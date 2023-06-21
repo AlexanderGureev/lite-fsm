@@ -22,6 +22,8 @@ lite-fsm is a lightweight finite state machine library
 ### Quickstart (basic example)
 
 ```ts
+import { createMachine, MachineManager } from "lite-fsm";
+
 const playback = createMachine({
   config: {
     IDLE: {
