@@ -16,7 +16,7 @@ lite-fsm is a lightweight finite state machine library
 
 ## Examples
 
-- React [Source](./examples/react.ts) | [Sandbox]()
+- React [Source](./examples/react.tsx) | [Sandbox]()
 - Basic typescript [Source](./examples/basic.ts) | [Sandbox]()
 
 ### Quickstart (basic example)
