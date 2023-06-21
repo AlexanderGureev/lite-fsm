@@ -1,0 +1,76 @@
+{
+  "name": "lite-fsm",
+  "version": "0.0.1",
+  "type": "module",
+  "description": "lightweight finite state machine library",
+  "author": "Alexander Gureev <g.alex00@bk.ru> (https://github.com/AlexanderGureev)",
+  "license": "MIT",
+  "main": "./dist/core.umd.cjs",
+  "module": "./dist/core.js",
+  "types": "./dist/core.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/core.js",
+      "require": "./dist/core.umd.cjs"
+    },
+    "./react": {
+      "import": "./dist/react.js",
+      "require": "./dist/react.cjs"
+    },
+    "./middleware": {
+      "import": "./dist/middleware.js",
+      "require": "./dist/middleware.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "react",
+    "redux",
+    "fsm",
+    "finite-state machine"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AlexanderGureev/lite-fsm"
+  },
+  "scripts": {
+    "build": "tsc && vite build",
+    "lint": "eslint . --ext .ts,.tsx",
+    "prepare": "husky install",
+    "prepack": "npm pkg delete devDependencies dependencies"
+  },
+  "devDependencies": {
+    "@rollup/plugin-typescript": "^11.1.1",
+    "@types/node": "^20.3.1",
+    "@types/react": "^18.0.37",
+    "@types/react-dom": "^18.0.11",
+    "@typescript-eslint/eslint-plugin": "^5.60.0",
+    "@typescript-eslint/parser": "^5.60.0",
+    "@vitejs/plugin-react": "^4.0.0",
+    "eslint": "^8.43.0",
+    "eslint-config-prettier": "^8.8.0",
+    "eslint-plugin-import": "^2.27.5",
+    "eslint-plugin-jsx-a11y": "^6.7.1",
+    "eslint-plugin-react": "^7.32.2",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "husky": "^8.0.3",
+    "prettier": "^2.8.8",
+    "rollup-plugin-typescript-paths": "^1.4.0",
+    "tslib": "^2.5.3",
+    "typescript": "^5.0.2",
+    "vite": "^4.3.9",
+    "vite-plugin-dts": "^2.3.0"
+  },
+  "dependencies": {
+    "immer": "^10.0.2",
+    "react": "^16.8.0 || ^17.0.2 || ^18.2.0",
+    "react-dom": "^16.8.0 || ^17.0.2 || ^18.2.0"
+  },
+  "peerDependencies": {
+    "react": "^16.8.0 || ^17.0.2 || ^18.2.0",
+    "react-dom": "^16.8.0 || ^17.0.2 || ^18.2.0",
+    "immer": ">=9.x"
+  }
+}
