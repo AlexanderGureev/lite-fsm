@@ -1,17 +1,17 @@
 {
   "name": "lite-fsm",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "type": "module",
   "description": "lightweight finite state machine library",
   "author": "Alexander Gureev <g.alex00@bk.ru> (https://github.com/AlexanderGureev)",
   "license": "MIT",
-  "main": "./dist/core.umd.cjs",
+  "main": "./dist/core.cjs",
   "module": "./dist/core.js",
   "types": "./dist/core.d.ts",
   "exports": {
     ".": {
       "import": "./dist/core.js",
-      "require": "./dist/core.umd.cjs"
+      "require": "./dist/core.cjs"
     },
     "./react": {
       "import": "./dist/react.js",
