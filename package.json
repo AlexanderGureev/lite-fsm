@@ -9,17 +9,24 @@
   "module": "./dist/core.js",
   "types": "./dist/core.d.ts",
   "exports": {
+    "./package.json": "./package.json",
     ".": {
       "import": "./dist/core.js",
-      "require": "./dist/core.cjs"
+      "require": "./dist/core.cjs",
+      "default": "./dist/core.js",
+      "types": "./dist/core.d.ts"
     },
     "./react": {
       "import": "./dist/react.js",
-      "require": "./dist/react.cjs"
+      "require": "./dist/react.cjs",
+      "default": "./dist/react.js",
+      "types": "./dist/react.d.ts"
     },
     "./middleware": {
       "import": "./dist/middleware.js",
-      "require": "./dist/middleware.cjs"
+      "require": "./dist/middleware.cjs",
+      "default": "./dist/middleware.js",
+      "types": "./dist/middleware.d.ts"
     }
   },
   "files": [
