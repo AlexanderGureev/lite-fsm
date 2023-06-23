@@ -1,6 +1,6 @@
 {
   "name": "lite-fsm",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "type": "module",
   "description": "lightweight finite state machine library",
   "author": "Alexander Gureev <g.alex00@bk.ru> (https://github.com/AlexanderGureev)",
