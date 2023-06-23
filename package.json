@@ -1,6 +1,6 @@
 {
   "name": "lite-fsm",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "type": "module",
   "description": "lightweight finite state machine library",
   "author": "Alexander Gureev <g.alex00@bk.ru> (https://github.com/AlexanderGureev)",
@@ -27,6 +27,19 @@
       "require": "./dist/middleware.cjs",
       "default": "./dist/middleware.js",
       "types": "./dist/middleware.d.ts"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "*": [
+        "dist/core.d.ts"
+      ],
+      "react": [
+        "dist/react.d.ts"
+      ],
+      "middleware": [
+        "dist/middleware.d.ts"
+      ]
     }
   },
   "files": [
