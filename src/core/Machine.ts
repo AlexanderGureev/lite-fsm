@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/ban-types -- ok*/
 import { DefaultDeps, FSMEvent, MachineConfig, Subscriber } from "./types";
 
 export const Machine = <
@@ -7,7 +8,7 @@ export const Machine = <
   P extends FSMEvent<E, any> = any,
   D extends Record<string, any> = {},
 >(
-  cfg: MachineConfig<S, C, P, D>,
+  cfg: MachineConfig<S, E, C, P, D>,
 ) => {
   let subs: Array<Subscriber<S, C>> = [];
 
@@ -16,15 +17,14 @@ export const Machine = <
     transition: (s: { state: S; context: C }, action: P) => {
       if (cfg.reducer) {
         return cfg.reducer(s, action, cfg.config);
-      } else {
-        const next = cfg.config[s.state]?.[action.type];
+      }
+      const next = cfg.config[s.state]?.[action.type];
 
-        if (next !== undefined) {
-          return {
-            state: next || s.state,
-            context: { ...s.context, ...action.payload },
-          };
-        }
+      if (next !== undefined) {
+        return {
+          state: next || s.state,
+          context: { ...s.context, ...action.payload },
+        };
       }
 
       return s;
@@ -35,7 +35,7 @@ export const Machine = <
         subs = subs.filter((c) => c !== cb);
       };
     },
-    invokeEffect: async (state: S, deps: D & DefaultDeps<S, C, P>) => {
+    invokeEffect: async (state: S & E, deps: D & DefaultDeps<P>) => {
       if (!cfg.effects?.[state]) return;
       await cfg.effects[state]?.(deps);
     },

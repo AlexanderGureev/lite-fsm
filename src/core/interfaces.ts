@@ -1,12 +1,13 @@
+/* eslint-disable @typescript-eslint/ban-types -- ok*/
 import {
-  Subscriber,
-  MachineConfig,
-  FSMConfig,
   DefaultDeps,
-  TransitionSubscriber,
+  FSMConfig,
+  FSMEvent,
+  MachineConfig,
   MachinesState,
   Reducer,
-  FSMEvent,
+  Subscriber,
+  TransitionSubscriber,
 } from "./types";
 
 export interface IMachine<
@@ -16,16 +17,16 @@ export interface IMachine<
   D extends Record<string, any> = {},
 > {
   transition: (state: { state: S; context: C }, payload: P) => { state: S; context: C };
-  getState: () => { state: S; context: C };
+  // getState: () => { state: S; context: C };
   onTransition: (cb: Subscriber<S, C>) => () => void;
   invokeSubscribers: (prevState: { state: S; context: C }) => void;
-  invokeEffect: (state: S, deps: D & DefaultDeps<S, C, P>) => Promise<void>;
+  invokeEffect: (state: S, deps: D & DefaultDeps<P>) => Promise<void>;
   config: FSMConfig<S, P["type"]>;
 }
 
 export interface IMachineManager<
   S extends {
-    [key in string]: MachineConfig<any, any, any, any>;
+    [key in string]: MachineConfig<any, any, any, any, any>;
   },
   P extends FSMEvent<any, any> = any,
 > {

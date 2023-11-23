@@ -1,11 +1,12 @@
-import { Machine } from "./Machine";
-import { MachineConfig, TransitionSubscriber, MachinesState, Middleware, FSMEvent } from "./types";
+/* eslint-disable @typescript-eslint/ban-types -- ok*/
 import { IMachine } from "./interfaces";
+import { Machine } from "./Machine";
+import { FSMEvent, MachineConfig, MachinesState, Middleware, TransitionSubscriber } from "./types";
 import { compose } from "./utils";
 
 export const MachineManager = <
   S extends {
-    [key in string]: MachineConfig<any, any, any, any>;
+    [key in string]: MachineConfig<any, any, any, any, any>;
   },
   P extends FSMEvent<any, any> = any,
 >(
@@ -88,26 +89,28 @@ export const MachineManager = <
     state = rootReducer(prevState, action);
     invokeSubscribers(prevState, state);
 
+    return action;
+  };
+
+  const invokeEffects = (prevState: MachinesState<S>, action: P) => {
     for (const name of Object.keys(machines) as Array<keyof S>) {
       const m = machines[name];
       const s = state[name];
+      const p = prevState[name];
 
-      if (m.config[s.state]?.[action.type] !== undefined) {
+      if (m.config[p.state]?.[action.type]) {
         m.invokeEffect(s.state, {
           ...deps,
           transition,
-          getState,
           action,
         }).catch((err) => {
           opts?.onError?.(err);
         });
       }
     }
-
-    return action;
   };
 
-  const createTransition = (funcs?: Array<Middleware<MachinesState<S>, P>>): ((action: P) => P) => {
+  const createWrappedTransition = (funcs?: Array<Middleware<MachinesState<S>, P>>): ((action: P) => P) => {
     if (!funcs?.length) return _transition;
 
     const f = funcs.map((m) =>
@@ -121,7 +124,14 @@ export const MachineManager = <
     return compose(...f)(_transition);
   };
 
-  transition = createTransition(opts?.middleware);
+  const wrappedTransition = createWrappedTransition(opts?.middleware);
+
+  transition = (action: P) => {
+    const prevState = state;
+    wrappedTransition(action);
+    invokeEffects(prevState, action);
+    return action;
+  };
 
   const setDependencies = <D extends Record<string, any> = {}>(d: D) => {
     deps = d;
