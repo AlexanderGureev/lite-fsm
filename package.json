@@ -1,6 +1,6 @@
 {
   "name": "lite-fsm",
-  "version": "0.0.6",
+  "version": "1.0.0",
   "type": "module",
   "description": "lightweight finite state machine library",
   "author": "Alexander Gureev <g.alex00@bk.ru> (https://github.com/AlexanderGureev)",
@@ -91,7 +91,7 @@
     "prettier": "^2.8.8",
     "rollup-plugin-typescript-paths": "^1.4.0",
     "tslib": "^2.5.3",
-    "typescript": "^5.0.2",
+    "typescript": "^5.1.6",
     "vite": "^4.3.9",
     "vite-plugin-dts": "^2.3.0"
   },

@@ -1,9 +1,10 @@
 import React from "react";
+import useSyncExternalStoreExports from "use-sync-external-store/shim/with-selector";
 
-import { FSMContext, FSMContextType } from "./FSMContext";
 import { MachineConfig, MachinesState } from "~/core/types";
 
-import useSyncExternalStoreExports from "use-sync-external-store/shim/with-selector";
+import { FSMContext, FSMContextType } from "./FSMContext";
+
 const { useSyncExternalStoreWithSelector } = useSyncExternalStoreExports;
 
 export const useSelector = <

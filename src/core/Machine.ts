@@ -1,43 +1,51 @@
 /* eslint-disable @typescript-eslint/ban-types -- ok*/
-import { DefaultDeps, FSMEvent, MachineConfig, Subscriber } from "./types";
+import { CFG, DefaultDeps, FSMEvent, MachineConfig, State, Subscriber, WILDCARD as WTYPE } from "./types";
+import { WILDCARD } from "./utils";
 
-export const Machine = <
-  S extends string,
+export const CreateMachine = <
+  C extends CFG<C, P, keyof C | WTYPE>,
+  T extends Record<string, any>,
   E extends string,
-  C extends Record<string, any>,
   P extends FSMEvent<E, any> = any,
   D extends Record<string, any> = {},
 >(
-  cfg: MachineConfig<S, E, C, P, D>,
+  cfg: MachineConfig<C, T, P, D>,
 ) => {
-  let subs: Array<Subscriber<S, C>> = [];
+  let subs: Array<Subscriber<State<keyof C>, T>> = [];
 
   return {
     config: cfg.config,
-    transition: (s: { state: S; context: C }, action: P) => {
+    transition: (s: { state: State<keyof C>; context: T }, action: P) => {
+      const _next = cfg.config[s.state]?.[action.type];
+      const nextState = _next !== undefined ? _next : cfg.config[WILDCARD]?.[action.type];
+
+      if (nextState === undefined) return s;
+
       if (cfg.reducer) {
-        return cfg.reducer(s, action, cfg.config);
-      }
-      const next = cfg.config[s.state]?.[action.type];
-
-      if (next !== undefined) {
-        return {
-          state: next || s.state,
-          context: { ...s.context, ...action.payload },
-        };
+        return cfg.reducer(s, action, { nextState: nextState || s.state, config: cfg.config });
       }
 
-      return s;
+      const payload = "payload" in action ? action.payload : {};
+
+      return {
+        state: nextState || s.state,
+        context: { ...s.context, ...payload },
+      };
     },
-    onTransition: (cb: Subscriber<S, C>) => {
+    onTransition: (cb: Subscriber<State<keyof C>, T>) => {
       subs.push(cb);
       return () => {
         subs = subs.filter((c) => c !== cb);
       };
     },
-    invokeEffect: async (state: S & E, deps: D & DefaultDeps<P>) => {
-      if (!cfg.effects?.[state]) return;
-      await cfg.effects[state]?.(deps);
+    invokeEffect: async (prevState: State<keyof C>, currentState: State<keyof C>, deps: D & DefaultDeps<any, C, P>) => {
+      if (!cfg.effects) return;
+
+      if (prevState !== currentState && cfg.effects[currentState]) {
+        await cfg.effects[currentState]?.(deps);
+      } else if (cfg.effects[WILDCARD]) {
+        await cfg.effects[WILDCARD]?.(deps);
+      }
     },
   };
 };

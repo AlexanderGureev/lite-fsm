@@ -7,3 +7,5 @@ export const compose = (...func: Array<(...args: any[]) => (...args: any[]) => a
         a(b(...args)),
   );
 };
+
+export const WILDCARD = "*";

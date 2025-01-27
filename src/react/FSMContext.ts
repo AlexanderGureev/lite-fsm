@@ -1,4 +1,6 @@
+/* eslint-disable @typescript-eslint/no-empty-function -- ok */
 import React from "react";
+
 import { IMachineManager } from "~/core/interfaces";
 import { FSMEvent, MachineConfig } from "~/core/types";
 
@@ -10,9 +12,7 @@ export type FSMContextType<
 > = IMachineManager<S, P>;
 
 export const FSMContext = React.createContext<FSMContextType>({
-  transition: (): any => {
-    return;
-  },
+  transition: (): any => {},
   getState: () => ({}),
   onTransition: () => () => {},
   replaceReducer: () => {},

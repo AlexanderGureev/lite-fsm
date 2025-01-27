@@ -1,7 +1,9 @@
 import React from "react";
-import { FSMContext } from "./FSMContext";
+
 import { IMachineManager } from "~/core/interfaces";
 import { FSMEvent, MachineConfig } from "~/core/types";
+
+import { FSMContext } from "./FSMContext";
 
 export const FSMContextProvider = <
   S extends {

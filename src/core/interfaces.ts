@@ -1,32 +1,37 @@
 /* eslint-disable @typescript-eslint/ban-types -- ok*/
 import {
+  CFG,
   DefaultDeps,
-  FSMConfig,
   FSMEvent,
   MachineConfig,
   MachinesState,
   Reducer,
-  Subscriber,
+  State,
   TransitionSubscriber,
+  WILDCARD,
 } from "./types";
 
 export interface IMachine<
-  S extends string = any,
-  C extends Record<string, any> = {},
+  C extends CFG<C, P, keyof C | WILDCARD>,
+  T extends Record<string, any> = {},
   P extends FSMEvent<any, any> = any,
   D extends Record<string, any> = {},
 > {
-  transition: (state: { state: S; context: C }, payload: P) => { state: S; context: C };
+  transition: (state: { state: State<keyof C>; context: T }, action: P) => { state: State<keyof C>; context: T };
   // getState: () => { state: S; context: C };
-  onTransition: (cb: Subscriber<S, C>) => () => void;
-  invokeSubscribers: (prevState: { state: S; context: C }) => void;
-  invokeEffect: (state: S, deps: D & DefaultDeps<P>) => Promise<void>;
-  config: FSMConfig<S, P["type"]>;
+  // onTransition: (cb: Subscriber<S, C>) => () => void;
+  // invokeSubscribers: (prevState: { state: S; context: C }) => void;
+  invokeEffect: (
+    prevState: State<keyof C>,
+    currentState: State<keyof C>,
+    deps: D & DefaultDeps<any, C, P>,
+  ) => Promise<void>;
+  config: C;
 }
 
 export interface IMachineManager<
   S extends {
-    [key in string]: MachineConfig<any, any, any, any, any>;
+    [key in string]: MachineConfig<any, any, any, any>;
   },
   P extends FSMEvent<any, any> = any,
 > {
@@ -34,5 +39,5 @@ export interface IMachineManager<
   getState: () => MachinesState<S>;
   onTransition: (cb: TransitionSubscriber<S>) => () => void;
   replaceReducer: (cb: (reducer: Reducer<MachinesState<S>, P>) => Reducer<MachinesState<S>, P>) => void;
-  setDependencies: <D extends Record<string, any> = {}>(d: D) => void;
+  setDependencies: <D extends Record<string, any> = {}>(d: D | ((deps: D) => D)) => void;
 }
