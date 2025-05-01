@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg width="240" height="240" viewBox="0 0 240 240" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Градиенты и эффекты -->
+  <defs>
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f8faff" />
+      <stop offset="100%" stop-color="#eef2ff" />
+    </linearGradient>
+    <linearGradient id="stateGradient" x1="30%" y1="30%" x2="70%" y2="70%">
+      <stop offset="0%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#4338ca" />
+    </linearGradient>
+    <filter id="lightShadow">
+      <feDropShadow dx="0" dy="3" stdDeviation="3" flood-opacity="0.1" />
+    </filter>
+    <linearGradient id="pathGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#a5b4fc" />
+      <stop offset="100%" stop-color="#818cf8" />
+    </linearGradient>
+    <linearGradient id="arrowGradient">
+      <stop offset="0%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#a5b4fc" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Фон -->
+  <rect width="240" height="240" rx="50" fill="url(#bgGradient)" />
+  
+  <!-- Абстрактные графические элементы -->
+  <g opacity="0.05">
+    <path d="M40 40 Q120 20, 200 40" stroke="#4f46e5" stroke-width="1" />
+    <path d="M40 80 Q120 60, 200 80" stroke="#4f46e5" stroke-width="1" />
+    <path d="M40 120 Q120 100, 200 120" stroke="#4f46e5" stroke-width="1" />
+    <path d="M40 160 Q120 140, 200 160" stroke="#4f46e5" stroke-width="1" />
+    <path d="M40 200 Q120 180, 200 200" stroke="#4f46e5" stroke-width="1" />
+  </g>
+  
+  <!-- Тонкие окружности для стилистических элементов -->
+  <circle cx="120" cy="120" r="85" stroke="#a5b4fc" stroke-width="0.5" fill="none" opacity="0.2" stroke-dasharray="2,2" />
+  <circle cx="120" cy="120" r="95" stroke="#a5b4fc" stroke-width="0.3" fill="none" opacity="0.1" />
+  
+  <!-- Соединительные линии с переходами (теперь под состояниями) -->
+  <g>
+    <!-- Внешняя окружность соединений более плавная -->
+    <path d="M88 70 A60 60 0 0 1 152 70" stroke="url(#pathGradient)" stroke-width="4" stroke-linecap="round" fill="none" />
+    <path d="M170 88 A60 60 0 0 1 170 152" stroke="url(#pathGradient)" stroke-width="4" stroke-linecap="round" fill="none" />
+    <path d="M152 170 A60 60 0 0 1 88 170" stroke="url(#pathGradient)" stroke-width="4" stroke-linecap="round" fill="none" />
+    <path d="M70 152 A60 60 0 0 1 70 88" stroke="url(#pathGradient)" stroke-width="4" stroke-linecap="round" fill="none" />
+    
+    <!-- От центра к состояниям (лучи) с плавным переходом -->
+    <path d="M100 100 L82 82" stroke="url(#pathGradient)" stroke-width="4" stroke-linecap="round" />
+    <path d="M140 100 L158 82" stroke="url(#pathGradient)" stroke-width="4" stroke-linecap="round" />
+    <path d="M140 140 L158 158" stroke="url(#pathGradient)" stroke-width="4" stroke-linecap="round" />
+    <path d="M100 140 L82 158" stroke="url(#pathGradient)" stroke-width="4" stroke-linecap="round" />
+  </g>
+
+  <!-- Декоративные точки-события на линиях -->
+  <g>
+    <circle cx="120" cy="70" r="3.5" fill="#c7d2fe" opacity="0.9">
+      <animate attributeName="opacity" values="0.7;1;0.7" dur="3s" repeatCount="indefinite" />
+    </circle>
+    <circle cx="170" cy="120" r="3.5" fill="#c7d2fe" opacity="0.9">
+      <animate attributeName="opacity" values="0.7;1;0.7" dur="3s" repeatCount="indefinite" begin="0.5s" />
+    </circle>
+    <circle cx="120" cy="170" r="3.5" fill="#c7d2fe" opacity="0.9">
+      <animate attributeName="opacity" values="0.7;1;0.7" dur="3s" repeatCount="indefinite" begin="1s"/>
+    </circle>
+    <circle cx="70" cy="120" r="3.5" fill="#c7d2fe" opacity="0.9">
+      <animate attributeName="opacity" values="0.7;1;0.7" dur="3s" repeatCount="indefinite" begin="1.5s"/>
+    </circle>
+  </g>
+  
+  <!-- Состояния по кругу (поверх линий) -->
+  <g>
+    <!-- Центральное состояние (начальное) -->
+    <circle cx="120" cy="120" r="24" fill="url(#stateGradient)" filter="url(#lightShadow)" />
+    <circle cx="120" cy="120" r="12" fill="none" stroke="white" stroke-width="1.5" stroke-opacity="0.3" />
+    <circle cx="120" cy="120" r="6" fill="white" fill-opacity="0.5" />
+  
+    <!-- Состояние 1 -->
+    <circle cx="70" cy="70" r="18" fill="url(#stateGradient)" filter="url(#lightShadow)" />
+    <circle cx="70" cy="70" r="8" fill="none" stroke="white" stroke-width="1" stroke-opacity="0.2" />
+    
+    <!-- Состояние 2 -->
+    <circle cx="170" cy="70" r="18" fill="url(#stateGradient)" filter="url(#lightShadow)" />
+    <circle cx="170" cy="70" r="8" fill="none" stroke="white" stroke-width="1" stroke-opacity="0.2" />
+    
+    <!-- Состояние 3 -->
+    <circle cx="170" cy="170" r="18" fill="url(#stateGradient)" filter="url(#lightShadow)" />
+    <circle cx="170" cy="170" r="8" fill="none" stroke="white" stroke-width="1" stroke-opacity="0.2" />
+    
+    <!-- Состояние 4 (конечное) -->
+    <circle cx="70" cy="170" r="18" fill="url(#stateGradient)" filter="url(#lightShadow)" />
+    <circle cx="70" cy="170" r="12" fill="none" stroke="white" stroke-width="1.2" stroke-opacity="0.4" />
+    <circle cx="70" cy="170" r="8" fill="none" stroke="white" stroke-width="0.8" stroke-opacity="0.3" />
+  </g>
+  
+  <!-- Индикаторы направления (вместо белых стрелок) - наложены поверх линий, более заметны -->
+  <g>
+    <!-- Направление движения по внешнему контуру -->
+    <circle cx="120" cy="57" r="4" fill="#6366f1" opacity="0.8">
+      <animate attributeName="opacity" values="0.5;0.9;0.5" dur="2s" repeatCount="indefinite" />
+    </circle>
+    <circle cx="183" cy="120" r="4" fill="#6366f1" opacity="0.8">
+      <animate attributeName="opacity" values="0.5;0.9;0.5" dur="2s" repeatCount="indefinite" begin="0.5s"/>
+    </circle>
+    <circle cx="120" cy="183" r="4" fill="#6366f1" opacity="0.8">
+      <animate attributeName="opacity" values="0.5;0.9;0.5" dur="2s" repeatCount="indefinite" begin="1s"/>
+    </circle>
+    <circle cx="57" cy="120" r="4" fill="#6366f1" opacity="0.8">
+      <animate attributeName="opacity" values="0.5;0.9;0.5" dur="2s" repeatCount="indefinite" begin="1.5s"/>
+    </circle>
+    
+    <!-- Направление движения от центра к внешним состояниям -->
+    <circle cx="87" cy="87" r="3" fill="#6366f1" opacity="0.8">
+      <animate attributeName="opacity" values="0.5;0.9;0.5" dur="1.5s" repeatCount="indefinite" />
+    </circle>
+    <circle cx="153" cy="87" r="3" fill="#6366f1" opacity="0.8">
+      <animate attributeName="opacity" values="0.5;0.9;0.5" dur="1.5s" repeatCount="indefinite" begin="0.4s"/>
+    </circle>
+    <circle cx="153" cy="153" r="3" fill="#6366f1" opacity="0.8">
+      <animate attributeName="opacity" values="0.5;0.9;0.5" dur="1.5s" repeatCount="indefinite" begin="0.8s"/>
+    </circle>
+    <circle cx="87" cy="153" r="3" fill="#6366f1" opacity="0.8">
+      <animate attributeName="opacity" values="0.5;0.9;0.5" dur="1.5s" repeatCount="indefinite" begin="1.2s"/>
+    </circle>
+  </g>
+</svg> 

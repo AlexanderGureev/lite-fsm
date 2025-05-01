@@ -2,8 +2,16 @@ import { Footer, Layout, Navbar } from "nextra-theme-docs";
 import { Banner, Head } from "nextra/components";
 import { getPageMap } from "nextra/page-map";
 import "nextra-theme-docs/style.css";
+import Image from "next/image";
+import type { ReactNode } from "react";
+
+// Дополнительные стили для переключения логотипа
+const logoStyles = `
+
+`;
 
 export const metadata = {
+  metadataBase: new URL("https://alexandergureev.github.io/lite-fsm"),
   title: {
     default: "lite-fsm - Легковесная библиотека конечных автоматов",
     template: "%s | lite-fsm",
@@ -13,6 +21,13 @@ export const metadata = {
     title: "lite-fsm - Легковесная библиотека конечных автоматов",
     description: "Документация для lite-fsm - легковесной библиотеки конечных автоматов для JavaScript и TypeScript",
     type: "website",
+    images: [{ url: "/logo.svg", width: 240, height: 240 }],
+  },
+  icons: {
+    icon: [
+      { url: "/favicon.svg", media: "(prefers-color-scheme: light)" },
+      { url: "/favicon-dark.svg", media: "(prefers-color-scheme: dark)" },
+    ],
   },
 };
 
@@ -20,7 +35,21 @@ const banner = <Banner storageKey="lite-fsm-banner">👋 Добро пожало
 
 const navbar = (
   <Navbar
-    logo={<span className="font-bold text-xl">lite-fsm</span>}
+    logo={
+      <div className="flex items-center">
+        <div className="mr-2">
+          <div className="relative w-[48px] h-[48px]">
+            <Image
+              src="/logo-dark.svg"
+              alt="lite-fsm logo"
+              className="logo-dark absolute top-0 left-0"
+              width={48}
+              height={48}
+            />
+          </div>
+        </div>
+      </div>
+    }
     projectLink="https://github.com/AlexanderGureev/lite-fsm"
   />
 );
@@ -33,10 +62,16 @@ const footer = (
   </Footer>
 );
 
-export default async function RootLayout({ children }) {
+type RootLayoutProps = {
+  children: ReactNode;
+};
+
+export default async function RootLayout({ children }: RootLayoutProps) {
   return (
     <html lang="ru" dir="ltr" suppressHydrationWarning>
-      <Head />
+      <Head>
+        <style>{logoStyles}</style>
+      </Head>
       <body>
         <Layout
           banner={banner}

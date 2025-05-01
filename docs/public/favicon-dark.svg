@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Градиенты и эффекты -->
+  <defs>
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e1b4b" />
+      <stop offset="100%" stop-color="#2e2276" />
+    </linearGradient>
+    <linearGradient id="stateGradient" x1="30%" y1="30%" x2="70%" y2="70%">
+      <stop offset="0%" stop-color="#818cf8" />
+      <stop offset="100%" stop-color="#6366f1" />
+    </linearGradient>
+    <linearGradient id="pathGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#c7d2fe" />
+      <stop offset="100%" stop-color="#a5b4fc" />
+    </linearGradient>
+    <filter id="softGlow" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur stdDeviation="0.5" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+  
+  <!-- Фон -->
+  <rect width="32" height="32" rx="8" fill="url(#bgGradient)" />
+  
+  <!-- Соединительные линии (упрощенные) -->
+  <g>
+    <!-- Внешний круг соединений -->
+    <path d="M11.7 9.3 A8 8 0 0 1 20.3 9.3" stroke="url(#pathGradient)" stroke-width="1.2" stroke-linecap="round" fill="none" />
+    <path d="M22.7 11.7 A8 8 0 0 1 22.7 20.3" stroke="url(#pathGradient)" stroke-width="1.2" stroke-linecap="round" fill="none" />
+    <path d="M20.3 22.7 A8 8 0 0 1 11.7 22.7" stroke="url(#pathGradient)" stroke-width="1.2" stroke-linecap="round" fill="none" />
+    <path d="M9.3 20.3 A8 8 0 0 1 9.3 11.7" stroke="url(#pathGradient)" stroke-width="1.2" stroke-linecap="round" fill="none" />
+    
+    <!-- От центра к состояниям (лучи) -->
+    <path d="M13.3 13.3 L10.9 10.9" stroke="url(#pathGradient)" stroke-width="1.2" stroke-linecap="round" />
+    <path d="M18.7 13.3 L21.1 10.9" stroke="url(#pathGradient)" stroke-width="1.2" stroke-linecap="round" />
+    <path d="M18.7 18.7 L21.1 21.1" stroke="url(#pathGradient)" stroke-width="1.2" stroke-linecap="round" />
+    <path d="M13.3 18.7 L10.9 21.1" stroke="url(#pathGradient)" stroke-width="1.2" stroke-linecap="round" />
+  </g>
+  
+  <!-- Состояния -->
+  <g filter="url(#softGlow)">
+    <!-- Центральное состояние -->
+    <circle cx="16" cy="16" r="3.2" fill="url(#stateGradient)" />
+    <circle cx="16" cy="16" r="1.5" fill="none" stroke="#e0e7ff" stroke-width="0.4" stroke-opacity="0.6" />
+    <circle cx="16" cy="16" r="0.8" fill="#e0e7ff" fill-opacity="0.8" />
+    
+    <!-- Угловые состояния -->
+    <circle cx="9.3" cy="9.3" r="2.2" fill="url(#stateGradient)" />
+    <circle cx="22.7" cy="9.3" r="2.2" fill="url(#stateGradient)" />
+    <circle cx="22.7" cy="22.7" r="2.2" fill="url(#stateGradient)" />
+    <circle cx="9.3" cy="22.7" r="2.2" fill="url(#stateGradient)" />
+  </g>
+  
+  <!-- Точки движения (более заметные) -->
+  <circle cx="16" cy="9.3" r="0.7" fill="#e0e7ff" />
+  <circle cx="22.7" cy="16" r="0.7" fill="#e0e7ff" />
+  <circle cx="16" cy="22.7" r="0.7" fill="#e0e7ff" />
+  <circle cx="9.3" cy="16" r="0.7" fill="#e0e7ff" />
+</svg> 
