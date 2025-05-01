@@ -11,7 +11,6 @@ import {
   SandpackFiles,
   SandpackOptions,
   useSandpack,
-  LoadingOverlay,
 } from "@codesandbox/sandpack-react";
 import { dracula } from "@codesandbox/sandpack-themes";
 
@@ -21,7 +20,7 @@ import parserHTML from "prettier/parser-html";
 import parserSCSS from "prettier/parser-postcss";
 import parserTS from "prettier/parser-typescript";
 
-import { debounce } from "lodash";
+import { debounce } from "../utils";
 
 type Opts = {
   showConsole?: boolean;
@@ -245,7 +244,7 @@ const usePrettier = () => {
   }, [sandpack.files, sandpack.activeFile]);
 
   const debouncedUpdate = useCallback(
-    debounce((code) => {
+    debounce((code: string) => {
       sandpack.updateCurrentFile(code, false);
     }, 150),
     [sandpack.activeFile, sandpack.files],
