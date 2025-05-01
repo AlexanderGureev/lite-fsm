@@ -13,5 +13,5 @@ export default withNextra({
     unoptimized: true,
   },
   // Если проект размещен не в корне, нужно добавить basePath
-  // basePath: "/lite-fsm",
+  basePath: process.env.NODE_ENV === "production" ? "/lite-fsm" : undefined,
 });
