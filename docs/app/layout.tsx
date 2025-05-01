@@ -21,12 +21,12 @@ export const metadata = {
     title: "lite-fsm - Легковесная библиотека конечных автоматов",
     description: "Документация для lite-fsm - легковесной библиотеки конечных автоматов для JavaScript и TypeScript",
     type: "website",
-    images: [{ url: "/logo.svg", width: 240, height: 240 }],
+    images: [{ url: "/lite-fsm/logo.svg", width: 240, height: 240 }],
   },
   icons: {
     icon: [
-      { url: "/favicon.svg", media: "(prefers-color-scheme: light)" },
-      { url: "/favicon-dark.svg", media: "(prefers-color-scheme: dark)" },
+      { url: "/lite-fsm/favicon.svg", media: "(prefers-color-scheme: light)" },
+      { url: "/lite-fsm/favicon-dark.svg", media: "(prefers-color-scheme: dark)" },
     ],
   },
 };
@@ -40,7 +40,7 @@ const navbar = (
         <div className="mr-2">
           <div className="relative w-[48px] h-[48px]">
             <Image
-              src="/logo-dark.svg"
+              src="/lite-fsm/logo-dark.svg"
               alt="lite-fsm logo"
               className="logo-dark absolute top-0 left-0"
               width={48}
