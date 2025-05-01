@@ -25,3 +25,6 @@ dist-ssr
 
 docs/.next/
 docs/node_modules/
+
+# Pagefind индексы для поиска
+docs/public/_pagefind/
