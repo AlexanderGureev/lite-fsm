@@ -1,4 +1,6 @@
+/* eslint-disable */
 export default {
   index: "Обзор",
-  "work-with-typescript": "Работа с TypeScript",
+  typescript: "Работа с TypeScript",
+  nextjs: "Интеграция с Next.js",
 };

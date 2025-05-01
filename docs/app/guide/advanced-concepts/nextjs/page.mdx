@@ -1,0 +1,177 @@
+# Интеграция с Next.js
+
+Next.js представляет собой популярный фреймворк для серверного рендеринга React-приложений, который требует особого подхода к интеграции с менеджерами состояний. В этом разделе рассмотрим, как правильно использовать `lite-fsm` с Next.js, особенно с архитектурой App Router.
+
+## Проблемы и особенности
+
+При использовании менеджера состояний с Next.js возникают следующие проблемы:
+
+1. **Создание независимого стора для каждого запроса**: Сервер Next.js обрабатывает множество запросов одновременно, поэтому хранилище должно создаваться для каждого запроса отдельно, а не использоваться как глобальная переменная.
+
+2. **Гидратация данных при SSR**: Next.js рендерит приложение дважды - на сервере и затем на клиенте. Данные в хранилище должны быть одинаковыми при обоих рендерах, иначе возникнет ошибка гидратации.
+
+3. **Поддержка SPA-маршрутизации**: Next.js поддерживает гибридную модель клиентской маршрутизации, и при переходе между страницами нужно правильно обрабатывать данные, специфичные для маршрута.
+
+4. **Совместимость с кешированием**: Новые версии Next.js (особенно использующие App Router) поддерживают агрессивное кеширование на сервере, и архитектура хранилища должна быть с этим совместима.
+
+## Рекомендации по использованию
+
+Для работы с Next.js App Router рекомендуется:
+
+- **Не использовать глобальные хранилища** - вместо этого создавать хранилище для каждого запроса.
+- **React Server Components не должны читать или писать в хранилище** - RSC не могут использовать хуки или контекст.
+- **Хранилище должно содержать только мутабельные данные** - Redux следует использовать только для тех данных, которые предназначены быть глобальными и изменяемыми.
+
+## Структура проекта
+
+Типичная структура проекта с Next.js App Router может выглядеть так:
+
+```
+/app
+  /components
+    ProductDetails.tsx
+  /api
+    route.ts
+  layout.tsx
+  page.tsx
+  StoreProvider.tsx
+/src
+  /store
+    /machines
+      counter.ts
+      profile.ts
+      root.ts
+    create-machine.ts
+    hooks.ts
+    index.ts
+    types.ts
+next.config.js
+package.json
+```
+
+## Настройка хранилища
+
+Вместо определения `store` как глобальной переменной, мы создаем функцию `makeStore`, которая возвращает новый экземпляр хранилища для каждого запроса:
+
+```tsx
+// src/store/index.ts
+import { MachineManager } from "lite-fsm";
+import { root } from "./machines/root";
+import { counter } from "./machines/counter";
+import { profile } from "./machines/profile";
+import { devToolsMiddleware, immerMiddleware } from "lite-fsm/middleware";
+import type { AppEvents, Dependencies } from "./types";
+
+// Создаем функцию для создания хранилища
+export const makeStore = () => {
+  const cfg = { root, counter, profile };
+
+  const middleware = [
+    immerMiddleware,
+    devToolsMiddleware({
+      blacklistActions: [],
+    }),
+  ];
+
+  const manager = MachineManager(cfg, {
+    middleware,
+    onError: console.error,
+  });
+
+  manager.setDependencies({
+    getState: manager.getState,
+    services: {
+      playerService: {
+        play: () => undefined,
+        pause: () => undefined,
+      },
+    },
+  });
+
+  return manager;
+};
+
+// Выводим типы из хранилища
+export type AppStore = ReturnType<typeof makeStore>;
+export type AppState = ReturnType<AppStore["getState"]>;
+```
+
+## Предоставление хранилища компонентам
+
+Создаем компонент-провайдер для Next.js:
+
+```tsx
+// app/StoreProvider.tsx
+"use client";
+import { useRef } from "react";
+import { FSMContextProvider } from "lite-fsm/react";
+import { makeStore } from "../src/store";
+import type { AppStore } from "../src/store";
+
+export default function StoreProvider({ children }: { children: React.ReactNode }) {
+  const storeRef = useRef<AppStore | null>(null);
+
+  if (!storeRef.current) {
+    storeRef.current = makeStore();
+  }
+
+  return <FSMContextProvider machineManager={storeRef.current}>{children}</FSMContextProvider>;
+}
+```
+
+## Использование хуков
+
+Создаем типизированные версии хуков для удобного использования:
+
+```tsx
+// src/store/hooks.ts
+import type { TypedUseMachineHook, TypedUseSelectorHook, TypedUseTransitionHook } from "lite-fsm/react";
+import {
+  useManager as _useManager,
+  useSelector as _useSelector,
+  useTransition as _useTransition,
+} from "lite-fsm/react";
+
+import type { AppState, AppStore, AppEvents } from "./types";
+
+// Создаем типизированные версии хуков
+export const useTransition: TypedUseTransitionHook<AppEvents> = _useTransition;
+export const useSelector: TypedUseSelectorHook<AppState> = _useSelector;
+export const useManager: TypedUseMachineHook<AppStore, AppEvents> = _useManager;
+```
+
+## Интеграция с приложением
+
+Для Next.js необходимо включить провайдер в корневой layout файл, обернув им даже HTML-элемент для доступности хранилища на самом раннем этапе:
+
+```tsx
+// app/layout.tsx
+import StoreProvider from "./StoreProvider";
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <StoreProvider>
+      <html lang="ru">
+        <body>{children}</body>
+      </html>
+    </StoreProvider>
+  );
+}
+```
+
+## Рекомендации по архитектуре
+
+Архитектура App Router в Next.js резко отличается от традиционной SPA-архитектуры. При интеграции lite-fsm с Next.js рекомендуем пересмотреть подход к управлению состоянием:
+
+- **Используйте lite-fsm только для глобальных, изменяемых данных**
+- **Используйте комбинацию состояния Next.js** (параметры поиска, параметры маршрута, состояние формы и т.д.), контекст React и хуки React для всего остального управления состоянием.
+- **Разделяйте серверные и клиентские компоненты** - помните, что серверные компоненты не могут использовать контекст React или хуки.
+
+## Проверка работоспособности
+
+Проверьте следующие аспекты, чтобы убедиться, что вы правильно настроили lite-fsm с Next.js:
+
+1. **Серверный рендеринг** - Проверьте HTML-вывод сервера, чтобы убедиться, что данные в хранилище присутствуют в результате серверного рендеринга.
+2. **Изоляция хранилища** - Убедитесь, что создается отдельное хранилище для каждого запроса.
+3. **Изменение маршрута** - Перемещайтесь между страницами, чтобы убедиться, что данные, специфичные для маршрута, правильно инициализируются.
+4. **Мутации и кеширование** - Проверьте, что хранилище совместимо с кешами Next.js App Router, выполнив мутацию, а затем перейдя с маршрута и вернувшись на исходный маршрут.
