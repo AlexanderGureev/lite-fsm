@@ -1,0 +1,742 @@
+# API Справочник
+
+В этом разделе приведена документация по всем функциям и типам, предоставляемым библиотекой `lite-fsm`.
+
+## Основной модуль
+
+Основной модуль предоставляет функции для создания и управления конечными автоматами.
+
+### createMachine
+
+```ts
+createMachine<C, T, E, P = FSMEvent<E, any>, D = {}>(cfg: MachineConfig<C, T, P, D>): Machine<C, T, P, D>
+```
+
+Функция для создания конечного автомата.
+
+**Параметры:**
+
+- `cfg`: Объект конфигурации автомата.
+
+**Возвращает:**
+
+Объект автомата.
+
+**Пример:**
+
+```ts
+import { createMachine } from "lite-fsm";
+
+const toggleMachine = createMachine({
+  config: {
+    INACTIVE: {
+      TOGGLE: "ACTIVE",
+    },
+    ACTIVE: {
+      TOGGLE: "INACTIVE",
+    },
+  },
+  initialState: "INACTIVE",
+  initialContext: {
+    lastToggled: null,
+  },
+});
+```
+
+### MachineManager
+
+```ts
+MachineManager<M extends Record<string, Machine<any, any, any, any>>>(
+  machines: M
+): MachineManager<M>
+```
+
+Функция для создания менеджера автоматов.
+
+**Параметры:**
+
+- `machines`: Объект с автоматами, где ключи - имена автоматов, а значения - объекты автоматов.
+
+**Возвращает:**
+
+Менеджер автоматов.
+
+**Пример:**
+
+```ts
+import { MachineManager, createMachine } from "lite-fsm";
+
+const toggleMachine = createMachine({
+  // ...конфигурация
+});
+
+const counterMachine = createMachine({
+  // ...конфигурация
+});
+
+const manager = MachineManager({
+  toggle: toggleMachine,
+  counter: counterMachine,
+});
+```
+
+#### Методы MachineManager
+
+##### transition
+
+```ts
+transition<E extends string, P extends Record<string, any>>(
+  action: { type: E; machine?: string; payload?: P }
+): void
+```
+
+Выполняет переход состояния для указанного (или всех) автоматов.
+
+**Параметры:**
+
+- `action`: Объект действия.
+  - `type`: Тип события.
+  - `machine`: (Опционально) Имя автомата. Если не указано, действие будет отправлено всем автоматам.
+  - `payload`: (Опционально) Полезная нагрузка, которая будет объединена с контекстом.
+
+**Пример:**
+
+```ts
+// Отправить событие конкретному автомату
+manager.transition({
+  type: "TOGGLE",
+  machine: "toggle",
+  payload: { lastToggled: new Date() },
+});
+
+// Отправить событие всем автоматам
+manager.transition({ type: "RESET" });
+```
+
+##### getState
+
+```ts
+getState(): { [K in keyof M]: { state: State<C>; context: T } }
+```
+
+Возвращает текущее состояние и контекст всех автоматов.
+
+**Возвращает:**
+
+Объект, в котором ключи - имена автоматов, а значения - объекты с состоянием и контекстом.
+
+**Пример:**
+
+```ts
+const state = manager.getState();
+console.log(state.toggle.state); // Текущее состояние автомата toggle
+console.log(state.counter.context); // Текущий контекст автомата counter
+```
+
+##### onTransition
+
+```ts
+onTransition(
+  callback: (
+    prevState: { [K in keyof M]: { state: State<C>; context: T } },
+    nextState: { [K in keyof M]: { state: State<C>; context: T } },
+    action?: { type: string; machine?: string; payload?: any }
+  ) => void
+): () => void
+```
+
+Подписывает функцию на события перехода состояний.
+
+**Параметры:**
+
+- `callback`: Функция обратного вызова, которая будет вызываться при каждом переходе состояния.
+
+**Возвращает:**
+
+Функция для отмены подписки.
+
+**Пример:**
+
+```ts
+const unsubscribe = manager.onTransition((prevState, nextState, action) => {
+  console.log("Предыдущее состояние:", prevState);
+  console.log("Новое состояние:", nextState);
+  console.log("Действие:", action);
+});
+
+// Позже, когда подписка больше не нужна
+unsubscribe();
+```
+
+##### setDependencies
+
+```ts
+setDependencies(dependencies: D): void
+```
+
+Устанавливает зависимости, которые будут доступны в эффектах.
+
+**Параметры:**
+
+- `dependencies`: Объект с зависимостями.
+
+**Пример:**
+
+```ts
+manager.setDependencies({
+  services: {
+    api: {
+      fetchData: async () => {
+        const response = await fetch("/api/data");
+        return response.json();
+      },
+    },
+  },
+  utils: {
+    formatDate: (date) => new Intl.DateTimeFormat().format(date),
+  },
+});
+```
+
+### createConfig
+
+```ts
+createConfig<C extends Record<string, Record<string, string | null>>>(
+  config: C
+): C
+```
+
+Функция для создания и типизации конфигурации автомата.
+
+**Параметры:**
+
+- `config`: Объект конфигурации автомата.
+
+**Возвращает:**
+
+Тот же объект конфигурации, но с правильной типизацией.
+
+**Пример:**
+
+```ts
+import { createConfig, createMachine } from "lite-fsm";
+
+const config = createConfig({
+  IDLE: {
+    START: "RUNNING",
+  },
+  RUNNING: {
+    PAUSE: "PAUSED",
+    STOP: "IDLE",
+  },
+  PAUSED: {
+    RESUME: "RUNNING",
+    STOP: "IDLE",
+  },
+});
+
+const machine = createMachine({
+  config,
+  initialState: "IDLE",
+  // ...
+});
+```
+
+### createReducer
+
+```ts
+createReducer<C, T, P>(
+  reducer: (
+    state: { state: State<C>; context: T },
+    action: P,
+    options: { nextState: State<C> | null; config: C }
+  ) => { state: State<C>; context: T }
+): typeof reducer
+```
+
+Функция для создания и типизации пользовательского редьюсера.
+
+**Параметры:**
+
+- `reducer`: Функция редьюсера.
+
+**Возвращает:**
+
+Тот же редьюсер, но с правильной типизацией.
+
+**Пример:**
+
+```ts
+import { createReducer, createMachine } from "lite-fsm";
+
+const reducer = createReducer((state, action, options) => {
+  const { state: currentState, context } = state;
+  const nextState = options.nextState || currentState;
+
+  switch (action.type) {
+    case "INCREMENT":
+      return {
+        state: nextState,
+        context: {
+          ...context,
+          count: context.count + 1,
+        },
+      };
+    case "DECREMENT":
+      return {
+        state: nextState,
+        context: {
+          ...context,
+          count: context.count - 1,
+        },
+      };
+    default:
+      return {
+        state: nextState,
+        context: {
+          ...context,
+          ...(action.payload || {}),
+        },
+      };
+  }
+});
+
+const machine = createMachine({
+  config: {
+    // ...
+  },
+  reducer,
+  // ...
+});
+```
+
+### createEffect
+
+```ts
+createEffect<D extends DefaultDeps<any, any, any>, P extends Record<string, any> = {}>(
+  opts: {
+    type?: EffectType;
+    effect: MachineEffect<D, P>;
+    cancelFn?: (deps: D) => () => boolean;
+  }
+): (deps: D, payload: P) => any
+```
+
+Функция для создания эффекта с возможностью отмены.
+
+**Параметры:**
+
+- `opts`: Объект с опциями.
+  - `type`: (Опционально) Тип эффекта. Может быть `'latest'` для выполнения только последнего вызова.
+  - `effect`: Функция эффекта.
+  - `cancelFn`: (Опционально) Функция, которая возвращает функцию проверки условия отмены.
+
+**Возвращает:**
+
+Функция эффекта с обработкой отмены.
+
+**Пример:**
+
+```ts
+import { createEffect, createMachine } from "lite-fsm";
+
+// Создание эффекта, который будет выполнять только последний вызов
+const searchEffect = createEffect({
+  type: "latest",
+  effect: async ({ transition, services }, { query }) => {
+    try {
+      const results = await services.api.search(query);
+      transition({ type: "SEARCH_SUCCESS", payload: { results } });
+    } catch (error) {
+      transition({ type: "SEARCH_ERROR", payload: { error: error.message } });
+    }
+  },
+});
+
+const searchMachine = createMachine({
+  config: {
+    IDLE: {
+      SEARCH: "SEARCHING",
+    },
+    SEARCHING: {
+      SEARCH_SUCCESS: "RESULTS",
+      SEARCH_ERROR: "ERROR",
+    },
+    // ...
+  },
+  effects: {
+    SEARCHING: (deps, action) => {
+      return searchEffect(deps, action.payload || {});
+    },
+  },
+  // ...
+});
+```
+
+## Константы
+
+### WILDCARD
+
+```ts
+WILDCARD: "*";
+```
+
+Специальный символ, используемый для обозначения состояния или события, которое должно соответствовать любому значению.
+
+**Пример:**
+
+```ts
+import { createMachine, WILDCARD } from "lite-fsm";
+
+const machine = createMachine({
+  config: {
+    IDLE: {
+      START: "RUNNING",
+    },
+    RUNNING: {
+      STOP: "IDLE",
+    },
+    // Обработка RESET из любого состояния
+    [WILDCARD]: {
+      RESET: "IDLE",
+    },
+  },
+  // ...
+});
+```
+
+## Типы TypeScript
+
+### State
+
+```ts
+type State<C> = keyof C;
+```
+
+Тип, представляющий состояние автомата.
+
+### FSMEvent
+
+```ts
+type FSMEvent<E, P> = { type: E; payload?: P };
+```
+
+Тип, представляющий событие автомата.
+
+### CFG
+
+```ts
+type CFG<C, T, E> = {
+  [K in keyof C]: { [A in E]?: K | null };
+};
+```
+
+Тип, представляющий конфигурацию автомата.
+
+### MachineConfig
+
+```ts
+type MachineConfig<C, T, P, D> = {
+  config: C;
+  initialState: State<C>;
+  initialContext: T;
+  effects?: {
+    [K in State<C> | typeof WILDCARD]?: (deps: D & DefaultDeps<T, C, P>, action?: P) => any;
+  };
+  reducer?: (
+    state: { state: State<C>; context: T },
+    action: P,
+    options: { nextState: State<C> | null; config: C },
+  ) => { state: State<C>; context: T };
+};
+```
+
+Тип, представляющий полную конфигурацию автомата.
+
+### Machine
+
+```ts
+type Machine<C, T, P, D> = {
+  config: C;
+  transition: (s: { state: State<C>; context: T }, action: P) => { state: State<C>; context: T };
+  onTransition: (cb: Subscriber<State<C>, T>) => () => void;
+  invokeEffect: (prevState: State<C>, currentState: State<C>, deps: D & DefaultDeps<T, C, P>) => Promise<any>;
+};
+```
+
+Тип, представляющий объект автомата.
+
+### MachineManager
+
+```ts
+type MachineManager<M> = {
+  transition: <E extends string, P extends Record<string, any>>(action: {
+    type: E;
+    machine?: string;
+    payload?: P;
+  }) => void;
+  getState: () => { [K in keyof M]: { state: any; context: any } };
+  onTransition: (
+    callback: (
+      prevState: { [K in keyof M]: { state: any; context: any } },
+      nextState: { [K in keyof M]: { state: any; context: any } },
+      action?: { type: string; machine?: string; payload?: any },
+    ) => void,
+  ) => () => void;
+  setDependencies: (dependencies: any) => void;
+};
+```
+
+Тип, представляющий менеджер автоматов.
+
+## Модуль React
+
+Модуль React предоставляет хуки и компоненты для использования `lite-fsm` в приложениях React.
+
+### createStoreHook
+
+```ts
+createStoreHook<M extends Record<string, Machine<any, any, any, any>>>(
+  manager: MachineManager<M>
+): <S>(
+  selector: (state: { [K in keyof M]: { state: any; context: any } }) => S,
+  equalityFn?: (a: S, b: S) => boolean
+) => S
+```
+
+Функция для создания хука, который подписывается на состояние машинного менеджера.
+
+**Параметры:**
+
+- `manager`: Объект менеджера машин.
+
+**Возвращает:**
+
+Хук, который принимает селектор и опциональную функцию сравнения, и возвращает выбранную часть состояния.
+
+**Пример:**
+
+```tsx
+import { createStoreHook } from "lite-fsm/react";
+import { manager } from "./store";
+
+// Создание хука для доступа к состоянию
+export const useStore = createStoreHook(manager);
+
+// Использование хука в компоненте
+function Counter() {
+  const { count } = useStore((state) => state.counter.context);
+
+  return (
+    <div>
+      <p>Count: {count}</p>
+      <button onClick={() => manager.transition({ type: "INCREMENT", machine: "counter" })}>Increment</button>
+    </div>
+  );
+}
+```
+
+### createDispatchHook
+
+```ts
+createDispatchHook<M extends Record<string, Machine<any, any, any, any>>>(
+  manager: MachineManager<M>
+): <E extends string, P extends Record<string, any>>(
+  action: { type: E; machine?: string; payload?: P }
+) => void
+```
+
+Функция для создания хука, который предоставляет функцию для отправки действий машинному менеджеру.
+
+**Параметры:**
+
+- `manager`: Объект менеджера машин.
+
+**Возвращает:**
+
+Хук, который возвращает функцию для отправки действий менеджеру.
+
+**Пример:**
+
+```tsx
+import { createDispatchHook } from "lite-fsm/react";
+import { manager } from "./store";
+
+// Создание хука для отправки действий
+export const useDispatch = createDispatchHook(manager);
+
+// Использование хука в компоненте
+function Counter() {
+  const dispatch = useDispatch();
+  const { count } = useStore((state) => state.counter.context);
+
+  return (
+    <div>
+      <p>Count: {count}</p>
+      <button onClick={() => dispatch({ type: "INCREMENT", machine: "counter" })}>Increment</button>
+    </div>
+  );
+}
+```
+
+### StoreProvider
+
+```tsx
+<StoreProvider manager={manager}>{children}</StoreProvider>
+```
+
+Компонент-провайдер, который делает машинный менеджер доступным для всех дочерних компонентов.
+
+**Свойства:**
+
+- `manager`: Объект менеджера машин.
+- `children`: Дочерние компоненты.
+
+**Пример:**
+
+```tsx
+import { StoreProvider } from "lite-fsm/react";
+import { manager } from "./store";
+
+function App() {
+  return (
+    <StoreProvider manager={manager}>
+      <Counter />
+      <UserProfile />
+      {/* Другие компоненты */}
+    </StoreProvider>
+  );
+}
+```
+
+### useStore и useDispatch
+
+```ts
+useStore<S>(
+  selector: (state: { [K in keyof M]: { state: any; context: any } }) => S,
+  equalityFn?: (a: S, b: S) => boolean
+): S
+```
+
+```ts
+useDispatch(): <E extends string, P extends Record<string, any>>(
+  action: { type: E; machine?: string; payload?: P }
+) => void
+```
+
+Хуки для использования внутри компонентов, обернутых в `StoreProvider`.
+
+**Пример:**
+
+```tsx
+import { useStore, useDispatch } from "lite-fsm/react";
+
+function Counter() {
+  const dispatch = useDispatch();
+  const { count } = useStore((state) => state.counter.context);
+
+  return (
+    <div>
+      <p>Count: {count}</p>
+      <button onClick={() => dispatch({ type: "INCREMENT", machine: "counter" })}>Increment</button>
+    </div>
+  );
+}
+```
+
+## Модуль Middleware
+
+Модуль middleware предоставляет функции для создания промежуточного программного обеспечения в стиле Redux для расширения функциональности менеджера автоматов.
+
+### applyMiddleware
+
+```ts
+applyMiddleware<M>(
+  ...middlewares: Array<Middleware<M>>
+): (manager: MachineManager<M>) => MachineManager<M>
+```
+
+Функция для применения промежуточного ПО к менеджеру автоматов.
+
+**Параметры:**
+
+- `middlewares`: Массив функций промежуточного ПО.
+
+**Возвращает:**
+
+Функция, которая принимает менеджер автоматов и возвращает новый менеджер автоматов с примененным промежуточным ПО.
+
+**Пример:**
+
+```ts
+import { MachineManager, createMachine } from "lite-fsm";
+import { applyMiddleware } from "lite-fsm/middleware";
+
+// Промежуточное ПО для логирования
+const logger = (store) => (next) => (action) => {
+  console.log("Действие:", action);
+  const result = next(action);
+  console.log("Состояние после:", store.getState());
+  return result;
+};
+
+// Создание машин
+const toggleMachine = createMachine({
+  // ...конфигурация
+});
+
+// Создание менеджера с промежуточным ПО
+const manager = applyMiddleware(logger)(
+  MachineManager({
+    toggle: toggleMachine,
+  }),
+);
+
+// Теперь все действия будут логироваться
+manager.transition({ type: "TOGGLE" });
+```
+
+### Middleware
+
+```ts
+type Middleware<M> = (
+  store: MachineManager<M>,
+) => (
+  next: <E extends string, P extends Record<string, any>>(action: { type: E; machine?: string; payload?: P }) => void,
+) => <E extends string, P extends Record<string, any>>(action: { type: E; machine?: string; payload?: P }) => void;
+```
+
+Тип, представляющий функцию промежуточного ПО.
+
+**Пример создания собственного промежуточного ПО:**
+
+```ts
+// Промежуточное ПО для отслеживания производительности
+const performance = (store) => (next) => (action) => {
+  const start = Date.now();
+  const result = next(action);
+  const end = Date.now();
+  console.log(`Действие ${action.type} выполнено за ${end - start}ms`);
+  return result;
+};
+
+// Промежуточное ПО для предотвращения определенных действий
+const filter = (store) => (next) => (action) => {
+  if (action.type === "FORBIDDEN_ACTION") {
+    console.warn("Действие FORBIDDEN_ACTION заблокировано");
+    return;
+  }
+  return next(action);
+};
+
+// Применение нескольких промежуточных ПО
+const manager = applyMiddleware(
+  logger,
+  performance,
+  filter,
+)(
+  MachineManager({
+    // машины...
+  }),
+);
+```

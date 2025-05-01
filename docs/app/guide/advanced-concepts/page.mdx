@@ -1,0 +1,508 @@
+# Продвинутые концепции
+
+В этом разделе мы рассмотрим более сложные аспекты работы с `lite-fsm` и паттерны, которые можно использовать для решения нестандартных задач.
+
+## Типизация с TypeScript
+
+`lite-fsm` полностью совместим с TypeScript и предоставляет встроенную систему типов, которая помогает избежать ошибок при разработке:
+
+```ts
+import { createMachine, MachineManager } from "lite-fsm";
+import type { CFG, FSMEvent } from "lite-fsm";
+
+// Определение типов состояний
+type State = "IDLE" | "LOADING" | "SUCCESS" | "ERROR";
+
+// Определение типов событий
+type EventType = "FETCH" | "FETCH_SUCCESS" | "FETCH_ERROR" | "RESET";
+
+// Определение типа события с payload
+type Event =
+  | FSMEvent<"FETCH", void>
+  | FSMEvent<"FETCH_SUCCESS", { data: any }>
+  | FSMEvent<"FETCH_ERROR", { error: string }>
+  | FSMEvent<"RESET", void>;
+
+// Определение типа контекста
+type Context = {
+  data: any | null;
+  error: string | null;
+  loading: boolean;
+};
+
+// Определение типа конфигурации
+type Config = CFG<
+  {
+    IDLE: { FETCH: "LOADING" };
+    LOADING: { FETCH_SUCCESS: "SUCCESS"; FETCH_ERROR: "ERROR" };
+    SUCCESS: { RESET: "IDLE" };
+    ERROR: { RESET: "IDLE"; FETCH: "LOADING" };
+  },
+  Context,
+  Event
+>;
+
+// Создание автомата с сильной типизацией
+const fetchMachine = createMachine<Config, Context, EventType, Event>({
+  config: {
+    IDLE: {
+      FETCH: "LOADING",
+    },
+    LOADING: {
+      FETCH_SUCCESS: "SUCCESS",
+      FETCH_ERROR: "ERROR",
+    },
+    SUCCESS: {
+      RESET: "IDLE",
+    },
+    ERROR: {
+      RESET: "IDLE",
+      FETCH: "LOADING",
+    },
+  },
+  initialState: "IDLE",
+  initialContext: {
+    data: null,
+    error: null,
+    loading: false,
+  },
+  effects: {
+    LOADING: async ({ transition }) => {
+      try {
+        const response = await fetch("https://api.example.com/data");
+        const data = await response.json();
+        // TypeScript проверит, что тип события и payload соответствуют определению
+        transition({ type: "FETCH_SUCCESS", payload: { data } });
+      } catch (error) {
+        // TypeScript проверит, что тип события и payload соответствуют определению
+        transition({
+          type: "FETCH_ERROR",
+          payload: { error: error instanceof Error ? error.message : String(error) },
+        });
+      }
+    },
+  },
+});
+```
+
+## Композиция автоматов
+
+Для управления сложными системами часто требуется создание нескольких взаимосвязанных автоматов. `lite-fsm` позволяет легко композировать автоматы с помощью `MachineManager`:
+
+```ts
+import { createMachine, MachineManager } from "lite-fsm";
+
+// Автомат для управления авторизацией
+const authMachine = createMachine({
+  config: {
+    LOGGED_OUT: {
+      LOGIN: "LOGGING_IN",
+    },
+    LOGGING_IN: {
+      LOGIN_SUCCESS: "LOGGED_IN",
+      LOGIN_ERROR: "LOGIN_ERROR",
+    },
+    LOGGED_IN: {
+      LOGOUT: "LOGGED_OUT",
+    },
+    LOGIN_ERROR: {
+      RETRY: "LOGGING_IN",
+      CANCEL: "LOGGED_OUT",
+    },
+  },
+  initialState: "LOGGED_OUT",
+  initialContext: {
+    user: null,
+    error: null,
+  },
+  // ...
+});
+
+// Автомат для управления данными пользователя
+const userDataMachine = createMachine({
+  config: {
+    IDLE: {
+      FETCH: "LOADING",
+    },
+    LOADING: {
+      FETCH_SUCCESS: "LOADED",
+      FETCH_ERROR: "ERROR",
+    },
+    LOADED: {
+      REFRESH: "LOADING",
+      CLEAR: "IDLE",
+    },
+    ERROR: {
+      RETRY: "LOADING",
+      CLEAR: "IDLE",
+    },
+  },
+  initialState: "IDLE",
+  initialContext: {
+    data: null,
+    error: null,
+  },
+  // ...
+});
+
+// Создание менеджера, объединяющего автоматы
+const manager = MachineManager({
+  auth: authMachine,
+  userData: userDataMachine,
+});
+
+// Установка зависимостей
+manager.setDependencies({
+  services: {
+    authService: {
+      login: async (credentials) => {
+        /* ... */
+      },
+      logout: async () => {
+        /* ... */
+      },
+    },
+    userService: {
+      fetchUserData: async (userId) => {
+        /* ... */
+      },
+    },
+  },
+});
+
+// Подписка на изменения с возможностью координации между автоматами
+manager.onTransition((prevState, nextState) => {
+  // Если пользователь успешно вошел в систему, запрашиваем его данные
+  if (prevState.auth.state !== "LOGGED_IN" && nextState.auth.state === "LOGGED_IN" && nextState.auth.context.user) {
+    manager.transition({
+      type: "FETCH",
+      machine: "userData", // Указываем целевой автомат
+    });
+  }
+
+  // Если пользователь вышел, очищаем данные
+  if (prevState.auth.state === "LOGGED_IN" && nextState.auth.state === "LOGGED_OUT") {
+    manager.transition({
+      type: "CLEAR",
+      machine: "userData",
+    });
+  }
+});
+```
+
+## Пользовательские редьюсеры
+
+По умолчанию `lite-fsm` использует простой редьюсер, который обновляет состояние автомата и объединяет payload с контекстом. Однако для более сложной логики обновления контекста можно определить собственный редьюсер:
+
+```ts
+import { createMachine } from "lite-fsm";
+
+const counterMachine = createMachine({
+  config: {
+    IDLE: {
+      INCREMENT: null, // null означает, что состояние не меняется
+      DECREMENT: null,
+      RESET: null,
+    },
+  },
+  initialState: "IDLE",
+  initialContext: {
+    count: 0,
+    history: [],
+    lastUpdated: null,
+  },
+  // Пользовательский редьюсер
+  reducer: (state, action, options) => {
+    // Получаем текущее состояние и контекст
+    const { state: currentState, context } = state;
+
+    // Обрабатываем различные типы событий
+    switch (action.type) {
+      case "INCREMENT":
+        return {
+          state: options.nextState || currentState,
+          context: {
+            ...context,
+            count: context.count + (action.payload?.step || 1),
+            history: [...context.history, { type: "INCREMENT", timestamp: Date.now() }],
+            lastUpdated: new Date().toISOString(),
+          },
+        };
+
+      case "DECREMENT":
+        return {
+          state: options.nextState || currentState,
+          context: {
+            ...context,
+            count: context.count - (action.payload?.step || 1),
+            history: [...context.history, { type: "DECREMENT", timestamp: Date.now() }],
+            lastUpdated: new Date().toISOString(),
+          },
+        };
+
+      case "RESET":
+        return {
+          state: options.nextState || currentState,
+          context: {
+            ...context,
+            count: 0,
+            history: [...context.history, { type: "RESET", timestamp: Date.now() }],
+            lastUpdated: new Date().toISOString(),
+          },
+        };
+
+      default:
+        // Для других событий используем стандартное поведение
+        return {
+          state: options.nextState || currentState,
+          context: {
+            ...context,
+            ...(action.payload || {}),
+          },
+        };
+    }
+  },
+});
+```
+
+## Интеграция с Immer
+
+`lite-fsm` имеет встроенную поддержку библиотеки Immer, которая упрощает работу с иммутабельными данными. Чтобы использовать Immer, установите его и используйте в редьюсере:
+
+```ts
+import { createMachine } from "lite-fsm";
+import { produce } from "immer";
+
+const todoMachine = createMachine({
+  config: {
+    IDLE: {
+      ADD_TODO: null,
+      TOGGLE_TODO: null,
+      DELETE_TODO: null,
+    },
+  },
+  initialState: "IDLE",
+  initialContext: {
+    todos: [],
+    filter: "all",
+  },
+  // Редьюсер с использованием Immer
+  reducer: (state, action, options) => {
+    const nextState = options.nextState || state.state;
+
+    // Используем Immer для обновления контекста
+    const nextContext = produce(state.context, (draft) => {
+      switch (action.type) {
+        case "ADD_TODO":
+          draft.todos.push({
+            id: Date.now(),
+            text: action.payload.text,
+            completed: false,
+          });
+          break;
+
+        case "TOGGLE_TODO":
+          const todo = draft.todos.find((t) => t.id === action.payload.id);
+          if (todo) {
+            todo.completed = !todo.completed;
+          }
+          break;
+
+        case "DELETE_TODO":
+          const index = draft.todos.findIndex((t) => t.id === action.payload.id);
+          if (index !== -1) {
+            draft.todos.splice(index, 1);
+          }
+          break;
+
+        case "SET_FILTER":
+          draft.filter = action.payload.filter;
+          break;
+      }
+    });
+
+    return {
+      state: nextState,
+      context: nextContext,
+    };
+  },
+});
+```
+
+## Эффекты с отменой
+
+Для управления долгоживущими эффектами или сценариями, где новый эффект должен отменять предыдущий, можно использовать функции `createEffect` с типом `latest`:
+
+```ts
+import { createMachine, createEffect } from "lite-fsm";
+
+// Создание эффекта с возможностью отмены предыдущих вызовов
+const searchEffect = createEffect({
+  type: "latest", // Только последний вызов будет выполнен до конца
+  effect: async ({ transition, services }, { query }) => {
+    // Выполнение запроса
+    const results = await services.api.search(query);
+    // Переход к следующему состоянию
+    transition({ type: "SEARCH_SUCCESS", payload: { results } });
+  },
+});
+
+const searchMachine = createMachine({
+  config: {
+    IDLE: {
+      SEARCH: "SEARCHING",
+    },
+    SEARCHING: {
+      SEARCH_SUCCESS: "RESULTS",
+      SEARCH_ERROR: "ERROR",
+      SEARCH: "SEARCHING", // Повторный поиск
+    },
+    RESULTS: {
+      SEARCH: "SEARCHING",
+      CLEAR: "IDLE",
+    },
+    ERROR: {
+      SEARCH: "SEARCHING",
+      CLEAR: "IDLE",
+    },
+  },
+  initialState: "IDLE",
+  initialContext: {
+    query: "",
+    results: [],
+    error: null,
+  },
+  effects: {
+    // Использование эффекта с отменой
+    SEARCHING: ({ services, transition }, event) => {
+      return searchEffect({ services, transition }, event.payload || {});
+    },
+  },
+});
+```
+
+## Дебаггинг и логирование
+
+Для отладки машин состояний полезно логировать переходы и изменения состояния:
+
+```ts
+import { MachineManager } from "lite-fsm";
+
+// Создание менеджера
+const manager = MachineManager({
+  /* автоматы... */
+});
+
+// Подключение логгера переходов
+manager.onTransition((prevState, nextState, action) => {
+  console.group("🔄 State Transition");
+  console.log("Action:", action);
+  console.log("Previous State:", prevState);
+  console.log("Next State:", nextState);
+  console.log("Changed:", JSON.stringify(getChanges(prevState, nextState)));
+  console.groupEnd();
+});
+
+// Вспомогательная функция для отслеживания изменений
+function getChanges(prevState, nextState) {
+  const changes = {};
+
+  // Перебираем все машины
+  Object.keys(nextState).forEach((machineName) => {
+    const prev = prevState[machineName];
+    const next = nextState[machineName];
+
+    // Проверяем изменения состояния
+    if (prev.state !== next.state) {
+      changes[machineName] = changes[machineName] || {};
+      changes[machineName].state = {
+        from: prev.state,
+        to: next.state,
+      };
+    }
+
+    // Проверяем изменения контекста
+    const contextChanges = {};
+    let hasContextChanges = false;
+
+    Object.keys(next.context).forEach((key) => {
+      if (JSON.stringify(prev.context[key]) !== JSON.stringify(next.context[key])) {
+        contextChanges[key] = {
+          from: prev.context[key],
+          to: next.context[key],
+        };
+        hasContextChanges = true;
+      }
+    });
+
+    if (hasContextChanges) {
+      changes[machineName] = changes[machineName] || {};
+      changes[machineName].context = contextChanges;
+    }
+  });
+
+  return changes;
+}
+```
+
+## Создание сложных машин
+
+Для создания более комплексных автоматов можно использовать функцию `createConfig` для типизации и организации конфигурации:
+
+```ts
+import { createMachine, createConfig } from "lite-fsm";
+
+// Создание конфигурации с типизацией
+const workflowConfig = createConfig({
+  DRAFT: {
+    SUBMIT: "REVIEW",
+    SAVE: null,
+    DISCARD: "CANCELLED",
+  },
+  REVIEW: {
+    APPROVE: "APPROVED",
+    REJECT: "REJECTED",
+    REQUEST_CHANGES: "CHANGES_REQUESTED",
+  },
+  CHANGES_REQUESTED: {
+    SUBMIT: "REVIEW",
+    DISCARD: "CANCELLED",
+  },
+  APPROVED: {
+    PUBLISH: "PUBLISHED",
+    REVERT: "DRAFT",
+  },
+  REJECTED: {
+    REVERT: "DRAFT",
+    DISCARD: "CANCELLED",
+  },
+  PUBLISHED: {
+    ARCHIVE: "ARCHIVED",
+    UNPUBLISH: "DRAFT",
+  },
+  CANCELLED: {
+    RESTORE: "DRAFT",
+  },
+  ARCHIVED: {
+    RESTORE: "DRAFT",
+  },
+});
+
+// Использование конфигурации при создании машины
+const workflowMachine = createMachine({
+  config: workflowConfig,
+  initialState: "DRAFT",
+  initialContext: {
+    id: null,
+    content: null,
+    comments: [],
+    lastModified: null,
+    author: null,
+  },
+  // ...
+});
+```
+
+## Заключение
+
+Продвинутые возможности `lite-fsm` позволяют создавать сложные и типобезопасные системы на основе конечных автоматов. Комбинируя различные функции библиотеки, можно построить надежные и предсказуемые приложения с четкой бизнес-логикой.

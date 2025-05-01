@@ -60,7 +60,10 @@
     "lint": "eslint . --ext .ts,.tsx",
     "prepare": "husky install",
     "prepack": "clean-package",
-    "postpack": "clean-package restore"
+    "postpack": "clean-package restore",
+    "docs:dev": "cd docs && next dev",
+    "docs:build": "cd docs && next build",
+    "docs:start": "cd docs && next start"
   },
   "clean-package": {
     "indent": 2,

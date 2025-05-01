@@ -2,7 +2,6 @@
 
 lite-fsm is a lightweight finite state machine library
 
-
 ### Features
 
 - Simple and clear API
@@ -13,6 +12,10 @@ lite-fsm is a lightweight finite state machine library
 ### Install
 
     npm install lite-fsm
+
+## Documentation
+
+The full documentation is available at [https://alexandergureev.github.io/lite-fsm/](https://alexandergureev.github.io/lite-fsm/)
 
 ## Examples
 
@@ -72,5 +75,4 @@ manager.transition({
 });
 
 const { state, context } = manager.getState().playback;
-
 ```

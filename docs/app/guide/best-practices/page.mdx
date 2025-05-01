@@ -1,0 +1,709 @@
+# Лучшие практики
+
+В этом разделе собраны рекомендации и советы по эффективному использованию `lite-fsm` для создания надежных и масштабируемых приложений.
+
+## Организация состояний
+
+### Используйте константы для имен состояний и событий
+
+Вместо строковых литералов используйте константы для состояний и типов событий:
+
+```ts
+// Состояния
+export const STATES = {
+  IDLE: "IDLE",
+  LOADING: "LOADING",
+  SUCCESS: "SUCCESS",
+  ERROR: "ERROR",
+} as const;
+
+// События
+export const EVENTS = {
+  FETCH: "FETCH",
+  FETCH_SUCCESS: "FETCH_SUCCESS",
+  FETCH_ERROR: "FETCH_ERROR",
+  RESET: "RESET",
+} as const;
+
+// Типы для TypeScript
+export type State = (typeof STATES)[keyof typeof STATES];
+export type EventType = (typeof EVENTS)[keyof typeof EVENTS];
+
+// Использование в машине
+const machine = createMachine({
+  config: {
+    [STATES.IDLE]: {
+      [EVENTS.FETCH]: STATES.LOADING,
+    },
+    [STATES.LOADING]: {
+      [EVENTS.FETCH_SUCCESS]: STATES.SUCCESS,
+      [EVENTS.FETCH_ERROR]: STATES.ERROR,
+    },
+    // ...
+  },
+  initialState: STATES.IDLE,
+  // ...
+});
+```
+
+Это делает код более надежным, позволяет избежать опечаток и упрощает рефакторинг.
+
+### Структурируйте большие автоматы
+
+Для сложных автоматов с множеством состояний и переходов разделяйте конфигурацию на логические группы:
+
+```ts
+import { createMachine, createConfig } from "lite-fsm";
+
+// Состояния создания и редактирования
+const editingStates = createConfig({
+  DRAFT: {
+    SUBMIT: "REVIEW",
+    SAVE: null,
+  },
+  EDITING: {
+    SAVE: null,
+    DONE: "REVIEW",
+  },
+});
+
+// Состояния проверки
+const reviewStates = createConfig({
+  REVIEW: {
+    APPROVE: "APPROVED",
+    REJECT: "REJECTED",
+    EDIT: "EDITING",
+  },
+  APPROVED: {
+    PUBLISH: "PUBLISHED",
+    EDIT: "EDITING",
+  },
+  REJECTED: {
+    EDIT: "EDITING",
+  },
+});
+
+// Состояния публикации
+const publishStates = createConfig({
+  PUBLISHED: {
+    ARCHIVE: "ARCHIVED",
+    UNPUBLISH: "DRAFT",
+  },
+  ARCHIVED: {
+    RESTORE: "DRAFT",
+  },
+});
+
+// Объединение в полную конфигурацию
+const workflowConfig = {
+  ...editingStates,
+  ...reviewStates,
+  ...publishStates,
+};
+
+// Создание автомата
+const workflowMachine = createMachine({
+  config: workflowConfig,
+  initialState: "DRAFT",
+  // ...
+});
+```
+
+## Моделирование приложения
+
+### Разделяйте ответственность между автоматами
+
+Каждый автомат должен иметь четкую область ответственности. Не пытайтесь моделировать всё приложение одним большим автоматом.
+
+**Хорошо:** Отдельные автоматы для различных функциональных областей
+
+```ts
+// Автомат для аутентификации
+const authMachine = createMachine({
+  config: {
+    LOGGED_OUT: { LOGIN: "LOGGING_IN" },
+    LOGGING_IN: {
+      LOGIN_SUCCESS: "LOGGED_IN",
+      LOGIN_ERROR: "LOGIN_ERROR",
+    },
+    // ...
+  },
+  // ...
+});
+
+// Автомат для управления пользовательскими данными
+const userDataMachine = createMachine({
+  config: {
+    IDLE: { LOAD: "LOADING" },
+    LOADING: {
+      LOAD_SUCCESS: "LOADED",
+      LOAD_ERROR: "ERROR",
+    },
+    // ...
+  },
+  // ...
+});
+
+// Управление через единый менеджер
+const manager = MachineManager({
+  auth: authMachine,
+  userData: userDataMachine,
+});
+```
+
+**Плохо:** Один огромный автомат с перемешанной ответственностью
+
+```ts
+const appMachine = createMachine({
+  config: {
+    LOGGED_OUT: { LOGIN: "LOGGING_IN" },
+    LOGGING_IN: {
+      LOGIN_SUCCESS: "LOGGED_IN_DATA_LOADING",
+      LOGIN_ERROR: "LOGIN_ERROR",
+    },
+    LOGGED_IN_DATA_LOADING: {
+      DATA_LOADED: "LOGGED_IN_DATA_LOADED",
+      DATA_ERROR: "LOGGED_IN_DATA_ERROR",
+    },
+    // ... смешивание ответственности затрудняет понимание
+  },
+  // ...
+});
+```
+
+### Используйте иерархический подход к организации автоматов
+
+Для сложных приложений объединяйте автоматы по функциональным областям:
+
+```ts
+// Autомат авторизации
+const authMachine = createMachine({
+  /* ... */
+});
+
+// Автомат профиля пользователя
+const profileMachine = createMachine({
+  /* ... */
+});
+
+// Автомат уведомлений
+const notificationsMachine = createMachine({
+  /* ... */
+});
+
+// Автомат списка проектов
+const projectListMachine = createMachine({
+  /* ... */
+});
+
+// Автомат задач проекта
+const tasksMachine = createMachine({
+  /* ... */
+});
+
+// Создание иерархии менеджеров
+const userManager = MachineManager({
+  auth: authMachine,
+  profile: profileMachine,
+  notifications: notificationsMachine,
+});
+
+const projectManager = MachineManager({
+  projects: projectListMachine,
+  tasks: tasksMachine,
+});
+
+// Координация между менеджерами
+userManager.onTransition((prevState, nextState) => {
+  // Если пользователь вышел, сбрасываем проекты
+  if (prevState.auth.state === "LOGGED_IN" && nextState.auth.state === "LOGGED_OUT") {
+    projectManager.transition({ type: "RESET" });
+  }
+});
+```
+
+## Работа с эффектами
+
+### Избегайте побочных эффектов вне обработчиков effects
+
+Все побочные эффекты должны быть инкапсулированы в обработчиках `effects`:
+
+**Хорошо:**
+
+```ts
+const machine = createMachine({
+  config: {
+    IDLE: { FETCH: "LOADING" },
+    LOADING: {
+      FETCH_SUCCESS: "SUCCESS",
+      FETCH_ERROR: "ERROR",
+    },
+    // ...
+  },
+  effects: {
+    LOADING: async ({ transition, services }) => {
+      try {
+        const data = await services.api.fetchData();
+        transition({ type: "FETCH_SUCCESS", payload: { data } });
+      } catch (error) {
+        transition({ type: "FETCH_ERROR", payload: { error: error.message } });
+      }
+    },
+  },
+});
+```
+
+**Плохо:**
+
+```ts
+// Побочные эффекты вне автомата
+const fetchData = async () => {
+  manager.transition({ type: "FETCH" });
+
+  try {
+    const data = await api.fetchData();
+    manager.transition({ type: "FETCH_SUCCESS", payload: { data } });
+  } catch (error) {
+    manager.transition({ type: "FETCH_ERROR", payload: { error: error.message } });
+  }
+};
+
+// Использование
+button.addEventListener("click", fetchData);
+```
+
+### Используйте сервисный слой для бизнес-логики
+
+Выносите сложную бизнес-логику в сервисы и внедряйте их через `setDependencies`:
+
+```ts
+// Определение сервисов
+const services = {
+  api: {
+    fetchData: async () => {
+      // Реализация API запроса
+    },
+    saveData: async (data) => {
+      // Реализация сохранения данных
+    },
+  },
+  validation: {
+    validateForm: (data) => {
+      // Проверка формы
+      const errors = {};
+
+      if (!data.name) {
+        errors.name = "Имя обязательно";
+      }
+
+      if (!data.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) {
+        errors.email = "Некорректный email";
+      }
+
+      return {
+        isValid: Object.keys(errors).length === 0,
+        errors,
+      };
+    },
+  },
+  storage: {
+    saveToLocalStorage: (key, value) => {
+      localStorage.setItem(key, JSON.stringify(value));
+    },
+    getFromLocalStorage: (key) => {
+      try {
+        return JSON.parse(localStorage.getItem(key) || "null");
+      } catch {
+        return null;
+      }
+    },
+  },
+};
+
+// Установка сервисов
+manager.setDependencies({ services });
+
+// Использование в эффектах
+const formMachine = createMachine({
+  config: {
+    IDLE: { SUBMIT: "VALIDATING" },
+    VALIDATING: {
+      VALID: "SUBMITTING",
+      INVALID: "VALIDATION_ERROR",
+    },
+    // ...
+  },
+  effects: {
+    VALIDATING: ({ transition, services }, event) => {
+      const { data } = event.payload;
+      const validationResult = services.validation.validateForm(data);
+
+      if (validationResult.isValid) {
+        transition({ type: "VALID", payload: { data } });
+      } else {
+        transition({
+          type: "INVALID",
+          payload: { errors: validationResult.errors },
+        });
+      }
+    },
+    SUBMITTING: async ({ transition, services }, event) => {
+      try {
+        const { data } = event.payload;
+        await services.api.saveData(data);
+        services.storage.saveToLocalStorage("lastSuccessfulSubmit", new Date());
+        transition({ type: "SUBMIT_SUCCESS" });
+      } catch (error) {
+        transition({
+          type: "SUBMIT_ERROR",
+          payload: { error: error.message },
+        });
+      }
+    },
+  },
+});
+```
+
+## Управление контекстом
+
+### Разделяйте контекст по ответственности
+
+Структурируйте контекст автомата по логическим категориям:
+
+```ts
+const formMachine = createMachine({
+  // ...
+  initialContext: {
+    // Данные формы
+    form: {
+      name: "",
+      email: "",
+      age: null,
+      preferences: [],
+    },
+    // Состояние формы
+    state: {
+      dirty: false,
+      touched: {},
+      submitCount: 0,
+    },
+    // Ошибки валидации
+    validation: {
+      errors: {},
+      isValid: true,
+    },
+    // Состояние отправки
+    submission: {
+      attempted: false,
+      error: null,
+      lastSubmitted: null,
+    },
+  },
+  // ...
+});
+```
+
+### Используйте пользовательские редьюсеры для сложной логики обновления
+
+Вместо сложных манипуляций с контекстом в эффектах используйте редьюсеры:
+
+```ts
+const todoMachine = createMachine({
+  config: {
+    IDLE: {
+      ADD_TODO: null,
+      UPDATE_TODO: null,
+      DELETE_TODO: null,
+      TOGGLE_TODO: null,
+      FILTER: null,
+    },
+  },
+  initialContext: {
+    todos: [],
+    filter: "all",
+    stats: {
+      total: 0,
+      completed: 0,
+      active: 0,
+    },
+  },
+  reducer: (state, action, options) => {
+    // Текущее состояние и контекст
+    const { state: currentState, context } = state;
+    const nextState = options.nextState || currentState;
+
+    // Новый контекст в зависимости от действия
+    let nextContext;
+
+    switch (action.type) {
+      case "ADD_TODO":
+        const newTodo = {
+          id: Date.now(),
+          text: action.payload.text,
+          completed: false,
+          createdAt: new Date().toISOString(),
+        };
+
+        nextContext = {
+          ...context,
+          todos: [...context.todos, newTodo],
+          stats: {
+            ...context.stats,
+            total: context.stats.total + 1,
+            active: context.stats.active + 1,
+          },
+        };
+        break;
+
+      case "TOGGLE_TODO":
+        const updatedTodos = context.todos.map((todo) =>
+          todo.id === action.payload.id ? { ...todo, completed: !todo.completed } : todo,
+        );
+
+        // Подсчитываем новую статистику
+        const completedCount = updatedTodos.filter((t) => t.completed).length;
+
+        nextContext = {
+          ...context,
+          todos: updatedTodos,
+          stats: {
+            total: updatedTodos.length,
+            completed: completedCount,
+            active: updatedTodos.length - completedCount,
+          },
+        };
+        break;
+
+      // Другие обработчики...
+
+      default:
+        // Стандартное обновление для необработанных типов
+        nextContext = {
+          ...context,
+          ...(action.payload || {}),
+        };
+    }
+
+    return {
+      state: nextState,
+      context: nextContext,
+    };
+  },
+});
+```
+
+## Дебаггинг и тестирование
+
+### Создайте мок-сервисы для тестирования
+
+Для упрощения тестирования создавайте мок-версии сервисов:
+
+```ts
+// Реальные сервисы
+const realServices = {
+  api: {
+    fetchData: async () => {
+      // Реальная реализация API
+    },
+  },
+};
+
+// Мок-сервисы для тестирования
+const mockServices = {
+  api: {
+    fetchData: async () => {
+      // Имитация успешного ответа
+      return { data: [{ id: 1, name: "Test" }] };
+    },
+  },
+};
+
+// Мок-сервисы для тестирования ошибок
+const errorMockServices = {
+  api: {
+    fetchData: async () => {
+      throw new Error("Network error");
+    },
+  },
+};
+
+// В тестах
+test("should handle successful data fetch", async () => {
+  const manager = MachineManager({
+    data: dataMachine,
+  });
+
+  // Установка мок-сервисов
+  manager.setDependencies({ services: mockServices });
+
+  // Вызываем действие
+  manager.transition({ type: "FETCH" });
+
+  // Ждем завершения асинхронных операций
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  // Проверяем результат
+  const { state, context } = manager.getState().data;
+  expect(state).toBe("SUCCESS");
+  expect(context.data).toEqual([{ id: 1, name: "Test" }]);
+});
+```
+
+### Логирование переходов в продакшене
+
+Добавьте логирование переходов для отслеживания поведения приложения в продакшене:
+
+```ts
+// Фабрика для создания менеджера с логированием
+function createLoggedManager(machines, options = {}) {
+  const manager = MachineManager(machines);
+
+  // Подписываемся на все переходы
+  manager.onTransition((prevState, nextState, action) => {
+    // Для продакшена можно использовать специальные сервисы логирования
+    if (options.logToServer) {
+      logToServer({
+        timestamp: Date.now(),
+        action,
+        prevState,
+        nextState,
+        sessionId: options.sessionId,
+        userId: options.userId,
+      });
+    }
+
+    // Для разработки можно выводить в консоль
+    if (process.env.NODE_ENV === "development") {
+      console.group("State Transition");
+      console.log("Action:", action);
+      console.log("Prev State:", prevState);
+      console.log("Next State:", nextState);
+      console.groupEnd();
+    }
+  });
+
+  return manager;
+}
+
+// Использование
+const manager = createLoggedManager(
+  { auth: authMachine, data: dataMachine },
+  {
+    logToServer: true,
+    sessionId: "user-session-id",
+    userId: "user-id",
+  },
+);
+```
+
+## Интеграция в приложение
+
+### Используйте фабрики для создания автоматов
+
+Для переиспользования логики создавайте фабрики автоматов:
+
+```ts
+// Фабрика для создания автомата загрузки данных
+function createDataFetchMachine(options = {}) {
+  return createMachine({
+    config: {
+      IDLE: { FETCH: "LOADING" },
+      LOADING: {
+        FETCH_SUCCESS: "SUCCESS",
+        FETCH_ERROR: "ERROR",
+      },
+      SUCCESS: {
+        REFETCH: "LOADING",
+        RESET: "IDLE",
+      },
+      ERROR: {
+        RETRY: "LOADING",
+        RESET: "IDLE",
+      },
+    },
+    initialState: options.initialState || "IDLE",
+    initialContext: {
+      data: options.initialData || null,
+      error: null,
+      lastUpdated: null,
+      ...options.extraContext,
+    },
+    effects: {
+      LOADING: async ({ transition, services }) => {
+        try {
+          // Используем переданный сервисный метод или общий метод
+          const fetchMethod = options.fetchMethod || "fetchData";
+          const resource = options.resource || "";
+
+          const data = await services.api[fetchMethod](resource);
+
+          transition({
+            type: "FETCH_SUCCESS",
+            payload: {
+              data,
+              lastUpdated: new Date().toISOString(),
+            },
+          });
+        } catch (error) {
+          transition({
+            type: "FETCH_ERROR",
+            payload: { error: error.message },
+          });
+        }
+      },
+    },
+  });
+}
+
+// Использование фабрики для разных типов данных
+const usersMachine = createDataFetchMachine({
+  resource: "users",
+  fetchMethod: "fetchUsers",
+});
+
+const productsMachine = createDataFetchMachine({
+  resource: "products",
+  fetchMethod: "fetchProducts",
+  extraContext: {
+    categories: [],
+    filters: { price: null, category: null },
+  },
+});
+```
+
+### Организуйте масштабируемую структуру проекта
+
+Для больших приложений следуйте четкой структуре организации автоматов:
+
+```
+src/
+├── machines/            # Определения автоматов
+│   ├── auth/
+│   │   ├── constants.ts # Константы для состояний и событий
+│   │   ├── types.ts     # Типы для TypeScript
+│   │   ├── machine.ts   # Определение автомата
+│   │   └── index.ts     # Публичный API
+│   ├── user/
+│   ├── products/
+│   └── index.ts         # Экспорт всех автоматов
+│
+├── services/            # Сервисный слой
+│   ├── api.ts
+│   ├── validation.ts
+│   ├── storage.ts
+│   └── index.ts
+│
+├── store/               # Интеграция с общим хранилищем приложения
+│   ├── manager.ts       # Создание и настройка MachineManager
+│   ├── hooks.ts         # React хуки для доступа к состоянию
+│   └── index.ts
+│
+└── components/          # Компоненты UI
+    ├── auth/
+    ├── user/
+    └── products/
+```
+
+## Заключение
+
+Следуя этим лучшим практикам, вы сможете создавать более надежные, тестируемые и масштабируемые приложения на основе `lite-fsm`. Конечные автоматы предоставляют прочную основу для моделирования состояний приложения, а правильные паттерны их использования помогают раскрыть весь потенциал этого подхода.

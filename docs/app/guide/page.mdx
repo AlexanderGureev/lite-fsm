@@ -1,0 +1,250 @@
+# Руководство по использованию
+
+В этом разделе вы узнаете, как использовать `lite-fsm` для создания и управления конечными автоматами в ваших приложениях.
+
+## Основные концепции
+
+Библиотека `lite-fsm` построена вокруг нескольких ключевых концепций:
+
+### Состояния и переходы
+
+Конечный автомат всегда находится в определенном состоянии. Переход между состояниями происходит в результате обработки событий (actions).
+
+### Контекст
+
+Контекст представляет собой объект с данными, связанными с автоматом. При переходе между состояниями контекст может обновляться.
+
+### Эффекты
+
+Эффекты - это функции, которые выполняются при переходе в определенное состояние. Они могут использоваться для выполнения побочных действий, таких как вызов API или обновление UI.
+
+### Менеджер автоматов
+
+`MachineManager` управляет всеми автоматами, обрабатывает переходы состояний и запускает соответствующие эффекты.
+
+## Создание автомата
+
+Автомат создается с помощью функции `createMachine`:
+
+```ts
+import { createMachine } from "lite-fsm";
+
+const toggleMachine = createMachine({
+  // Конфигурация состояний и переходов
+  config: {
+    INACTIVE: {
+      TOGGLE: "ACTIVE",
+    },
+    ACTIVE: {
+      TOGGLE: "INACTIVE",
+    },
+  },
+  // Начальное состояние
+  initialState: "INACTIVE",
+  // Начальный контекст
+  initialContext: {
+    lastToggled: null,
+  },
+  // Эффекты при переходе в состояния
+  effects: {
+    ACTIVE: ({ transition }) => {
+      console.log("Активировано!");
+      // Здесь можно выполнить побочные эффекты
+    },
+    INACTIVE: ({ transition }) => {
+      console.log("Деактивировано!");
+      // Здесь можно выполнить побочные эффекты
+    },
+  },
+  // Пользовательский reducer для обработки переходов (опционально)
+  reducer: (state, action, options) => {
+    // По умолчанию используется стандартный reducer
+    // Здесь можно изменить логику обновления состояния и контекста
+    return {
+      state: options.nextState,
+      context: {
+        ...state.context,
+        lastToggled: new Date(),
+      },
+    };
+  },
+});
+```
+
+## Управление автоматом через MachineManager
+
+После создания автомата, нужно инициализировать менеджер:
+
+```ts
+import { MachineManager } from "lite-fsm";
+
+// Можно создать несколько автоматов и управлять ими через один менеджер
+const manager = MachineManager({
+  toggle: toggleMachine,
+  // другие автоматы ...
+});
+
+// Подписка на изменения состояний
+manager.onTransition((prevState, nextState) => {
+  console.log("Состояние изменилось:", { prevState, nextState });
+});
+
+// Вызов перехода
+manager.transition({ type: "TOGGLE" });
+
+// Получение текущего состояния и контекста
+const { state, context } = manager.getState().toggle;
+```
+
+## Внедрение зависимостей
+
+Менеджер позволяет внедрять зависимости, которые будут доступны в эффектах:
+
+```ts
+// Создание зависимостей
+const dependencies = {
+  services: {
+    api: {
+      fetchData: () => fetch("/api/data").then((r) => r.json()),
+    },
+    logger: {
+      log: (message) => console.log(`[LOG]: ${message}`),
+    },
+  },
+  utils: {
+    formatDate: (date) => new Intl.DateTimeFormat().format(date),
+  },
+};
+
+// Установка зависимостей
+manager.setDependencies(dependencies);
+
+// Автомат с использованием зависимостей
+const dataMachine = createMachine({
+  config: {
+    IDLE: {
+      FETCH: "LOADING",
+    },
+    LOADING: {
+      FETCH_SUCCESS: "SUCCESS",
+      FETCH_ERROR: "ERROR",
+    },
+    SUCCESS: {
+      RESET: "IDLE",
+    },
+    ERROR: {
+      RETRY: "LOADING",
+      RESET: "IDLE",
+    },
+  },
+  initialState: "IDLE",
+  initialContext: {
+    data: null,
+    error: null,
+    lastUpdated: null,
+  },
+  effects: {
+    // Зависимости доступны в параметрах эффекта
+    LOADING: async ({ transition, services, utils }) => {
+      try {
+        const data = await services.api.fetchData();
+        services.logger.log("Данные успешно загружены");
+        transition({
+          type: "FETCH_SUCCESS",
+          payload: {
+            data,
+            lastUpdated: utils.formatDate(new Date()),
+          },
+        });
+      } catch (error) {
+        services.logger.log("Ошибка при загрузке данных");
+        transition({
+          type: "FETCH_ERROR",
+          payload: { error: error.message },
+        });
+      }
+    },
+  },
+});
+```
+
+## Асинхронные эффекты
+
+Эффекты могут быть асинхронными, что позволяет легко интегрировать их с API и другими асинхронными операциями:
+
+```ts
+effects: {
+  LOADING: async ({ transition, services }) => {
+    try {
+      // Асинхронная операция
+      const result = await services.api.fetchSomething();
+
+      // Передаем данные в контекст через payload
+      transition({
+        type: "FETCH_SUCCESS",
+        payload: { data: result },
+      });
+    } catch (error) {
+      transition({
+        type: "FETCH_ERROR",
+        payload: { error: error.message },
+      });
+    }
+  };
+}
+```
+
+## Дополнительные возможности
+
+### Дикие карты (WILDCARD)
+
+Можно использовать специальный символ `*` для обработки любого состояния:
+
+```ts
+import { createMachine, WILDCARD } from "lite-fsm";
+
+const machine = createMachine({
+  config: {
+    STATE_A: {
+      EVENT_1: "STATE_B",
+    },
+    STATE_B: {
+      EVENT_2: "STATE_C",
+    },
+    STATE_C: {
+      EVENT_3: "STATE_A",
+    },
+    // Обработка событий в любом состоянии
+    [WILDCARD]: {
+      RESET: "STATE_A",
+      LOG: null, // null означает, что состояние не меняется
+    },
+  },
+  // ...
+});
+```
+
+### Создание эффектов с отменой
+
+Библиотека позволяет создавать эффекты с возможностью отмены:
+
+```ts
+import { createEffect } from "lite-fsm";
+
+const fetchDataEffect = createEffect({
+  // Тип эффекта: "latest" выполняет только последний вызов
+  type: "latest",
+  effect: async ({ transition, services }) => {
+    // Реализация эффекта
+    const data = await services.api.fetchData();
+    transition({ type: "FETCH_SUCCESS", payload: { data } });
+  },
+  // Функция для проверки условий отмены
+  cancelFn: (deps) => {
+    let canceled = false;
+    return () => {
+      return canceled;
+    };
+  },
+});
+```

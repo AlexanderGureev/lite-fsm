@@ -1,0 +1,333 @@
+# Middleware
+
+Библиотека `lite-fsm` поддерживает концепцию middleware, которая позволяет расширить функциональность менеджера конечных автоматов. Middleware могут использоваться для логирования, отладки, обработки побочных эффектов и других задач.
+
+## Что такое middleware?
+
+Middleware в `lite-fsm` - это функции, которые запускаются до и после обработки действий. Они могут перехватывать, изменять или даже отменять действия, а также выполнять дополнительные операции на основе результата обработки действия.
+
+## Доступ к модулю middleware
+
+```ts
+// ESM
+import { immerMiddleware, devToolsMiddleware } from "lite-fsm/middleware";
+
+// CommonJS
+const { immerMiddleware, devToolsMiddleware } = require("lite-fsm/middleware");
+```
+
+## Встроенные middleware
+
+### immerMiddleware
+
+Middleware для интеграции с библиотекой [Immer](https://immerjs.github.io/immer/), которая упрощает работу с иммутабельными данными.
+
+```ts
+import { MachineManager, createMachine } from "lite-fsm";
+import { immerMiddleware } from "lite-fsm/middleware";
+
+// Создание автомата
+const todoMachine = createMachine({
+  config: {
+    IDLE: {
+      ADD_TODO: null,
+      TOGGLE_TODO: null,
+      REMOVE_TODO: null,
+    },
+  },
+  initialState: "IDLE",
+  initialContext: {
+    todos: [],
+  },
+  // С Immer можно мутировать черновик контекста
+  reducer: (state, action, options) => {
+    const { state: currentState, context } = state;
+    const nextState = options.nextState || currentState;
+
+    // Используем стандартный reducer, Immer-middleware позаботится о создании нового объекта
+    switch (action.type) {
+      case "ADD_TODO":
+        // Мутируем context напрямую (Immer создаст новую копию под капотом)
+        context.todos.push({
+          id: Date.now(),
+          text: action.payload.text,
+          completed: false,
+        });
+        break;
+
+      case "TOGGLE_TODO":
+        const todo = context.todos.find((t) => t.id === action.payload.id);
+        if (todo) {
+          todo.completed = !todo.completed;
+        }
+        break;
+
+      case "REMOVE_TODO":
+        const index = context.todos.findIndex((t) => t.id === action.payload.id);
+        if (index !== -1) {
+          context.todos.splice(index, 1);
+        }
+        break;
+    }
+
+    return {
+      state: nextState,
+      context, // Возвращаем "мутированный" контекст, Immer преобразует его в новый объект
+    };
+  },
+});
+
+// Создание менеджера с middleware
+const manager = MachineManager({ todo: todoMachine }, { middleware: [immerMiddleware] });
+```
+
+### devToolsMiddleware
+
+Middleware для интеграции с [Redux DevTools Extension](https://github.com/reduxjs/redux-devtools), который позволяет отлаживать состояние приложения и переходы между состояниями.
+
+```ts
+import { MachineManager, createMachine } from "lite-fsm";
+import { devToolsMiddleware } from "lite-fsm/middleware";
+
+// Создание автомата
+const counterMachine = createMachine({
+  config: {
+    IDLE: {
+      INCREMENT: null,
+      DECREMENT: null,
+      RESET: null,
+    },
+  },
+  initialState: "IDLE",
+  initialContext: {
+    count: 0,
+  },
+  reducer: (state, action) => {
+    const { state: currentState, context } = state;
+
+    switch (action.type) {
+      case "INCREMENT":
+        return {
+          state: currentState,
+          context: { ...context, count: context.count + 1 },
+        };
+      case "DECREMENT":
+        return {
+          state: currentState,
+          context: { ...context, count: context.count - 1 },
+        };
+      case "RESET":
+        return {
+          state: currentState,
+          context: { ...context, count: 0 },
+        };
+      default:
+        return state;
+    }
+  },
+});
+
+// Настраиваем параметры DevTools
+const devToolsOptions = {
+  name: "My App", // Название для DevTools
+  trace: true, // Включить трассировку
+  traceLimit: 25, // Ограничение количества действий для трассировки
+  features: {
+    jump: true, // Разрешить перемещение между состояниями
+    skip: true, // Разрешить пропуск действий
+  },
+};
+
+// Создание менеджера с middleware
+const manager = MachineManager({ counter: counterMachine }, { middleware: [devToolsMiddleware(devToolsOptions)] });
+```
+
+## Создание собственного middleware
+
+Вы можете создать собственное middleware для решения специфических задач:
+
+```ts
+import { MachineManager, createMachine } from "lite-fsm";
+
+// Middleware для логирования всех переходов
+const loggingMiddleware = (manager) => (next) => (action) => {
+  console.group(`%c Action: ${action.type}`, "color: #4CAF50");
+  console.log("Предыдущее состояние:", manager.getState());
+  console.log("Действие:", action);
+
+  // Вызываем следующее middleware в цепочке
+  const result = next(action);
+
+  console.log("Новое состояние:", manager.getState());
+  console.groupEnd();
+
+  return result;
+};
+
+// Middleware для аналитики
+const analyticsMiddleware = (manager) => (next) => (action) => {
+  // Измеряем время выполнения действия
+  const startTime = performance.now();
+
+  // Вызываем следующее middleware в цепочке
+  const result = next(action);
+
+  const endTime = performance.now();
+  const duration = endTime - startTime;
+
+  // Отправляем данные в аналитику
+  if (window.analytics) {
+    window.analytics.track("State Transition", {
+      action: action.type,
+      machine: action.machine || "all",
+      duration,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  return result;
+};
+
+// Middleware для сохранения состояния в localStorage
+const persistMiddleware =
+  (storageKey = "lite-fsm-state") =>
+  (manager) =>
+  (next) =>
+  (action) => {
+    // Вызываем следующее middleware в цепочке
+    const result = next(action);
+
+    // Сохраняем состояние после обработки действия
+    try {
+      const state = manager.getState();
+      localStorage.setItem(storageKey, JSON.stringify(state));
+    } catch (err) {
+      console.error("Error persisting state:", err);
+    }
+
+    return result;
+  };
+
+// Создание автомата
+const appMachine = createMachine({
+  // ...конфигурация автомата
+});
+
+// Создание менеджера с несколькими middleware
+const manager = MachineManager(
+  { app: appMachine },
+  {
+    middleware: [loggingMiddleware, analyticsMiddleware, persistMiddleware("my-app-state")],
+  },
+);
+```
+
+## Порядок выполнения middleware
+
+Middleware выполняются в порядке их определения в массиве. Каждое middleware может:
+
+1. Выполнить действия перед передачей действия следующему middleware
+2. Изменить или полностью заменить действие
+3. Предотвратить вызов следующего middleware, отменив действие
+4. Выполнить действия после обработки действия всеми следующими middleware
+
+```
+Action -> Middleware 1 -> Middleware 2 -> ... -> Reducer -> ... -> Middleware 2 -> Middleware 1 -> Result
+```
+
+## Расширенные примеры использования middleware
+
+### Кеширование действий
+
+```ts
+// Middleware для кеширования результатов некоторых действий
+const cachingMiddleware = (options = {}) => {
+  const cache = new Map();
+  const { ttl = 5000, actionTypes = [] } = options;
+
+  return (manager) => (next) => (action) => {
+    // Если действие не должно кешироваться
+    if (!actionTypes.includes(action.type)) {
+      return next(action);
+    }
+
+    // Создаем ключ кеша
+    const cacheKey = JSON.stringify({ type: action.type, payload: action.payload });
+
+    // Проверяем кеш
+    if (cache.has(cacheKey)) {
+      const { result, timestamp } = cache.get(cacheKey);
+      const now = Date.now();
+
+      // Если кеш все еще актуален
+      if (now - timestamp < ttl) {
+        console.log(`[Cache] Использование кешированного результата для ${action.type}`);
+        return result;
+      }
+    }
+
+    // Выполняем действие
+    const result = next(action);
+
+    // Сохраняем результат в кеше
+    cache.set(cacheKey, { result, timestamp: Date.now() });
+
+    return result;
+  };
+};
+
+// Использование
+const manager = MachineManager(
+  { data: dataMachine },
+  {
+    middleware: [
+      cachingMiddleware({
+        actionTypes: ["FETCH_DATA", "LOAD_PROFILE"],
+        ttl: 10000, // 10 секунд
+      }),
+    ],
+  },
+);
+```
+
+### Обработка ошибок
+
+```ts
+// Middleware для централизованной обработки ошибок
+const errorHandlingMiddleware = (errorHandler) => (manager) => (next) => (action) => {
+  try {
+    return next(action);
+  } catch (error) {
+    console.error(`Error processing action ${action.type}:`, error);
+
+    // Вызываем пользовательский обработчик ошибок
+    errorHandler(error, action, manager);
+
+    // Возвращаем состояние без изменений
+    return manager.getState();
+  }
+};
+
+// Использование
+const manager = MachineManager(
+  { app: appMachine },
+  {
+    middleware: [
+      errorHandlingMiddleware((error, action, manager) => {
+        // Отправляем ошибку в сервис мониторинга
+        reportErrorToService(error, {
+          action,
+          state: manager.getState(),
+        });
+
+        // Показываем уведомление пользователю
+        showErrorNotification(`Произошла ошибка: ${error.message}`);
+      }),
+    ],
+  },
+);
+```
+
+## Заключение
+
+Middleware в `lite-fsm` предоставляет мощный механизм для расширения функциональности библиотеки. С их помощью вы можете добавить логирование, отладку, персистентность, аналитику и другие возможности к вашим конечным автоматам, не усложняя основную логику приложения.
