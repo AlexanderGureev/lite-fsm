@@ -248,3 +248,133 @@ const fetchDataEffect = createEffect({
   },
 });
 ```
+
+### Интерактивный пример
+
+Вы можете поэкспериментировать с этим примером прямо здесь:
+
+<CodeSandbox
+  sandboxId="stoic-haslett-zt3lz7"
+  options={{
+    editorHeight: "500px",
+    previewHeight: "300px",
+    autoResize: true,
+  }}
+/>
+
+### Использование Sandpack компонента
+
+Также вы можете использовать встроенный редактор кода:
+
+<Sandpack 
+  files={{
+    "/App.tsx": `import { createMachine, MachineManager } from 'lite-fsm';
+import { useState, useEffect } from 'react';
+
+// Создаем простой автомат для тумблера
+const toggleMachine = createMachine({
+config: {
+inactive: {
+TOGGLE: 'active'
+},
+active: {
+TOGGLE: 'inactive'
+}
+},
+initialState: 'inactive',
+initialContext: {
+toggleCount: 0
+},
+effects: {
+// Вызывается при входе в состояние
+active: ({ context, updateContext }) => {
+updateContext({
+toggleCount: context.toggleCount + 1
+});
+console.log('Activated! Toggle count:', context.toggleCount + 1);
+}
+}
+});
+
+// Создаем менеджер для управления автоматом
+const manager = MachineManager({ toggle: toggleMachine });
+
+function App() {
+// Локальное состояние для отслеживания состояния автомата
+const [state, setState] = useState(manager.getState());
+
+useEffect(() => {
+// Подписываемся на изменения состояния
+const unsubscribe = manager.onTransition(() => {
+setState(manager.getState());
+});
+
+    return unsubscribe;
+
+}, []);
+
+const { state: currentState, context } = state.toggle;
+
+return (
+
+<div className="App" style={{ fontFamily: 'system-ui, sans-serif', padding: '20px' }}>
+<h1>Toggle FSM Example</h1>
+
+      <div style={{ margin: '20px 0' }}>
+        <div>Current state: <strong>{currentState}</strong></div>
+        <div>Toggle count: <strong>{context.toggleCount}</strong></div>
+      </div>
+
+      <button
+        onClick={() => manager.transition({ type: 'TOGGLE' })}
+        style={{
+          padding: '8px 16px',
+          backgroundColor: currentState === 'active' ? '#4CAF50' : '#9E9E9E',
+          color: 'white',
+          border: 'none',
+          borderRadius: '4px',
+          cursor: 'pointer'
+        }}
+      >
+        Toggle
+      </button>
+    </div>
+
+);
+}
+
+export default App;`,
+    "/index.tsx": `import React, { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import App from "./App";
+
+const root = createRoot(document.getElementById("root"));
+root.render(
+
+<StrictMode>
+  <App />
+</StrictMode>
+);` }} options={{
+  showConsole: true,
+  editorHeight: "400px",
+}}
+customSetup=
+{{
+  dependencies: {
+    "lite-fsm": "latest",
+  },
+}}
+/>
+
+## Примеры в CodeSandbox
+
+Вы также можете изучить полные примеры проектов в CodeSandbox:
+
+<CodeSandbox
+  sandboxId="https://codesandbox.io/p/sandbox/festive-darkness-rx2hwn"
+  options={{
+    editorHeight: "450px",
+    previewHeight: "350px",
+    autoResize: true,
+  }}
+/>

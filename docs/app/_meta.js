@@ -12,6 +12,10 @@ export default {
     title: "API",
     type: "page",
   },
+  examples: {
+    title: "Примеры",
+    type: "page",
+  },
   react: {
     title: "React",
     type: "page",

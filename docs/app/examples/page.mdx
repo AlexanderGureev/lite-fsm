@@ -1,0 +1,170 @@
+# Примеры
+
+На этой странице представлены примеры использования библиотеки **lite-fsm**, интегрированные с CodeSandbox.
+
+## Интеграция с React
+
+Этот пример демонстрирует, как интегрировать FSM с React-компонентами:
+
+<CodeSandbox
+  sandboxId="https://codesandbox.io/p/sandbox/festive-darkness-rx2hwn"
+  options={{
+    initialModule: "/src/store/index.ts",
+  }}
+/>
+
+## Асинхронные переходы
+
+Пример обработки асинхронных переходов в конечном автомате:
+
+<Sandpack 
+  files={{
+    "/App.tsx": `import { createMachine, MachineManager } from 'lite-fsm';
+import { useEffect, useState } from 'react';
+
+// Определяем типы для автомата
+type FetcherState = 'IDLE' | 'LOADING' | 'SUCCESS' | 'ERROR';
+type FetcherEvent =
+| { type: 'FETCH'; payload: { url: string } }
+| { type: 'RESOLVE'; payload: { data: any } }
+| { type: 'REJECT'; payload: { error: string } }
+| { type: 'RESET' };
+
+type FetcherContext = {
+url: string | null;
+data: any | null;
+error: string | null;
+};
+
+// Создаем автомат для загрузки данных
+const fetcher = createMachine({
+config: {
+IDLE: {
+FETCH: 'LOADING',
+},
+LOADING: {
+RESOLVE: 'SUCCESS',
+REJECT: 'ERROR',
+},
+SUCCESS: {
+FETCH: 'LOADING',
+RESET: 'IDLE',
+},
+ERROR: {
+FETCH: 'LOADING',
+RESET: 'IDLE',
+},
+},
+initialState: 'IDLE' as FetcherState,
+initialContext: {
+url: null,
+data: null,
+error: null,
+} as FetcherContext,
+effects: {
+LOADING: ({ action, transition }) => {
+const { url } = action.payload;
+
+      // Асинхронная операция
+      fetch(url)
+        .then(res => res.json())
+        .then(data => {
+          transition({
+            type: 'RESOLVE',
+            payload: { data },
+          });
+        })
+        .catch(err => {
+          transition({
+            type: 'REJECT',
+            payload: { error: err.message },
+          });
+        });
+    },
+
+},
+});
+
+const manager = MachineManager({ fetcher });
+
+// Компонент для демонстрации работы автомата
+function App() {
+const [state, setState] = useState(manager.getState());
+
+useEffect(() => {
+// Подписываемся на изменения состояния
+const unsubscribe = manager.onTransition(() => {
+setState(manager.getState());
+});
+
+    return unsubscribe;
+
+}, []);
+
+const handleFetch = () => {
+manager.transition({
+type: 'FETCH',
+payload: { url: 'https://jsonplaceholder.typicode.com/todos/1' },
+});
+};
+
+const handleReset = () => {
+manager.transition({ type: 'RESET' });
+};
+
+const { state: fetcherState, context } = state.fetcher;
+
+return (
+
+<div className="App">
+<h1>Async Fetcher</h1>
+<div>Current state: <strong>{fetcherState}</strong></div>
+<div style={{ margin: '20px 0' }}>
+<button onClick={handleFetch} disabled={fetcherState === 'LOADING'}>
+Fetch Data
+</button>
+<button onClick={handleReset} style={{ marginLeft: '10px' }}>
+Reset
+</button>
+</div>
+
+      {fetcherState === 'LOADING' && <div>Loading...</div>}
+      {fetcherState === 'SUCCESS' && (
+        <div>
+          <h3>Success:</h3>
+          <pre>{JSON.stringify(context.data, null, 2)}</pre>
+        </div>
+      )}
+      {fetcherState === 'ERROR' && (
+        <div>
+          <h3>Error:</h3>
+          <div style={{ color: 'red' }}>{context.error}</div>
+        </div>
+      )}
+    </div>
+
+);
+}
+
+export default App;`,
+    "/index.tsx": `import React, { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import App from "./App";
+
+const root = createRoot(document.getElementById("root"));
+root.render(
+
+<StrictMode>
+  <App />
+</StrictMode>
+);` }} customSetup=
+{{
+  dependencies: {
+    "lite-fsm": "latest",
+  },
+}}
+options={{
+  showConsole: true,
+  editorHeight: "500px",
+}}
+/>
