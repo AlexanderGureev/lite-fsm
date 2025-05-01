@@ -19,8 +19,8 @@ The full documentation is available at [https://alexandergureev.github.io/lite-f
 
 ## Examples
 
-- React [Source](./examples/react.tsx) | [Sandbox]()
-- Basic typescript [Source](./examples/basic.ts) | [Sandbox]()
+- React [Source](./examples/react.tsx) | [Sandbox](https://codesandbox.io/p/sandbox/holy-framework-rx2hwn)
+- Basic typescript [Source](./examples/basic.ts)
 
 ### Quickstart (basic example)
 
