@@ -2,283 +2,36 @@
 
 В этом разделе мы рассмотрим более сложные аспекты работы с `lite-fsm` и паттерны, которые можно использовать для решения нестандартных задач.
 
+## Обзор разделов
+
+- [Работа с TypeScript](/guide/advanced-concepts/work-with-typescript) - подробное руководство по типизации автоматов и созданию строго типизированного приложения с использованием предварительно типизированных функций API.
+
 ## Типизация с TypeScript
 
-`lite-fsm` полностью совместим с TypeScript и предоставляет встроенную систему типов, которая помогает избежать ошибок при разработке:
+`lite-fsm` предоставляет богатые возможности для работы с TypeScript и обеспечения типобезопасности. В [отдельном разделе](/guide/advanced-concepts/work-with-typescript) мы подробно рассматриваем, как создать предварительно типизированные версии функций и хуков для автоматического применения ваших пользовательских типов.
 
-```ts
-import { createMachine, MachineManager } from "lite-fsm";
-import type { CFG, FSMEvent } from "lite-fsm";
+Вкратце, этот подход позволяет:
 
-// Определение типов состояний
-type State = "IDLE" | "LOADING" | "SUCCESS" | "ERROR";
+1. Создать строго типизированные версии функций API
+2. Объединить типы всех автоматов в центральном месте
+3. Автоматически получать проверку типов во время компиляции
+4. Иметь автодополнение в IDE для состояний, событий и контекста
 
-// Определение типов событий
-type EventType = "FETCH" | "FETCH_SUCCESS" | "FETCH_ERROR" | "RESET";
+## Иммутабельное обновление с Immer
 
-// Определение типа события с payload
-type Event =
-  | FSMEvent<"FETCH", void>
-  | FSMEvent<"FETCH_SUCCESS", { data: any }>
-  | FSMEvent<"FETCH_ERROR", { error: string }>
-  | FSMEvent<"RESET", void>;
-
-// Определение типа контекста
-type Context = {
-  data: any | null;
-  error: string | null;
-  loading: boolean;
-};
-
-// Определение типа конфигурации
-type Config = CFG<
-  {
-    IDLE: { FETCH: "LOADING" };
-    LOADING: { FETCH_SUCCESS: "SUCCESS"; FETCH_ERROR: "ERROR" };
-    SUCCESS: { RESET: "IDLE" };
-    ERROR: { RESET: "IDLE"; FETCH: "LOADING" };
-  },
-  Context,
-  Event
->;
-
-// Создание автомата с сильной типизацией
-const fetchMachine = createMachine<Config, Context, EventType, Event>({
-  config: {
-    IDLE: {
-      FETCH: "LOADING",
-    },
-    LOADING: {
-      FETCH_SUCCESS: "SUCCESS",
-      FETCH_ERROR: "ERROR",
-    },
-    SUCCESS: {
-      RESET: "IDLE",
-    },
-    ERROR: {
-      RESET: "IDLE",
-      FETCH: "LOADING",
-    },
-  },
-  initialState: "IDLE",
-  initialContext: {
-    data: null,
-    error: null,
-    loading: false,
-  },
-  effects: {
-    LOADING: async ({ transition }) => {
-      try {
-        const response = await fetch("https://api.example.com/data");
-        const data = await response.json();
-        // TypeScript проверит, что тип события и payload соответствуют определению
-        transition({ type: "FETCH_SUCCESS", payload: { data } });
-      } catch (error) {
-        // TypeScript проверит, что тип события и payload соответствуют определению
-        transition({
-          type: "FETCH_ERROR",
-          payload: { error: error instanceof Error ? error.message : String(error) },
-        });
-      }
-    },
-  },
-});
-```
-
-## Композиция автоматов
-
-Для управления сложными системами часто требуется создание нескольких взаимосвязанных автоматов. `lite-fsm` позволяет легко композировать автоматы с помощью `MachineManager`:
-
-```ts
-import { createMachine, MachineManager } from "lite-fsm";
-
-// Автомат для управления авторизацией
-const authMachine = createMachine({
-  config: {
-    LOGGED_OUT: {
-      LOGIN: "LOGGING_IN",
-    },
-    LOGGING_IN: {
-      LOGIN_SUCCESS: "LOGGED_IN",
-      LOGIN_ERROR: "LOGIN_ERROR",
-    },
-    LOGGED_IN: {
-      LOGOUT: "LOGGED_OUT",
-    },
-    LOGIN_ERROR: {
-      RETRY: "LOGGING_IN",
-      CANCEL: "LOGGED_OUT",
-    },
-  },
-  initialState: "LOGGED_OUT",
-  initialContext: {
-    user: null,
-    error: null,
-  },
-  // ...
-});
-
-// Автомат для управления данными пользователя
-const userDataMachine = createMachine({
-  config: {
-    IDLE: {
-      FETCH: "LOADING",
-    },
-    LOADING: {
-      FETCH_SUCCESS: "LOADED",
-      FETCH_ERROR: "ERROR",
-    },
-    LOADED: {
-      REFRESH: "LOADING",
-      CLEAR: "IDLE",
-    },
-    ERROR: {
-      RETRY: "LOADING",
-      CLEAR: "IDLE",
-    },
-  },
-  initialState: "IDLE",
-  initialContext: {
-    data: null,
-    error: null,
-  },
-  // ...
-});
-
-// Создание менеджера, объединяющего автоматы
-const manager = MachineManager({
-  auth: authMachine,
-  userData: userDataMachine,
-});
-
-// Установка зависимостей
-manager.setDependencies({
-  services: {
-    authService: {
-      login: async (credentials) => {
-        /* ... */
-      },
-      logout: async () => {
-        /* ... */
-      },
-    },
-    userService: {
-      fetchUserData: async (userId) => {
-        /* ... */
-      },
-    },
-  },
-});
-
-// Подписка на изменения с возможностью координации между автоматами
-manager.onTransition((prevState, nextState) => {
-  // Если пользователь успешно вошел в систему, запрашиваем его данные
-  if (prevState.auth.state !== "LOGGED_IN" && nextState.auth.state === "LOGGED_IN" && nextState.auth.context.user) {
-    manager.transition({
-      type: "FETCH",
-      machine: "userData", // Указываем целевой автомат
-    });
-  }
-
-  // Если пользователь вышел, очищаем данные
-  if (prevState.auth.state === "LOGGED_IN" && nextState.auth.state === "LOGGED_OUT") {
-    manager.transition({
-      type: "CLEAR",
-      machine: "userData",
-    });
-  }
-});
-```
-
-## Пользовательские редьюсеры
-
-По умолчанию `lite-fsm` использует простой редьюсер, который обновляет состояние автомата и объединяет payload с контекстом. Однако для более сложной логики обновления контекста можно определить собственный редьюсер:
-
-```ts
-import { createMachine } from "lite-fsm";
-
-const counterMachine = createMachine({
-  config: {
-    IDLE: {
-      INCREMENT: null, // null означает, что состояние не меняется
-      DECREMENT: null,
-      RESET: null,
-    },
-  },
-  initialState: "IDLE",
-  initialContext: {
-    count: 0,
-    history: [],
-    lastUpdated: null,
-  },
-  // Пользовательский редьюсер
-  reducer: (state, action, options) => {
-    // Получаем текущее состояние и контекст
-    const { state: currentState, context } = state;
-
-    // Обрабатываем различные типы событий
-    switch (action.type) {
-      case "INCREMENT":
-        return {
-          state: options.nextState || currentState,
-          context: {
-            ...context,
-            count: context.count + (action.payload?.step || 1),
-            history: [...context.history, { type: "INCREMENT", timestamp: Date.now() }],
-            lastUpdated: new Date().toISOString(),
-          },
-        };
-
-      case "DECREMENT":
-        return {
-          state: options.nextState || currentState,
-          context: {
-            ...context,
-            count: context.count - (action.payload?.step || 1),
-            history: [...context.history, { type: "DECREMENT", timestamp: Date.now() }],
-            lastUpdated: new Date().toISOString(),
-          },
-        };
-
-      case "RESET":
-        return {
-          state: options.nextState || currentState,
-          context: {
-            ...context,
-            count: 0,
-            history: [...context.history, { type: "RESET", timestamp: Date.now() }],
-            lastUpdated: new Date().toISOString(),
-          },
-        };
-
-      default:
-        // Для других событий используем стандартное поведение
-        return {
-          state: options.nextState || currentState,
-          context: {
-            ...context,
-            ...(action.payload || {}),
-          },
-        };
-    }
-  },
-});
-```
-
-## Интеграция с Immer
-
-`lite-fsm` имеет встроенную поддержку библиотеки Immer, которая упрощает работу с иммутабельными данными. Чтобы использовать Immer, установите его и используйте в редьюсере:
+Для упрощения обновления состояний `lite-fsm` предоставляет интеграцию с библиотекой Immer, которая позволяет писать "мутирующий" код, который под капотом преобразуется в иммутабельные обновления:
 
 ```ts
 import { createMachine } from "lite-fsm";
 import { produce } from "immer";
 
-const todoMachine = createMachine({
+const todosMachine = createMachine({
   config: {
     IDLE: {
       ADD_TODO: null,
       TOGGLE_TODO: null,
       DELETE_TODO: null,
+      SET_FILTER: null,
     },
   },
   initialState: "IDLE",
@@ -286,12 +39,11 @@ const todoMachine = createMachine({
     todos: [],
     filter: "all",
   },
-  // Редьюсер с использованием Immer
-  reducer: (state, action, options) => {
-    const nextState = options.nextState || state.state;
+  reducer: (state, action, { nextState }) => {
+    const { state: currentState, context } = state;
 
-    // Используем Immer для обновления контекста
-    const nextContext = produce(state.context, (draft) => {
+    // Используем Immer для простого обновления состояния
+    const nextContext = produce(context, (draft) => {
       switch (action.type) {
         case "ADD_TODO":
           draft.todos.push({

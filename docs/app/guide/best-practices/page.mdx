@@ -2,52 +2,6 @@
 
 В этом разделе собраны рекомендации и советы по эффективному использованию `lite-fsm` для создания надежных и масштабируемых приложений.
 
-## Организация состояний
-
-### Используйте константы для имен состояний и событий
-
-Вместо строковых литералов используйте константы для состояний и типов событий:
-
-```ts
-// Состояния
-export const STATES = {
-  IDLE: "IDLE",
-  LOADING: "LOADING",
-  SUCCESS: "SUCCESS",
-  ERROR: "ERROR",
-} as const;
-
-// События
-export const EVENTS = {
-  FETCH: "FETCH",
-  FETCH_SUCCESS: "FETCH_SUCCESS",
-  FETCH_ERROR: "FETCH_ERROR",
-  RESET: "RESET",
-} as const;
-
-// Типы для TypeScript
-export type State = (typeof STATES)[keyof typeof STATES];
-export type EventType = (typeof EVENTS)[keyof typeof EVENTS];
-
-// Использование в машине
-const machine = createMachine({
-  config: {
-    [STATES.IDLE]: {
-      [EVENTS.FETCH]: STATES.LOADING,
-    },
-    [STATES.LOADING]: {
-      [EVENTS.FETCH_SUCCESS]: STATES.SUCCESS,
-      [EVENTS.FETCH_ERROR]: STATES.ERROR,
-    },
-    // ...
-  },
-  initialState: STATES.IDLE,
-  // ...
-});
-```
-
-Это делает код более надежным, позволяет избежать опечаток и упрощает рефакторинг.
-
 ### Структурируйте большие автоматы
 
 Для сложных автоматов с множеством состояний и переходов разделяйте конфигурацию на логические группы:
@@ -597,79 +551,6 @@ const manager = createLoggedManager(
 ```
 
 ## Интеграция в приложение
-
-### Используйте фабрики для создания автоматов
-
-Для переиспользования логики создавайте фабрики автоматов:
-
-```ts
-// Фабрика для создания автомата загрузки данных
-function createDataFetchMachine(options = {}) {
-  return createMachine({
-    config: {
-      IDLE: { FETCH: "LOADING" },
-      LOADING: {
-        FETCH_SUCCESS: "SUCCESS",
-        FETCH_ERROR: "ERROR",
-      },
-      SUCCESS: {
-        REFETCH: "LOADING",
-        RESET: "IDLE",
-      },
-      ERROR: {
-        RETRY: "LOADING",
-        RESET: "IDLE",
-      },
-    },
-    initialState: options.initialState || "IDLE",
-    initialContext: {
-      data: options.initialData || null,
-      error: null,
-      lastUpdated: null,
-      ...options.extraContext,
-    },
-    effects: {
-      LOADING: async ({ transition, services }) => {
-        try {
-          // Используем переданный сервисный метод или общий метод
-          const fetchMethod = options.fetchMethod || "fetchData";
-          const resource = options.resource || "";
-
-          const data = await services.api[fetchMethod](resource);
-
-          transition({
-            type: "FETCH_SUCCESS",
-            payload: {
-              data,
-              lastUpdated: new Date().toISOString(),
-            },
-          });
-        } catch (error) {
-          transition({
-            type: "FETCH_ERROR",
-            payload: { error: error.message },
-          });
-        }
-      },
-    },
-  });
-}
-
-// Использование фабрики для разных типов данных
-const usersMachine = createDataFetchMachine({
-  resource: "users",
-  fetchMethod: "fetchUsers",
-});
-
-const productsMachine = createDataFetchMachine({
-  resource: "products",
-  fetchMethod: "fetchProducts",
-  extraContext: {
-    categories: [],
-    filters: { price: null, category: null },
-  },
-});
-```
 
 ### Организуйте масштабируемую структуру проекта
 

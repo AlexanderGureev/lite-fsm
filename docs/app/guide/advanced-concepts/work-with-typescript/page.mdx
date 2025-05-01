@@ -1,0 +1,398 @@
+# Работа с TypeScript
+
+TypeScript предоставляет мощные возможности для обеспечения типобезопасности в приложениях, использующих `lite-fsm`. В этом разделе мы рассмотрим, как настроить типизацию автоматов и переиспользовать типы для создания строго типизированных приложений.
+
+## Предварительная типизация функций API
+
+Одним из ключевых преимуществ использования TypeScript с `lite-fsm` является возможность создать предварительно типизированные версии функций API (таких как `createMachine`, `createEffect` и т.д.), которые будут автоматически применять ваши пользовательские типы ко всем автоматам в приложении.
+
+### Шаг 1: Определение базовых типов событий и зависимостей
+
+Сначала определите базовые типы для вашего приложения:
+
+```ts
+// src/store/types.ts
+import * as root from "./machines/root";
+import * as counter from "./machines/counter";
+import * as profile from "./machines/profile";
+
+// Тип всех состояний приложения (будет выведен из конфигурации)
+export type AppState = {
+  /* будет определен позже */
+};
+
+// Объединяем все типы событий из всех автоматов
+export type AppEvents = root.Events | counter.Events | profile.Events;
+
+// Определяем тип зависимостей, которые будут доступны в эффектах
+export type Dependencies = {
+  services: {
+    playerService: {
+      play: () => void;
+      pause: () => void;
+    };
+  };
+  getState: () => AppState;
+};
+```
+
+### Шаг 2: Создание типизированных версий функций API
+
+Создайте файл, который будет реэкспортировать функции `lite-fsm` с предварительно примененными типами:
+
+```ts
+// src/store/create-machine.ts
+import type { TypedCreateConfigFn, TypedCreateEffectFn, TypedCreateMachineFn, TypedCreateReducerFn } from "lite-fsm";
+import {
+  createConfig as _createConfig,
+  createEffect as _createEffect,
+  createMachine as _createMachine,
+  createReducer as _createReducer,
+} from "lite-fsm";
+
+import type { AppEvents, Dependencies } from "./types";
+
+// Создаем типизированные версии функций
+export const createMachine: TypedCreateMachineFn<AppEvents, Dependencies> = _createMachine;
+export const createReducer: TypedCreateReducerFn<AppEvents> = _createReducer;
+export const createConfig: TypedCreateConfigFn<AppEvents> = _createConfig;
+export const createEffect: TypedCreateEffectFn<AppEvents, Dependencies> = _createEffect;
+
+// Тип для эффектов, полезно для типизации кастомных эффектов
+export type TypedEffect = ReturnType<TypedCreateEffectFn<AppEvents, Dependencies>>;
+```
+
+### Шаг 3: Типизированные хуки для работы с React
+
+Аналогичным образом, создайте типизированные версии React-хуков:
+
+```ts
+// src/store/hooks.ts
+import type { TypedUseMachineHook, TypedUseSelectorHook, TypedUseTransitionHook } from "lite-fsm/react";
+import {
+  useManager as _useManager,
+  useSelector as _useSelector,
+  useTransition as _useTransition,
+} from "lite-fsm/react";
+
+import type { AppState, AppEvents, FSMConfigType } from ".";
+
+// Создаем типизированные версии хуков
+export const useTransition: TypedUseTransitionHook<AppEvents> = _useTransition;
+export const useSelector: TypedUseSelectorHook<AppState> = _useSelector;
+export const useManager: TypedUseMachineHook<FSMConfigType, AppEvents> = _useManager;
+```
+
+### Шаг 4: Создание store
+
+Теперь нужно объединить все автоматы в единый store и экспортировать типы:
+
+```ts
+// src/store/index.ts
+import { root } from "./machines/root";
+import { counter } from "./machines/counter";
+import { profile } from "./machines/profile";
+import { MachineManager, MachinesState } from "lite-fsm";
+import { devToolsMiddleware, immerMiddleware } from "lite-fsm/middleware";
+import type { AppEvents, Dependencies } from "./types";
+
+// Конфигурация всех автоматов
+const cfg = { root, counter, profile };
+
+// Тип конфигурации, нужен для типизации менеджера
+export type FSMConfigType = typeof cfg;
+
+// Функция создания store
+export const makeStore = () => {
+  const middleware = [
+    immerMiddleware,
+    devToolsMiddleware({
+      blacklistActions: [],
+    }),
+  ];
+
+  const manager = MachineManager<FSMConfigType, AppEvents>(cfg, {
+    middleware,
+    onError: console.error,
+  });
+
+  manager.setDependencies<Dependencies>({
+    getState: manager.getState,
+    services: {
+      playerService: {
+        play: () => undefined,
+        pause: () => undefined,
+      },
+    },
+  });
+
+  return manager;
+};
+
+// Экспортируем типы для использования в приложении
+export type AppState = MachinesState<FSMConfigType>;
+export type AppStore = ReturnType<typeof makeStore>;
+```
+
+## Автоматический вывод типов событий и состояний
+
+При использовании типизированных функций, TypeScript может автоматически выводить доступные состояния и события из конфигурации автомата. Это позволяет избежать дублирования кода и ошибок синхронизации между константами и типами.
+
+```ts
+// src/store/machines/counter.ts
+import { createMachine, createConfig } from "../create-machine";
+
+// Создаем типизированную конфигурацию
+const config = createConfig({
+  IDLE: {
+    INCREMENT: "COUNTING",
+    RESET: "IDLE",
+  },
+  COUNTING: {
+    INCREMENT: null,
+    DECREMENT: null,
+    RESET: "IDLE",
+  },
+});
+
+// Автоматически выводим тип состояний из конфигурации
+export type State = keyof typeof config;
+// => "IDLE" | "COUNTING"
+
+// Определяем полный тип событий с payload
+export type Events =
+  | { type: "INCREMENT"; payload?: { step?: number } }
+  | { type: "DECREMENT"; payload?: { step?: number } }
+  | { type: "RESET" };
+
+// Используем выведенные типы
+export const counter = createMachine({
+  config,
+  initialState: "IDLE", // TypeScript проверяет, что это одно из состояний
+  initialContext: {
+    count: 0,
+  },
+  // ...
+});
+```
+
+Такой подход минимизирует дублирование и гарантирует, что типы всегда соответствуют реальной конфигурации автомата. При изменении конфигурации TypeScript автоматически обновит выведенные типы.
+
+## Использование FSMEvent для типизации событий
+
+Библиотека `lite-fsm` предоставляет встроенный тип `FSMEvent`, который можно использовать для создания типов событий с поддержкой payload:
+
+```ts
+import type { FSMEvent } from "lite-fsm";
+import { createMachine, createConfig } from "../create-machine";
+
+// Создаем типизированную конфигурацию
+const config = createConfig({
+  IDLE: {
+    INCREMENT: "COUNTING",
+    DECREMENT: "IDLE",
+    RESET: "IDLE",
+    SET_VALUE: "IDLE",
+  },
+  COUNTING: {
+    INCREMENT: null,
+    DECREMENT: "IDLE",
+    RESET: "IDLE",
+  },
+});
+
+// Автоматически выводим тип состояний из конфигурации
+export type State = keyof typeof config;
+
+// Используем FSMEvent для типизации событий с различными payload
+export type Events =
+  | FSMEvent<"INCREMENT"> // Без payload
+  | FSMEvent<"DECREMENT"> // Без payload
+  | FSMEvent<"RESET"> // Без payload
+  | FSMEvent<"SET_VALUE", { value: number }>; // С payload
+
+// Тип контекста
+export type Context = {
+  count: number;
+  lastReset?: Date;
+};
+
+export const counter = createMachine({
+  config,
+  initialState: "IDLE",
+  initialContext: {
+    count: 0,
+  },
+  reducer: (state, action) => {
+    const { state: currentState, context } = state;
+
+    switch (action.type) {
+      case "INCREMENT":
+        return {
+          state: currentState,
+          context: {
+            ...context,
+            count: context.count + 1,
+          },
+        };
+      case "DECREMENT":
+        return {
+          state: currentState,
+          context: {
+            ...context,
+            count: Math.max(0, context.count - 1),
+          },
+        };
+      case "RESET":
+        return {
+          state: currentState,
+          context: {
+            ...context,
+            count: 0,
+            lastReset: new Date(),
+          },
+        };
+      case "SET_VALUE":
+        // TypeScript знает, что у action.payload есть свойство value
+        return {
+          state: currentState,
+          context: {
+            ...context,
+            count: action.payload.value,
+          },
+        };
+      default:
+        return state;
+    }
+  },
+});
+
+// Примеры использования:
+// OK: manager.transition({ type: "INCREMENT" });
+// OK: manager.transition({ type: "SET_VALUE", payload: { value: 42 } });
+// Ошибка TypeScript: manager.transition({ type: "SET_VALUE" }); // Отсутствует payload
+// Ошибка TypeScript: manager.transition({ type: "INCREMENT", payload: { value: 5 } }); // Лишний payload
+```
+
+Использование `FSMEvent` упрощает типизацию событий и гарантирует правильную структуру payload для каждого типа события.
+
+## Использование типизированных функций
+
+Используя подготовленные типизированные функции, можно создавать строго типизированные автоматы:
+
+```ts
+// src/store/machines/counter.ts
+import { createMachine, createConfig } from "../create-machine";
+
+// Определяем типы для этого конкретного автомата
+export type State = "IDLE";
+export type Events = { type: "INC" } | { type: "DEC" };
+export type Context = {
+  value: number;
+};
+
+// Используем типизированные функции создания конфигурации и автомата
+const config = createConfig({
+  IDLE: {
+    INC: null,
+    DEC: null,
+  },
+});
+
+export const counter = createMachine({
+  config,
+  initialState: "IDLE",
+  initialContext: {
+    value: 0,
+  },
+  reducer: (state, action) => {
+    const { state: currentState, context } = state;
+
+    switch (action.type) {
+      case "INC":
+        return {
+          state: currentState,
+          context: {
+            ...context,
+            value: context.value + 1,
+          },
+        };
+      case "DEC":
+        return {
+          state: currentState,
+          context: {
+            ...context,
+            value: Math.max(0, context.value - 1),
+          },
+        };
+      default:
+        return state;
+    }
+  },
+});
+```
+
+## Использование типизированных хуков в компонентах
+
+Теперь в компонентах React можно использовать типизированные хуки:
+
+```tsx
+// src/App.tsx
+import "./styles.css";
+import { useSelector, useTransition } from "./store/hooks";
+import { useEffect } from "react";
+
+export default function App() {
+  const transition = useTransition();
+  const rootState = useSelector((s) => s.counter.state);
+  const value = useSelector((s) => s.counter.context.value);
+
+  useEffect(() => {
+    transition({ type: "DO_INIT" });
+  }, []);
+
+  return (
+    <div className="App">
+      <h1>Root state: {rootState}</h1>
+      <h1>Counter value: {value}</h1>
+
+      <button
+        onClick={() => {
+          transition({ type: "INC" });
+        }}
+      >
+        +1
+      </button>
+      <button
+        onClick={() => {
+          transition({ type: "DEC" });
+        }}
+        disabled={!value}
+      >
+        -1
+      </button>
+    </div>
+  );
+}
+```
+
+## Преимущества типизации
+
+Предварительная типизация функций API `lite-fsm` дает следующие преимущества:
+
+1. **Проверка типов во время компиляции** - TypeScript предупредит вас о несоответствии типов в вашем коде.
+2. **Автодополнение в IDE** - получите подсказки о доступных состояниях, событиях и контексте.
+3. **Безопасные рефакторинги** - при изменении типов TypeScript укажет на места, которые нужно обновить.
+4. **Документирование кода** - типы служат документацией, которая всегда актуальна.
+5. **Предотвращение ошибок типов** - избегайте ошибок из-за неправильных типов данных.
+
+## Дополнительные рекомендации
+
+- **Разделяйте типы по машинам** - определяйте типы `Context`, `State` и `Events` для каждого автомата отдельно.
+- **Используйте union типы для событий** - это даст TypeScript возможность проверять все варианты действий.
+- **Используйте автоматический вывод типов** - вместо дублирования констант и типов позвольте TypeScript выводить типы из конфигурации автоматов.
+- **Применяйте строгий режим TypeScript** - установите `"strict": true` в `tsconfig.json`.
+
+## Заключение
+
+Использование TypeScript с `lite-fsm` позволяет создавать надежные и понятные приложения, где многие ошибки выявляются на этапе компиляции. Предварительно типизированные функции API избавляют от необходимости повторно указывать типы и обеспечивают согласованность типов во всем приложении.

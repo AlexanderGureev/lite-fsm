@@ -47,7 +47,11 @@ const toggleMachine = createMachine({
 
 ```ts
 MachineManager<M extends Record<string, Machine<any, any, any, any>>>(
-  machines: M
+  machines: M,
+  opts?: {
+    middleware?: Middleware<MachinesState<M>, any>[];
+    onError?: (err: any) => void;
+  }
 ): MachineManager<M>
 ```
 
@@ -56,6 +60,9 @@ MachineManager<M extends Record<string, Machine<any, any, any, any>>>(
 **Параметры:**
 
 - `machines`: Объект с автоматами, где ключи - имена автоматов, а значения - объекты автоматов.
+- `opts`: (Опционально) Объект с дополнительными опциями.
+  - `middleware`: Массив функций middleware для расширения функциональности.
+  - `onError`: Обработчик ошибок, возникающих при выполнении эффектов.
 
 **Возвращает:**
 
@@ -65,6 +72,7 @@ MachineManager<M extends Record<string, Machine<any, any, any, any>>>(
 
 ```ts
 import { MachineManager, createMachine } from "lite-fsm";
+import { immerMiddleware } from "lite-fsm/middleware";
 
 const toggleMachine = createMachine({
   // ...конфигурация
@@ -74,10 +82,35 @@ const counterMachine = createMachine({
   // ...конфигурация
 });
 
-const manager = MachineManager({
+// Создание менеджера без дополнительных опций
+const simpleManager = MachineManager({
   toggle: toggleMachine,
   counter: counterMachine,
 });
+
+// Создание менеджера с middleware и обработчиком ошибок
+const advancedManager = MachineManager(
+  {
+    toggle: toggleMachine,
+    counter: counterMachine,
+  },
+  {
+    middleware: [
+      immerMiddleware,
+      // Пользовательский middleware для логирования
+      (api) => (next) => (action) => {
+        console.log("Action:", action);
+        const result = next(action);
+        console.log("New state:", api.getState());
+        return result;
+      },
+    ],
+    onError: (error) => {
+      console.error("Error in machine effect:", error);
+      // Можно отправить ошибку в сервис мониторинга
+    },
+  },
+);
 ```
 
 #### Методы MachineManager
@@ -194,6 +227,114 @@ manager.setDependencies({
   },
   utils: {
     formatDate: (date) => new Intl.DateTimeFormat().format(date),
+  },
+});
+```
+
+##### replaceReducer
+
+```ts
+replaceReducer(
+  callback: (
+    reducer: (state: MachinesState<M>, action: A) => MachinesState<M>
+  ) => (state: MachinesState<M>, action: A) => MachinesState<M>
+): void
+```
+
+Заменяет редьюсер менеджера автоматов. Этот метод используется middleware для модификации поведения обработки состояний.
+
+**Параметры:**
+
+- `callback`: Функция, которая принимает текущий редьюсер и возвращает новый редьюсер.
+
+**Пример:**
+
+```ts
+// Пример создания middleware с использованием replaceReducer
+const loggingMiddleware = (api) => {
+  // Заменяем редьюсер, добавляя логирование
+  api.replaceReducer((reducer) => {
+    return (state, action) => {
+      console.log("Предыдущее состояние:", state);
+      console.log("Действие:", action);
+
+      const result = reducer(state, action);
+
+      console.log("Новое состояние:", result);
+      return result;
+    };
+  });
+
+  return (next) => (action) => next(action);
+};
+
+// Использование middleware
+const manager = MachineManager({ counter: counterMachine }, { middleware: [loggingMiddleware] });
+```
+
+##### condition
+
+```ts
+condition(
+  predicate: (action: A) => boolean
+): Promise<boolean>
+```
+
+Создает промис, который резолвится, когда переход, удовлетворяющий предикату, происходит в системе. Полезно для создания последовательностей асинхронных операций с ожиданием определенных состояний.
+
+**Параметры:**
+
+- `predicate`: Функция, которая принимает действие и возвращает булево значение.
+
+**Возвращает:**
+
+Промис, который резолвится со значением `true`, когда предикат возвращает `true` для какого-либо действия.
+
+**Пример:**
+
+```ts
+// Использование condition в эффекте
+const machine = createMachine({
+  config: {
+    IDLE: {
+      START: "PROCESSING",
+    },
+    PROCESSING: {
+      SUCCESS: "SUCCESS",
+      ERROR: "ERROR",
+    },
+    SUCCESS: {
+      RESET: "IDLE",
+    },
+    ERROR: {
+      RETRY: "PROCESSING",
+      RESET: "IDLE",
+    },
+  },
+  effects: {
+    PROCESSING: async ({ transition, condition }) => {
+      try {
+        // Запуск асинхронной операции
+        const processPromise = startLongProcess();
+
+        // Ожидание действия CANCEL до завершения операции
+        const raceResult = await Promise.race([
+          processPromise,
+          condition((action) => action.type === "CANCEL").then(() => ({ cancelled: true })),
+        ]);
+
+        // Если операция была отменена
+        if (raceResult?.cancelled) {
+          transition({ type: "ERROR", payload: { error: "Operation cancelled" } });
+          return;
+        }
+
+        // Если операция завершилась успешно
+        transition({ type: "SUCCESS", payload: { result: raceResult } });
+      } catch (error) {
+        transition({ type: "ERROR", payload: { error: error.message } });
+      }
+    },
   },
 });
 ```
@@ -493,152 +634,150 @@ type MachineManager<M> = {
 
 Модуль React предоставляет хуки и компоненты для использования `lite-fsm` в приложениях React.
 
-### createStoreHook
-
-```ts
-createStoreHook<M extends Record<string, Machine<any, any, any, any>>>(
-  manager: MachineManager<M>
-): <S>(
-  selector: (state: { [K in keyof M]: { state: any; context: any } }) => S,
-  equalityFn?: (a: S, b: S) => boolean
-) => S
-```
-
-Функция для создания хука, который подписывается на состояние машинного менеджера.
-
-**Параметры:**
-
-- `manager`: Объект менеджера машин.
-
-**Возвращает:**
-
-Хук, который принимает селектор и опциональную функцию сравнения, и возвращает выбранную часть состояния.
-
-**Пример:**
+### FSMProvider
 
 ```tsx
-import { createStoreHook } from "lite-fsm/react";
-import { manager } from "./store";
-
-// Создание хука для доступа к состоянию
-export const useStore = createStoreHook(manager);
-
-// Использование хука в компоненте
-function Counter() {
-  const { count } = useStore((state) => state.counter.context);
-
-  return (
-    <div>
-      <p>Count: {count}</p>
-      <button onClick={() => manager.transition({ type: "INCREMENT", machine: "counter" })}>Increment</button>
-    </div>
-  );
-}
+<FSMProvider manager={manager}>{children}</FSMProvider>
 ```
 
-### createDispatchHook
-
-```ts
-createDispatchHook<M extends Record<string, Machine<any, any, any, any>>>(
-  manager: MachineManager<M>
-): <E extends string, P extends Record<string, any>>(
-  action: { type: E; machine?: string; payload?: P }
-) => void
-```
-
-Функция для создания хука, который предоставляет функцию для отправки действий машинному менеджеру.
-
-**Параметры:**
-
-- `manager`: Объект менеджера машин.
-
-**Возвращает:**
-
-Хук, который возвращает функцию для отправки действий менеджеру.
-
-**Пример:**
-
-```tsx
-import { createDispatchHook } from "lite-fsm/react";
-import { manager } from "./store";
-
-// Создание хука для отправки действий
-export const useDispatch = createDispatchHook(manager);
-
-// Использование хука в компоненте
-function Counter() {
-  const dispatch = useDispatch();
-  const { count } = useStore((state) => state.counter.context);
-
-  return (
-    <div>
-      <p>Count: {count}</p>
-      <button onClick={() => dispatch({ type: "INCREMENT", machine: "counter" })}>Increment</button>
-    </div>
-  );
-}
-```
-
-### StoreProvider
-
-```tsx
-<StoreProvider manager={manager}>{children}</StoreProvider>
-```
-
-Компонент-провайдер, который делает машинный менеджер доступным для всех дочерних компонентов.
+Компонент-провайдер, который делает менеджер автоматов доступным для всех дочерних компонентов через React Context.
 
 **Свойства:**
 
-- `manager`: Объект менеджера машин.
+- `manager`: Объект менеджера автоматов.
 - `children`: Дочерние компоненты.
 
 **Пример:**
 
 ```tsx
-import { StoreProvider } from "lite-fsm/react";
+import { FSMProvider } from "lite-fsm/react";
 import { manager } from "./store";
 
 function App() {
   return (
-    <StoreProvider manager={manager}>
+    <FSMProvider manager={manager}>
       <Counter />
       <UserProfile />
       {/* Другие компоненты */}
-    </StoreProvider>
+    </FSMProvider>
   );
 }
 ```
 
-### useStore и useDispatch
+### useSelector
 
 ```ts
-useStore<S>(
+useSelector<S>(
   selector: (state: { [K in keyof M]: { state: any; context: any } }) => S,
   equalityFn?: (a: S, b: S) => boolean
 ): S
 ```
 
-```ts
-useDispatch(): <E extends string, P extends Record<string, any>>(
-  action: { type: E; machine?: string; payload?: P }
-) => void
-```
+Хук для выбора и подписки на часть состояния из менеджера автоматов.
 
-Хуки для использования внутри компонентов, обернутых в `StoreProvider`.
+**Параметры:**
+
+- `selector`: Функция, которая принимает состояние и возвращает производную часть этого состояния.
+- `equalityFn`: (Опционально) Функция сравнения для определения, изменилось ли выбранное состояние.
+
+**Возвращает:**
+
+Выбранную часть состояния.
 
 **Пример:**
 
 ```tsx
-import { useStore, useDispatch } from "lite-fsm/react";
+import { useSelector } from "lite-fsm/react";
 
 function Counter() {
-  const dispatch = useDispatch();
-  const { count } = useStore((state) => state.counter.context);
+  // Выбор счетчика из состояния
+  const count = useSelector((state) => state.counter.context.count);
+
+  // Выбор нескольких значений
+  const { isAuthenticated, username } = useSelector((state) => ({
+    isAuthenticated: state.auth.state === "AUTHENTICATED",
+    username: state.auth.context.user?.name || "Guest",
+  }));
 
   return (
     <div>
       <p>Count: {count}</p>
-      <button onClick={() => dispatch({ type: "INCREMENT", machine: "counter" })}>Increment</button>
+      <p>
+        User: {username} ({isAuthenticated ? "Authenticated" : "Guest"})
+      </p>
+    </div>
+  );
+}
+```
+
+### useTransition
+
+```ts
+useTransition(): <E extends string, P extends Record<string, any>>(
+  action: { type: E; machine?: string; payload?: P }
+) => void
+```
+
+Хук, который возвращает функцию для отправки действий менеджеру автоматов.
+
+**Возвращает:**
+
+Функция для отправки действий.
+
+**Пример:**
+
+```tsx
+import { useSelector, useTransition } from "lite-fsm/react";
+
+function Counter() {
+  const count = useSelector((state) => state.counter.context.count);
+  const transition = useTransition();
+
+  return (
+    <div>
+      <p>Count: {count}</p>
+      <button onClick={() => transition({ type: "INCREMENT", machine: "counter" })}>Increment</button>
+      <button onClick={() => transition({ type: "DECREMENT", machine: "counter" })}>Decrement</button>
+      <button onClick={() => transition({ type: "RESET", machine: "counter" })}>Reset</button>
+    </div>
+  );
+}
+```
+
+### useManager
+
+```ts
+useManager<M extends Record<string, Machine<any, any, any, any>>>(): MachineManager<M>
+```
+
+Хук для получения прямого доступа к объекту менеджера автоматов.
+
+**Возвращает:**
+
+Объект менеджера автоматов.
+
+**Пример:**
+
+```tsx
+import { useManager } from "lite-fsm/react";
+import { useEffect } from "react";
+
+function DebugPanel() {
+  const manager = useManager();
+
+  useEffect(() => {
+    // Подписка на изменения состояния
+    const unsubscribe = manager.onTransition((prevState, nextState) => {
+      console.log("Состояние изменилось:", prevState, nextState);
+    });
+
+    return unsubscribe;
+  }, [manager]);
+
+  return (
+    <div>
+      <pre>{JSON.stringify(manager.getState(), null, 2)}</pre>
+      <button onClick={() => manager.transition({ type: "RESET_ALL" })}>Сбросить все</button>
     </div>
   );
 }
@@ -646,31 +785,38 @@ function Counter() {
 
 ## Модуль Middleware
 
-Модуль middleware предоставляет функции для создания промежуточного программного обеспечения в стиле Redux для расширения функциональности менеджера автоматов.
+Модуль middleware предоставляет функции для создания промежуточного программного обеспечения для расширения функциональности менеджера автоматов.
 
-### applyMiddleware
+### Применение middleware
 
 ```ts
-applyMiddleware<M>(
-  ...middlewares: Array<Middleware<M>>
-): (manager: MachineManager<M>) => MachineManager<M>
+MachineManager(
+  machines: M,
+  options: {
+    middleware?: Middleware<MachinesState<M>, any>[];
+    onError?: (err: any) => void;
+  }
+): MachineManager<M>
 ```
 
-Функция для применения промежуточного ПО к менеджеру автоматов.
+Функция `MachineManager` позволяет указать массив middleware через параметр `options.middleware`.
 
 **Параметры:**
 
-- `middlewares`: Массив функций промежуточного ПО.
+- `machines`: Объект с автоматами, где ключи - имена автоматов, а значения - объекты автоматов.
+- `options`: Объект с опциями.
+  - `middleware`: Массив функций middleware.
+  - `onError`: Обработчик ошибок.
 
 **Возвращает:**
 
-Функция, которая принимает менеджер автоматов и возвращает новый менеджер автоматов с примененным промежуточным ПО.
+Менеджер автоматов с применёнными middleware.
 
 **Пример:**
 
 ```ts
 import { MachineManager, createMachine } from "lite-fsm";
-import { applyMiddleware } from "lite-fsm/middleware";
+import { immerMiddleware, devToolsMiddleware } from "lite-fsm/middleware";
 
 // Промежуточное ПО для логирования
 const logger = (store) => (next) => (action) => {
@@ -686,33 +832,77 @@ const toggleMachine = createMachine({
 });
 
 // Создание менеджера с промежуточным ПО
-const manager = applyMiddleware(logger)(
-  MachineManager({
-    toggle: toggleMachine,
-  }),
-);
+const manager = MachineManager({ toggle: toggleMachine }, { middleware: [logger, immerMiddleware] });
 
 // Теперь все действия будут логироваться
 manager.transition({ type: "TOGGLE" });
 ```
 
+### Встроенные middleware
+
+#### immerMiddleware
+
+```ts
+immerMiddleware: Middleware;
+```
+
+Middleware для интеграции с [Immer](https://immerjs.github.io/immer), который позволяет писать иммутабельный код мутативным стилем.
+
+**Пример:**
+
+```ts
+import { MachineManager, createMachine } from "lite-fsm";
+import { immerMiddleware } from "lite-fsm/middleware";
+
+const manager = MachineManager({ toggle: toggleMachine }, { middleware: [immerMiddleware] });
+```
+
+#### devToolsMiddleware
+
+```ts
+devToolsMiddleware(options?: { blacklistActions: string[] }): Middleware
+```
+
+Middleware для интеграции с [Redux DevTools Extension](https://github.com/reduxjs/redux-devtools), который позволяет отлаживать состояние приложения и переходы между состояниями.
+
+**Параметры:**
+
+- `options`: Объект с параметрами.
+  - `blacklistActions`: Массив типов действий, которые не будут отправляться в DevTools.
+
+**Пример:**
+
+```ts
+import { MachineManager, createMachine } from "lite-fsm";
+import { devToolsMiddleware } from "lite-fsm/middleware";
+
+const manager = MachineManager(
+  { counter: counterMachine },
+  {
+    middleware: [devToolsMiddleware({ blacklistActions: ["TIMER_TICK"] })],
+  },
+);
+```
+
 ### Middleware
 
 ```ts
-type Middleware<M> = (
-  store: MachineManager<M>,
-) => (
-  next: <E extends string, P extends Record<string, any>>(action: { type: E; machine?: string; payload?: P }) => void,
-) => <E extends string, P extends Record<string, any>>(action: { type: E; machine?: string; payload?: P }) => void;
+type Middleware<S, A> = (api: {
+  getState: () => S;
+  transition: (action: A) => A;
+  replaceReducer: (cb: (reducer: (state: S, action: A) => S) => (state: S, action: A) => S) => void;
+  onTransition: (callback: (prevState: S, nextState: S, action?: A) => void) => () => void;
+  condition: (predicate: (a: A) => boolean) => Promise<boolean>;
+}) => (next: (action: A) => A) => (action: A) => A;
 ```
 
-Тип, представляющий функцию промежуточного ПО.
+Тип, представляющий функцию middleware.
 
-**Пример создания собственного промежуточного ПО:**
+**Пример создания пользовательского middleware:**
 
 ```ts
-// Промежуточное ПО для отслеживания производительности
-const performance = (store) => (next) => (action) => {
+// Middleware для отслеживания производительности
+const performanceMiddleware = (store) => (next) => (action) => {
   const start = Date.now();
   const result = next(action);
   const end = Date.now();
@@ -720,23 +910,15 @@ const performance = (store) => (next) => (action) => {
   return result;
 };
 
-// Промежуточное ПО для предотвращения определенных действий
-const filter = (store) => (next) => (action) => {
+// Middleware для предотвращения определенных действий
+const filterMiddleware = (store) => (next) => (action) => {
   if (action.type === "FORBIDDEN_ACTION") {
     console.warn("Действие FORBIDDEN_ACTION заблокировано");
-    return;
+    return action;
   }
   return next(action);
 };
 
-// Применение нескольких промежуточных ПО
-const manager = applyMiddleware(
-  logger,
-  performance,
-  filter,
-)(
-  MachineManager({
-    // машины...
-  }),
-);
+// Использование пользовательских middleware
+const manager = MachineManager({ app: appMachine }, { middleware: [performanceMiddleware, filterMiddleware] });
 ```
