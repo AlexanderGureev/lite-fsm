@@ -7,5 +7,11 @@ const withNextra = nextra({
 
 // Экспортируем конечную конфигурацию Next.js с Nextra
 export default withNextra({
-  // Дополнительные опции Next.js
+  // Настройки для GitHub Pages
+  output: "export",
+  images: {
+    unoptimized: true,
+  },
+  // Если проект размещен не в корне, нужно добавить basePath
+  // basePath: "/lite-fsm",
 });
