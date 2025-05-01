@@ -72,6 +72,26 @@ jobs:
       - name: Build with Next.js
         run: ${{ steps.detect-package-manager.outputs.runner }} next build
 
+      # Добавляем отдельный шаг для генерации поискового индекса Pagefind
+      - name: Generate search index with Pagefind
+        run: npx pagefind --site .next/server/app --output-path out/_pagefind
+
+      # Создаем config file для Pagefind
+      - name: Create Pagefind config file
+        run: |
+          echo '{ "baseUrl": "/lite-fsm" }' > out/_pagefind-config.json
+
+      # Создаем entry файл для Pagefind
+      - name: Create Pagefind entry file
+        run: |
+          cat > out/_pagefind/pagefind-entry.js << 'EOL'
+          // Конфигурация Pagefind для GitHub Pages
+          window.PagefindConfig = {
+            baseUrl: "/lite-fsm",
+            bundlePath: "/lite-fsm/_pagefind/"
+          };
+          EOL
+
       - name: Создаем .nojekyll в out директории
         run: touch ./out/.nojekyll
 
