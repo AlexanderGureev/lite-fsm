@@ -1,5 +1,11 @@
 # lite-fsm
 
+[![Build Status](https://github.com/AlexanderGureev/lite-fsm/actions/workflows/deploy-docs.yml/badge.svg)](https://github.com/AlexanderGureev/lite-fsm/actions)
+[![Bundle Size](https://img.shields.io/bundlephobia/minzip/lite-fsm)](https://bundlephobia.com/package/lite-fsm)
+[![npm version](https://img.shields.io/npm/v/lite-fsm.svg)](https://www.npmjs.com/package/lite-fsm)
+[![npm downloads](https://img.shields.io/npm/dm/lite-fsm.svg)](https://www.npmjs.com/package/lite-fsm)
+[![Coverage Status](https://coveralls.io/repos/github/AlexanderGureev/lite-fsm/badge.svg)](https://coveralls.io/github/AlexanderGureev/lite-fsm)
+
 lite-fsm is a lightweight finite state machine library
 
 ### Features

@@ -18,9 +18,7 @@ export const MachineManager = <
 ) => {
   let deps = {};
   let subs: Array<TransitionSubscriber<S>> = [];
-  let transition = (_action: P): P => {
-    throw new Error("transition called before initialization");
-  };
+  let transition: (_action: P) => P;
 
   const machines = Object.keys(config).reduce(
     (acc, name) => {

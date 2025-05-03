@@ -11,22 +11,19 @@
   "exports": {
     "./package.json": "./package.json",
     ".": {
+      "types": "./dist/core.d.ts",
       "import": "./dist/core.js",
-      "require": "./dist/core.cjs",
-      "default": "./dist/core.js",
-      "types": "./dist/core.d.ts"
+      "require": "./dist/core.cjs"
     },
     "./react": {
+      "types": "./dist/react.d.ts",
       "import": "./dist/react.js",
-      "require": "./dist/react.cjs",
-      "default": "./dist/react.js",
-      "types": "./dist/react.d.ts"
+      "require": "./dist/react.cjs"
     },
     "./middleware": {
+      "types": "./dist/middleware.d.ts",
       "import": "./dist/middleware.js",
-      "require": "./dist/middleware.cjs",
-      "default": "./dist/middleware.js",
-      "types": "./dist/middleware.d.ts"
+      "require": "./dist/middleware.cjs"
     }
   },
   "typesVersions": {
@@ -63,7 +60,10 @@
     "postpack": "clean-package restore",
     "docs:dev": "cd docs && next dev",
     "docs:build": "cd docs && next build",
-    "docs:start": "cd docs && next start"
+    "docs:start": "cd docs && next start",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "clean-package": {
     "indent": 2,
@@ -84,6 +84,7 @@
     "@typescript-eslint/eslint-plugin": "^5.60.0",
     "@typescript-eslint/parser": "^5.60.0",
     "@vitejs/plugin-react": "^4.0.0",
+    "@vitest/coverage-v8": "^3.1.2",
     "clean-package": "^2.2.0",
     "eslint": "^8.43.0",
     "eslint-config-prettier": "^8.8.0",
@@ -95,10 +96,12 @@
     "next": "^15.3.1",
     "prettier": "^2.8.8",
     "rollup-plugin-typescript-paths": "^1.4.0",
+    "ts-node": "^10.9.1",
     "tslib": "^2.5.3",
     "typescript": "^5.1.6",
     "vite": "^4.3.9",
-    "vite-plugin-dts": "^2.3.0"
+    "vite-plugin-dts": "^2.3.0",
+    "vitest": "^3.1.2"
   },
   "dependencies": {
     "immer": ">=9.x",
