@@ -13,7 +13,7 @@ export default {
     type: "page",
   },
   api: {
-    title: "API",
+    title: "API Справочник",
     type: "page",
   },
   react: {
@@ -22,6 +22,10 @@ export default {
   },
   middleware: {
     title: "Middleware",
+    type: "page",
+  },
+  comparison: {
+    title: "Сравнение",
     type: "page",
   },
   examples: {
