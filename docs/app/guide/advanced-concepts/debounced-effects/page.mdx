@@ -1,0 +1,77 @@
+# Debounced эффекты
+
+Debounced эффекты позволяют отложить выполнение асинхронной операции до тех пор, пока не наступит пауза в потоке событий. Это особенно полезно для оптимизации операций, которые могут быть вызваны многократно за короткий промежуток времени, например, поиск при вводе пользователя или автосохранение формы.
+
+## Концепция debounce
+
+Функция debounce предотвращает частый вызов функции, откладывая её выполнение до тех пор, пока не пройдет определенное время после последнего вызова. Это особенно полезно, когда:
+
+- Обработка каждого события требует значительных ресурсов
+- Результат промежуточных вызовов не имеет значения
+- Важен только результат последнего вызова
+
+
+## Создание debounced эффекта
+
+В `lite-fsm` для создания эффекта с debounce используется функция `debounce`:
+
+```ts
+import { createMachine, debounce } from "lite-fsm";
+
+const effect = async ({ q, getState, services, transition }) => {
+  // Получаем контекст с информацией о поиске
+  const { pagination } = getState().onboardingSearch.context;
+  
+  // Выполняем поисковый запрос
+  const response = await services.entityResolver.create("ONBOARDING_SEARCH").GET({
+    ...pagination,
+    query: q,
+  });
+  
+  // Переходим к следующему состоянию с результатами
+  transition({
+    type: "SEARCH_ONBOARDING_RESOLVE",
+    payload: { response },
+  });
+};
+
+// Создаем debounced версию эффекта с задержкой 250 мс
+const debouncedEffect = debounce(effect, 250);
+
+// Создание автомата с использованием debounced эффекта
+export const onboardingSearch = createMachine({
+  config: {
+    IDLE: {
+      SET_SEARCH_ONBOARDING_INPUT: "SEARCH_ONBOARDING_PENDING",
+    },
+    SEARCH_ONBOARDING_PENDING: {
+      SEARCH_ONBOARDING_STARTED: "IDLE",
+    },
+    SEARCH_ONBOARDING_RESOLVE: "IDLE",
+    SEARCH_ONBOARDING_REJECT: "IDLE",
+  },
+  initialState: "IDLE",
+  initialContext,
+  effects: {
+    SEARCH_ONBOARDING_PENDING: (deps) => {
+      // Переход в состояние начала поиска
+      deps.transition({
+        type: "SEARCH_ONBOARDING_STARTED",
+      });
+      
+      // Вызов debounced эффекта с параметрами
+      debouncedEffect({ ...deps, q: deps.action.payload.q });
+    },
+  },
+});
+```
+
+## Важность промежуточного состояния
+
+В приведенном примере обратите внимание на переход `SEARCH_ONBOARDING_STARTED`, который возвращает автомат в состояние `IDLE`. Этот шаг критически важен для правильной работы debounced эффектов:
+
+1. **Активация эффекта перед debounce**: Если бы мы оставались в состоянии `SEARCH_ONBOARDING_PENDING`, эффект был бы вызван только один раз при первом входе в состояние. Однако нам необходимо, чтобы debounced-функция запускалась при каждом новом входящем событии, даже если они происходят быстро один за другим. Быстрый возврат в `IDLE` позволяет снова войти в `SEARCH_ONBOARDING_PENDING` и активировать эффект при каждом новом событии.
+
+2. **Сохранение результата debounce**: Хотя автомат возвращается в `IDLE`, отложенный эффект продолжает ждать окончания таймера debounce и затем выполняется.
+
+Без такого подхода с промежуточным переходом, debounce не будет работать корректно в контексте конечного автомата, так как эффекты в `lite-fsm` привязаны к состояниям, а не к событиям.

@@ -64,7 +64,6 @@ const toggleMachine = createMachine({
       state: options.nextState,
       context: {
         ...state.context,
-        lastToggled: new Date(),
       },
     };
   },
@@ -196,7 +195,7 @@ effects: {
 
 ## Дополнительные возможности
 
-### Дикие карты (WILDCARD)
+### Обработка событий в любом состоянии (WILDCARD)
 
 Можно использовать специальный символ `*` для обработки любого состояния:
 
@@ -249,132 +248,290 @@ const fetchDataEffect = createEffect({
 });
 ```
 
-### Интерактивный пример
+## Архитектура приложения на основе lite-fsm
 
-Вы можете поэкспериментировать с этим примером прямо здесь:
+Следующая sequence диаграмма демонстрирует архитектуру типичного приложения, построенного с использованием lite-fsm:
 
-<CodeSandbox
-  sandboxId="stoic-haslett-zt3lz7"
-  options={{
-    editorHeight: "500px",
-    previewHeight: "300px",
-    autoResize: true,
-  }}
-/>
+```mermaid
+sequenceDiagram
+    participant UI as Пользовательский интерфейс
+    participant Manager as MachineManager
+    participant Machine1 as Автомат 1
+    participant Machine2 as Автомат 2
+    participant Services as Сервисный слой
 
-### Использование Sandpack компонента
+    Note over UI,Services: Инициализация приложения
+    UI->>Manager: Создание MachineManager
+    Manager->>Machine1: Регистрация автомата 1
+    Manager->>Machine2: Регистрация автомата 2
+    UI->>Manager: setDependencies(services)
+    Manager-->>Services: Внедрение зависимостей
 
-Также вы можете использовать встроенный редактор кода:
+    Note over UI,Services: Обработка события
+    UI->>Manager: transition({type: "EVENT", payload: {...}})
+    Manager->>Machine1: transition(state, action)
+    Machine1-->>Manager: nextState
+    Manager->>Machine2: transition(state, action)
+    Machine2-->>Manager: nextState
+    Manager->>Manager: Обновление глобального состояния
+    Manager->>Manager: Вызов подписчиков onTransition
 
-<Sandpack 
-  files={{
-    "/App.tsx": `import { createMachine, MachineManager } from 'lite-fsm';
-import { useState, useEffect } from 'react';
+    Note over UI,Services: Выполнение эффектов
+    Manager->>Machine1: invokeEffect(prevState, currentState, deps)
+    Machine1->>Services: Вызов API/сервисов
+    Services-->>Machine1: Результат операции
+    Machine1->>Manager: transition({type: "NEXT_EVENT", ...})
 
-// Создаем простой автомат для тумблера
-const toggleMachine = createMachine({
-config: {
-inactive: {
-TOGGLE: 'active'
-},
-active: {
-TOGGLE: 'inactive'
+    Manager->>Machine2: invokeEffect(prevState, currentState, deps)
+    Machine2->>Services: Вызов API/сервисов
+    Services-->>Machine2: Результат операции
+
+    Manager-->>UI: Обновление UI на основе нового состояния
+```
+
+Основные компоненты архитектуры:
+
+1. **Пользовательский интерфейс (UI)**: Отображает состояние приложения и отправляет события в `MachineManager`.
+
+2. **MachineManager**: Центральный координатор, который:
+
+   - Хранит глобальное состояние всех автоматов
+   - Передает события в зарегистрированные автоматы
+   - Запускает эффекты при изменении состояний
+   - Уведомляет подписчиков об изменениях состояния
+   - Внедряет зависимости (сервисы, утилиты) в автоматы
+
+3. **Автоматы**: Определяют:
+
+   - Состояния и переходы между ними
+   - Логику обновления контекста (данных)
+   - Эффекты, выполняемые при входе в определенные состояния
+
+4. **Сервисный слой**: Содержит внешние зависимости:
+   - API-клиенты для взаимодействия с серверами
+   - Сервисы для работы с хранилищем, логированием и т.д.
+   - Утилиты и хелперы для обработки данных
+
+Такая архитектура обеспечивает чёткое разделение ответственности между компонентами, предсказуемое поведение приложения и упрощает тестирование, поскольку все взаимодействия происходят через явно определенные интерфейсы.
+
+## Преимущества выделения бизнес-логики в автоматы
+
+Один из ключевых архитектурных принципов при использовании lite-fsm — выделение всей бизнес-логики в автоматы (редьюсеры и эффекты) и сервисный слой, при этом компоненты пользовательского интерфейса только отображают данные и отправляют события. Этот подход имеет ряд существенных преимуществ по сравнению с традиционным написанием бизнес-логики непосредственно в React-компонентах:
+
+### 1. Разделение ответственности
+
+**Традиционный подход с React Hooks:**
+
+```jsx
+function UserProfile() {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    async function fetchUser() {
+      setLoading(true);
+      try {
+        const response = await fetch("/api/user");
+        const data = await response.json();
+        setUser(data);
+        setLoading(false);
+      } catch (err) {
+        setError(err.message);
+        setLoading(false);
+      }
+    }
+    fetchUser();
+  }, []);
+
+  const updateUser = async (userData) => {
+    try {
+      setLoading(true);
+      await fetch("/api/user", {
+        method: "PUT",
+        body: JSON.stringify(userData),
+      });
+      setUser({ ...user, ...userData });
+      setLoading(false);
+    } catch (err) {
+      setError(err.message);
+      setLoading(false);
+    }
+  };
+
+  // JSX с обработкой разных состояний...
 }
-},
-initialState: 'inactive',
-initialContext: {
-toggleCount: 0
-},
-effects: {
-// Вызывается при входе в состояние
-active: ({ context, updateContext }) => {
-updateContext({
-toggleCount: context.toggleCount + 1
-});
-console.log('Activated! Toggle count:', context.toggleCount + 1);
+```
+
+**Подход с lite-fsm:**
+
+```jsx
+// Компонент - только отображение и отправка событий
+function UserProfile() {
+  const { state, context } = useSelector((state) => state.user);
+  const transition = useTransition();
+
+  useEffect(() => {
+    transition({ type: "FETCH_USER" });
+  }, []);
+
+  const handleUpdate = (userData) => {
+    transition({ type: "UPDATE_USER", payload: userData });
+  };
+
+  // JSX с обработкой разных состояний...
 }
+```
+
+### 2. Ключевые преимущества
+
+#### Предсказуемость и отслеживаемость
+
+- **Явные состояния**: Все возможные состояния системы явно описаны и документированы
+- **Центральное управление**: Все переходы между состояниями происходят контролируемо через одну точку входа
+- **Логирование и отладка**: Легко отслеживать все изменения состояния, так как они происходят через `transition`
+- **Разработка через тестирование**: Каждый переход и эффект можно тестировать изолированно без сложных моков React-хуков
+- **Внедрение аналитики**: Благодаря явным событиям легко добавлять аналитические системы и внешние интеграции, перехватывая события в одном месте
+
+#### Управление сложностью
+
+- **Масштабируемость**: Легко добавлять новые состояния и обработчики без разрастания компонентов
+- **Локализация изменений**: Изменения в бизнес-логике не требуют правок во множестве компонентов
+- **Изолированная разработка**: Разные команды могут работать над UI и бизнес-логикой параллельно
+- **Контроль побочных эффектов**: Все асинхронные операции сгруппированы в эффектах и происходят предсказуемо
+- **Изоляция неоптимального кода**: Даже если в отдельном автомате присутствует неоптимальный код, он изолирован и не влияет на проект в целом
+- **Контроль сложности проекта**: Разделение бизнес-логики на отдельные автоматы позволяет легко управлять сложностью даже в крупных приложениях
+
+#### Улучшение кодовой базы
+
+- **Чистые компоненты**: UI-компоненты фокусируются только на отображении и взаимодействии
+- **Переиспользование логики**: Бизнес-логика не привязана к компонентам и может использоваться в разных частях приложения
+- **Лёгкая замена технологий**: Можно заменить React на другую UI-библиотеку без переписывания бизнес-логики
+- **Снижение дублирования**: Общая логика по управлению состояниями вынесена на уровень автоматов
+
+#### Улучшение пользовательского опыта
+
+- **Отзывчивость UI**: Компоненты становятся проще и рендерятся быстрее
+- **Меньше ошибок**: Явное моделирование состояний помогает обрабатывать все возможные сценарии
+- **Консистентное поведение**: Все переходы между состояниями чётко определены и работают одинаково во всём приложении
+
+### 3. Сравнение с useEffect
+
+Использование `useEffect` в React для управления побочными эффектами имеет ряд недостатков:
+
+1. **Разбросанность логики**: Логика часто распределена между несколькими хуками в одном компоненте
+2. **Нечёткие зависимости**: Массив зависимостей часто становится источником ошибок и бесконечных циклов
+3. **Сложность тестирования**: Тестирование компонентов с несколькими `useEffect` требует сложной настройки
+4. **Отсутствие явной модели состояний**: Состояния неявно определяются комбинациями переменных состояния
+5. **Сложность отмены эффектов**: Функция очистки в `useEffect` часто реализуется не до конца или с ошибками
+
+В подходе с lite-fsm эти проблемы решены:
+
+- Вся бизнес-логика централизована в автоматах
+- Все состояния явно определены
+- Переходы между состояниями контролируются автоматом
+- Эффекты привязаны к конкретным состояниям
+- Тестирование логики можно проводить без зависимости от React
+
+### 4. Конкретный пример улучшения
+
+**До (React компонент с логикой):**
+
+```jsx
+function PaymentForm() {
+  const [paymentMethod, setPaymentMethod] = useState("card");
+  const [cardDetails, setCardDetails] = useState({});
+  const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setProcessing(true);
+    setError(null);
+
+    try {
+      if (paymentMethod === "card") {
+        // Валидация карты
+        if (!cardDetails.number) {
+          throw new Error("Card number is required");
+        }
+        // Обработка платежа
+        await processCardPayment(cardDetails);
+      } else if (paymentMethod === "paypal") {
+        // Обработка PayPal
+        await processPayPalPayment();
+      }
+
+      setSuccess(true);
+      setProcessing(false);
+    } catch (err) {
+      setError(err.message);
+      setProcessing(false);
+    }
+  };
+
+  // Многочисленные обработчики изменений форм...
+  // Условная логика отображения
 }
-});
+```
 
-// Создаем менеджер для управления автоматом
-const manager = MachineManager({ toggle: toggleMachine });
+**После (с lite-fsm):**
 
-function App() {
-// Локальное состояние для отслеживания состояния автомата
-const [state, setState] = useState(manager.getState());
+```jsx
+// Компонент только для отображения
+function PaymentForm() {
+  const { state, context } = useSelector((state) => state.payment);
+  const transition = useTransition();
 
-useEffect(() => {
-// Подписываемся на изменения состояния
-const unsubscribe = manager.onTransition(() => {
-setState(manager.getState());
-});
+  const handlePaymentMethodChange = (method) => {
+    transition({ type: "CHANGE_PAYMENT_METHOD", payload: { method } });
+  };
 
-    return unsubscribe;
+  const handleCardDetailsChange = (details) => {
+    transition({ type: "UPDATE_CARD_DETAILS", payload: details });
+  };
 
-}, []);
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    transition({ type: "SUBMIT_PAYMENT" });
+  };
 
-const { state: currentState, context } = state.toggle;
-
-return (
-
-<div className="App" style={{ fontFamily: 'system-ui, sans-serif', padding: '20px' }}>
-<h1>Toggle FSM Example</h1>
-
-      <div style={{ margin: '20px 0' }}>
-        <div>Current state: <strong>{currentState}</strong></div>
-        <div>Toggle count: <strong>{context.toggleCount}</strong></div>
-      </div>
-
-      <button
-        onClick={() => manager.transition({ type: 'TOGGLE' })}
-        style={{
-          padding: '8px 16px',
-          backgroundColor: currentState === 'active' ? '#4CAF50' : '#9E9E9E',
-          color: 'white',
-          border: 'none',
-          borderRadius: '4px',
-          cursor: 'pointer'
-        }}
-      >
-        Toggle
-      </button>
-    </div>
-
-);
+  // Простая логика отображения на основе состояния
+  return <form onSubmit={handleSubmit}>{/* Форма на основе state и context */}</form>;
 }
 
-export default App;`,
-    "/index.tsx": `import React, { StrictMode } from "react";
-import { createRoot } from "react-dom/client";
-import App from "./App";
-
-const root = createRoot(document.getElementById("root"));
-root.render(
-
-<StrictMode>
-  <App />
-</StrictMode>
-);` }} options={{
-  showConsole: true,
-  editorHeight: "400px",
-}}
-customSetup=
-{{
-  dependencies: {
-    "lite-fsm": "latest",
+// Автомат с бизнес-логикой в отдельном файле
+const paymentMachine = createMachine({
+  config: {
+    IDLE: {
+      CHANGE_PAYMENT_METHOD: null,
+      UPDATE_CARD_DETAILS: null,
+      SUBMIT_PAYMENT: "VALIDATING",
+    },
+    VALIDATING: {
+      VALIDATION_SUCCESS: "PROCESSING",
+      VALIDATION_FAILURE: "VALIDATION_ERROR",
+    },
+    VALIDATION_ERROR: {
+      CHANGE_PAYMENT_METHOD: null,
+      UPDATE_CARD_DETAILS: null,
+      SUBMIT_PAYMENT: "VALIDATING",
+    },
+    PROCESSING: {
+      PAYMENT_SUCCESS: "SUCCESS",
+      PAYMENT_FAILURE: "PAYMENT_ERROR",
+    },
+    PAYMENT_ERROR: {
+      RETRY_PAYMENT: "PROCESSING",
+      CHANGE_PAYMENT_METHOD: "IDLE",
+    },
+    SUCCESS: {
+      NEW_PAYMENT: "IDLE",
+    },
   },
-}}
-/>
+  // Остальная логика автомата...
+});
+```
 
-## Примеры в CodeSandbox
-
-Вы также можете изучить полные примеры проектов в CodeSandbox:
-
-<CodeSandbox
-  sandboxId="https://codesandbox.io/p/sandbox/festive-darkness-rx2hwn"
-  options={{
-    editorHeight: "450px",
-    previewHeight: "350px",
-    autoResize: true,
-  }}
-/>
+В результате такого подхода код становится более структурированным, тестируемым и масштабируемым, а поведение приложения — более предсказуемым и устойчивым к ошибкам.

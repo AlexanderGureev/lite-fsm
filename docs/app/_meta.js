@@ -8,12 +8,12 @@ export default {
     title: "Руководство",
     type: "page",
   },
-  api: {
-    title: "API",
+  usage: {
+    title: "Использование lite-fsm",
     type: "page",
   },
-  examples: {
-    title: "Примеры",
+  api: {
+    title: "API",
     type: "page",
   },
   react: {
@@ -22,6 +22,10 @@ export default {
   },
   middleware: {
     title: "Middleware",
+    type: "page",
+  },
+  examples: {
+    title: "Примеры",
     type: "page",
   },
 };

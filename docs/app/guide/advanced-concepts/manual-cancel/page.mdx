@@ -1,0 +1,239 @@
+# Ручная отмена эффектов
+
+Помимо автоматической отмены эффектов при смене состояний, `lite-fsm` предоставляет инструменты для ручного контроля над жизненным циклом эффектов. Это особенно полезно в сложных сценариях, когда требуется более тонкое управление отменой операций.
+
+## Механизм ручной отмены
+
+Ручная отмена эффектов позволяет контролировать жизненный цикл асинхронных операций по условию, не зависящему напрямую от изменения состояния автомата. 
+
+## Пример использования
+
+В следующем примере показано, как реализовать ручную отмену эффекта на основе изменения значения в контексте:
+
+```ts
+export const streams = createMachine({
+  config: {
+    IDLE: {
+      DO_LOAD_STREAMS: "LOAD_STREAMS_PENDING",
+      LOAD_STREAMS_RESOLVE: "IDLE",
+      LOAD_STREAMS_REJECT: "IDLE",
+    },
+    LOAD_STREAMS_PENDING: {
+      LOAD_STREAMS_STARTED: "IDLE",
+    },
+  },
+  initialState: "IDLE",
+  initialContext,
+  effects: {
+    LOAD_STREAMS_PENDING: createEffect({
+      type: "latest",
+      // Функция отмены, которая проверяет условие перед каждым вызовом transition
+      cancelFn: ({ getState }) => {
+        let prevState = getState().player.context.session.sessionId;
+        
+        // Функция, которая проверяет изменилась ли сессия
+        return () => {
+          const currentSession = getState().player.context.session.sessionId;
+          return prevState !== currentSession; // Если сессия изменилась, transition вызовы будут игнорироваться
+        };
+      },
+      effect: async ({ transition, services, getState }) => {
+        // Этот вызов transition может быть проигнорирован, если сессия изменилась
+        transition({
+          type: "LOAD_STREAMS_STARTED",
+        });
+        
+        try {
+          // Эта операция будет выполнена в любом случае, независимо от отмены
+          await services.api.loadStreams();
+
+          // Этот вызов transition может быть проигнорирован, если сессия изменилась
+          transition({
+            type: "LOAD_STREAMS_RESOLVE",
+          });
+        } catch (error) {
+          // Этот вызов transition может быть проигнорирован, если сессия изменилась
+          transition({
+            type: "LOAD_STREAMS_REJECT",
+            payload: { error },
+          });
+        }
+      },
+    }),
+  },
+});
+```
+
+## Механизм работы отмены
+
+Функция `cancelFn` возвращает проверку, которая вызывается перед каждым вызовом `transition` в эффекте:
+
+1. **Инициализация**: При первом запуске эффекта вызывается `cancelFn`, которая сохраняет начальное состояние и возвращает функцию проверки
+2. **Выполнение эффекта продолжается**: Важно понимать, что сам код эффекта продолжает выполняться даже при отмене
+3. **Проверка перед transition**: Перед каждым вызовом `transition` внутри эффекта, система вызывает функцию проверки отмены
+4. **Игнорирование transition при отмене**: Если функция проверки возвращает `true`, вызов `transition` игнорируется, и машина состояний не получает событие
+
+Таким образом, отмена эффекта не прерывает его выполнение, а лишь блокирует влияние эффекта на состояние машины, игнорируя попытки вызвать `transition`.
+
+## Сложные сценарии отмены
+
+### Отмена по внешнему сигналу
+
+```ts
+// Создаем контроллер для отмены поисковых запросов
+const createSearchController = () => {
+  return {
+    controller: new AbortController(),
+    reset() {
+      // Отменяем предыдущий контроллер и создаем новый
+      this.controller.abort();
+      this.controller = new AbortController();
+      return this.controller;
+    }
+  };
+};
+
+// Создаем машину состояний для поиска
+export const searchMachine = createMachine({
+  config: {
+    IDLE: {
+      SEARCH: "SEARCH_PENDING", // Начинаем поиск через промежуточное состояние
+    },
+    // Промежуточное состояние, которое запускает эффект и сразу переходит в состояние поиска
+    SEARCH_PENDING: {
+      SEARCH_STARTED: "SEARCHING",
+    },
+    SEARCHING: {
+      SEARCH: "SEARCH_PENDING", // Новый поиск снова проходит через промежуточное состояние
+      SEARCH_SUCCESS: "RESULTS",
+      SEARCH_ERROR: "ERROR",
+    },
+    RESULTS: {
+      SEARCH: "SEARCH_PENDING", // Новый поиск из состояния результатов
+    },
+    ERROR: {
+      SEARCH: "SEARCH_PENDING", // Новый поиск из состояния ошибки
+    },
+  },
+  initialState: "IDLE",
+  initialContext: {
+    results: null,
+    error: null,
+    query: "",
+  },
+  reducer: (s, action, { nextState }) => {
+    s.state = nextState;
+
+    // Сохраняем запрос при начале поиска
+    if (action.type === "SEARCH") {
+      s.context = {
+        ...s.context,
+        query: action.payload.query,
+      };
+    }
+    
+    // Обновляем контекст при успешном поиске
+    if (action.type === "SEARCH_SUCCESS") {
+      s.context = {
+        ...s.context,
+        results: action.payload.results,
+        error: null,
+      };
+    }
+    
+    // Обновляем контекст при ошибке поиска
+    if (action.type === "SEARCH_ERROR") {
+      s.context = {
+        ...s.context,
+        error: action.payload.error,
+        results: null,
+      };
+    }
+  },
+  effects: {
+    // Эффект в промежуточном состоянии просто запускает переход в следующее состояние
+    SEARCH_PENDING: ({ transition }) => {
+      transition({
+        type: "SEARCH_STARTED",
+      });
+    },
+    
+    // Основной эффект поиска
+    SEARCHING: createEffect({
+      effect: async ({ transition, services, getState }) => {
+        try {
+          // Получаем запрос из контекста
+          const { query } = getState().search.context;
+          
+          // Сбрасываем и получаем новый контроллер для этого поиска
+          const controller = services.searchController.reset();
+          
+          // Выполняем запрос с новым контроллером
+          const results = await services.api.search(query, {
+            signal: controller.signal,
+          });
+          
+          // Этот вызов transition будет игнорироваться, если запрос был отменен
+          transition({
+            type: "SEARCH_SUCCESS",
+            payload: { results },
+          });
+        } catch (err) {
+          if (err.name === "AbortError") {
+            // Запрос был отменен, просто выходим
+            return;
+          }
+          
+          // Этот вызов transition будет игнорироваться, если запрос был отменен
+          transition({
+            type: "SEARCH_ERROR",
+            payload: { error: err },
+          });
+        }
+      },
+      // Функция проверки отмены
+      cancelFn: ({ services }) => {
+        // Проверяем, был ли отменен текущий поисковый запрос
+        const controller = services.searchController.controller;
+        
+        return () => {
+          return controller.signal.aborted;
+        };
+      },
+    }),
+  },
+});
+
+// Инициализируем менеджер с нужными зависимостями
+const manager = new MachineManager({
+  search: searchMachine,
+}, {
+  api: apiService,
+  searchController: createSearchController()
+});
+
+// Примеры использования
+
+// Первый поиск
+manager.transition({
+  type: "SEARCH",
+  payload: { query: "первый" },
+});
+
+// Пользователь не дождался результата и ввел новый запрос
+// Предыдущий запрос будет автоматически отменен
+manager.transition({
+  type: "SEARCH",
+  payload: { query: "второй" },
+});
+```
+
+## Лучшие практики
+
+1. **Чётко определите условие отмены**: Условие должно быть детерминированным и основанным на состоянии автомата.
+2. **Помните, что код эффекта продолжает выполняться**: Отмена эффекта блокирует только вызовы `transition`, но сам код продолжает выполняться.
+3. **Используйте AbortController для реальной отмены операций**: Поскольку код эффекта продолжает выполняться, используйте AbortController для реальной отмены HTTP-запросов и других ресурсоемких операций.
+4. **Сочетайте отмену эффектов и отмену операций**: При необходимости комбинируйте блокировку transition (через cancelFn) и отмену самих операций (через AbortController).
+5. **Избегайте побочных эффектов в функции проверки**: Функция, возвращаемая из cancelFn, должна в основном проверять условие, а не изменять состояние.
+6. **Документируйте условия отмены**: Явно указывайте, при каких условиях будут игнорироваться transition-вызовы.
+7. **Осторожно с глобальными переходами**: Не злоупотребляйте глобальными переходами (WILDCARD), так как это усложняет контроль над логикой автомата. Используйте их в основном для сброса автомата в начальное состояние или для обработки критических ошибок. 

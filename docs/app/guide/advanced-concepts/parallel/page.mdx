@@ -1,0 +1,286 @@
+# Параллельные автоматы
+
+Параллельные автоматы позволяют разделить сложную логику на несколько независимо работающих автоматов, каждый из которых отвечает за свою часть функциональности.
+
+## Концепция параллельных автоматов
+
+В сложных приложениях часто возникает необходимость разделения логики на отдельные, но взаимодействующие компоненты. `lite-fsm` позволяет создавать независимые параллельные автоматы и координировать их работу через общий `MachineManager`.
+
+В отличие от вложенных автоматов, параллельные автоматы:
+- Работают независимо друг от друга
+- Каждый имеет собственное состояние и контекст
+- Могут реагировать на одни и те же события
+- Общаются через события, обрабатываемые менеджером
+
+## Пример использования
+
+Рассмотрим пример медиаплеера с параллельными автоматами, где каждый автомат обрабатывает свою часть функциональности:
+
+```ts
+// Автомат для работы с данными трека
+export const player = createMachine({
+  config: {
+    IDLE: {
+      CHANGE_TRACK: "LOAD_TRACK_DATA_PENDING",
+    },
+    LOAD_TRACK_DATA_PENDING: {
+      LOAD_TRACK_DATA_RESOLVE: "SELECT_STREAM_PENDING",
+    },
+    SELECT_STREAM_PENDING: {
+      SELECT_STREAM_RESOLVE: "SET_STREAM_PENDING",
+    },
+    SET_STREAM_PENDING: {},
+  },
+  initialState: "IDLE",
+  initialContext,
+  reducer: (s, action, { nextState }) => {
+    s.state = nextState;
+    return s;
+  },
+  effects: {
+    LOAD_TRACK_DATA_PENDING: async ({ condition, transition }) => {
+      await Promise.all([
+        condition(e => e.type === "LOAD_TRACK_META_RESOLVE"),
+        condition(e => e.type === "LOAD_STREAMS_RESOLVE"),
+      ]);
+      
+      transition({
+        type: "LOAD_TRACK_DATA_RESOLVE",
+      });
+    },
+  },
+});
+
+// Автомат для работы с метаданными
+export const trackMeta = createMachine({
+  config: {
+    IDLE: {
+      CHANGE_TRACK: "LOAD_TRACK_META_PENDING",
+    },
+    LOAD_TRACK_META_PENDING: {
+      LOAD_TRACK_META_RESOLVE: "IDLE",
+    },
+  },
+  initialState: "IDLE",
+  initialContext,
+  reducer: (s, action, { nextState }) => {
+    s.state = nextState;
+    return s;
+  },
+  effects: {
+    LOAD_TRACK_META_PENDING: async ({ services, transition }) => {
+      transition({ type: "LOAD_TRACK_META_RESOLVE" });
+    },
+  },
+});
+
+// Автомат для управления потоками
+export const streams = createMachine({
+  config: {
+    IDLE: {
+      CHANGE_TRACK: "LOAD_STREAMS_PENDING",
+    },
+    LOAD_STREAMS_PENDING: {
+      LOAD_STREAMS_RESOLVE: "IDLE",
+    },
+  },
+  initialState: "IDLE",
+  initialContext,
+  reducer: (s, action, { nextState }) => {
+    s.state = nextState;
+    return s;
+  },
+  effects: {
+    LOAD_STREAMS_PENDING: async ({ services, transition }) => {
+      transition({ type: "LOAD_STREAMS_RESOLVE" });
+    },
+  },
+});
+
+// События распространяются между всеми автоматами
+manager.transition({ type: "CHANGE_TRACK", payload: { trackId: "123" } });
+```
+
+В этом примере все три автомата независимо реагируют на событие `CHANGE_TRACK`, а player ожидает завершения работы двух других автоматов через механизм `condition`.
+
+## Правила взаимодействия автоматов
+
+1. **Одно событие - много обработчиков**: Каждый автомат независимо проверяет, может ли он обработать событие.
+2. **Независимые состояния**: Каждый автомат имеет свое собственное состояние и контекст.
+3. **Коммуникация через события**: Автоматы взаимодействуют, отправляя события, которые могут быть обработаны другими автоматами.
+4. **Единый источник правды**: `MachineManager` хранит состояние всех автоматов и обеспечивает их согласованность.
+
+## Структурирование параллельных автоматов
+
+Лучшие практики при работе с параллельными автоматами:
+
+### 1. Чёткое разделение ответственности
+
+Каждый автомат должен отвечать за конкретную и хорошо определенную область функциональности:
+
+```ts
+// Автомат для аутентификации
+const authMachine = createMachine({
+  config: {
+    UNAUTHENTICATED: {
+      LOGIN: "AUTHENTICATING",
+    },
+    AUTHENTICATING: {
+      LOGIN_SUCCESS: "AUTHENTICATED",
+      LOGIN_FAILURE: "UNAUTHENTICATED",
+    },
+    AUTHENTICATED: {
+      LOGOUT: "UNAUTHENTICATED",
+    },
+  },
+  // ...
+});
+
+// Автомат для управления профилем пользователя
+const profileMachine = createMachine({
+  config: {
+    IDLE: {
+      LOGIN_SUCCESS: "LOADING_PROFILE",
+      UPDATE_PROFILE: "UPDATING_PROFILE",
+    },
+    LOADING_PROFILE: {
+      PROFILE_LOADED: "READY",
+      PROFILE_LOAD_ERROR: "ERROR",
+    },
+    READY: {
+      UPDATE_PROFILE: "UPDATING_PROFILE",
+    },
+    UPDATING_PROFILE: {
+      PROFILE_UPDATED: "READY",
+      PROFILE_UPDATE_ERROR: "ERROR",
+    },
+    ERROR: {
+      RETRY: "LOADING_PROFILE",
+    },
+  },
+  // ...
+});
+```
+
+### 2. Согласованные имена событий
+
+Используйте согласованные имена событий, чтобы обеспечить понятное взаимодействие между автоматами:
+
+```ts
+// В authMachine
+effects: {
+  AUTHENTICATING: async ({ transition, services }) => {
+    try {
+      const user = await services.api.login(credentials);
+      transition({
+        type: "LOGIN_SUCCESS", // Это событие также обрабатывается profileMachine
+        payload: { user }
+      });
+    } catch (error) {
+      transition({ type: "LOGIN_FAILURE", payload: { error } });
+    }
+  }
+}
+```
+
+### 3. Иерархия автоматов (вложенные автоматы)
+
+В сложных системах полезно устанавливать иерархические отношения между автоматами:
+
+```ts
+// Родительский автомат
+const appMachine = createMachine({
+  config: {
+    INITIALIZING: {
+      APP_READY: "RUNNING",
+    },
+    RUNNING: { },
+  },
+  // ...
+  effects: {
+    INITIALIZING: async ({ transition }) => {
+      // Инициализация приложения
+      transition({ type: "APP_READY" });
+    },
+  },
+});
+
+// Автомат для аутентификации
+const authMachine = createMachine({
+  config: {
+    IDLE: {
+      // Реагирует на события от родительского автомата
+      APP_READY: "WAITING_FOR_AUTH",
+      FATAL_ERROR: "DISABLED",
+    },
+    WAITING_FOR_AUTH: {
+      LOGIN: "AUTHENTICATING",
+    },
+    AUTHENTICATING: {
+      LOGIN_SUCCESS: "AUTHENTICATED",
+      LOGIN_FAILURE: "WAITING_FOR_AUTH",
+    },
+    AUTHENTICATED: {
+      LOGOUT: "WAITING_FOR_AUTH",
+    },
+  },
+  initialState: "IDLE",
+  // ... остальная часть определения
+});
+
+// Автомат для управления профилем пользователя
+const profileMachine = createMachine({
+  config: {
+    IDLE: {
+      // Реагирует на события от родительского автомата
+      APP_READY: "WAITING_FOR_LOGIN",
+      FATAL_ERROR: "DISABLED",
+    },
+    WAITING_FOR_LOGIN: {
+      // Реагирует на события от другого автомата
+      LOGIN_SUCCESS: "LOADING_PROFILE",
+    },
+    LOADING_PROFILE: {
+      PROFILE_LOADED: "READY",
+      PROFILE_LOAD_ERROR: "ERROR",
+    },
+    READY: { },
+  },
+  initialState: "IDLE",
+  // ... остальная часть определения
+});
+
+// Объединение автоматов в менеджере
+const manager = MachineManager({
+  app: appMachine,
+  auth: authMachine,
+  profile: profileMachine,
+});
+
+// Инициализация приложения
+manager.transition({ type: "APP_READY" });
+// Это событие автоматически обработается и auth, и profile автоматами
+
+// Пользователь логинится
+manager.transition({ type: "LOGIN" });
+// При успешном логине authMachine отправит LOGIN_SUCCESS
+// Это событие будет обработано profileMachine автоматически
+```
+
+В этом примере:
+- Автоматы auth и profile сами следят за состоянием родительского автомата через подписку на события APP_READY и FATAL_ERROR
+- Автомат profile также реагирует на событие LOGIN_SUCCESS от auth автомата
+- Все автоматы явно переходят в состояние DISABLED при критической ошибке
+- При перезапуске приложения (APP_READY) автоматы возвращаются в рабочее состояние
+
+## Преимущества параллельных автоматов
+
+1. **Модульность**: Каждый автомат может разрабатываться, тестироваться и поддерживаться независимо.
+2. **Масштабируемость**: Легко добавлять новые автоматы для новой функциональности.
+3. **Понятность**: Каждый автомат имеет более простую и понятную структуру.
+4. **Производительность**: Можно оптимизировать пересчет состояния только для затронутых автоматов.
+5. **Переиспользуемость**: Автоматы могут быть переиспользованы в разных частях приложения или даже в разных проектах.
+
+## Заключение
+
+Параллельные автоматы — мощный механизм для структурирования сложной бизнес-логики, позволяющий разделить ответственность и обеспечить более чистую архитектуру приложения. `lite-fsm` предоставляет гибкие инструменты для создания и координации таких автоматов через единый интерфейс `MachineManager`. 

@@ -1,0 +1,150 @@
+# Создание автомата
+
+В lite-fsm автоматы создаются из отдельных логических компонентов: конфигурации, начального состояния, контекста, редьюсера и эффектов. Такой модульный подход улучшает организацию кода и упрощает тестирование.
+
+## Разбиение автомата на части
+
+В `lite-fsm` вы можете разбить определение автомата на логические компоненты, что значительно упрощает его поддержку и понимание. Это дополнительная возможность библиотеки, которая особенно полезна для сложных автоматов с множеством состояний и переходов. В большинстве случаев можно определять автомат как единое целое, но возможность модульного определения дает гибкость при работе со сложными системами.
+
+## Пример использования
+
+Вместо того чтобы определять весь автомат в одном месте, вы можете выделить отдельные части:
+
+<Tabs items={['JavaScript', 'TypeScript']}>
+  <Tabs.Tab>
+```js
+// Конфигурация состояний и переходов
+const config = createConfig({
+  IDLE: {
+    CHANGE_TRACK: "LOAD_TRACK_META_PENDING",
+  },
+  LOAD_TRACK_META_PENDING: {
+    LOAD_TRACK_META_RESOLVE: "LOAD_STREAMS_PENDING",
+  },
+  LOAD_STREAMS_PENDING: {
+    LOAD_STREAMS_RESOLVE: "SELECT_STREAM_PENDING",
+  },
+  SELECT_STREAM_PENDING: {
+    SELECT_STREAM_RESOLVE: "SET_STREAM_PENDING",
+  },
+  SET_STREAM_PENDING: {},
+});
+
+// Начальное состояние и контекст
+const initialState = "IDLE";
+const initialContext = {
+  // начальные данные
+};
+
+// Определение редьюсера
+const reducer = (s, action, { nextState }) => {
+  s.state = nextState;
+  // логика обновления контекста
+  return s;
+};
+
+// Определение эффектов
+const effects = {
+  // эффекты для разных состояний
+};
+
+// Создание автомата из компонентов
+export const player = createMachine({
+  config,
+  initialState,
+  initialContext,
+  reducer,
+  effects,
+});
+```
+  </Tabs.Tab>
+  <Tabs.Tab>
+```ts
+import { FSMEvent } from "lite-fsm";
+import {
+  createEffect,
+  createConfig,
+  createMachine,
+  createReducer,
+} from "../create-machine";
+
+export type Events = FSMEvent<"DO_INIT">;
+
+type Context = {
+  sessionId: string;
+};
+
+const initialContext: Context = {
+  sessionId: "",
+};
+
+const config = createConfig({
+  IDLE: {
+    DO_INIT: "READY",
+  },
+  READY: {},
+});
+
+const reducer = createReducer<typeof config, Context>(
+  (s, action, { nextState }) => {
+    s.state = nextState;
+    
+    switch (action.type) {
+      case "DO_INIT": {
+      }
+    }
+    
+    return s;
+  }
+);
+
+const READY = createEffect<typeof config, "READY">({
+  type: "every",
+  effect: async ({ action, services, getState, transition, condition }) => {},
+});
+
+export const auth = createMachine({
+  config,
+  initialState: "IDLE",
+  initialContext,
+  reducer,
+  effects: {
+    READY,
+  },
+});
+```
+  </Tabs.Tab>
+</Tabs>
+
+## Преимущества композиции
+
+1. **Улучшенная читаемость** - разбивка на логические компоненты делает код более понятным
+2. **Упрощенное тестирование** - можно тестировать отдельные части автомата изолированно
+3. **Лучшая организация кода** - каждая часть автомата имеет свое специализированное назначение
+4. **Переиспользование** - отдельные части можно переиспользовать в разных автоматах
+
+## Структура файлов для сложных случаев
+
+Важно отметить, что разделение автомата на отдельные файлы — это скорее возможность, а не универсальная рекомендация. В большинстве случаев лучше стараться держать автомат в одном месте как единую модель и разделять его только при необходимости или когда логика уже сильно разрослась.
+
+Как правило, эффективнее разделять бизнес-логику по разным автоматам с чёткими зонами ответственности. При таком подходе отдельные автоматы не так быстро разрастаются, и необходимость в их фрагментации на отдельные файлы возникает реже.
+
+Однако, если автомат всё же стал слишком сложным, для его организации можно использовать следующую структуру:
+
+```
+/machines
+  /player
+    index.ts        // Экспорт автомата
+    types.ts        // Типы и интерфейсы
+    config.ts       // Конфигурация состояний
+    reducer.ts      // Логика обновления состояния
+    effects.ts      // Эффекты для состояний
+    constants.ts    // Константы (имена состояний, событий)
+    selectors.ts    // Селекторы для получения данных из состояния
+  /auth
+    // аналогичная структура
+  /cart
+    // аналогичная структура
+```
+
+Такой подход может быть полезен для очень сложных автоматов, но не должен применяться преждевременно. 

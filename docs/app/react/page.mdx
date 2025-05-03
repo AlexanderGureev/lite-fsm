@@ -13,12 +13,10 @@ npm install lite-fsm
 ## Доступ к модулю React
 
 ```ts
-// ESM
 import { FSMProvider, useSelector, useTransition } from "lite-fsm/react";
-
-// CommonJS
-const { FSMProvider, useSelector, useTransition } = require("lite-fsm/react");
 ```
+
+> **Совет:** Если вы используете TypeScript, рекомендуется создать строготипизированные версии хуков, как показано в разделе [TypeScript](/usage/typescript). Это обеспечит автодополнение и проверку типов во время компиляции, что значительно снизит количество потенциальных ошибок.
 
 ## Основные компоненты и хуки
 
@@ -44,35 +42,16 @@ const counterMachine = createMachine({
     count: 0,
   },
   reducer: (state, action) => {
-    const { state: currentState, context } = state;
-
     switch (action.type) {
       case "INCREMENT":
-        return {
-          state: currentState,
-          context: {
-            ...context,
-            count: context.count + 1,
-          },
-        };
+        s.context.count++;
+        break;
       case "DECREMENT":
-        return {
-          state: currentState,
-          context: {
-            ...context,
-            count: context.count - 1,
-          },
-        };
+        s.context.count--;
+        break;
       case "RESET":
-        return {
-          state: currentState,
-          context: {
-            ...context,
-            count: 0,
-          },
-        };
-      default:
-        return state;
+        s.context.count = 0;
+        break;
     }
   },
 });
@@ -178,11 +157,19 @@ function DebugPanel() {
 ### Авторизация пользователя
 
 ```tsx
+const initialContext = {
+  user: null,
+  error: null,
+  username: "",
+  password: "",
+};
+
 // Создание автомата
 const authMachine = createMachine({
   config: {
     LOGGED_OUT: {
       LOGIN: "LOGGING_IN",
+      UPDATE_CREDENTIALS: null, // Обновление username/password остается в том же состоянии
     },
     LOGGING_IN: {
       LOGIN_SUCCESS: "LOGGED_IN",
@@ -194,17 +181,30 @@ const authMachine = createMachine({
     LOGIN_ERROR: {
       LOGIN: "LOGGING_IN",
       RESET: "LOGGED_OUT",
+      UPDATE_CREDENTIALS: null, // Обновление данных в состоянии ошибки
     },
   },
   initialState: "LOGGED_OUT",
-  initialContext: {
-    user: null,
-    error: null,
+  initialContext,
+  reducer: (state, action) => {
+    switch (action.type) {
+      case "UPDATE_CREDENTIALS":
+        state.context = {
+          ...state.context,
+          ...action.payload,
+        };
+        break;
+      case "LOGOUT":
+      case "RESET":
+        state.context = initialContext;
+        break;
+    }
   },
   effects: {
-    LOGGING_IN: async ({ transition, services }, event) => {
+    LOGGING_IN: async ({ transition, services, getState }) => {
       try {
-        const { username, password } = event.payload;
+        // Получаем данные из контекста автомата вместо payload
+        const { username, password } = getState().auth.context;
         const user = await services.authService.login(username, password);
         transition({ type: "LOGIN_SUCCESS", payload: { user } });
       } catch (error) {
@@ -222,69 +222,47 @@ const authMachine = createMachine({
 
 // Компонент формы входа
 function LoginForm() {
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
   const { state, context } = useSelector((state) => state.auth);
   const transition = useTransition();
 
+  // Получаем данные из контекста автомата вместо локального состояния
+  const { username, password, error } = context;
+
+  // Обработчики изменения полей ввода
+  const handleUsernameChange = (e) => {
+    transition({
+      type: "UPDATE_CREDENTIALS",
+      payload: { username: e.target.value },
+    });
+  };
+
+  const handlePasswordChange = (e) => {
+    transition({
+      type: "UPDATE_CREDENTIALS",
+      payload: { password: e.target.value },
+    });
+  };
+
   const handleSubmit = (e) => {
     e.preventDefault();
-    transition({
-      type: "LOGIN",
-      machine: "auth",
-      payload: { username, password },
-    });
+    transition({ type: "LOGIN" });
   };
 
   return (
     <form onSubmit={handleSubmit}>
-      {context.error && <div className="error">{context.error}</div>}
+      {error && <div className="error">{error}</div>}
       <div>
         <label>Имя пользователя:</label>
-        <input type="text" value={username} onChange={(e) => setUsername(e.target.value)} />
+        <input type="text" value={username} onChange={handleUsernameChange} />
       </div>
       <div>
         <label>Пароль:</label>
-        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+        <input type="password" value={password} onChange={handlePasswordChange} />
       </div>
       <button type="submit" disabled={state === "LOGGING_IN"}>
         {state === "LOGGING_IN" ? "Вход..." : "Войти"}
       </button>
     </form>
-  );
-}
-```
-
-## Оптимизация производительности
-
-### Мемоизация селекторов
-
-Для предотвращения лишних ре-рендеров используйте мемоизированные селекторы:
-
-```tsx
-import { useMemo } from "react";
-import { useSelector } from "lite-fsm/react";
-
-function UserProfile() {
-  // Создаем селектор-функцию только один раз
-  const selectUserData = useMemo(
-    () => (state) => ({
-      name: state.user.context.name,
-      email: state.user.context.email,
-      isAdmin: state.user.context.roles.includes("admin"),
-    }),
-    [],
-  );
-
-  // Используем мемоизированный селектор
-  const userData = useSelector(selectUserData);
-
-  return (
-    <div>
-      <h2>{userData.name}</h2>
-      <p>{userData.email}</p>
-      {userData.isAdmin && <AdminPanel />}
-    </div>
   );
 }
 ```
