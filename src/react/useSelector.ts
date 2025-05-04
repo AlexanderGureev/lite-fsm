@@ -20,7 +20,6 @@ export const useSelector = <
   const slice = useSyncExternalStoreWithSelector(api.onTransition, api.getState, api.getState, selector, equalityFn);
   return slice;
 };
-
 // export const useSelector = <
 //   S extends {
 //     [key in string]: MachineConfig<any, any, any, any>;
