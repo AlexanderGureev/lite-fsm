@@ -53,7 +53,7 @@ package.json
 
 Вместо определения `store` как глобальной переменной, мы создаем функцию `makeStore`, которая возвращает новый экземпляр хранилища для каждого запроса:
 
-```tsx
+```tsx showLineNumbers copy
 // src/store/index.ts
 import { MachineManager } from "lite-fsm";
 import { root } from "./machines/root";
@@ -100,7 +100,7 @@ export type AppState = ReturnType<AppStore["getState"]>;
 
 Создаем компонент-провайдер для Next.js:
 
-```tsx
+```tsx showLineNumbers copy
 // app/StoreProvider.tsx
 "use client";
 import { useRef } from "react";
@@ -123,7 +123,7 @@ export default function StoreProvider({ children }: { children: React.ReactNode 
 
 Создаем типизированные версии хуков для удобного использования:
 
-```tsx
+```tsx showLineNumbers copy
 // src/store/hooks.ts
 import type { TypedUseMachineHook, TypedUseSelectorHook, TypedUseTransitionHook } from "lite-fsm/react";
 import {
@@ -144,7 +144,7 @@ export const useManager: TypedUseMachineHook<AppStore, AppEvents> = _useManager;
 
 Для Next.js необходимо включить провайдер в корневой layout файл, обернув им даже HTML-элемент для доступности хранилища на самом раннем этапе:
 
-```tsx
+```tsx showLineNumbers copy
 // app/layout.tsx
 import StoreProvider from "./StoreProvider";
 

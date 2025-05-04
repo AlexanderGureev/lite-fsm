@@ -4,10 +4,16 @@ export type SType = string | number | symbol;
 export type WILDCARD = "*";
 export type State<S extends SType> = Exclude<S, WILDCARD | number | symbol>;
 
-export type Subscriber<S extends string, C extends Record<string, any>> = (
-  prevState: { state: State<S>; context: C },
-  currentState: { state: State<S>; context: C },
-) => void;
+export type StateType<C extends CFG<any, any, any>, T extends Record<string, any>> = {
+  context: T;
+  state: State<keyof C>;
+};
+
+export type Subscriber<
+  C extends CFG<any, any, any>,
+  T extends Record<string, any>,
+  P extends FSMEvent<any, any> = any,
+> = (prevState: StateType<C, T>, currentState: StateType<C, T>, action: P) => void;
 
 export type MachinesState<
   S extends {

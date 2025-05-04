@@ -2,6 +2,22 @@
 
 TypeScript предоставляет мощные возможности для обеспечения типобезопасности в приложениях, использующих `lite-fsm`. В этом разделе мы рассмотрим, как настроить типизацию автоматов и переиспользовать типы для создания строго типизированных приложений.
 
+## Структура проекта
+
+Ниже представлена структура файлов, которую мы будем использовать в примерах:
+
+```
+src/
+├── App.tsx                   # Корневой компонент React-приложения
+└── store/                    # Директория для управления состоянием
+    ├── index.ts              # Экспорт store и типов
+    ├── types.ts              # Общие типы приложения
+    ├── create-machine.ts     # Типизированные версии API функций
+    ├── hooks.ts              # Типизированные React-хуки
+    └── machines/             # Директория с автоматами
+        ├── counter.ts        # Автомат счетчика
+```
+
 ## Предварительная типизация функций API
 
 Одним из ключевых преимуществ использования TypeScript с `lite-fsm` является возможность создать предварительно типизированные версии функций API (таких как `createMachine`, `createEffect` и т.д.), которые будут автоматически применять ваши пользовательские типы ко всем автоматам в приложении.
@@ -10,8 +26,7 @@ TypeScript предоставляет мощные возможности для
 
 Сначала определите базовые типы для вашего приложения:
 
-```ts
-// src/store/types.ts
+```ts showLineNumbers copy filename="src/store/types.ts"
 import * as root from "./machines/root";
 import * as counter from "./machines/counter";
 import * as profile from "./machines/profile";
@@ -40,8 +55,7 @@ export type Dependencies = {
 
 Создайте файл, который будет реэкспортировать функции `lite-fsm` с предварительно примененными типами:
 
-```ts
-// src/store/create-machine.ts
+```ts showLineNumbers copy filename="src/store/create-machine.ts"
 import type { TypedCreateConfigFn, TypedCreateEffectFn, TypedCreateMachineFn, TypedCreateReducerFn } from "lite-fsm";
 import {
   createConfig as _createConfig,
@@ -66,8 +80,7 @@ export type TypedEffect = ReturnType<TypedCreateEffectFn<AppEvents, Dependencies
 
 Аналогичным образом, создайте типизированные версии React-хуков:
 
-```ts
-// src/store/hooks.ts
+```ts showLineNumbers copy filename="src/store/hooks.ts"
 import type { TypedUseMachineHook, TypedUseSelectorHook, TypedUseTransitionHook } from "lite-fsm/react";
 import {
   useManager as _useManager,
@@ -87,8 +100,7 @@ export const useManager: TypedUseMachineHook<FSMConfigType, AppEvents> = _useMan
 
 Теперь нужно объединить все автоматы в единый store и экспортировать типы:
 
-```ts
-// src/store/index.ts
+```ts showLineNumbers copy filename="src/store/index.ts"
 import { root } from "./machines/root";
 import { counter } from "./machines/counter";
 import { profile } from "./machines/profile";
@@ -138,8 +150,7 @@ export type AppStore = ReturnType<typeof makeStore>;
 
 При использовании типизированных функций, TypeScript может автоматически выводить доступные состояния и события из конфигурации автомата. Это позволяет избежать дублирования кода и ошибок синхронизации между константами и типами.
 
-```ts
-// src/store/machines/counter.ts
+```ts showLineNumbers copy filename="src/store/machines/counter.ts"
 import { createMachine, createConfig } from "../create-machine";
 
 // Создаем типизированную конфигурацию
@@ -182,7 +193,7 @@ export const counter = createMachine({
 
 Библиотека `lite-fsm` предоставляет встроенный тип `FSMEvent`, который можно использовать для создания типов событий с поддержкой payload:
 
-```ts
+```ts showLineNumbers copy
 import type { FSMEvent } from "lite-fsm";
 import { createMachine, createConfig } from "../create-machine";
 
@@ -280,8 +291,7 @@ export const counter = createMachine({
 
 Используя подготовленные типизированные функции, можно создавать строго типизированные автоматы:
 
-```ts
-// src/store/machines/counter.ts
+```ts showLineNumbers copy filename="src/store/machines/counter.ts"
 import { createMachine, createConfig } from "../create-machine";
 
 // Определяем типы для этого конкретного автомата
@@ -336,8 +346,7 @@ export const counter = createMachine({
 
 Теперь в компонентах React можно использовать типизированные хуки:
 
-```tsx
-// src/App.tsx
+```tsx showLineNumbers copy filename="src/App.tsx"
 import "./styles.css";
 import { useSelector, useTransition } from "./store/hooks";
 import { useEffect } from "react";

@@ -7,8 +7,10 @@ export const immerMiddleware: Middleware = (api) => {
     const newReducer = produce((draft, action) => {
       const result = reducer(draft, action);
 
-      for (const k of Object.keys(result)) {
-        if (result[k] !== undefined) draft[k] = result[k];
+      if (typeof result === "object") {
+        for (const k of Object.keys(result)) {
+          if (result[k] !== undefined) draft[k] = result[k];
+        }
       }
 
       return draft;

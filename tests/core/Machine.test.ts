@@ -1,34 +1,27 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { CreateMachine } from "../../src/core/Machine";
 import { WILDCARD } from "../../src/core/utils";
 import { MachineConfig } from "../../src/core/types";
 
 describe("CreateMachine", () => {
-  it("should create a machine with the provided config", () => {
+  it("должен создавать машину с предоставленной конфигурацией", () => {
     const cfg = {
       config: {
-        IDLE: {
-          GO: "ACTIVE",
-        },
-        ACTIVE: {
-          STOP: "IDLE",
-        },
+        IDLE: { GO: "ACTIVE" },
+        ACTIVE: { STOP: "IDLE" },
       },
       initialState: "IDLE",
       initialContext: { count: 0 },
     } as const;
 
     const machine = CreateMachine(cfg);
-
     expect(machine.config).toEqual(cfg.config);
   });
 
-  it("should handle transitions correctly", () => {
+  it("должен обрабатывать переходы корректно", () => {
     const cfg = {
       config: {
-        IDLE: {
-          GO: "ACTIVE",
-        },
+        IDLE: { GO: "ACTIVE" },
         ACTIVE: {
           STOP: "IDLE",
           UPDATE: null, // null означает, что состояние не меняется
@@ -43,13 +36,11 @@ describe("CreateMachine", () => {
 
     // Переход из IDLE в ACTIVE
     const nextState = machine.transition(state, { type: "GO" })!;
-
     expect(nextState.state).toBe("ACTIVE");
     expect(nextState.context).toEqual({ count: 0 });
 
     // Переход с UPDATE не должен менять состояние
     const updatedState = machine.transition(nextState, { type: "UPDATE", payload: { count: 5 } })!;
-
     expect(updatedState.state).toBe("ACTIVE");
     expect(updatedState.context).toEqual({ count: 5 });
 
@@ -59,18 +50,12 @@ describe("CreateMachine", () => {
     expect(finalState.context).toEqual({ count: 5 });
   });
 
-  it("should handle wildcard transitions", () => {
+  it("должен обрабатывать wildcard переходы", () => {
     const machine = CreateMachine({
       config: {
-        IDLE: {
-          GO: "ACTIVE",
-        },
-        ACTIVE: {
-          STOP: "IDLE",
-        },
-        [WILDCARD]: {
-          RESET: "IDLE",
-        },
+        IDLE: { GO: "ACTIVE" },
+        ACTIVE: { STOP: "IDLE" },
+        [WILDCARD]: { RESET: "IDLE" },
       },
       initialState: "IDLE",
       initialContext: { count: 0 },
@@ -85,28 +70,22 @@ describe("CreateMachine", () => {
     expect(resetFromIdle.state).toBe("IDLE");
   });
 
-  it("should return the current state if no transition is found", () => {
+  it("должен возвращать текущее состояние, если переход не найден", () => {
     const machine = CreateMachine({
       config: {
-        IDLE: {
-          GO: "ACTIVE",
-        },
-        ACTIVE: {
-          STOP: "IDLE",
-        },
+        IDLE: { GO: "ACTIVE" },
+        ACTIVE: { STOP: "IDLE" },
       },
       initialState: "IDLE",
       initialContext: { count: 0 },
     });
 
     const state = { state: "IDLE", context: { count: 0 } } as const;
-
-    // Неизвестный тип события
     const sameState = machine.transition(state, { type: "UNKNOWN" })!;
     expect(sameState).toEqual(state);
   });
 
-  it("should use the reducer if provided", () => {
+  it("должен использовать редьюсер, если он предоставлен", () => {
     const reducerSpy = vi.fn((s, action, meta) => {
       if (action.type === "INCREMENT") {
         return {
@@ -152,47 +131,15 @@ describe("CreateMachine", () => {
     );
   });
 
-  it("should correctly subscribe and unsubscribe to transitions", () => {
-    const machine = CreateMachine({
-      config: {
-        IDLE: {
-          GO: "ACTIVE",
-        },
-        ACTIVE: {
-          STOP: "IDLE",
-        },
-      },
-      initialState: "IDLE",
-      initialContext: { count: 0 },
-    });
-
-    const subscriber = vi.fn();
-    const unsubscribe = machine.onTransition(subscriber);
-
-    // Проверяем, что функция подписки была добавлена
-    expect(typeof unsubscribe).toBe("function");
-
-    // Отписываемся
-    unsubscribe();
-
-    // После отписки функция не должна вызываться
-    // Но так как нет прямого доступа к массиву подписчиков,
-    // мы не можем проверить это напрямую
-  });
-
-  it("should invoke effects when state changes", async () => {
+  it("должен вызвать эффекты при изменении состояния", async () => {
     const idleEffect = vi.fn();
     const activeEffect = vi.fn();
     const wildcardEffect = vi.fn();
 
     const machine = CreateMachine({
       config: {
-        IDLE: {
-          GO: "ACTIVE",
-        },
-        ACTIVE: {
-          STOP: "IDLE",
-        },
+        IDLE: { GO: "ACTIVE" },
+        ACTIVE: { STOP: "IDLE" },
       },
       initialState: "IDLE",
       initialContext: { count: 0 },
@@ -204,7 +151,12 @@ describe("CreateMachine", () => {
     });
 
     // Эффект должен вызываться при изменении состояния
-    await machine.invokeEffect("IDLE", "ACTIVE", { transition: vi.fn(), action: { type: "GO" }, condition: vi.fn() });
+    await machine.invokeEffect("IDLE", "ACTIVE", {
+      transition: vi.fn(),
+      action: { type: "GO" },
+      condition: vi.fn(),
+    });
+
     expect(activeEffect).toHaveBeenCalledOnce();
     expect(idleEffect).not.toHaveBeenCalled();
     expect(wildcardEffect).not.toHaveBeenCalled();
@@ -218,20 +170,17 @@ describe("CreateMachine", () => {
       action: { type: "UPDATE" },
       condition: vi.fn(),
     });
+
     expect(activeEffect).not.toHaveBeenCalled();
     expect(idleEffect).not.toHaveBeenCalled();
     expect(wildcardEffect).toHaveBeenCalledOnce();
   });
 
-  it("should not throw when there are no effects", async () => {
+  it("не должен выбрасывать ошибку, когда эффекты отсутствуют", async () => {
     const machine = CreateMachine({
       config: {
-        IDLE: {
-          GO: "ACTIVE",
-        },
-        ACTIVE: {
-          STOP: "IDLE",
-        },
+        IDLE: { GO: "ACTIVE" },
+        ACTIVE: { STOP: "IDLE" },
       },
       initialState: "IDLE",
       initialContext: { count: 0 },
@@ -239,7 +188,11 @@ describe("CreateMachine", () => {
 
     // Не должно быть ошибки, когда effects отсутствует
     await expect(
-      machine.invokeEffect("IDLE", "ACTIVE", { transition: vi.fn(), action: { type: "GO" }, condition: vi.fn() }),
+      machine.invokeEffect("IDLE", "ACTIVE", {
+        transition: vi.fn(),
+        action: { type: "GO" },
+        condition: vi.fn(),
+      }),
     ).resolves.toBeUndefined();
   });
 });

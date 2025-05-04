@@ -6,13 +6,13 @@
 
 Для использования модуля React с `lite-fsm` вам не нужно устанавливать дополнительные пакеты, так как он уже включен в основную библиотеку:
 
-```bash
+```bash showLineNumbers copy
 npm install lite-fsm
 ```
 
 ## Доступ к модулю React
 
-```ts
+```ts showLineNumbers copy
 import { FSMProvider, useSelector, useTransition } from "lite-fsm/react";
 ```
 
@@ -24,7 +24,7 @@ import { FSMProvider, useSelector, useTransition } from "lite-fsm/react";
 
 `FSMProvider` — компонент-провайдер, который предоставляет доступ к менеджеру автоматов для всех дочерних компонентов через React Context.
 
-```tsx
+```tsx showLineNumbers copy
 import { createMachine, MachineManager } from "lite-fsm";
 import { FSMProvider } from "lite-fsm/react";
 
@@ -75,7 +75,7 @@ function App() {
 
 Хук `useSelector` позволяет выбирать и подписываться на состояние из менеджера автоматов:
 
-```tsx
+```tsx showLineNumbers copy
 import { useSelector, useTransition } from "lite-fsm/react";
 
 function Counter() {
@@ -104,7 +104,7 @@ function Counter() {
 
 Хук `useTransition` предоставляет функцию для отправки событий автоматам:
 
-```tsx
+```tsx showLineNumbers copy
 import { useSelector, useTransition } from "lite-fsm/react";
 
 function Counter() {
@@ -126,7 +126,7 @@ function Counter() {
 
 Хук `useManager` даёт прямой доступ к объекту менеджера автоматов:
 
-```tsx
+```tsx showLineNumbers copy
 import { useManager } from "lite-fsm/react";
 
 function DebugPanel() {
@@ -156,7 +156,7 @@ function DebugPanel() {
 
 ### Авторизация пользователя
 
-```tsx
+```tsx showLineNumbers copy
 const initialContext = {
   user: null,
   error: null,

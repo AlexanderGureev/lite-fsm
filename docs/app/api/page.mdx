@@ -8,7 +8,7 @@
 
 ### createMachine
 
-```ts
+```ts showLineNumbers copy
 createMachine<C, T, E, P = FSMEvent<E, any>, D = {}>(cfg: MachineConfig<C, T, P, D>): Machine<C, T, P, D>
 ```
 
@@ -24,7 +24,7 @@ createMachine<C, T, E, P = FSMEvent<E, any>, D = {}>(cfg: MachineConfig<C, T, P,
 
 **Пример:**
 
-```ts
+```ts showLineNumbers copy
 import { createMachine } from "lite-fsm";
 
 const toggleMachine = createMachine({
@@ -45,7 +45,7 @@ const toggleMachine = createMachine({
 
 ### MachineManager
 
-```ts
+```ts showLineNumbers copy
 MachineManager<M extends Record<string, Machine<any, any, any, any>>>(
   machines: M,
   opts?: {
@@ -70,7 +70,7 @@ MachineManager<M extends Record<string, Machine<any, any, any, any>>>(
 
 **Пример:**
 
-```ts
+```ts showLineNumbers copy
 import { MachineManager, createMachine } from "lite-fsm";
 import { immerMiddleware } from "lite-fsm/middleware";
 
@@ -117,7 +117,7 @@ const advancedManager = MachineManager(
 
 ##### transition
 
-```ts
+```ts showLineNumbers copy
 transition<E extends string, P extends Record<string, any>>(
   action: { type: E; machine?: string; payload?: P }
 ): void
@@ -134,7 +134,7 @@ transition<E extends string, P extends Record<string, any>>(
 
 **Пример:**
 
-```ts
+```ts showLineNumbers copy
 // Отправить событие конкретному автомату
 manager.transition({
   type: "TOGGLE",
@@ -148,7 +148,7 @@ manager.transition({ type: "RESET" });
 
 ##### getState
 
-```ts
+```ts showLineNumbers copy
 getState(): { [K in keyof M]: { state: State<C>; context: T } }
 ```
 
@@ -160,7 +160,7 @@ getState(): { [K in keyof M]: { state: State<C>; context: T } }
 
 **Пример:**
 
-```ts
+```ts showLineNumbers copy
 const state = manager.getState();
 console.log(state.toggle.state); // Текущее состояние автомата toggle
 console.log(state.counter.context); // Текущий контекст автомата counter
@@ -168,7 +168,7 @@ console.log(state.counter.context); // Текущий контекст авто�
 
 ##### onTransition
 
-```ts
+```ts showLineNumbers copy
 onTransition(
   callback: (
     prevState: { [K in keyof M]: { state: State<C>; context: T } },
@@ -190,7 +190,7 @@ onTransition(
 
 **Пример:**
 
-```ts
+```ts showLineNumbers copy
 const unsubscribe = manager.onTransition((prevState, nextState, action) => {
   console.log("Предыдущее состояние:", prevState);
   console.log("Новое состояние:", nextState);
@@ -203,7 +203,7 @@ unsubscribe();
 
 ##### setDependencies
 
-```ts
+```ts showLineNumbers copy
 setDependencies(dependencies: D): void
 ```
 
@@ -215,7 +215,7 @@ setDependencies(dependencies: D): void
 
 **Пример:**
 
-```ts
+```ts showLineNumbers copy
 manager.setDependencies({
   services: {
     api: {
@@ -233,7 +233,7 @@ manager.setDependencies({
 
 ##### replaceReducer
 
-```ts
+```ts showLineNumbers copy
 replaceReducer(
   callback: (
     reducer: (state: MachinesState<M>, action: A) => MachinesState<M>
@@ -249,7 +249,7 @@ replaceReducer(
 
 **Пример:**
 
-```ts
+```ts showLineNumbers copy
 // Пример создания middleware с использованием replaceReducer
 const loggingMiddleware = (api) => {
   // Заменяем редьюсер, добавляя логирование
@@ -274,7 +274,7 @@ const manager = MachineManager({ counter: counterMachine }, { middleware: [loggi
 
 ##### condition
 
-```ts
+```ts showLineNumbers copy
 condition(
   predicate: (action: A) => boolean
 ): Promise<boolean>
@@ -292,7 +292,7 @@ condition(
 
 **Пример:**
 
-```ts
+```ts showLineNumbers copy
 // Использование condition в эффекте
 const machine = createMachine({
   config: {
@@ -341,7 +341,7 @@ const machine = createMachine({
 
 ### createConfig
 
-```ts
+```ts showLineNumbers copy
 createConfig<C extends Record<string, Record<string, string | null>>>(
   config: C
 ): C
@@ -359,7 +359,7 @@ createConfig<C extends Record<string, Record<string, string | null>>>(
 
 **Пример:**
 
-```ts
+```ts showLineNumbers copy
 import { createConfig, createMachine } from "lite-fsm";
 
 const config = createConfig({
@@ -385,7 +385,7 @@ const machine = createMachine({
 
 ### createReducer
 
-```ts
+```ts showLineNumbers copy
 createReducer<C, T, P>(
   reducer: (
     state: { state: State<C>; context: T },
@@ -407,7 +407,7 @@ createReducer<C, T, P>(
 
 **Пример:**
 
-```ts
+```ts showLineNumbers copy
 import { createReducer, createMachine } from "lite-fsm";
 
 const reducer = createReducer((state, action, options) => {
@@ -453,7 +453,7 @@ const machine = createMachine({
 
 ### createEffect
 
-```ts
+```ts showLineNumbers copy
 createEffect<D extends DefaultDeps<any, any, any>, P extends Record<string, any> = {}>(
   opts: {
     type?: EffectType;
@@ -478,7 +478,7 @@ createEffect<D extends DefaultDeps<any, any, any>, P extends Record<string, any>
 
 **Пример:**
 
-```ts
+```ts showLineNumbers copy
 import { createEffect, createMachine } from "lite-fsm";
 
 // Создание эффекта, который будет выполнять только последний вызов
@@ -518,7 +518,7 @@ const searchMachine = createMachine({
 
 ### WILDCARD
 
-```ts
+```ts showLineNumbers copy
 WILDCARD: "*";
 ```
 
@@ -526,7 +526,7 @@ WILDCARD: "*";
 
 **Пример:**
 
-```ts
+```ts showLineNumbers copy
 import { createMachine, WILDCARD } from "lite-fsm";
 
 const machine = createMachine({
@@ -550,7 +550,7 @@ const machine = createMachine({
 
 ### State
 
-```ts
+```ts showLineNumbers copy
 type State<C> = keyof C;
 ```
 
@@ -558,7 +558,7 @@ type State<C> = keyof C;
 
 ### FSMEvent
 
-```ts
+```ts showLineNumbers copy
 type FSMEvent<E, P> = { type: E; payload?: P };
 ```
 
@@ -566,7 +566,7 @@ type FSMEvent<E, P> = { type: E; payload?: P };
 
 ### CFG
 
-```ts
+```ts showLineNumbers copy
 type CFG<C, T, E> = {
   [K in keyof C]: { [A in E]?: K | null };
 };
@@ -576,7 +576,7 @@ type CFG<C, T, E> = {
 
 ### MachineConfig
 
-```ts
+```ts showLineNumbers copy
 type MachineConfig<C, T, P, D> = {
   config: C;
   initialState: State<C>;
@@ -596,7 +596,7 @@ type MachineConfig<C, T, P, D> = {
 
 ### Machine
 
-```ts
+```ts showLineNumbers copy
 type Machine<C, T, P, D> = {
   config: C;
   transition: (s: { state: State<C>; context: T }, action: P) => { state: State<C>; context: T };
@@ -609,7 +609,7 @@ type Machine<C, T, P, D> = {
 
 ### MachineManager
 
-```ts
+```ts showLineNumbers copy
 type MachineManager<M> = {
   transition: <E extends string, P extends Record<string, any>>(action: {
     type: E;
@@ -636,7 +636,7 @@ type MachineManager<M> = {
 
 ### FSMProvider
 
-```tsx
+```tsx showLineNumbers copy
 <FSMProvider manager={manager}>{children}</FSMProvider>
 ```
 
@@ -649,7 +649,7 @@ type MachineManager<M> = {
 
 **Пример:**
 
-```tsx
+```tsx showLineNumbers copy
 import { FSMProvider } from "lite-fsm/react";
 import { manager } from "./store";
 
@@ -666,7 +666,7 @@ function App() {
 
 ### useSelector
 
-```ts
+```ts showLineNumbers copy
 useSelector<S>(
   selector: (state: { [K in keyof M]: { state: any; context: any } }) => S,
   equalityFn?: (a: S, b: S) => boolean
@@ -686,7 +686,7 @@ useSelector<S>(
 
 **Пример:**
 
-```tsx
+```tsx showLineNumbers copy
 import { useSelector } from "lite-fsm/react";
 
 function Counter() {
@@ -712,7 +712,7 @@ function Counter() {
 
 ### useTransition
 
-```ts
+```ts showLineNumbers copy
 useTransition(): <E extends string, P extends Record<string, any>>(
   action: { type: E; machine?: string; payload?: P }
 ) => void
@@ -726,7 +726,7 @@ useTransition(): <E extends string, P extends Record<string, any>>(
 
 **Пример:**
 
-```tsx
+```tsx showLineNumbers copy
 import { useSelector, useTransition } from "lite-fsm/react";
 
 function Counter() {
@@ -746,7 +746,7 @@ function Counter() {
 
 ### useManager
 
-```ts
+```ts showLineNumbers copy
 useManager<M extends Record<string, Machine<any, any, any, any>>>(): MachineManager<M>
 ```
 
@@ -758,7 +758,7 @@ useManager<M extends Record<string, Machine<any, any, any, any>>>(): MachineMana
 
 **Пример:**
 
-```tsx
+```tsx showLineNumbers copy
 import { useManager } from "lite-fsm/react";
 import { useEffect } from "react";
 
@@ -789,7 +789,7 @@ function DebugPanel() {
 
 ### Применение middleware
 
-```ts
+```ts showLineNumbers copy
 MachineManager(
   machines: M,
   options: {
@@ -814,7 +814,7 @@ MachineManager(
 
 **Пример:**
 
-```ts
+```ts showLineNumbers copy
 import { MachineManager, createMachine } from "lite-fsm";
 import { immerMiddleware, devToolsMiddleware } from "lite-fsm/middleware";
 
@@ -842,7 +842,7 @@ manager.transition({ type: "TOGGLE" });
 
 #### immerMiddleware
 
-```ts
+```ts showLineNumbers copy
 immerMiddleware: Middleware;
 ```
 
@@ -850,7 +850,7 @@ Middleware для интеграции с [Immer](https://immerjs.github.io/imme
 
 **Пример:**
 
-```ts
+```ts showLineNumbers copy
 import { MachineManager, createMachine } from "lite-fsm";
 import { immerMiddleware } from "lite-fsm/middleware";
 
@@ -859,7 +859,7 @@ const manager = MachineManager({ toggle: toggleMachine }, { middleware: [immerMi
 
 #### devToolsMiddleware
 
-```ts
+```ts showLineNumbers copy
 devToolsMiddleware(options?: { blacklistActions: string[] }): Middleware
 ```
 
@@ -872,7 +872,7 @@ Middleware для интеграции с [Redux DevTools Extension](https://git
 
 **Пример:**
 
-```ts
+```ts showLineNumbers copy
 import { MachineManager, createMachine } from "lite-fsm";
 import { devToolsMiddleware } from "lite-fsm/middleware";
 
@@ -886,7 +886,7 @@ const manager = MachineManager(
 
 ### Middleware
 
-```ts
+```ts showLineNumbers copy
 type Middleware<S, A> = (api: {
   getState: () => S;
   transition: (action: A) => A;
@@ -900,7 +900,7 @@ type Middleware<S, A> = (api: {
 
 **Пример создания пользовательского middleware:**
 
-```ts
+```ts showLineNumbers copy
 // Middleware для отслеживания производительности
 const performanceMiddleware = (store) => (next) => (action) => {
   const start = Date.now();

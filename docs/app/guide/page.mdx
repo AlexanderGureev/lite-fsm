@@ -26,7 +26,7 @@
 
 Автомат создается с помощью функции `createMachine`:
 
-```ts
+```ts showLineNumbers copy
 import { createMachine } from "lite-fsm";
 
 const toggleMachine = createMachine({
@@ -74,7 +74,7 @@ const toggleMachine = createMachine({
 
 После создания автомата, нужно инициализировать менеджер:
 
-```ts
+```ts showLineNumbers copy
 import { MachineManager } from "lite-fsm";
 
 // Можно создать несколько автоматов и управлять ими через один менеджер
@@ -99,7 +99,7 @@ const { state, context } = manager.getState().toggle;
 
 Менеджер позволяет внедрять зависимости, которые будут доступны в эффектах:
 
-```ts
+```ts showLineNumbers copy
 // Создание зависимостей
 const dependencies = {
   services: {
@@ -171,7 +171,7 @@ const dataMachine = createMachine({
 
 Эффекты могут быть асинхронными, что позволяет легко интегрировать их с API и другими асинхронными операциями:
 
-```ts
+```ts showLineNumbers copy
 effects: {
   LOADING: async ({ transition, services }) => {
     try {
@@ -199,7 +199,7 @@ effects: {
 
 Можно использовать специальный символ `*` для обработки любого состояния:
 
-```ts
+```ts showLineNumbers copy
 import { createMachine, WILDCARD } from "lite-fsm";
 
 const machine = createMachine({
@@ -227,7 +227,7 @@ const machine = createMachine({
 
 Библиотека позволяет создавать эффекты с возможностью отмены:
 
-```ts
+```ts showLineNumbers copy
 import { createEffect } from "lite-fsm";
 
 const fetchDataEffect = createEffect({
@@ -322,7 +322,7 @@ sequenceDiagram
 
 **Традиционный подход с React Hooks:**
 
-```jsx
+```jsx showLineNumbers copy
 function UserProfile() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -365,7 +365,7 @@ function UserProfile() {
 
 **Подход с lite-fsm:**
 
-```jsx
+```jsx showLineNumbers copy
 // Компонент - только отображение и отправка событий
 function UserProfile() {
   const { state, context } = useSelector((state) => state.user);
@@ -437,7 +437,7 @@ function UserProfile() {
 
 **До (React компонент с логикой):**
 
-```jsx
+```jsx showLineNumbers copy
 function PaymentForm() {
   const [paymentMethod, setPaymentMethod] = useState("card");
   const [cardDetails, setCardDetails] = useState({});
@@ -478,7 +478,7 @@ function PaymentForm() {
 
 **После (с lite-fsm):**
 
-```jsx
+```jsx showLineNumbers copy
 // Компонент только для отображения
 function PaymentForm() {
   const { state, context } = useSelector((state) => state.payment);

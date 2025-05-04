@@ -18,7 +18,7 @@
 
 Важно понимать, что при отмене эффекта сам код уже запущенного эффекта продолжает выполняться, но игнорируются transition-вызовы внутри этого эффекта. То есть мы просто игнорируем результаты работы эффектов, но не прерываем их выполнение:
 
-```ts
+```ts showLineNumbers copy
 export const player = createMachine({
   config: {
     IDLE: {
@@ -74,7 +74,7 @@ export const player = createMachine({
 
 Выполняется только последний вызов, предыдущие отменяются (transition-вызовы игнорируются):
 
-```ts
+```ts showLineNumbers copy
 const searchEffect = createEffect({
   type: "latest", // необходимо явно указывать для активации отмены эффектов
   effect: async ({ transition }, { query }) => {
@@ -88,7 +88,7 @@ const searchEffect = createEffect({
 
 Выполняются все вызовы, без отмены (используется по умолчанию):
 
-```ts
+```ts showLineNumbers copy
 const logEffect = createEffect({
   type: "every", // можно не указывать, так как это значение по умолчанию
   effect: async ({ services }, { event }) => {

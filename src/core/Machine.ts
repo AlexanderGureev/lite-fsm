@@ -1,6 +1,17 @@
 /* eslint-disable @typescript-eslint/ban-types -- ok*/
-import { CFG, DefaultDeps, FSMEvent, MachineConfig, State, Subscriber, WILDCARD as WTYPE } from "./types";
-import { WILDCARD } from "./utils";
+
+import {
+  CFG,
+  DefaultDeps,
+  FSMEvent,
+  MachineConfig,
+  Middleware,
+  State,
+  StateType,
+  Subscriber,
+  WILDCARD as WTYPE,
+} from "./types";
+import { compose, WILDCARD } from "./utils";
 
 export const CreateMachine = <
   C extends CFG<C, P, keyof C | WTYPE>,
@@ -11,8 +22,6 @@ export const CreateMachine = <
 >(
   cfg: MachineConfig<C, T, P, D>,
 ) => {
-  let subs: Array<Subscriber<State<keyof C>, T>> = [];
-
   return {
     config: cfg.config,
     transition: (s: { state: State<keyof C>; context: T }, action: P) => {
@@ -32,12 +41,6 @@ export const CreateMachine = <
         context: { ...s.context, ...payload },
       };
     },
-    onTransition: (cb: Subscriber<State<keyof C>, T>) => {
-      subs.push(cb);
-      return () => {
-        subs = subs.filter((c) => c !== cb);
-      };
-    },
     invokeEffect: async (prevState: State<keyof C>, currentState: State<keyof C>, deps: D & DefaultDeps<any, C, P>) => {
       if (!cfg.effects) return;
 
@@ -49,3 +52,178 @@ export const CreateMachine = <
     },
   };
 };
+
+export const createMachine = <
+  C extends CFG<C, P, keyof C | WTYPE>,
+  T extends Record<string, any>,
+  P extends FSMEvent<any, any>,
+  D extends Record<string, any>,
+>(
+  cfg: MachineConfig<C, T, P, D>,
+  opts: {
+    onError?: (err: any) => void;
+    dependencies?: D;
+  } = {},
+) => {
+  const machine = CreateMachine(cfg);
+  let transition: (_action: P) => P;
+  let _middleware: Middleware<StateType<C, T>, P>[] = [];
+
+  let subs: Array<Subscriber<C, T, P>> = [];
+
+  let state: StateType<C, T> = {
+    context: cfg.initialContext,
+    state: cfg.initialState,
+  };
+
+  let rootReducer = (prevState: StateType<C, T>, action: P) => {
+    const nextState = machine.transition(prevState, action)!;
+    return nextState;
+  };
+
+  const replaceReducer = (
+    cb: (
+      reducer: (state: StateType<C, T>, action: P) => StateType<C, T>,
+    ) => (state: StateType<C, T>, action: P) => StateType<C, T>,
+  ) => {
+    rootReducer = cb(rootReducer);
+  };
+
+  const condition = (predicate: (a: P) => boolean) =>
+    new Promise<boolean>((resolve, reject) => {
+      const unsubscribe = onTransition((_prevState, _currentState, action) => {
+        try {
+          if (predicate(action)) {
+            unsubscribe();
+            resolve(true);
+          }
+        } catch (err) {
+          unsubscribe();
+          reject(err);
+        }
+      });
+    });
+
+  const invokeEffects = (prevState: StateType<C, T>, currentState: StateType<C, T>, action: P) => {
+    machine
+      .invokeEffect(prevState.state, currentState.state, {
+        ...(opts.dependencies as D),
+        transition,
+        action,
+        condition,
+      })
+      .catch((err) => {
+        opts?.onError?.(err);
+      });
+  };
+
+  const onTransition = (cb: Subscriber<C, T, P>) => {
+    subs.push(cb);
+    return () => {
+      subs = subs.filter((c) => c !== cb);
+    };
+  };
+
+  const invokeSubscribers: Subscriber<C, T, P> = (prevState, currentState, action) => {
+    subs.forEach((s) => s(prevState, currentState, action));
+  };
+
+  const _transition = (action: P) => {
+    const prevState = state;
+    state = rootReducer(prevState, action);
+    invokeSubscribers(prevState, state, action);
+
+    return action;
+  };
+
+  const createWrappedTransition = (funcs?: Array<Middleware<StateType<C, T>, P>>): ((action: P) => P) => {
+    if (!funcs?.length) return _transition;
+
+    const f = funcs.map((m) =>
+      m({
+        getState,
+        transition: (action: P) => transition(action),
+        replaceReducer,
+        onTransition,
+        condition,
+      }),
+    );
+
+    return compose(...f)(_transition);
+  };
+
+  let wrappedTransition = createWrappedTransition(_middleware);
+
+  transition = (action: P) => {
+    const prevState = state;
+    const newAction = wrappedTransition(action);
+    const currentState = state;
+    invokeEffects(prevState, currentState, newAction);
+    return newAction;
+  };
+
+  const getState = () => ({ ...state });
+  const addMiddleware = (...middleware: Middleware<StateType<C, T>, P>[]) => {
+    _middleware = [..._middleware, ...middleware];
+    wrappedTransition = createWrappedTransition(_middleware);
+  };
+
+  return { transition, getState, onTransition, addMiddleware };
+};
+
+export const defineMachine = <P extends FSMEvent<any, any> = any, D extends Record<string, any> = {}>(
+  opts: {
+    onError?: (err: any) => void;
+    dependencies?: D;
+  } = {},
+) => ({
+  create: <C extends CFG<C, P, keyof C | WTYPE>, T extends Record<string, any>>(cfg: MachineConfig<C, T, P, D>) =>
+    createMachine(cfg, opts),
+});
+
+// type Events = FSMEvent<"DO_INIT"> | FSMEvent<"__DEBUG">;
+// type Dependencies = {
+//   services: {
+//     logger: { log: typeof console.log };
+//   };
+// };
+
+// const m = defineMachine<Events, Dependencies>({
+//   onError: () => {},
+//   dependencies: {
+//     services: {
+//       logger: {
+//         log: console.log,
+//       },
+//     },
+//   },
+// }).create({
+//   config: {
+//     IDLE: {
+//       DO_INIT: "READY",
+//     },
+//     READY: {},
+//   },
+//   initialState: "IDLE",
+//   initialContext: { a: 1 },
+//   effects: {
+//     READY: async ({ action, condition, transition, services }) => {
+//       services.logger.log("test 123");
+
+//       // await new Promise<void>((res) =>
+//       //   setTimeout(() => {
+//       //     res();
+//       //   }, 5000),
+//       // );
+
+//       // transition({ type: "__DEBUG" });
+//     },
+//   },
+// });
+
+// m.addMiddleware(immerMiddleware);
+
+// m.onTransition((prev, next, action) => {
+//   console.log("[on transition]", { prev, next, action });
+// });
+// m.transition({ type: "DO_INIT" });

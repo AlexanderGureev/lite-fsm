@@ -6,7 +6,7 @@
 
 Для сложных автоматов с множеством состояний и переходов разделяйте конфигурацию на логические группы:
 
-```ts
+```ts showLineNumbers copy
 import { createMachine, createConfig } from "lite-fsm";
 
 // Состояния создания и редактирования
@@ -71,7 +71,7 @@ const workflowMachine = createMachine({
 
 **Хорошо:** Отдельные автоматы для различных функциональных областей
 
-```ts
+```ts showLineNumbers copy
 // Автомат для аутентификации
 const authMachine = createMachine({
   config: {
@@ -107,7 +107,7 @@ const manager = MachineManager({
 
 **Плохо:** Один огромный автомат с перемешанной ответственностью
 
-```ts
+```ts showLineNumbers copy
 const appMachine = createMachine({
   config: {
     LOGGED_OUT: { LOGIN: "LOGGING_IN" },
@@ -129,7 +129,7 @@ const appMachine = createMachine({
 
 Для сложных приложений объединяйте автоматы по функциональным областям:
 
-```ts
+```ts showLineNumbers copy
 // Autомат авторизации
 const authMachine = createMachine({
   /* ... */
@@ -184,7 +184,7 @@ userManager.onTransition((prevState, nextState) => {
 
 **Хорошо:**
 
-```ts
+```ts showLineNumbers copy
 const machine = createMachine({
   config: {
     IDLE: { FETCH: "LOADING" },
@@ -209,7 +209,7 @@ const machine = createMachine({
 
 **Плохо:**
 
-```ts
+```ts showLineNumbers copy
 // Побочные эффекты вне автомата
 const fetchData = async () => {
   manager.transition({ type: "FETCH" });
@@ -230,7 +230,7 @@ button.addEventListener("click", fetchData);
 
 Выносите сложную бизнес-логику в сервисы и внедряйте их через `setDependencies`:
 
-```ts
+```ts showLineNumbers copy
 // Определение сервисов
 const services = {
   api: {
@@ -324,7 +324,7 @@ const formMachine = createMachine({
 
 Структурируйте контекст автомата по логическим категориям:
 
-```ts
+```ts showLineNumbers copy
 const formMachine = createMachine({
   // ...
   initialContext: {
@@ -361,7 +361,7 @@ const formMachine = createMachine({
 
 Вместо сложных манипуляций с контекстом в эффектах используйте редьюсеры:
 
-```ts
+```ts showLineNumbers copy
 const todoMachine = createMachine({
   config: {
     IDLE: {
@@ -452,7 +452,7 @@ const todoMachine = createMachine({
 
 Для упрощения тестирования создавайте мок-версии сервисов:
 
-```ts
+```ts showLineNumbers copy
 // Реальные сервисы
 const realServices = {
   api: {
@@ -507,7 +507,7 @@ test("should handle successful data fetch", async () => {
 
 Добавьте логирование переходов для отслеживания поведения приложения в продакшене:
 
-```ts
+```ts showLineNumbers copy
 // Фабрика для создания менеджера с логированием
 function createLoggedManager(machines, options = {}) {
   const manager = MachineManager(machines);

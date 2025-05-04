@@ -16,7 +16,7 @@
 
 Рассмотрим пример медиаплеера с параллельными автоматами, где каждый автомат обрабатывает свою часть функциональности:
 
-```ts
+```ts showLineNumbers copy
 // Автомат для работы с данными трека
 export const player = createMachine({
   config: {
@@ -118,7 +118,7 @@ manager.transition({ type: "CHANGE_TRACK", payload: { trackId: "123" } });
 
 Каждый автомат должен отвечать за конкретную и хорошо определенную область функциональности:
 
-```ts
+```ts showLineNumbers copy
 // Автомат для аутентификации
 const authMachine = createMachine({
   config: {
@@ -166,7 +166,7 @@ const profileMachine = createMachine({
 
 Используйте согласованные имена событий, чтобы обеспечить понятное взаимодействие между автоматами:
 
-```ts
+```ts showLineNumbers copy
 // В authMachine
 effects: {
   AUTHENTICATING: async ({ transition, services }) => {
@@ -187,7 +187,7 @@ effects: {
 
 В сложных системах полезно устанавливать иерархические отношения между автоматами:
 
-```ts
+```ts showLineNumbers copy
 // Родительский автомат
 const appMachine = createMachine({
   config: {

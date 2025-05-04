@@ -10,7 +10,7 @@
 
 Для определения глобального эффекта используйте символ `*` в качестве ключа в объекте `effects`:
 
-```ts
+```ts showLineNumbers copy
 import { createMachine, WILDCARD } from "lite-fsm";
 
 export const analytics = createMachine({
@@ -34,7 +34,7 @@ export const analytics = createMachine({
 
 Вы также можете использовать константу `WILDCARD` для большей читаемости:
 
-```ts
+```ts showLineNumbers copy
 effects: {
   [WILDCARD]: ({ action, services, getState }) => {
     // Реализация глобального эффекта
@@ -51,7 +51,7 @@ effects: {
 - `services` - зависимости, предоставленные через `setDependencies`
 - `getState` - функция для получения текущего состояния всех автоматов
 
-```ts
+```ts showLineNumbers copy
 effects: {
   [WILDCARD]: ({ action, transition, services, getState }) => {
     // Используйте все доступные параметры
@@ -74,7 +74,7 @@ effects: {
 
 Один из самых распространенных случаев использования глобальных эффектов - отправка событий в системы аналитики:
 
-```ts
+```ts showLineNumbers copy
 const analyticsMachine = createMachine({
   config: {
     IDLE: {},
@@ -116,7 +116,7 @@ const analyticsMachine = createMachine({
 
 Глобальные эффекты идеально подходят для реализации логирования:
 
-```ts
+```ts showLineNumbers copy
 const loggingMachine = createMachine({
   config: {
     IDLE: {},
@@ -141,7 +141,7 @@ const loggingMachine = createMachine({
 
 Отслеживание и обработка ошибок на глобальном уровне:
 
-```ts
+```ts showLineNumbers copy
 const errorMonitorMachine = createMachine({
   config: {
     IDLE: {},

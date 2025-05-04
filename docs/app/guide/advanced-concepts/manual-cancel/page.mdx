@@ -10,7 +10,7 @@
 
 В следующем примере показано, как реализовать ручную отмену эффекта на основе изменения значения в контексте:
 
-```ts
+```ts showLineNumbers copy
 export const streams = createMachine({
   config: {
     IDLE: {
@@ -79,7 +79,7 @@ export const streams = createMachine({
 
 ### Отмена по внешнему сигналу
 
-```ts
+```ts showLineNumbers copy
 // Создаем контроллер для отмены поисковых запросов
 const createSearchController = () => {
   return {

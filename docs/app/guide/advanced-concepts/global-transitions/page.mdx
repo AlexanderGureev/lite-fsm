@@ -10,7 +10,7 @@
 
 Глобальные переходы определяются в конфигурации автомата с использованием символа `*` в качестве ключа:
 
-```ts
+```ts showLineNumbers copy
 import { createMachine, WILDCARD } from "lite-fsm";
 
 export const player = createMachine({
@@ -43,7 +43,7 @@ export const player = createMachine({
 
 Вы также можете использовать константу `WILDCARD` для лучшей читаемости:
 
-```ts
+```ts showLineNumbers copy
 import { createMachine, WILDCARD } from "lite-fsm";
 
 export const player = createMachine({
@@ -66,7 +66,7 @@ export const player = createMachine({
 
 Это означает, что глобальные переходы могут быть переопределены в конкретных состояниях:
 
-```ts
+```ts showLineNumbers copy
 config: {
   [WILDCARD]: {
     RESET: "IDLE", // Применяется ко всем состояниям
@@ -82,7 +82,7 @@ config: {
 
 ### 1. Общие действия, доступные в любом состоянии
 
-```ts
+```ts showLineNumbers copy
 const playerMachine = createMachine({
   config: {
     [WILDCARD]: {
@@ -102,7 +102,7 @@ const playerMachine = createMachine({
 
 ### 2. Обработка ошибок на глобальном уровне
 
-```ts
+```ts showLineNumbers copy
 const appMachine = createMachine({
   config: {
     [WILDCARD]: {
@@ -126,7 +126,7 @@ const appMachine = createMachine({
 
 ### 3. Сброс состояния
 
-```ts
+```ts showLineNumbers copy
 const formMachine = createMachine({
   config: {
     [WILDCARD]: {

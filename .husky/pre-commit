@@ -1,4 +1,8 @@
 #!/usr/bin/env sh
 . "$(dirname -- "$0")/_/husky.sh"
 
+# Запуск тестов перед коммитом
+npm run test
+
+# Сборка проекта
 npm run build

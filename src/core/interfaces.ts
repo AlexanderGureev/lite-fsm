@@ -18,9 +18,6 @@ export interface IMachine<
   D extends Record<string, any> = {},
 > {
   transition: (state: { state: State<keyof C>; context: T }, action: P) => { state: State<keyof C>; context: T };
-  // getState: () => { state: S; context: C };
-  // onTransition: (cb: Subscriber<S, C>) => () => void;
-  // invokeSubscribers: (prevState: { state: S; context: C }) => void;
   invokeEffect: (
     prevState: State<keyof C>,
     currentState: State<keyof C>,
