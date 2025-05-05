@@ -4,13 +4,13 @@
 
 ### Структурируйте большие автоматы
 
-Для сложных автоматов с множеством состояний и переходов разделяйте конфигурацию на логические группы:
+Для сложных автоматов с множеством состояний и переходов вы можете разделять конфигурацию на логические группы:
 
 ```ts showLineNumbers copy
 import { createMachine, createConfig } from "lite-fsm";
 
 // Состояния создания и редактирования
-const editingStates = createConfig({
+const editingStates = {
   DRAFT: {
     SUBMIT: "REVIEW",
     SAVE: null,
@@ -19,10 +19,10 @@ const editingStates = createConfig({
     SAVE: null,
     DONE: "REVIEW",
   },
-});
+} as const;
 
 // Состояния проверки
-const reviewStates = createConfig({
+const reviewStates = {
   REVIEW: {
     APPROVE: "APPROVED",
     REJECT: "REJECTED",
@@ -35,10 +35,10 @@ const reviewStates = createConfig({
   REJECTED: {
     EDIT: "EDITING",
   },
-});
+} as const;
 
 // Состояния публикации
-const publishStates = createConfig({
+const publishStates = {
   PUBLISHED: {
     ARCHIVE: "ARCHIVED",
     UNPUBLISH: "DRAFT",
@@ -46,22 +46,24 @@ const publishStates = createConfig({
   ARCHIVED: {
     RESTORE: "DRAFT",
   },
-});
+} as const;
 
 // Объединение в полную конфигурацию
-const workflowConfig = {
+const workflowConfig = createConfig({
   ...editingStates,
   ...reviewStates,
   ...publishStates,
-};
+});
 
 // Создание автомата
 const workflowMachine = createMachine({
   config: workflowConfig,
   initialState: "DRAFT",
-  // ...
+  initialContext: {},
 });
 ```
+
+> **Примечание:** Подробное руководство по композиции автоматов, организации файловой структуры и дополнительные примеры вы найдете в разделе [Создание автомата](/guide/advanced-concepts/create-machine). Там показаны различные техники модульного создания как для JavaScript, так и для TypeScript.
 
 ## Моделирование приложения
 
@@ -125,9 +127,9 @@ const appMachine = createMachine({
 });
 ```
 
-### Используйте иерархический подход к организации автоматов
+#### Микросервисная архитектура и распределенные автоматы
 
-Для сложных приложений объединяйте автоматы по функциональным областям:
+В очень сложных приложениях или приложениях с микросервисной архитектурой использование нескольких независимых менеджеров автоматов может предоставять дополнительные преимущества:
 
 ```ts showLineNumbers copy
 // Autомат авторизации
@@ -175,6 +177,18 @@ userManager.onTransition((prevState, nextState) => {
   }
 });
 ```
+
+#### Преимущества использования нескольких менеджеров вместо одного
+
+Хотя использование одного глобального менеджера автоматов может быть удобным для небольших и средних приложений, разделение на несколько менеджеров имеет следующие преимущества:
+
+1. **Изоляция доменов**: Каждый менеджер отвечает за свой домен и не зависит от других частей системы, что упрощает разработку и тестирование
+
+2. **Масштабируемость**: Независимые менеджеры могут работать на разных серверах или в разных процессах, что улучшает производительность
+
+3. **Устойчивость к сбоям**: Сбой в одном домене не обязательно приведет к сбою всей системы
+
+4. **Оптимизация памяти**: Каждый клиент или сервис может загружать только необходимые ему автоматы
 
 ## Работа с эффектами
 
@@ -305,7 +319,7 @@ const formMachine = createMachine({
       try {
         const { data } = event.payload;
         await services.api.saveData(data);
-        services.storage.saveToLocalStorage("lastSuccessfulSubmit", new Date());
+        services.storage.saveToLocalStorage("lastSuccessfulSubmit", event.payload.timestamp || Date.now());
         transition({ type: "SUBMIT_SUCCESS" });
       } catch (error) {
         transition({
@@ -359,7 +373,7 @@ const formMachine = createMachine({
 
 ### Используйте пользовательские редьюсеры для сложной логики обновления
 
-Вместо сложных манипуляций с контекстом в эффектах используйте редьюсеры:
+Держите всю логику по обновлению контекста в редьюсерах, когда это возможно. Редьюсеры идеально подходят для любой логики, которая может быть реализована как чистая функция и не нуждается в доступе к сервисам или состоянию других автоматов.
 
 ```ts showLineNumbers copy
 const todoMachine = createMachine({
@@ -384,7 +398,7 @@ const todoMachine = createMachine({
   reducer: (state, action, options) => {
     // Текущее состояние и контекст
     const { state: currentState, context } = state;
-    const nextState = options.nextState || currentState;
+    const nextState = options.nextState;
 
     // Новый контекст в зависимости от действия
     let nextContext;
@@ -392,10 +406,10 @@ const todoMachine = createMachine({
     switch (action.type) {
       case "ADD_TODO":
         const newTodo = {
-          id: Date.now(),
+          id: action.payload.id,
           text: action.payload.text,
           completed: false,
-          createdAt: new Date().toISOString(),
+          createdAt: action.payload.createdAt,
         };
 
         nextContext = {
@@ -446,6 +460,252 @@ const todoMachine = createMachine({
 });
 ```
 
+> **Примечание:** Редьюсеры должны быть чистыми функциями. Вызовы таких методов как `Date.now()` или `new Date()` создают побочные эффекты и делают редьюсеры непредсказуемыми. Вместо этого генерируйте ID и временные метки вне редьюсера, например, в эффектах или обработчиках событий, и передавайте их через payload:
+>
+> ```ts
+> // Правильно: генерация ID и timestamp вне редьюсера
+> const handleAddTodo = (text) => {
+>   const now = new Date();
+>   manager.transition({
+>     type: "ADD_TODO",
+>     payload: {
+>       id: generateId(), // или Date.now()
+>       text,
+>       createdAt: now.toISOString(),
+>     },
+>   });
+> };
+> ```
+
+#### Преимущества использования редьюсеров
+
+1. **Предсказуемость** — редьюсеры обеспечивают предсказуемые изменения состояния, так как они являются чистыми функциями
+2. **Тестируемость** — редьюсеры легко тестировать изолированно, просто передавая им состояние и действие
+3. **Централизация логики** — вся логика обновления состояния сосредоточена в одном месте, что упрощает отладку и понимание кода
+4. **Разделение ответственности** — редьюсеры отвечают за обновление состояния, эффекты — за побочные эффекты, что создает чистую архитектуру
+
+#### Когда использовать редьюсеры, а когда эффекты
+
+**Используйте редьюсеры для:**
+
+- Всех преобразований данных и обновлений контекста
+- Логики, которая не требует доступа к внешним API или сервисам
+- Сложных вычислений на основе имеющихся данных в контексте
+- Обновления связанных частей контекста (например, обновление статистики при изменении данных)
+
+**Используйте эффекты для:**
+
+- Асинхронных операций (API запросы, таймеры)
+- Доступа к сервисам (аналитика, локальное хранилище)
+- Координации между несколькими автоматами
+- Сложной последовательности событий, которые должны происходить на определенных этапах
+
+## Используйте вложенные и параллельные автоматы для управления сложностью
+
+При моделировании сложных бизнес-процессов часто возникает проблема "взрыва состояний", когда количество состояний и переходов становится слишком большим для эффективного управления. В этих случаях стоит использовать концепции из Statecharts:
+
+### Параллельные автоматы
+
+Параллельные автоматы позволяют разделить сложную систему на несколько независимых автоматов, которые могут реагировать на одни и те же события одновременно:
+
+```ts showLineNumbers copy
+// Автомат для управления процессом заказа
+const orderMachine = createMachine({
+  config: {
+    IDLE: {
+      START_CHECKOUT: "PROCESSING",
+    },
+    PROCESSING: {
+      PAYMENT_SUCCESS: "COMPLETED",
+      PAYMENT_ERROR: "ERROR",
+    },
+    ERROR: {
+      RETRY_PAYMENT: "PROCESSING",
+      CANCEL: "IDLE",
+    },
+    COMPLETED: {},
+  },
+  // ...
+  effects: {
+    PROCESSING: async ({ transition, services }) => {
+      try {
+        await services.payment.process();
+        transition({ type: "PAYMENT_SUCCESS" });
+      } catch (error) {
+        transition({ type: "PAYMENT_ERROR", payload: { error } });
+      }
+    },
+  },
+});
+
+// Параллельный автомат для управления уведомлениями
+// Реагирует на те же события, что и orderMachine
+const notificationsMachine = createMachine({
+  config: {
+    IDLE: {
+      // Тот же тип события, что и у orderMachine
+      START_CHECKOUT: "SHOWING_PROGRESS",
+      // Обрабатывает те же события успеха/ошибки
+      PAYMENT_SUCCESS: "SHOWING_SUCCESS",
+      PAYMENT_ERROR: "SHOWING_ERROR",
+    },
+    SHOWING_PROGRESS: {
+      HIDE: "IDLE",
+      // Также реагирует на результаты платежа
+      PAYMENT_SUCCESS: "SHOWING_SUCCESS",
+      PAYMENT_ERROR: "SHOWING_ERROR",
+    },
+    SHOWING_SUCCESS: {
+      HIDE: "IDLE",
+    },
+    SHOWING_ERROR: {
+      HIDE: "IDLE",
+      RETRY_PAYMENT: "SHOWING_PROGRESS",
+    },
+  },
+  // ...
+  effects: {
+    SHOWING_SUCCESS: ({ services, transition }) => {
+      // Автоматически скрыть уведомление через 3 секунды
+      setTimeout(() => transition({ type: "HIDE" }), 3000);
+    },
+  },
+});
+
+// Параллельный автомат для отслеживания аналитики
+// Также реагирует на те же события процесса оформления заказа
+const analyticsMachine = createMachine({
+  config: {
+    TRACKING: {
+      // Отслеживает все те же события
+      START_CHECKOUT: null, // null = остаемся в том же состоянии
+      PAYMENT_SUCCESS: null,
+      PAYMENT_ERROR: null,
+      RETRY_PAYMENT: null,
+    },
+  },
+  // ...
+  effects: {
+    TRACKING: ({ action, services }) => {
+      // Отправляем аналитику при каждом событии
+      services.analytics.trackEvent(action.type, action.payload);
+    },
+  },
+});
+
+// Управление через общий менеджер
+const manager = MachineManager({
+  order: orderMachine,
+  notifications: notificationsMachine,
+  analytics: analyticsMachine,
+});
+
+// Одно событие вызывает параллельную работу всех трех автоматов
+manager.transition({ type: "START_CHECKOUT", payload: { orderId: "12345" } });
+```
+
+Ключевое преимущество параллельных автоматов: одно и то же событие (например, `START_CHECKOUT`) обрабатывается одновременно несколькими автоматами, что позволяет разделить ответственность между различными функциональными компонентами системы.
+
+### Иерархические (вложенные) автоматы
+
+Вложенные автоматы позволяют моделировать иерархию состояний, где состояние одного автомата влияет на поведение других автоматов:
+
+```ts showLineNumbers copy
+// Моделирование вложенности через композицию автоматов
+const authMachine = createMachine({
+  config: {
+    IDLE: {
+      INIT: "CHECKING_AUTH",
+    },
+    CHECKING_AUTH: {
+      HAS_SESSION: "AUTHENTICATED",
+      NO_SESSION: "UNAUTHENTICATED",
+    },
+    AUTHENTICATED: {
+      LOGOUT: "UNAUTHENTICATED",
+    },
+    UNAUTHENTICATED: {
+      LOGIN: "LOGIN_PENDING",
+    },
+    LOGIN_PENDING: {
+      LOGIN_SUCCESS: "AUTHENTICATED",
+      LOGIN_ERROR: "LOGIN_ERROR",
+    },
+    LOGIN_ERROR: {
+      RETRY: "LOGIN_PENDING",
+      RESET: "UNAUTHENTICATED",
+    },
+  },
+  // ...
+});
+
+// Автомат для управления профилем, который напрямую реагирует на события аутентификации
+const profileMachine = createMachine({
+  config: {
+    INACTIVE: {
+      // Прямая реакция на те же события аутентификации
+      HAS_SESSION: "LOADING",
+      LOGIN_SUCCESS: "LOADING",
+    },
+    LOADING: {
+      LOAD_SUCCESS: "LOADED",
+      LOAD_ERROR: "ERROR",
+    },
+    LOADED: {
+      UPDATE: "UPDATING",
+      // Профиль возвращается в неактивное состояние при выходе
+      LOGOUT: "INACTIVE",
+    },
+    UPDATING: {
+      UPDATE_SUCCESS: "LOADED",
+      UPDATE_ERROR: "ERROR",
+      // Также реагируем на выход из системы
+      LOGOUT: "INACTIVE",
+    },
+    ERROR: {
+      RETRY: "LOADING",
+      // Также реагируем на выход из системы
+      LOGOUT: "INACTIVE",
+    },
+  },
+  // ...
+  effects: {
+    LOADING: async ({ services, transition }) => {
+      try {
+        const profileData = await services.api.fetchProfile();
+        transition({ type: "LOAD_SUCCESS", payload: { profile: profileData } });
+      } catch (error) {
+        transition({ type: "LOAD_ERROR", payload: { error } });
+      }
+    },
+  },
+});
+
+// Управление через общий менеджер
+const manager = MachineManager({
+  auth: authMachine,
+  profile: profileMachine,
+});
+
+manager.transition({ type: "INIT" });
+// Когда обнаружена сессия, событие активирует оба автомата:
+// - auth переходит в AUTHENTICATED
+// - profile переходит из INACTIVE в LOADING и начинает загрузку данных
+manager.transition({ type: "HAS_SESSION" });
+```
+
+В этом примере оба автомата напрямую реагируют на одни и те же события (`HAS_SESSION`, `LOGIN_SUCCESS`, `LOGOUT`), что позволяет создать иерархию без использования эффектов для координации. Профиль пользователя автоматически начинает загружаться, когда обнаружена сессия пользователя, и переходит в неактивное состояние при выходе.
+
+### Преимущества использования вложенных и параллельных автоматов
+
+1. **Уменьшение сложности** — разделение системы на логические компоненты делает её проще для понимания
+2. **Повышение повторного использования** — независимые автоматы могут быть использованы повторно в других частях приложения
+3. **Улучшенная поддерживаемость** — изменения в одном автомате не влияют на работу других
+4. **Улучшенное тестирование** — автоматы можно тестировать независимо друг от друга
+5. **Естественное моделирование бизнес-процессов** — многие бизнес-процессы сами по себе имеют иерархическую и/или параллельную структуру
+
+Подробную информацию о реализации и использовании параллельных автоматов можно найти в разделе [Параллельные автоматы](/guide/advanced-concepts/parallel).
+
 ## Дебаггинг и тестирование
 
 ### Создайте мок-сервисы для тестирования
@@ -494,60 +754,16 @@ test("should handle successful data fetch", async () => {
   manager.transition({ type: "FETCH" });
 
   // Ждем завершения асинхронных операций
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  await vi.waitFor(() => {
+    const { state } = manager.getState().data;
+    return state === "SUCCESS";
+  });
 
   // Проверяем результат
   const { state, context } = manager.getState().data;
   expect(state).toBe("SUCCESS");
   expect(context.data).toEqual([{ id: 1, name: "Test" }]);
 });
-```
-
-### Логирование переходов в продакшене
-
-Добавьте логирование переходов для отслеживания поведения приложения в продакшене:
-
-```ts showLineNumbers copy
-// Фабрика для создания менеджера с логированием
-function createLoggedManager(machines, options = {}) {
-  const manager = MachineManager(machines);
-
-  // Подписываемся на все переходы
-  manager.onTransition((prevState, nextState, action) => {
-    // Для продакшена можно использовать специальные сервисы логирования
-    if (options.logToServer) {
-      logToServer({
-        timestamp: Date.now(),
-        action,
-        prevState,
-        nextState,
-        sessionId: options.sessionId,
-        userId: options.userId,
-      });
-    }
-
-    // Для разработки можно выводить в консоль
-    if (process.env.NODE_ENV === "development") {
-      console.group("State Transition");
-      console.log("Action:", action);
-      console.log("Prev State:", prevState);
-      console.log("Next State:", nextState);
-      console.groupEnd();
-    }
-  });
-
-  return manager;
-}
-
-// Использование
-const manager = createLoggedManager(
-  { auth: authMachine, data: dataMachine },
-  {
-    logToServer: true,
-    sessionId: "user-session-id",
-    userId: "user-id",
-  },
-);
 ```
 
 ## Интеграция в приложение
@@ -584,6 +800,20 @@ src/
     ├── user/
     └── products/
 ```
+
+### Используйте полную типизацию с TypeScript
+
+При разработке приложений с использованием TypeScript настоятельно рекомендуется создавать строго типизированные версии всех функций библиотеки `lite-fsm`. Это обеспечивает полную проверку типов для вашей системы конечных автоматов и предотвращает множество ошибок на этапе компиляции.
+
+Полная типизация предоставляет следующие преимущества:
+
+1. **Автодополнение состояний и событий** в IDE
+2. **Раннее обнаружение ошибок** на этапе разработки
+3. **Безопасный рефакторинг** с автоматическим отслеживанием всех затронутых мест
+4. **Предотвращение ошибок времени выполнения**, связанных с неправильными переходами
+5. **Самодокументирование кода** через типы, которые всегда соответствуют реальной реализации
+
+Подробную информацию о работе с TypeScript можно найти в разделе [Работа с TypeScript](/usage/typescript).
 
 ## Заключение
 

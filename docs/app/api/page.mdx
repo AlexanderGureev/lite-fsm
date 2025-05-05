@@ -119,30 +119,28 @@ const advancedManager = MachineManager(
 
 ```ts showLineNumbers copy
 transition<E extends string, P extends Record<string, any>>(
-  action: { type: E; machine?: string; payload?: P }
+  action: { type: E; payload?: P }
 ): void
 ```
 
-Выполняет переход состояния для указанного (или всех) автоматов.
+Выполняет переход состояния для всех автоматов.
 
 **Параметры:**
 
 - `action`: Объект действия.
   - `type`: Тип события.
-  - `machine`: (Опционально) Имя автомата. Если не указано, действие будет отправлено всем автоматам.
-  - `payload`: (Опционально) Полезная нагрузка, которая будет объединена с контекстом.
+  - `payload`: (Опционально) Полезная нагрузка, которая будет доступна в редьюсерах и эффектах.
 
 **Пример:**
 
 ```ts showLineNumbers copy
-// Отправить событие конкретному автомату
+// Отправить событие с payload
 manager.transition({
   type: "TOGGLE",
-  machine: "toggle",
   payload: { lastToggled: new Date() },
 });
 
-// Отправить событие всем автоматам
+// Отправить событие без payload
 manager.transition({ type: "RESET" });
 ```
 
@@ -204,18 +202,19 @@ unsubscribe();
 ##### setDependencies
 
 ```ts showLineNumbers copy
-setDependencies(dependencies: D): void
+setDependencies<D extends Record<string, any> = {}>(dependencies: D | ((deps: D) => D)): void
 ```
 
-Устанавливает зависимости, которые будут доступны в эффектах.
+Устанавливает зависимости, которые будут доступны в эффектах. Можно передать либо объект с зависимостями, либо функцию обновления, которая получает текущие зависимости и возвращает новые.
 
 **Параметры:**
 
-- `dependencies`: Объект с зависимостями.
+- `dependencies`: Объект с зависимостями или функция, принимающая текущие зависимости и возвращающая новые.
 
-**Пример:**
+**Пример объекта:**
 
 ```ts showLineNumbers copy
+// Установка зависимостей напрямую через объект
 manager.setDependencies({
   services: {
     api: {
@@ -224,12 +223,42 @@ manager.setDependencies({
         return response.json();
       },
     },
+    storage: {
+      saveItem: (key, value) => localStorage.setItem(key, JSON.stringify(value)),
+      getItem: (key) => JSON.parse(localStorage.getItem(key) || "null"),
+    },
   },
   utils: {
     formatDate: (date) => new Intl.DateTimeFormat().format(date),
+    generateId: () => Math.random().toString(36).substring(2),
   },
 });
 ```
+
+**Пример функции обновления:**
+
+```ts showLineNumbers copy
+// Обновление существующих зависимостей с сохранением предыдущих значений
+manager.setDependencies((prevDeps) => ({
+  ...prevDeps,
+  services: {
+    ...prevDeps.services,
+    analytics: {
+      trackEvent: (eventName, params) => {
+        console.log(`Analytics event: ${eventName}`, params);
+        // Отправка события в аналитику
+      },
+    },
+  },
+  // Добавление новых зависимостей
+  env: {
+    isDevelopment: process.env.NODE_ENV === "development",
+    apiUrl: process.env.API_URL,
+  },
+}));
+```
+
+Функциональный подход особенно полезен для поэтапного обновления зависимостей или для добавления новых зависимостей без потери существующих.
 
 ##### replaceReducer
 
@@ -468,9 +497,11 @@ createEffect<D extends DefaultDeps<any, any, any>, P extends Record<string, any>
 **Параметры:**
 
 - `opts`: Объект с опциями.
-  - `type`: (Опционально) Тип эффекта. Может быть `'latest'` для выполнения только последнего вызова.
+  - `type`: (Опционально) Тип эффекта. Может принимать следующие значения:
+    - `"every"`: (по умолчанию) Выполняет каждый вызов эффекта независимо от других вызовов.
+    - `"latest"`: Игнорирует вызовы `transition` из предыдущих вызовов эффекта при новом вызове. Важно понимать, что код эффекта продолжает выполняться, но вызовы `transition` из устаревших эффектов будут проигнорированы. Это позволяет избежать состояния гонки (race condition) в асинхронных операциях, например, при поиске или загрузке данных, когда важно обрабатывать только результат последнего запроса.
   - `effect`: Функция эффекта.
-  - `cancelFn`: (Опционально) Функция, которая возвращает функцию проверки условия отмены.
+  - `cancelFn`: (Опционально) Функция, которая возвращает функцию проверки условия отмены. Позволяет реализовать пользовательскую логику отмены эффекта.
 
 **Возвращает:**
 
@@ -481,19 +512,6 @@ createEffect<D extends DefaultDeps<any, any, any>, P extends Record<string, any>
 ```ts showLineNumbers copy
 import { createEffect, createMachine } from "lite-fsm";
 
-// Создание эффекта, который будет выполнять только последний вызов
-const searchEffect = createEffect({
-  type: "latest",
-  effect: async ({ transition, services }, { query }) => {
-    try {
-      const results = await services.api.search(query);
-      transition({ type: "SEARCH_SUCCESS", payload: { results } });
-    } catch (error) {
-      transition({ type: "SEARCH_ERROR", payload: { error: error.message } });
-    }
-  },
-});
-
 const searchMachine = createMachine({
   config: {
     IDLE: {
@@ -503,14 +521,43 @@ const searchMachine = createMachine({
       SEARCH_SUCCESS: "RESULTS",
       SEARCH_ERROR: "ERROR",
     },
-    // ...
-  },
-  effects: {
-    SEARCHING: (deps, action) => {
-      return searchEffect(deps, action.payload || {});
+    RESULTS: {
+      SEARCH: "SEARCHING",
+    },
+    ERROR: {
+      SEARCH: "SEARCHING",
     },
   },
-  // ...
+  initialState: "IDLE",
+  initialContext: {
+    query: "",
+    results: [],
+    error: null,
+    isLoading: false,
+  },
+  effects: {
+    SEARCHING: createEffect({
+      type: "latest", // Обрабатывать только результаты последнего поискового запроса
+      effect: async ({ transition, services, action }) => {
+        try {
+          const query = action.payload?.query || "";
+          const results = await services.api.search(query);
+
+          // Этот transition будет проигнорирован, если был сделан более новый запрос
+          transition({
+            type: "SEARCH_SUCCESS",
+            payload: { results },
+          });
+        } catch (error) {
+          // Этот transition тоже будет проигнорирован для устаревших запросов
+          transition({
+            type: "SEARCH_ERROR",
+            payload: { error: error.message },
+          });
+        }
+      },
+    }),
+  },
 });
 ```
 
@@ -546,120 +593,51 @@ const machine = createMachine({
 });
 ```
 
-## Типы TypeScript
+## React API
 
-### State
+Библиотека `lite-fsm` предоставляет интеграцию с React через набор компонентов и хуков.
 
-```ts showLineNumbers copy
-type State<C> = keyof C;
-```
-
-Тип, представляющий состояние автомата.
-
-### FSMEvent
-
-```ts showLineNumbers copy
-type FSMEvent<E, P> = { type: E; payload?: P };
-```
-
-Тип, представляющий событие автомата.
-
-### CFG
-
-```ts showLineNumbers copy
-type CFG<C, T, E> = {
-  [K in keyof C]: { [A in E]?: K | null };
-};
-```
-
-Тип, представляющий конфигурацию автомата.
-
-### MachineConfig
-
-```ts showLineNumbers copy
-type MachineConfig<C, T, P, D> = {
-  config: C;
-  initialState: State<C>;
-  initialContext: T;
-  effects?: {
-    [K in State<C> | typeof WILDCARD]?: (deps: D & DefaultDeps<T, C, P>, action?: P) => any;
-  };
-  reducer?: (
-    state: { state: State<C>; context: T },
-    action: P,
-    options: { nextState: State<C> | null; config: C },
-  ) => { state: State<C>; context: T };
-};
-```
-
-Тип, представляющий полную конфигурацию автомата.
-
-### Machine
-
-```ts showLineNumbers copy
-type Machine<C, T, P, D> = {
-  config: C;
-  transition: (s: { state: State<C>; context: T }, action: P) => { state: State<C>; context: T };
-  onTransition: (cb: Subscriber<State<C>, T>) => () => void;
-  invokeEffect: (prevState: State<C>, currentState: State<C>, deps: D & DefaultDeps<T, C, P>) => Promise<any>;
-};
-```
-
-Тип, представляющий объект автомата.
-
-### MachineManager
-
-```ts showLineNumbers copy
-type MachineManager<M> = {
-  transition: <E extends string, P extends Record<string, any>>(action: {
-    type: E;
-    machine?: string;
-    payload?: P;
-  }) => void;
-  getState: () => { [K in keyof M]: { state: any; context: any } };
-  onTransition: (
-    callback: (
-      prevState: { [K in keyof M]: { state: any; context: any } },
-      nextState: { [K in keyof M]: { state: any; context: any } },
-      action?: { type: string; machine?: string; payload?: any },
-    ) => void,
-  ) => () => void;
-  setDependencies: (dependencies: any) => void;
-};
-```
-
-Тип, представляющий менеджер автоматов.
-
-## Модуль React
-
-Модуль React предоставляет хуки и компоненты для использования `lite-fsm` в приложениях React.
-
-### FSMProvider
+### FSMContextProvider
 
 ```tsx showLineNumbers copy
-<FSMProvider manager={manager}>{children}</FSMProvider>
+<FSMContextProvider machineManager={manager}>{children}</FSMContextProvider>
 ```
 
 Компонент-провайдер, который делает менеджер автоматов доступным для всех дочерних компонентов через React Context.
 
 **Свойства:**
 
-- `manager`: Объект менеджера автоматов.
+- `machineManager`: Объект менеджера автоматов, созданный с помощью `MachineManager`.
 - `children`: Дочерние компоненты.
 
 **Пример:**
 
 ```tsx showLineNumbers copy
-import { FSMProvider } from "lite-fsm/react";
-import { manager } from "./store";
+import { FSMContextProvider } from "lite-fsm/react";
+import { MachineManager, createMachine } from "lite-fsm";
 
+// Создание автомата
+const counterMachine = createMachine({
+  config: {
+    IDLE: { INCREMENT: null, DECREMENT: null, RESET: null },
+  },
+  initialState: "IDLE",
+  initialContext: { count: 0 },
+  // ...
+});
+
+// Создание менеджера
+const manager = MachineManager({
+  counter: counterMachine,
+});
+
+// Использование в приложении
 function App() {
   return (
-    <FSMProvider manager={manager}>
+    <FSMContextProvider machineManager={manager}>
       <Counter />
-      <UserProfile />
-      {/* Другие компоненты */}
-    </FSMProvider>
+      <Controls />
+    </FSMContextProvider>
   );
 }
 ```
@@ -667,21 +645,20 @@ function App() {
 ### useSelector
 
 ```ts showLineNumbers copy
-useSelector<S>(
-  selector: (state: { [K in keyof M]: { state: any; context: any } }) => S,
-  equalityFn?: (a: S, b: S) => boolean
-): S
+useSelector<R>(
+  selector: (state: MachinesState<S>) => R,
+  equalityFn?: (oldValue: R, newValue: R) => boolean
+): R
 ```
 
 Хук для выбора и подписки на часть состояния из менеджера автоматов.
 
 **Параметры:**
 
-- `selector`: Функция, которая принимает состояние и возвращает производную часть этого состояния.
+- `selector`: Функция, которая принимает состояние всех автоматов и возвращает производную часть этого состояния.
 - `equalityFn`: (Опционально) Функция сравнения для определения, изменилось ли выбранное состояние.
 
 **Возвращает:**
-
 Выбранную часть состояния.
 
 **Пример:**
@@ -690,21 +667,23 @@ useSelector<S>(
 import { useSelector } from "lite-fsm/react";
 
 function Counter() {
-  // Выбор счетчика из состояния
+  // Получение значения счетчика
   const count = useSelector((state) => state.counter.context.count);
 
-  // Выбор нескольких значений
-  const { isAuthenticated, username } = useSelector((state) => ({
-    isAuthenticated: state.auth.state === "AUTHENTICATED",
-    username: state.auth.context.user?.name || "Guest",
-  }));
+  // Получение нескольких значений с мемоизацией
+  const { isResettable, isDecrementable } = useSelector((state) => {
+    const count = state.counter.context.count;
+    return {
+      isResettable: count > 0,
+      isDecrementable: count > 0,
+    };
+  });
 
   return (
     <div>
-      <p>Count: {count}</p>
-      <p>
-        User: {username} ({isAuthenticated ? "Authenticated" : "Guest"})
-      </p>
+      <h2>Count: {count}</h2>
+      <p>Can reset: {isResettable ? "Yes" : "No"}</p>
+      <p>Can decrement: {isDecrementable ? "Yes" : "No"}</p>
     </div>
   );
 }
@@ -713,15 +692,12 @@ function Counter() {
 ### useTransition
 
 ```ts showLineNumbers copy
-useTransition(): <E extends string, P extends Record<string, any>>(
-  action: { type: E; machine?: string; payload?: P }
-) => void
+useTransition<P extends FSMEvent<any, any> = any>(): (action: P) => void
 ```
 
 Хук, который возвращает функцию для отправки действий менеджеру автоматов.
 
 **Возвращает:**
-
 Функция для отправки действий.
 
 **Пример:**
@@ -729,16 +705,21 @@ useTransition(): <E extends string, P extends Record<string, any>>(
 ```tsx showLineNumbers copy
 import { useSelector, useTransition } from "lite-fsm/react";
 
-function Counter() {
+function CounterControls() {
   const count = useSelector((state) => state.counter.context.count);
   const transition = useTransition();
 
   return (
     <div>
-      <p>Count: {count}</p>
-      <button onClick={() => transition({ type: "INCREMENT", machine: "counter" })}>Increment</button>
-      <button onClick={() => transition({ type: "DECREMENT", machine: "counter" })}>Decrement</button>
-      <button onClick={() => transition({ type: "RESET", machine: "counter" })}>Reset</button>
+      <button onClick={() => transition({ type: "INCREMENT" })}>Increment</button>
+
+      <button onClick={() => transition({ type: "DECREMENT" })} disabled={count <= 0}>
+        Decrement
+      </button>
+
+      <button onClick={() => transition({ type: "RESET" })} disabled={count === 0}>
+        Reset
+      </button>
     </div>
   );
 }
@@ -747,13 +728,12 @@ function Counter() {
 ### useManager
 
 ```ts showLineNumbers copy
-useManager<M extends Record<string, Machine<any, any, any, any>>>(): MachineManager<M>
+useManager<S extends Record<string, MachineConfig<any, any, any, any>>>(): MachineManager<S>
 ```
 
 Хук для получения прямого доступа к объекту менеджера автоматов.
 
 **Возвращает:**
-
 Объект менеджера автоматов.
 
 **Пример:**
@@ -762,13 +742,18 @@ useManager<M extends Record<string, Machine<any, any, any, any>>>(): MachineMana
 import { useManager } from "lite-fsm/react";
 import { useEffect } from "react";
 
-function DebugPanel() {
+function Debug() {
   const manager = useManager();
 
+  // Получение полного состояния всех автоматов
+  const state = manager.getState();
+
   useEffect(() => {
-    // Подписка на изменения состояния
-    const unsubscribe = manager.onTransition((prevState, nextState) => {
-      console.log("Состояние изменилось:", prevState, nextState);
+    // Подписка на все изменения состояния
+    const unsubscribe = manager.onTransition((prevState, nextState, action) => {
+      console.log("Действие:", action);
+      console.log("Предыдущее состояние:", prevState);
+      console.log("Новое состояние:", nextState);
     });
 
     return unsubscribe;
@@ -776,149 +761,10 @@ function DebugPanel() {
 
   return (
     <div>
-      <pre>{JSON.stringify(manager.getState(), null, 2)}</pre>
+      <h3>Текущее состояние:</h3>
+      <pre>{JSON.stringify(state, null, 2)}</pre>
       <button onClick={() => manager.transition({ type: "RESET_ALL" })}>Сбросить все</button>
     </div>
   );
 }
-```
-
-## Модуль Middleware
-
-Модуль middleware предоставляет функции для создания промежуточного программного обеспечения для расширения функциональности менеджера автоматов.
-
-### Применение middleware
-
-```ts showLineNumbers copy
-MachineManager(
-  machines: M,
-  options: {
-    middleware?: Middleware<MachinesState<M>, any>[];
-    onError?: (err: any) => void;
-  }
-): MachineManager<M>
-```
-
-Функция `MachineManager` позволяет указать массив middleware через параметр `options.middleware`.
-
-**Параметры:**
-
-- `machines`: Объект с автоматами, где ключи - имена автоматов, а значения - объекты автоматов.
-- `options`: Объект с опциями.
-  - `middleware`: Массив функций middleware.
-  - `onError`: Обработчик ошибок.
-
-**Возвращает:**
-
-Менеджер автоматов с применёнными middleware.
-
-**Пример:**
-
-```ts showLineNumbers copy
-import { MachineManager, createMachine } from "lite-fsm";
-import { immerMiddleware, devToolsMiddleware } from "lite-fsm/middleware";
-
-// Промежуточное ПО для логирования
-const logger = (store) => (next) => (action) => {
-  console.log("Действие:", action);
-  const result = next(action);
-  console.log("Состояние после:", store.getState());
-  return result;
-};
-
-// Создание машин
-const toggleMachine = createMachine({
-  // ...конфигурация
-});
-
-// Создание менеджера с промежуточным ПО
-const manager = MachineManager({ toggle: toggleMachine }, { middleware: [logger, immerMiddleware] });
-
-// Теперь все действия будут логироваться
-manager.transition({ type: "TOGGLE" });
-```
-
-### Встроенные middleware
-
-#### immerMiddleware
-
-```ts showLineNumbers copy
-immerMiddleware: Middleware;
-```
-
-Middleware для интеграции с [Immer](https://immerjs.github.io/immer), который позволяет писать иммутабельный код мутативным стилем.
-
-**Пример:**
-
-```ts showLineNumbers copy
-import { MachineManager, createMachine } from "lite-fsm";
-import { immerMiddleware } from "lite-fsm/middleware";
-
-const manager = MachineManager({ toggle: toggleMachine }, { middleware: [immerMiddleware] });
-```
-
-#### devToolsMiddleware
-
-```ts showLineNumbers copy
-devToolsMiddleware(options?: { blacklistActions: string[] }): Middleware
-```
-
-Middleware для интеграции с [Redux DevTools Extension](https://github.com/reduxjs/redux-devtools), который позволяет отлаживать состояние приложения и переходы между состояниями.
-
-**Параметры:**
-
-- `options`: Объект с параметрами.
-  - `blacklistActions`: Массив типов действий, которые не будут отправляться в DevTools.
-
-**Пример:**
-
-```ts showLineNumbers copy
-import { MachineManager, createMachine } from "lite-fsm";
-import { devToolsMiddleware } from "lite-fsm/middleware";
-
-const manager = MachineManager(
-  { counter: counterMachine },
-  {
-    middleware: [devToolsMiddleware({ blacklistActions: ["TIMER_TICK"] })],
-  },
-);
-```
-
-### Middleware
-
-```ts showLineNumbers copy
-type Middleware<S, A> = (api: {
-  getState: () => S;
-  transition: (action: A) => A;
-  replaceReducer: (cb: (reducer: (state: S, action: A) => S) => (state: S, action: A) => S) => void;
-  onTransition: (callback: (prevState: S, nextState: S, action?: A) => void) => () => void;
-  condition: (predicate: (a: A) => boolean) => Promise<boolean>;
-}) => (next: (action: A) => A) => (action: A) => A;
-```
-
-Тип, представляющий функцию middleware.
-
-**Пример создания пользовательского middleware:**
-
-```ts showLineNumbers copy
-// Middleware для отслеживания производительности
-const performanceMiddleware = (store) => (next) => (action) => {
-  const start = Date.now();
-  const result = next(action);
-  const end = Date.now();
-  console.log(`Действие ${action.type} выполнено за ${end - start}ms`);
-  return result;
-};
-
-// Middleware для предотвращения определенных действий
-const filterMiddleware = (store) => (next) => (action) => {
-  if (action.type === "FORBIDDEN_ACTION") {
-    console.warn("Действие FORBIDDEN_ACTION заблокировано");
-    return action;
-  }
-  return next(action);
-};
-
-// Использование пользовательских middleware
-const manager = MachineManager({ app: appMachine }, { middleware: [performanceMiddleware, filterMiddleware] });
 ```

@@ -131,6 +131,8 @@ const manager = MachineManager({ counter: counterMachine }, { middleware: [immer
 
 Middleware для интеграции с [Redux DevTools Extension](https://github.com/reduxjs/redux-devtools), который позволяет отлаживать состояние приложения и переходы между состояниями.
 
+> **Важно:** Данная middleware находится в альфа-версии и в настоящее время поддерживает только базовое логирование событий. Остальные возможности API, которые предоставляет официальный пакет Redux DevTools (такие как time-travel debugging, экспорт/импорт состояний, и тестирование на основе записей), находятся в разработке и будут добавлены в будущих версиях.
+
 DevTools middleware принимает только опцию `blacklistActions` - массив типов действий, которые не будут отправляться в DevTools. Redux DevTools Extension сам по себе поддерживает множество настроек через свой интерфейс.
 
 ```ts showLineNumbers copy
