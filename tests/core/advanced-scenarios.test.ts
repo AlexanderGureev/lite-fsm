@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
 import { createMachine, MachineManager } from "../../src/core";
-import { WILDCARD } from "../../src/core/utils";
 import { defineMachine } from "../../src/core/Machine";
 
 describe("Сложные сценарии взаимодействия машин", () => {

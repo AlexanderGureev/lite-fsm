@@ -8,7 +8,7 @@ import type {
 } from "./types";
 
 export type * from "./interfaces";
-export { CreateMachine as Machine } from "./Machine";
+export { CreateMachine as Machine, defineMachine } from "./Machine";
 export { MachineManager } from "./MachineManager";
 export type * from "./types";
 

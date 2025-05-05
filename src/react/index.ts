@@ -7,3 +7,4 @@ export type { TypedUseMachineHook, TypedUseSelectorHook, TypedUseTransitionHook 
 export { useManager } from "./useManager";
 export { useSelector } from "./useSelector";
 export { useTransition } from "./useTransition";
+export { defineMachine } from "./defineMachine";

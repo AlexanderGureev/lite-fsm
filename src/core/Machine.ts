@@ -188,6 +188,29 @@ export const defineMachine = <P extends FSMEvent<any, any> = any, D extends Reco
 //   };
 // };
 
+// const config = {
+//   IDLE: {
+//     DO_INIT: "READY",
+//   },
+//   READY: {},
+// } as const;
+
+// const initialContext = { a: 1 };
+
+// const reducer: MachineReducer<typeof config, Events, typeof initialContext> = (s, action, opts) => {
+//   return s;
+// };
+
+// const READY: MachineEffect<"READY", typeof config, Events, Dependencies> = async ({
+//   action,
+//   condition,
+//   transition,
+//   services,
+// }) => {
+//   action.type;
+//   services.logger.log("test 123");
+// };
+
 // const m = defineMachine<Events, Dependencies>({
 //   onError: () => {},
 //   dependencies: {
@@ -198,30 +221,16 @@ export const defineMachine = <P extends FSMEvent<any, any> = any, D extends Reco
 //     },
 //   },
 // }).create({
-//   config: {
-//     IDLE: {
-//       DO_INIT: "READY",
-//     },
-//     READY: {},
-//   },
+//   config,
 //   initialState: "IDLE",
-//   initialContext: { a: 1 },
+//   initialContext,
+//   reducer,
 //   effects: {
-//     READY: async ({ action, condition, transition, services }) => {
-//       services.logger.log("test 123");
-
-//       // await new Promise<void>((res) =>
-//       //   setTimeout(() => {
-//       //     res();
-//       //   }, 5000),
-//       // );
-
-//       // transition({ type: "__DEBUG" });
-//     },
+//     READY,
 //   },
 // });
 
-// m.addMiddleware(immerMiddleware);
+// // m.addMiddleware(immerMiddleware);
 
 // m.onTransition((prev, next, action) => {
 //   console.log("[on transition]", { prev, next, action });
