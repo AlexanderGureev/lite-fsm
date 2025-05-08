@@ -46,7 +46,7 @@ const todoMachine = createMachine({
       case "ADD_TODO":
         // Мутируем context напрямую (Immer создаст новую копию под капотом)
         context.todos.push({
-          id: Date.now(),
+          id: action.payload.id,
           text: action.payload.text,
           completed: false,
         });

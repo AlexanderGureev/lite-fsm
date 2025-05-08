@@ -15,7 +15,7 @@ src/
     ├── create-machine.ts     # Типизированные версии API функций
     ├── hooks.ts              # Типизированные React-хуки
     └── machines/             # Директория с автоматами
-        ├── counter.ts        # Автомат счетчика
+        ├── counter.ts        # Автомат для счетчика
 ```
 
 ## Предварительная типизация функций API
@@ -27,24 +27,17 @@ src/
 Сначала определите базовые типы для вашего приложения:
 
 ```ts showLineNumbers copy filename="src/store/types.ts"
-import * as root from "./machines/root";
+import type { AppState } from ".";
 import * as counter from "./machines/counter";
-import * as profile from "./machines/profile";
-
-// Тип всех состояний приложения (будет выведен из конфигурации)
-export type AppState = {
-  /* будет определен позже */
-};
 
 // Объединяем все типы событий из всех автоматов
-export type AppEvents = root.Events | counter.Events | profile.Events;
+export type AppEvents = counter.Events;
 
 // Определяем тип зависимостей, которые будут доступны в эффектах
 export type Dependencies = {
   services: {
-    playerService: {
-      play: () => void;
-      pause: () => void;
+    logger: {
+      log: () => void;
     };
   };
   getState: () => AppState;
@@ -71,9 +64,6 @@ export const createMachine: TypedCreateMachineFn<AppEvents, Dependencies> = _cre
 export const createReducer: TypedCreateReducerFn<AppEvents> = _createReducer;
 export const createConfig: TypedCreateConfigFn<AppEvents> = _createConfig;
 export const createEffect: TypedCreateEffectFn<AppEvents, Dependencies> = _createEffect;
-
-// Тип для эффектов, полезно для типизации кастомных эффектов
-export type TypedEffect = ReturnType<TypedCreateEffectFn<AppEvents, Dependencies>>;
 ```
 
 ### Шаг 3: Типизированные хуки для работы с React
@@ -88,7 +78,8 @@ import {
   useTransition as _useTransition,
 } from "lite-fsm/react";
 
-import type { AppState, AppEvents, FSMConfigType } from ".";
+import type { AppEvents } from "./types";
+import type { AppState, FSMConfigType } from ".";
 
 // Создаем типизированные версии хуков
 export const useTransition: TypedUseTransitionHook<AppEvents> = _useTransition;
@@ -101,15 +92,13 @@ export const useManager: TypedUseMachineHook<FSMConfigType, AppEvents> = _useMan
 Теперь нужно объединить все автоматы в единый store и экспортировать типы:
 
 ```ts showLineNumbers copy filename="src/store/index.ts"
-import { root } from "./machines/root";
 import { counter } from "./machines/counter";
-import { profile } from "./machines/profile";
-import { MachineManager, MachinesState } from "lite-fsm";
+import { MachineManager, type MachinesState } from "lite-fsm";
 import { devToolsMiddleware, immerMiddleware } from "lite-fsm/middleware";
 import type { AppEvents, Dependencies } from "./types";
 
 // Конфигурация всех автоматов
-const cfg = { root, counter, profile };
+const cfg = { counter };
 
 // Тип конфигурации, нужен для типизации менеджера
 export type FSMConfigType = typeof cfg;
@@ -131,10 +120,7 @@ export const makeStore = () => {
   manager.setDependencies<Dependencies>({
     getState: manager.getState,
     services: {
-      playerService: {
-        play: () => undefined,
-        pause: () => undefined,
-      },
+      logger: console,
     },
   });
 
@@ -144,6 +130,26 @@ export const makeStore = () => {
 // Экспортируем типы для использования в приложении
 export type AppState = MachinesState<FSMConfigType>;
 export type AppStore = ReturnType<typeof makeStore>;
+```
+
+### Шаг 5: Создадим базовый шаблон автомата counter
+
+```ts showLineNumbers copy filename="src/store/machines/counter.ts"
+import type { FSMEvent } from "lite-fsm";
+import { createMachine } from "../create-machine";
+
+export type Events = FSMEvent<"DO_INIT">;
+
+export const counter = createMachine({
+  config: {
+    IDLE: {
+      DO_INIT: "READY",
+    },
+    READY: {},
+  },
+  initialContext: {},
+  initialState: "IDLE",
+});
 ```
 
 ## Автоматический вывод типов событий и состояний
@@ -172,8 +178,8 @@ export type State = keyof typeof config;
 
 // Определяем полный тип событий с payload
 export type Events =
-  | { type: "INCREMENT"; payload?: { step?: number } }
-  | { type: "DECREMENT"; payload?: { step?: number } }
+  | { type: "INCREMENT"; payload: { step: number } }
+  | { type: "DECREMENT"; payload: { step: number } }
   | { type: "RESET" };
 
 // Используем выведенные типы
@@ -212,21 +218,12 @@ const config = createConfig({
   },
 });
 
-// Автоматически выводим тип состояний из конфигурации
-export type State = keyof typeof config;
-
 // Используем FSMEvent для типизации событий с различными payload
 export type Events =
   | FSMEvent<"INCREMENT"> // Без payload
   | FSMEvent<"DECREMENT"> // Без payload
   | FSMEvent<"RESET"> // Без payload
   | FSMEvent<"SET_VALUE", { value: number }>; // С payload
-
-// Тип контекста
-export type Context = {
-  count: number;
-  lastReset?: Date;
-};
 
 export const counter = createMachine({
   config,
@@ -260,7 +257,6 @@ export const counter = createMachine({
           context: {
             ...context,
             count: 0,
-            lastReset: new Date(),
           },
         };
       case "SET_VALUE":
@@ -286,61 +282,6 @@ export const counter = createMachine({
 ```
 
 Использование `FSMEvent` упрощает типизацию событий и гарантирует правильную структуру payload для каждого типа события.
-
-## Использование типизированных функций
-
-Используя подготовленные типизированные функции, можно создавать строго типизированные автоматы:
-
-```ts showLineNumbers copy filename="src/store/machines/counter.ts"
-import { createMachine, createConfig } from "../create-machine";
-
-// Определяем типы для этого конкретного автомата
-export type State = "IDLE";
-export type Events = { type: "INC" } | { type: "DEC" };
-export type Context = {
-  value: number;
-};
-
-// Используем типизированные функции создания конфигурации и автомата
-const config = createConfig({
-  IDLE: {
-    INC: null,
-    DEC: null,
-  },
-});
-
-export const counter = createMachine({
-  config,
-  initialState: "IDLE",
-  initialContext: {
-    value: 0,
-  },
-  reducer: (state, action) => {
-    const { state: currentState, context } = state;
-
-    switch (action.type) {
-      case "INC":
-        return {
-          state: currentState,
-          context: {
-            ...context,
-            value: context.value + 1,
-          },
-        };
-      case "DEC":
-        return {
-          state: currentState,
-          context: {
-            ...context,
-            value: Math.max(0, context.value - 1),
-          },
-        };
-      default:
-        return state;
-    }
-  },
-});
-```
 
 ## Использование типизированных хуков в компонентах
 
@@ -391,7 +332,7 @@ export default function App() {
 
 1. **Проверка типов во время компиляции** - TypeScript предупредит вас о несоответствии типов в вашем коде.
 2. **Автодополнение в IDE** - получите подсказки о доступных состояниях, событиях и контексте.
-3. **Безопасные рефакторинги** - при изменении типов TypeScript укажет на места, которые нужно обновить.
+3. **Проще рефакторинг** - при изменении типов TypeScript укажет на места, которые нужно обновить.
 4. **Документирование кода** - типы служат документацией, которая всегда актуальна.
 5. **Предотвращение ошибок типов** - избегайте ошибок из-за неправильных типов данных.
 
