@@ -13,20 +13,22 @@ npm install lite-fsm
 ## Доступ к модулю React
 
 ```ts showLineNumbers copy
-import { FSMProvider, useSelector, useTransition } from "lite-fsm/react";
+import { FSMContextProvider, useSelector, useTransition } from "lite-fsm/react";
 ```
 
 > **Совет:** Если вы используете TypeScript, рекомендуется создать строготипизированные версии хуков, как показано в разделе [TypeScript](/usage/typescript). Это обеспечит автодополнение и проверку типов во время компиляции, что значительно снизит количество потенциальных ошибок.
 
 ## Основные компоненты и хуки
 
-### FSMProvider
+### FSMContextProvider
 
-`FSMProvider` — компонент-провайдер, который предоставляет доступ к менеджеру автоматов для всех дочерних компонентов через React Context.
+`FSMContextProvider` — компонент-провайдер, который предоставляет доступ к менеджеру автоматов для всех дочерних компонентов через React Context.
 
 ```tsx showLineNumbers copy
-import { createMachine, MachineManager } from "lite-fsm";
-import { FSMProvider } from "lite-fsm/react";
+import { createMachine, MachineManager, type FSMEvent } from "lite-fsm";
+import { FSMContextProvider } from "lite-fsm/react";
+
+export type Events = FSMEvent<"INCREMENT"> | FSMEvent<"DECREMENT"> | FSMEvent<"RESET">;
 
 // Создаем автомат
 const counterMachine = createMachine({
@@ -64,9 +66,9 @@ const manager = MachineManager({
 // Использование в корне приложения
 function App() {
   return (
-    <FSMProvider manager={manager}>
+    <FSMContextProvider machineManager={manager}>
       <Counter />
-    </FSMProvider>
+    </FSMContextProvider>
   );
 }
 ```
