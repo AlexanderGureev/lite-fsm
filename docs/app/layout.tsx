@@ -5,9 +5,11 @@ import "nextra-theme-docs/style.css";
 import Image from "next/image";
 import type { ReactNode } from "react";
 
-// Дополнительные стили для переключения логотипа
 const logoStyles = `
-
+  .logo-light { display: block; }
+  .logo-dark { display: none; }
+  html.dark .logo-light { display: none; }
+  html.dark .logo-dark { display: block; }
 `;
 
 const assetPrefix = process.env.NODE_ENV === "production" ? "/lite-fsm" : "";
@@ -40,13 +42,20 @@ const navbar = (
     logo={
       <div className="flex items-center">
         <div className="mr-2">
-          <div className="relative w-[48px] h-[48px]">
+          <div className="relative w-[62px] h-[62px]">
+            <Image
+              src={`${assetPrefix}/logo.svg`}
+              alt="lite-fsm logo"
+              className="logo-light absolute top-0 left-0"
+              width={62}
+              height={62}
+            />
             <Image
               src={`${assetPrefix}/logo-dark.svg`}
               alt="lite-fsm logo"
               className="logo-dark absolute top-0 left-0"
-              width={48}
-              height={48}
+              width={62}
+              height={62}
             />
           </div>
         </div>
