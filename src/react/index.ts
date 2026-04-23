@@ -1,5 +1,3 @@
-"use client";
-
 export type { FSMContextType } from "./FSMContext";
 export { FSMContext } from "./FSMContext";
 export { FSMContextProvider } from "./FSMProvider";

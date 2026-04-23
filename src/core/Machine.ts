@@ -1,5 +1,3 @@
-/* eslint-disable @typescript-eslint/ban-types -- ok*/
-
 import {
   CFG,
   DefaultDeps,
@@ -11,7 +9,14 @@ import {
   Subscriber,
   WILDCARD as WTYPE,
 } from "./types";
-import { compose, WILDCARD } from "./utils";
+import { compose, deepFreeze, IS_DEV, VOID_REDUCER_ERROR, VOID_REDUCER_MIDDLEWARE_MARKER, WILDCARD } from "./utils";
+
+type RuntimeOptions = {
+  allowVoidReducer?: () => boolean;
+};
+
+const supportsVoidReducer = (middleware: Middleware<any, any>) =>
+  Boolean((middleware as Middleware & Record<string, unknown>)[VOID_REDUCER_MIDDLEWARE_MARKER]);
 
 export const CreateMachine = <
   C extends CFG<C, P, keyof C | WTYPE>,
@@ -21,6 +26,7 @@ export const CreateMachine = <
   D extends Record<string, any> = {},
 >(
   cfg: MachineConfig<C, T, P, D>,
+  runtimeOptions: RuntimeOptions = {},
 ) => {
   return {
     config: cfg.config,
@@ -31,7 +37,14 @@ export const CreateMachine = <
       if (nextState === undefined) return s;
 
       if (cfg.reducer) {
-        return cfg.reducer(s, action, { nextState: nextState || s.state, config: cfg.config });
+        const next = cfg.reducer(s, action, { nextState: nextState || s.state, config: cfg.config });
+
+        if (next === undefined) {
+          if (runtimeOptions.allowVoidReducer?.()) return s;
+          throw new Error(VOID_REDUCER_ERROR);
+        }
+
+        return next;
       }
 
       const payload = "payload" in action ? action.payload : {};
@@ -65,9 +78,15 @@ export const createMachine = <
     dependencies?: D;
   } = {},
 ) => {
-  const machine = CreateMachine(cfg);
   let transition: (_action: P) => P;
   let _middleware: Middleware<StateType<C, T>, P>[] = [];
+  let allowVoidReducer = false;
+
+  const syncVoidReducerSupport = (middleware?: Array<Middleware<StateType<C, T>, P>>) => {
+    allowVoidReducer = Boolean(middleware?.some(supportsVoidReducer));
+  };
+
+  const machine = CreateMachine(cfg, { allowVoidReducer: () => allowVoidReducer });
 
   let subs: Array<Subscriber<C, T, P>> = [];
 
@@ -75,6 +94,9 @@ export const createMachine = <
     context: cfg.initialContext,
     state: cfg.initialState,
   };
+
+  /* v8 ignore next */
+  if (IS_DEV) deepFreeze(state);
 
   let rootReducer = (prevState: StateType<C, T>, action: P) => {
     const nextState = machine.transition(prevState, action)!;
@@ -130,13 +152,23 @@ export const createMachine = <
 
   const _transition = (action: P) => {
     const prevState = state;
-    state = rootReducer(prevState, action);
+    const nextState = rootReducer(prevState, action);
+
+    if (nextState === undefined) {
+      throw new Error(VOID_REDUCER_ERROR);
+    }
+
+    state = nextState;
+    /* v8 ignore next */
+    if (IS_DEV) deepFreeze(state);
     invokeSubscribers(prevState, state, action);
 
     return action;
   };
 
   const createWrappedTransition = (funcs?: Array<Middleware<StateType<C, T>, P>>): ((action: P) => P) => {
+    syncVoidReducerSupport(funcs);
+
     if (!funcs?.length) return _transition;
 
     const f = funcs.map((m) =>
@@ -162,7 +194,7 @@ export const createMachine = <
     return newAction;
   };
 
-  const getState = () => ({ ...state });
+  const getState = () => state;
   const addMiddleware = (...middleware: Middleware<StateType<C, T>, P>[]) => {
     _middleware = [..._middleware, ...middleware];
     wrappedTransition = createWrappedTransition(_middleware);
@@ -180,59 +212,3 @@ export const defineMachine = <P extends FSMEvent<any, any> = any, D extends Reco
   create: <C extends CFG<C, P, keyof C | WTYPE>, T extends Record<string, any>>(cfg: MachineConfig<C, T, P, D>) =>
     createMachine(cfg, opts),
 });
-
-// type Events = FSMEvent<"DO_INIT"> | FSMEvent<"__DEBUG">;
-// type Dependencies = {
-//   services: {
-//     logger: { log: typeof console.log };
-//   };
-// };
-
-// const config = {
-//   IDLE: {
-//     DO_INIT: "READY",
-//   },
-//   READY: {},
-// } as const;
-
-// const initialContext = { a: 1 };
-
-// const reducer: MachineReducer<typeof config, Events, typeof initialContext> = (s, action, opts) => {
-//   return s;
-// };
-
-// const READY: MachineEffect<"READY", typeof config, Events, Dependencies> = async ({
-//   action,
-//   condition,
-//   transition,
-//   services,
-// }) => {
-//   action.type;
-//   services.logger.log("test 123");
-// };
-
-// const m = defineMachine<Events, Dependencies>({
-//   onError: () => {},
-//   dependencies: {
-//     services: {
-//       logger: {
-//         log: console.log,
-//       },
-//     },
-//   },
-// }).create({
-//   config,
-//   initialState: "IDLE",
-//   initialContext,
-//   reducer,
-//   effects: {
-//     READY,
-//   },
-// });
-
-// // m.addMiddleware(immerMiddleware);
-
-// m.onTransition((prev, next, action) => {
-//   console.log("[on transition]", { prev, next, action });
-// });
-// m.transition({ type: "DO_INIT" });

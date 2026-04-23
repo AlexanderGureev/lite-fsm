@@ -1,198 +1,256 @@
 import { describe, it, expect, vi } from "vitest";
+
 import { CreateMachine } from "../../src/core/Machine";
 import { WILDCARD } from "../../src/core/utils";
-import { MachineConfig } from "../../src/core/types";
 
-describe("CreateMachine", () => {
-  it("должен создавать машину с предоставленной конфигурацией", () => {
-    const cfg = {
-      config: {
+describe("CreateMachine — чистая функция", () => {
+  describe("config", () => {
+    it("экспонирует переданный config как поле", () => {
+      const config = {
         IDLE: { GO: "ACTIVE" },
         ACTIVE: { STOP: "IDLE" },
-      },
-      initialState: "IDLE",
-      initialContext: { count: 0 },
-    } as const;
+      } as const;
 
-    const machine = CreateMachine(cfg);
-    expect(machine.config).toEqual(cfg.config);
+      const machine = CreateMachine({ config, initialState: "IDLE", initialContext: {} });
+
+      expect(machine.config).toBe(config);
+    });
   });
 
-  it("должен обрабатывать переходы корректно", () => {
-    const cfg = {
-      config: {
-        IDLE: { GO: "ACTIVE" },
-        ACTIVE: {
-          STOP: "IDLE",
-          UPDATE: null, // null означает, что состояние не меняется
+  describe("transition без reducer", () => {
+    it("простой переход IDLE → ACTIVE сохраняет context", () => {
+      const machine = CreateMachine({
+        config: { IDLE: { GO: "ACTIVE" }, ACTIVE: {} },
+        initialState: "IDLE",
+        initialContext: { count: 0 },
+      });
+
+      const next = machine.transition({ state: "IDLE", context: { count: 0 } }, { type: "GO" });
+
+      expect(next).toEqual({ state: "ACTIVE", context: { count: 0 } });
+    });
+
+    it("self-transition (nextState === null) мержит payload в context, не меняя state", () => {
+      const machine = CreateMachine({
+        config: { IDLE: { UPDATE: null } },
+        initialState: "IDLE",
+        initialContext: { count: 0, name: "a" },
+      });
+
+      const next = machine.transition(
+        { state: "IDLE", context: { count: 0, name: "a" } },
+        { type: "UPDATE", payload: { count: 5 } },
+      );
+
+      expect(next).toEqual({ state: "IDLE", context: { count: 5, name: "a" } });
+    });
+
+    it("action без payload не меняет context", () => {
+      const machine = CreateMachine({
+        config: { IDLE: { GO: "ACTIVE" }, ACTIVE: {} },
+        initialState: "IDLE",
+        initialContext: { count: 0 },
+      });
+
+      const next = machine.transition({ state: "IDLE", context: { count: 0 } }, { type: "GO" });
+
+      expect(next).toEqual({ state: "ACTIVE", context: { count: 0 } });
+    });
+
+    it("неизвестный event возвращает переданный state без изменений", () => {
+      const machine = CreateMachine({
+        config: { IDLE: { GO: "ACTIVE" }, ACTIVE: {} },
+        initialState: "IDLE",
+        initialContext: { count: 0 },
+      });
+
+      const state = { state: "IDLE" as const, context: { count: 0 } };
+      const next = machine.transition(state, { type: "UNKNOWN" });
+
+      expect(next).toBe(state);
+    });
+
+    it("wildcard-переход работает, когда явный для текущего state не задан", () => {
+      const machine = CreateMachine({
+        config: {
+          IDLE: { GO: "ACTIVE" },
+          ACTIVE: {},
+          [WILDCARD]: { RESET: "IDLE" },
         },
-      },
-      initialState: "IDLE",
-      initialContext: { count: 0 } as { count: number },
-    } as const;
+        initialState: "IDLE",
+        initialContext: {},
+      });
 
-    const machine = CreateMachine(cfg);
-    const state = { state: cfg.initialState, context: cfg.initialContext };
+      const next = machine.transition({ state: "ACTIVE", context: {} }, { type: "RESET" });
 
-    // Переход из IDLE в ACTIVE
-    const nextState = machine.transition(state, { type: "GO" })!;
-    expect(nextState.state).toBe("ACTIVE");
-    expect(nextState.context).toEqual({ count: 0 });
-
-    // Переход с UPDATE не должен менять состояние
-    const updatedState = machine.transition(nextState, { type: "UPDATE", payload: { count: 5 } })!;
-    expect(updatedState.state).toBe("ACTIVE");
-    expect(updatedState.context).toEqual({ count: 5 });
-
-    // Переход обратно в IDLE
-    const finalState = machine.transition(updatedState, { type: "STOP" })!;
-    expect(finalState.state).toBe("IDLE");
-    expect(finalState.context).toEqual({ count: 5 });
-  });
-
-  it("должен обрабатывать wildcard переходы", () => {
-    const machine = CreateMachine({
-      config: {
-        IDLE: { GO: "ACTIVE" },
-        ACTIVE: { STOP: "IDLE" },
-        [WILDCARD]: { RESET: "IDLE" },
-      },
-      initialState: "IDLE",
-      initialContext: { count: 0 },
+      expect(next).toEqual({ state: "IDLE", context: {} });
     });
 
-    // Переход по wildcard из ACTIVE в IDLE
-    const resetFromActive = machine.transition({ state: "ACTIVE", context: { count: 5 } }, { type: "RESET" })!;
-    expect(resetFromActive.state).toBe("IDLE");
+    it("явный переход из state имеет приоритет над wildcard", () => {
+      const machine = CreateMachine({
+        config: {
+          IDLE: { RESET: "READY" },
+          READY: {},
+          [WILDCARD]: { RESET: "IDLE" },
+        },
+        initialState: "IDLE",
+        initialContext: {},
+      });
 
-    // Переход по wildcard из IDLE в IDLE
-    const resetFromIdle = machine.transition({ state: "IDLE", context: { count: 5 } }, { type: "RESET" })!;
-    expect(resetFromIdle.state).toBe("IDLE");
+      const next = machine.transition({ state: "IDLE", context: {} }, { type: "RESET" });
+
+      expect(next).toEqual({ state: "READY", context: {} });
+    });
   });
 
-  it("должен возвращать текущее состояние, если переход не найден", () => {
-    const machine = CreateMachine({
-      config: {
-        IDLE: { GO: "ACTIVE" },
-        ACTIVE: { STOP: "IDLE" },
-      },
-      initialState: "IDLE",
-      initialContext: { count: 0 },
+  describe("transition c reducer", () => {
+    it("reducer вызывается с (state, action, { nextState, config })", () => {
+      const reducer = vi.fn((s, _a, meta) => ({ state: meta.nextState, context: s.context }));
+      const config = { IDLE: { GO: "ACTIVE" }, ACTIVE: {} } as const;
+
+      const machine = CreateMachine({ config, initialState: "IDLE", initialContext: {}, reducer });
+
+      const state = { state: "IDLE" as const, context: {} };
+      machine.transition(state, { type: "GO" });
+
+      expect(reducer).toHaveBeenCalledWith(state, { type: "GO" }, { nextState: "ACTIVE", config });
     });
 
-    const state = { state: "IDLE", context: { count: 0 } } as const;
-    const sameState = machine.transition(state, { type: "UNKNOWN" })!;
-    expect(sameState).toEqual(state);
-  });
-
-  it("должен использовать редьюсер, если он предоставлен", () => {
-    const reducerSpy = vi.fn((s, action, meta) => {
-      if (action.type === "INCREMENT") {
-        return {
-          state: meta.nextState,
-          context: { count: s.context.count + 1 },
-        };
-      }
-      return {
+    it("reducer при self-transition (nextState === null) получает meta.nextState = текущий state", () => {
+      const reducer = vi.fn((s, _a, meta) => ({
         state: meta.nextState,
-        context: s.context,
-      };
+        context: { ...s.context, touched: true },
+      }));
+
+      const machine = CreateMachine({
+        config: { IDLE: { PING: null } },
+        initialState: "IDLE",
+        initialContext: { touched: false },
+        reducer,
+      });
+
+      const next = machine.transition({ state: "IDLE", context: { touched: false } }, { type: "PING" });
+
+      expect(reducer.mock.calls[0][2].nextState).toBe("IDLE");
+      expect(next).toEqual({ state: "IDLE", context: { touched: true } });
     });
 
-    const machine = CreateMachine({
-      config: {
-        IDLE: {
-          GO: "ACTIVE",
-          INCREMENT: null,
-        },
-        ACTIVE: {
-          STOP: "IDLE",
-          INCREMENT: null,
-        },
-      },
-      initialState: "IDLE",
-      initialContext: { count: 0 },
-      reducer: reducerSpy,
+    it("обычный reducer обязан вернуть новый state", () => {
+      const machine = CreateMachine({
+        config: { IDLE: { GO: "ACTIVE" }, ACTIVE: {} },
+        initialState: "IDLE",
+        initialContext: {},
+        reducer: (s, _a, meta) => ({ state: meta.nextState, context: s.context }),
+      });
+
+      const next = machine.transition({ state: "IDLE", context: {} }, { type: "GO" });
+      expect(next).toEqual({ state: "ACTIVE", context: {} });
     });
 
-    const state = { state: "IDLE", context: { count: 0 } } as const;
+    it("reducer без return бросает понятную ошибку", () => {
+      const machine = CreateMachine({
+        config: { IDLE: { GO: "ACTIVE" }, ACTIVE: {} },
+        initialState: "IDLE",
+        initialContext: {},
+        reducer: () => {},
+      });
 
-    // Вызов редьюсера при переходе GO
-    const nextState = machine.transition(state, { type: "GO" });
-    expect(reducerSpy).toHaveBeenCalledWith(state, { type: "GO" }, { nextState: "ACTIVE", config: machine.config });
-
-    // Вызов редьюсера при INCREMENT
-    const incrementedState = machine.transition(state, { type: "INCREMENT" })!;
-    expect(incrementedState.context.count).toBe(1);
-    expect(reducerSpy).toHaveBeenCalledWith(
-      state,
-      { type: "INCREMENT" },
-      { nextState: "IDLE", config: machine.config },
-    );
+      expect(() => machine.transition({ state: "IDLE", context: {} }, { type: "GO" })).toThrow(/immerMiddleware/);
+    });
   });
 
-  it("должен вызвать эффекты при изменении состояния", async () => {
-    const idleEffect = vi.fn();
-    const activeEffect = vi.fn();
-    const wildcardEffect = vi.fn();
+  describe("invokeEffect", () => {
+    const noopDeps = { transition: vi.fn(), action: { type: "X" }, condition: vi.fn() };
 
-    const machine = CreateMachine({
-      config: {
-        IDLE: { GO: "ACTIVE" },
-        ACTIVE: { STOP: "IDLE" },
-      },
-      initialState: "IDLE",
-      initialContext: { count: 0 },
-      effects: {
-        IDLE: idleEffect,
-        ACTIVE: activeEffect,
-        [WILDCARD]: wildcardEffect,
-      },
+    it("без effects — Promise<undefined>", async () => {
+      const machine = CreateMachine({
+        config: { IDLE: { GO: "ACTIVE" }, ACTIVE: {} },
+        initialState: "IDLE",
+        initialContext: {},
+      });
+
+      await expect(machine.invokeEffect("IDLE", "ACTIVE", noopDeps)).resolves.toBeUndefined();
     });
 
-    // Эффект должен вызываться при изменении состояния
-    await machine.invokeEffect("IDLE", "ACTIVE", {
-      transition: vi.fn(),
-      action: { type: "GO" },
-      condition: vi.fn(),
+    it("prev !== current + эффект на current → вызывается только он", async () => {
+      const active = vi.fn();
+      const idle = vi.fn();
+
+      const machine = CreateMachine({
+        config: { IDLE: { GO: "ACTIVE" }, ACTIVE: {} },
+        initialState: "IDLE",
+        initialContext: {},
+        effects: { IDLE: idle, ACTIVE: active },
+      });
+
+      await machine.invokeEffect("IDLE", "ACTIVE", noopDeps);
+
+      expect(active).toHaveBeenCalledOnce();
+      expect(idle).not.toHaveBeenCalled();
     });
 
-    expect(activeEffect).toHaveBeenCalledOnce();
-    expect(idleEffect).not.toHaveBeenCalled();
-    expect(wildcardEffect).not.toHaveBeenCalled();
+    it("prev === current без wildcard → эффекты не вызываются", async () => {
+      const idle = vi.fn();
 
-    // Сброс моков
-    vi.clearAllMocks();
+      const machine = CreateMachine({
+        config: { IDLE: { PING: null } },
+        initialState: "IDLE",
+        initialContext: {},
+        effects: { IDLE: idle },
+      });
 
-    // Вызов wildcard эффекта при том же состоянии
-    await machine.invokeEffect("ACTIVE", "ACTIVE", {
-      transition: vi.fn(),
-      action: { type: "UPDATE" },
-      condition: vi.fn(),
+      await machine.invokeEffect("IDLE", "IDLE", noopDeps);
+
+      expect(idle).not.toHaveBeenCalled();
     });
 
-    expect(activeEffect).not.toHaveBeenCalled();
-    expect(idleEffect).not.toHaveBeenCalled();
-    expect(wildcardEffect).toHaveBeenCalledOnce();
-  });
+    it("prev === current c wildcard → вызывается wildcard", async () => {
+      const active = vi.fn();
+      const wild = vi.fn();
 
-  it("не должен выбрасывать ошибку, когда эффекты отсутствуют", async () => {
-    const machine = CreateMachine({
-      config: {
-        IDLE: { GO: "ACTIVE" },
-        ACTIVE: { STOP: "IDLE" },
-      },
-      initialState: "IDLE",
-      initialContext: { count: 0 },
+      const machine = CreateMachine({
+        config: { IDLE: { GO: "ACTIVE" }, ACTIVE: {} },
+        initialState: "IDLE",
+        initialContext: {},
+        effects: { ACTIVE: active, [WILDCARD]: wild },
+      });
+
+      await machine.invokeEffect("ACTIVE", "ACTIVE", noopDeps);
+
+      expect(wild).toHaveBeenCalledOnce();
+      expect(active).not.toHaveBeenCalled();
     });
 
-    // Не должно быть ошибки, когда effects отсутствует
-    await expect(
-      machine.invokeEffect("IDLE", "ACTIVE", {
-        transition: vi.fn(),
-        action: { type: "GO" },
-        condition: vi.fn(),
-      }),
-    ).resolves.toBeUndefined();
+    it("prev !== current с wildcard + эффект на current → вызывается эффект состояния (приоритет)", async () => {
+      const active = vi.fn();
+      const wild = vi.fn();
+
+      const machine = CreateMachine({
+        config: { IDLE: { GO: "ACTIVE" }, ACTIVE: {} },
+        initialState: "IDLE",
+        initialContext: {},
+        effects: { ACTIVE: active, [WILDCARD]: wild },
+      });
+
+      await machine.invokeEffect("IDLE", "ACTIVE", noopDeps);
+
+      expect(active).toHaveBeenCalledOnce();
+      expect(wild).not.toHaveBeenCalled();
+    });
+
+    it("prev !== current с wildcard без эффекта на current → вызывается wildcard", async () => {
+      const wild = vi.fn();
+
+      const machine = CreateMachine({
+        config: { IDLE: { GO: "ACTIVE" }, ACTIVE: {} },
+        initialState: "IDLE",
+        initialContext: {},
+        effects: { [WILDCARD]: wild },
+      });
+
+      await machine.invokeEffect("IDLE", "ACTIVE", noopDeps);
+
+      expect(wild).toHaveBeenCalledOnce();
+    });
   });
 });

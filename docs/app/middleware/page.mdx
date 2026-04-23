@@ -215,7 +215,6 @@ const analyticsMiddleware = (manager) => (next) => (action) => {
   if (window.analytics) {
     window.analytics.track("State Transition", {
       action: action.type,
-      machine: action.machine || "all",
       duration,
       timestamp: new Date().toISOString(),
     });

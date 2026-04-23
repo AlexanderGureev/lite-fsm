@@ -14,11 +14,12 @@ import {
 } from "@codesandbox/sandpack-react";
 import { dracula } from "@codesandbox/sandpack-themes";
 
-import prettier from "prettier";
-import parserBabel from "prettier/parser-babel";
-import parserHTML from "prettier/parser-html";
-import parserSCSS from "prettier/parser-postcss";
-import parserTS from "prettier/parser-typescript";
+import * as prettier from "prettier/standalone";
+import * as parserBabel from "prettier/plugins/babel";
+import * as parserEstree from "prettier/plugins/estree";
+import * as parserHTML from "prettier/plugins/html";
+import * as parserSCSS from "prettier/plugins/postcss";
+import * as parserTS from "prettier/plugins/typescript";
 
 import { debounce } from "../utils";
 
@@ -250,7 +251,7 @@ const usePrettier = () => {
     [sandpack.activeFile, sandpack.files],
   );
 
-  const prettifyCode = () => {
+  const prettifyCode = async () => {
     const activeFile = sandpack.files[sandpack.activeFile];
     const currentCode = activeFile.code;
 
@@ -259,14 +260,14 @@ const usePrettier = () => {
       let formattedCode = currentCode;
 
       if (fileExtension === "scss" || fileExtension === "css") {
-        formattedCode = prettier.format(currentCode, {
+        formattedCode = await prettier.format(currentCode, {
           parser: "scss",
           plugins: [parserSCSS],
         });
       } else {
-        formattedCode = prettier.format(currentCode, {
+        formattedCode = await prettier.format(currentCode, {
           parser: fileExtension === "ts" || fileExtension === "tsx" ? "typescript" : "babel",
-          plugins: [parserBabel, parserTS, parserHTML],
+          plugins: [parserBabel, parserEstree, parserTS, parserHTML],
         });
       }
 

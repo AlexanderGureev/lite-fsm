@@ -22,4 +22,10 @@ export default withNextra({
   // Если проект размещен не в корне, нужно добавить basePath и assetPrefix
   basePath: basePath,
   assetPrefix: basePath,
+  turbopack: {
+    root: import.meta.dirname,
+    resolveAlias: {
+      "next-mdx-import-source-file": "./mdx-components.jsx",
+    },
+  },
 });

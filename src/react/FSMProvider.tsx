@@ -1,7 +1,7 @@
 import React from "react";
 
-import { IMachineManager } from "~/core/interfaces";
-import { FSMEvent, MachineConfig } from "~/core/types";
+import type { IMachineManager } from "../core/interfaces";
+import type { FSMEvent, MachineConfig } from "../core/types";
 
 import { FSMContext } from "./FSMContext";
 

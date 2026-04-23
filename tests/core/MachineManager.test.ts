@@ -1,422 +1,619 @@
 import { describe, it, expect, vi } from "vitest";
-import { CreateMachine } from "../../src/core/Machine";
+
 import { MachineManager } from "../../src/core/MachineManager";
-import { WILDCARD } from "../../src/core/utils";
+import { immerMiddleware } from "../../src/middleware/immer";
+import { VOID_REDUCER_ERROR, WILDCARD } from "../../src/core/utils";
+import type { Middleware } from "../../src/core/types";
 
 describe("MachineManager", () => {
-  // Базовая конфигурация для тестов
-  const toggleConfig = {
-    config: {
-      INACTIVE: {
-        TOGGLE: "ACTIVE",
-      },
-      ACTIVE: {
-        TOGGLE: "INACTIVE",
-      },
-    },
-    initialState: "INACTIVE",
-    initialContext: { toggled: false },
-  };
+  describe("базовое поведение", () => {
+    it("getState возвращает начальные state/context по каждой машине", () => {
+      const manager = MachineManager({
+        a: { config: { IDLE: {} }, initialState: "IDLE", initialContext: { n: 0 } },
+        b: { config: { OFF: {} }, initialState: "OFF", initialContext: { flag: false } },
+      });
 
-  const counterConfig = {
-    config: {
-      IDLE: {
-        INCREMENT: null,
-        DECREMENT: null,
-        RESET: null,
-      },
-    },
-    initialState: "IDLE",
-    initialContext: { count: 0 },
-    reducer: (state, action) => {
-      switch (action.type) {
-        case "INCREMENT":
-          return {
-            state: state.state,
-            context: { count: state.context.count + 1 },
-          };
-        case "DECREMENT":
-          return {
-            state: state.state,
-            context: { count: state.context.count - 1 },
-          };
-        case "RESET":
-          return {
-            state: state.state,
-            context: { count: 0 },
-          };
-        default:
-          return state;
-      }
-    },
-  };
-
-  it("должен создавать менеджер машин с машинами", () => {
-    const manager = MachineManager({
-      toggle: toggleConfig,
-      counter: counterConfig,
+      expect(manager.getState()).toEqual({
+        a: { state: "IDLE", context: { n: 0 } },
+        b: { state: "OFF", context: { flag: false } },
+      });
     });
 
-    const state = manager.getState();
-    expect(state.toggle.state).toBe("INACTIVE");
-    expect(state.toggle.context).toEqual({ toggled: false });
-    expect(state.counter.state).toBe("IDLE");
-    expect(state.counter.context).toEqual({ count: 0 });
-  });
+    it("transition обновляет все машины, которые реагируют на событие", () => {
+      const manager = MachineManager({
+        a: { config: { IDLE: { GO: "ON" }, ON: {} }, initialState: "IDLE", initialContext: {} },
+        b: { config: { OFF: { GO: "RUN" }, RUN: {} }, initialState: "OFF", initialContext: {} },
+        c: { config: { READY: {} }, initialState: "READY", initialContext: {} },
+      });
 
-  it("должен корректно обрабатывать переходы для всех машин", () => {
-    const manager = MachineManager({
-      toggle: toggleConfig,
-      counter: counterConfig,
+      manager.transition({ type: "GO" });
+
+      expect(manager.getState()).toEqual({
+        a: { state: "ON", context: {} },
+        b: { state: "RUN", context: {} },
+        c: { state: "READY", context: {} },
+      });
     });
 
-    // Переключение toggle машины
-    manager.transition({ type: "TOGGLE" });
-    expect(manager.getState().toggle.state).toBe("ACTIVE");
+    it("getState возвращает прямую ссылку на state: стабильна между вызовами, меняется после transition", () => {
+      const manager = MachineManager({
+        m: { config: { IDLE: { GO: "ACTIVE" }, ACTIVE: {} }, initialState: "IDLE", initialContext: {} },
+      });
 
-    // Инкремент counter машины
-    manager.transition({ type: "INCREMENT" });
-    expect(manager.getState().counter.context.count).toBe(1);
+      const before = manager.getState();
+      expect(manager.getState()).toBe(before);
 
-    // Декремент counter машины
-    manager.transition({ type: "DECREMENT" });
-    expect(manager.getState().counter.context.count).toBe(0);
+      manager.transition({ type: "GO" });
 
-    // Переключение обратно в INACTIVE
-    manager.transition({ type: "TOGGLE" });
-    expect(manager.getState().toggle.state).toBe("INACTIVE");
-  });
-
-  it("должен вызывать подписчиков при переходе", () => {
-    const manager = MachineManager({
-      toggle: toggleConfig,
-      counter: counterConfig,
+      expect(manager.getState()).not.toBe(before);
     });
 
-    const subscriber = vi.fn();
-    const unsubscribe = manager.onTransition(subscriber);
+    it("в dev-режиме state заморожен — мутация извне кидает TypeError", () => {
+      const manager = MachineManager({
+        m: { config: { IDLE: { GO: "ACTIVE" }, ACTIVE: {} }, initialState: "IDLE", initialContext: { n: 0 } },
+      });
 
-    // Подписка должна работать
-    manager.transition({ type: "TOGGLE" });
+      const snapshot = manager.getState() as Record<string, unknown>;
+      expect(() => (snapshot.hacked = true)).toThrow(TypeError);
+      expect(() => ((snapshot.m as { state: string }).state = "HACKED")).toThrow(TypeError);
+      expect(() => ((snapshot.m as { context: { n: number } }).context.n = 999)).toThrow(TypeError);
 
-    expect(subscriber).toHaveBeenCalledOnce();
-    const [prevState, currentState, action] = subscriber.mock.calls[0];
+      manager.transition({ type: "GO" });
+      const next = manager.getState() as Record<string, unknown>;
+      expect(() => ((next.m as { state: string }).state = "HACKED")).toThrow(TypeError);
+    });
 
-    expect(prevState.toggle.state).toBe("INACTIVE");
-    expect(currentState.toggle.state).toBe("ACTIVE");
-    expect(action).toEqual({ type: "TOGGLE" });
+    it("кидает VOID_REDUCER_ERROR, если rootReducer через middleware возвращает undefined", () => {
+      const breaking: Middleware<any, any> = (api) => {
+        api.replaceReducer(() => () => undefined as any);
+        return (next) => next;
+      };
 
-    // Отписка должна работать
-    subscriber.mockClear();
-    unsubscribe();
+      const manager = MachineManager(
+        { m: { config: { IDLE: { GO: "ACTIVE" }, ACTIVE: {} }, initialState: "IDLE", initialContext: {} } },
+        { middleware: [breaking] },
+      );
 
-    manager.transition({ type: "INCREMENT" });
-    expect(subscriber).not.toHaveBeenCalled();
-  });
+      expect(() => manager.transition({ type: "GO" })).toThrow(VOID_REDUCER_ERROR);
+    });
 
-  it("должен позволять устанавливать зависимости", () => {
-    const loggerMock = vi.fn();
+    it("без middleware transition возвращает исходный action", () => {
+      const manager = MachineManager({
+        m: { config: { IDLE: { GO: "ACTIVE" }, ACTIVE: {} }, initialState: "IDLE", initialContext: {} },
+      });
 
-    const toggleWithEffectConfig = {
-      config: {
-        INACTIVE: {
-          TOGGLE: "ACTIVE",
+      const result = manager.transition({ type: "GO" });
+
+      expect(result).toEqual({ type: "GO" });
+      expect(manager.getState().m.state).toBe("ACTIVE");
+    });
+
+    it("reducer без return без immerMiddleware бросает понятную ошибку", () => {
+      const manager = MachineManager({
+        m: {
+          config: { IDLE: { GO: "ACTIVE" }, ACTIVE: {} },
+          initialState: "IDLE",
+          initialContext: {},
+          reducer: () => {},
         },
-        ACTIVE: {
-          TOGGLE: "INACTIVE",
-        },
-      },
-      initialState: "INACTIVE",
-      initialContext: { toggled: false },
-      effects: {
-        ACTIVE: ({ services }) => services.logger("Activated"),
-        INACTIVE: ({ services }) => services.logger("Deactivated"),
-      },
-    };
+      });
 
-    const manager = MachineManager({
-      toggle: toggleWithEffectConfig,
+      expect(() => manager.transition({ type: "GO" })).toThrow(/immerMiddleware/);
     });
 
-    manager.setDependencies({
-      services: { logger: loggerMock },
-    });
-
-    // Эффект должен получить доступ к зависимостям
-    manager.transition({ type: "TOGGLE" });
-    expect(loggerMock).toHaveBeenCalledWith("Activated");
-
-    // Следующий эффект тоже должен использовать зависимости
-    manager.transition({ type: "TOGGLE" });
-    expect(loggerMock).toHaveBeenCalledWith("Deactivated");
-  });
-
-  it("должен корректно обрабатывать middleware", () => {
-    // Middleware для логирования
-    const logMiddleware = vi.fn((api) => (next) => (action) => next(action));
-
-    // Middleware для добавления данных к action
-    const enhanceMiddleware = vi.fn((api) => (next) => (action) => {
-      if (action.type === "INCREMENT") {
-        return next({ ...action, payload: { amount: 5 } });
-      }
-      return next(action);
-    });
-
-    const manager = MachineManager(
-      {
-        toggle: toggleConfig,
-        counter: counterConfig,
-      },
-      {
-        middleware: [logMiddleware, enhanceMiddleware],
-      },
-    );
-
-    // Проверка, что middleware были вызваны при создании
-    expect(logMiddleware).toHaveBeenCalledOnce();
-    expect(enhanceMiddleware).toHaveBeenCalledOnce();
-
-    // Проверка работы enhanceMiddleware
-    const customCounterConfig = {
-      config: {
-        IDLE: {
-          INCREMENT: null,
-        },
-      },
-      initialState: "IDLE",
-      initialContext: { count: 0 },
-      reducer: (state, action) => {
-        if (action.type === "INCREMENT") {
-          const amount = action.payload?.amount || 1;
-          return {
-            state: state.state,
-            context: { count: state.context.count + amount },
-          };
-        }
-        return state;
-      },
-    };
-
-    const customManager = MachineManager(
-      {
-        counter: customCounterConfig,
-      },
-      {
-        middleware: [enhanceMiddleware],
-      },
-    );
-
-    customManager.transition({ type: "INCREMENT" });
-    expect(customManager.getState().counter.context.count).toBe(5); // Благодаря enhanceMiddleware
-  });
-
-  it("должен предоставлять функцию condition для эффектов", () => {
-    const conditionFnSpy = vi.fn();
-
-    const waitForToggleEffect = vi.fn(({ condition }) => {
-      // Проверяем, что condition функция передана и сохраняем ссылку
-      expect(typeof condition).toBe("function");
-      conditionFnSpy(condition);
-    });
-
-    const toggleWithEffectConfig = {
-      config: {
-        INACTIVE: {
-          TOGGLE: "ACTIVE",
-        },
-        ACTIVE: {
-          TOGGLE: "INACTIVE",
-          COMPLETED: null,
-        },
-      },
-      initialState: "INACTIVE",
-      initialContext: { toggled: false },
-      effects: {
-        ACTIVE: waitForToggleEffect,
-      },
-    };
-
-    const manager = MachineManager({
-      toggle: toggleWithEffectConfig,
-    });
-
-    manager.transition({ type: "TOGGLE" });
-
-    expect(waitForToggleEffect).toHaveBeenCalledOnce();
-    expect(conditionFnSpy).toHaveBeenCalledOnce();
-    expect(typeof conditionFnSpy.mock.calls[0][0]).toBe("function");
-  });
-
-  it("должен корректно настраивать обработчик ошибок", () => {
-    const errorHandler = vi.fn();
-
-    const manager = MachineManager({ toggle: toggleConfig }, { onError: errorHandler });
-
-    // Проверяем, что manager был создан успешно
-    expect(manager).toBeDefined();
-    expect(manager.getState).toBeDefined();
-    expect(manager.transition).toBeDefined();
-  });
-
-  it("должен позволять заменять редьюсер", () => {
-    const manager = MachineManager({
-      toggle: toggleConfig,
-      counter: counterConfig,
-    });
-
-    // Определим расширенный тип для контекста toggle машины
-    type ExtendedToggleContext = { toggled: boolean; specialAction?: boolean };
-
-    // Замена корневого редьюсера
-    manager.replaceReducer((originalReducer) => (state, action) => {
-      if (action.type === "SPECIAL") {
-        return {
-          ...state,
-          toggle: {
-            ...state.toggle,
-            context: {
-              ...state.toggle.context,
-              specialAction: true,
-            } as ExtendedToggleContext,
+    it("immerMiddleware разрешает reducer без return", () => {
+      const manager = MachineManager(
+        {
+          m: {
+            config: { IDLE: { GO: "ACTIVE" }, ACTIVE: {} },
+            initialState: "IDLE",
+            initialContext: { count: 0 },
+            reducer: (state, _action, meta) => {
+              state.state = meta.nextState;
+              state.context.count += 1;
+            },
           },
-        };
-      }
-      return originalReducer(state, action);
-    });
-
-    // Проверяем, что оригинальная логика все еще работает
-    manager.transition({ type: "TOGGLE" });
-    expect(manager.getState().toggle.state).toBe("ACTIVE");
-
-    // Проверяем новую логику
-    manager.transition({ type: "SPECIAL" });
-    expect((manager.getState().toggle.context as ExtendedToggleContext).specialAction).toBe(true);
-  });
-
-  it("должен обрабатывать установку зависимостей через функцию", () => {
-    const counterMock = vi.fn();
-
-    const toggleWithEffectConfig = {
-      config: {
-        INACTIVE: { TOGGLE: "ACTIVE" },
-        ACTIVE: { TOGGLE: "INACTIVE" },
-      },
-      initialState: "INACTIVE",
-      initialContext: { toggled: false },
-      effects: {
-        ACTIVE: ({ services }) => services.counter(),
-      },
-    };
-
-    const manager = MachineManager({
-      toggle: toggleWithEffectConfig,
-    });
-
-    // Установка зависимостей через функцию
-    manager.setDependencies((currentDeps) => ({
-      ...currentDeps,
-      services: { counter: counterMock },
-    }));
-
-    manager.transition({ type: "TOGGLE" });
-    expect(counterMock).toHaveBeenCalledOnce();
-  });
-
-  it("должен продолжать работу после выброса ошибки в эффекте", async () => {
-    const errorHandler = vi.fn();
-
-    const effectConfig = {
-      config: {
-        IDLE: { START: "ACTIVE" },
-        ACTIVE: { STOP: "IDLE" },
-      },
-      initialState: "IDLE",
-      initialContext: {},
-      effects: {
-        ACTIVE: () => {
-          throw new Error("Effect error");
         },
-      },
-    };
+        { middleware: [immerMiddleware] },
+      );
 
-    const manager = MachineManager(
-      { test: effectConfig },
-      {
-        onError: errorHandler,
-      },
-    );
+      manager.transition({ type: "GO" });
 
-    manager.transition({ type: "START" });
-
-    await vi.waitFor(() => {
-      expect(errorHandler).toHaveBeenCalledOnce();
+      expect(manager.getState().m).toEqual({ state: "ACTIVE", context: { count: 1 } });
     });
   });
 
-  it("должен корректно обрабатывать отклонение функции condition", async () => {
-    const errorHandler = vi.fn();
+  describe("поток событий и каскад эффектов", () => {
+    it("порядок: rootReducer (по всем машинам) → subscribers → effects по каждой машине", async () => {
+      const order: string[] = [];
 
-    const conditionConfig = {
-      config: {
-        IDLE: { START: "ACTIVE" },
-        ACTIVE: { COMPLETE: "IDLE" },
-      },
-      initialState: "IDLE",
-      initialContext: {},
-      effects: {
-        ACTIVE: async ({ condition }) => {
-          await condition(() => {
-            throw new Error("Condition error");
-          });
+      const manager = MachineManager({
+        a: {
+          config: { IDLE: { GO: "ON" }, ON: {} },
+          initialState: "IDLE",
+          initialContext: {},
+          effects: {
+            ON: () => {
+              order.push("effect:a.ON");
+            },
+          },
         },
-      },
-    };
+        b: {
+          config: { OFF: { GO: "RUN" }, RUN: {} },
+          initialState: "OFF",
+          initialContext: {},
+          effects: {
+            RUN: () => {
+              order.push("effect:b.RUN");
+            },
+          },
+        },
+      });
 
-    const manager = MachineManager(
-      { test: conditionConfig },
-      {
-        onError: errorHandler,
-      },
-    );
+      manager.onTransition((_p, c, action) => {
+        order.push(`sub:${action.type}:${c.a.state}/${c.b.state}`);
+      });
 
-    manager.transition({ type: "START" });
-    manager.transition({ type: "TRIGGER_ERROR" });
+      manager.transition({ type: "GO" });
 
-    await vi.waitFor(() => {
-      expect(errorHandler).toHaveBeenCalledOnce();
+      await vi.waitFor(() => {
+        expect(order).toEqual(["sub:GO:ON/RUN", "effect:a.ON", "effect:b.RUN"]);
+      });
+    });
+
+    it("каскад: вложенный transition из эффекта углубляет стек, эффекты разворачиваются LIFO", () => {
+      const trace: string[] = [];
+      type CascadeAction = { type: "E1" | "E2" | "E3" | "E4" };
+      type EffectDeps = { transition: (a: CascadeAction) => void };
+
+      const snap = () => {
+        const s = manager.getState();
+        return `a=${s.a.state} b=${s.b.state} c=${s.c.state}`;
+      };
+
+      const a = {
+        config: { IDLE: { E1: "LEVEL1" }, LEVEL1: { E4: "DONE" }, DONE: {} },
+        initialState: "IDLE",
+        initialContext: {},
+        effects: {
+          LEVEL1: ({ transition }: EffectDeps) => {
+            trace.push(`in:A  ${snap()}`);
+            transition({ type: "E2" });
+            trace.push(`out:A ${snap()}`);
+          },
+        },
+      };
+
+      const b = {
+        config: { IDLE: { E2: "LEVEL2" }, LEVEL2: { E4: "DONE" }, DONE: {} },
+        initialState: "IDLE",
+        initialContext: {},
+        effects: {
+          LEVEL2: ({ transition }: EffectDeps) => {
+            trace.push(`in:B  ${snap()}`);
+            transition({ type: "E3" });
+            trace.push(`out:B ${snap()}`);
+          },
+        },
+      };
+
+      const c = {
+        config: { IDLE: { E3: "LEVEL3" }, LEVEL3: { E4: "DONE" }, DONE: {} },
+        initialState: "IDLE",
+        initialContext: {},
+        effects: {
+          LEVEL3: ({ transition }: EffectDeps) => {
+            trace.push(`in:C  ${snap()}`);
+            transition({ type: "E4" });
+            trace.push(`out:C ${snap()}`);
+          },
+        },
+      };
+
+      const manager = MachineManager({ a, b, c });
+
+      manager.transition({ type: "E1" });
+
+      expect(trace).toEqual([
+        "in:A  a=LEVEL1 b=IDLE c=IDLE",
+        "in:B  a=LEVEL1 b=LEVEL2 c=IDLE",
+        "in:C  a=LEVEL1 b=LEVEL2 c=LEVEL3",
+        "out:C a=DONE b=DONE c=DONE",
+        "out:B a=DONE b=DONE c=DONE",
+        "out:A a=DONE b=DONE c=DONE",
+      ]);
     });
   });
 
-  it("должен обрабатывать успешное завершение condition", async () => {
-    const effectCompletedSpy = vi.fn();
+  describe("onTransition", () => {
+    it("подписчик получает (prev, current, action) с независимыми ссылками", () => {
+      const manager = MachineManager({
+        m: { config: { IDLE: { GO: "ACTIVE" }, ACTIVE: {} }, initialState: "IDLE", initialContext: {} },
+      });
 
-    const conditionConfig = {
-      config: {
-        IDLE: { START: "ACTIVE" },
-        ACTIVE: { COMPLETE: "IDLE" },
-      },
-      initialState: "IDLE",
-      initialContext: {},
-      effects: {
-        ACTIVE: async ({ condition }) => {
-          await condition((action) => action.type === "COMPLETE");
-          effectCompletedSpy();
+      const sub = vi.fn();
+      manager.onTransition(sub);
+
+      manager.transition({ type: "GO" });
+
+      const [prev, cur, action] = sub.mock.calls[0];
+      expect(prev.m.state).toBe("IDLE");
+      expect(cur.m.state).toBe("ACTIVE");
+      expect(action).toEqual({ type: "GO" });
+      expect(prev).not.toBe(cur);
+    });
+
+    it("отписка прекращает последующие вызовы, оставляя остальных подписчиков", () => {
+      const manager = MachineManager({
+        m: { config: { IDLE: { GO: "ACTIVE" }, ACTIVE: { STOP: "IDLE" } }, initialState: "IDLE", initialContext: {} },
+      });
+
+      const a = vi.fn();
+      const b = vi.fn();
+      const offA = manager.onTransition(a);
+      manager.onTransition(b);
+
+      manager.transition({ type: "GO" });
+      offA();
+      manager.transition({ type: "STOP" });
+
+      expect(a).toHaveBeenCalledTimes(1);
+      expect(b).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe("setDependencies", () => {
+    it("объектом: эффект получает переданные deps", () => {
+      const log = vi.fn();
+
+      const manager = MachineManager({
+        m: {
+          config: { IDLE: { GO: "ACTIVE" }, ACTIVE: {} },
+          initialState: "IDLE",
+          initialContext: {},
+          effects: {
+            ACTIVE: ({ services }) => services.log("hi"),
+          },
         },
-      },
-    };
+      });
 
-    const manager = MachineManager({
-      test: conditionConfig,
+      manager.setDependencies({ services: { log } });
+      manager.transition({ type: "GO" });
+
+      expect(log).toHaveBeenCalledWith("hi");
     });
 
-    manager.transition({ type: "START" });
-    manager.transition({ type: "COMPLETE" });
+    it("функцией: результат становится новыми deps; предыдущие deps видны через аргумент", () => {
+      const seen: unknown[] = [];
 
-    await vi.waitFor(() => {
-      expect(effectCompletedSpy).toHaveBeenCalledOnce();
+      const manager = MachineManager({
+        m: {
+          config: { IDLE: { GO: "ACTIVE" }, ACTIVE: {} },
+          initialState: "IDLE",
+          initialContext: {},
+          effects: {
+            ACTIVE: ({ services }) => {
+              seen.push(services);
+            },
+          },
+        },
+      });
+
+      manager.setDependencies({ services: { tag: "v1" } });
+      manager.setDependencies((prev: { services: { tag: string } }) => ({
+        services: { ...prev.services, extra: true },
+      }));
+
+      manager.transition({ type: "GO" });
+
+      expect(seen[0]).toEqual({ tag: "v1", extra: true });
+    });
+  });
+
+  describe("middleware через opts.middleware", () => {
+    it("порядок вызова нескольких middleware совпадает с порядком передачи", () => {
+      const trace: string[] = [];
+
+      const first = () => (next: (a: { type: string }) => { type: string }) => (action: { type: string }) => {
+        trace.push(`1:${action.type}`);
+        return next(action);
+      };
+      const second = () => (next: (a: { type: string }) => { type: string }) => (action: { type: string }) => {
+        trace.push(`2:${action.type}`);
+        return next(action);
+      };
+
+      const manager = MachineManager(
+        { m: { config: { IDLE: { GO: "ACTIVE" }, ACTIVE: {} }, initialState: "IDLE", initialContext: {} } },
+        { middleware: [first, second] },
+      );
+
+      manager.transition({ type: "GO" });
+
+      expect(trace).toEqual(["1:GO", "2:GO"]);
     });
 
-    expect(manager.getState().test.state).toBe("IDLE");
+    it("middleware может трансформировать action для reducer, subscribers и wildcard effect", async () => {
+      type Action = { type: "INC"; payload?: { amount: number; tagged: boolean } };
+      const trace: string[] = [];
+
+      const manager = MachineManager(
+        {
+          counter: {
+            config: { IDLE: { INC: null } },
+            initialState: "IDLE",
+            initialContext: { n: 0 },
+            reducer: (state, action: Action) => {
+              trace.push(`reducer:${action.payload?.amount}:${String(action.payload?.tagged)}`);
+              if (action.type === "INC") {
+                const amount = action.payload?.amount ?? 1;
+                return { state: state.state, context: { n: state.context.n + amount } };
+              }
+              return state;
+            },
+            effects: {
+              [WILDCARD]: ({ action }) => {
+                trace.push(`effect:${action.payload?.amount}:${String(action.payload?.tagged)}`);
+              },
+            },
+          },
+        },
+        {
+          middleware: [
+            () => (next) => (action: Action) => {
+              if (action.type === "INC" && action.payload === undefined) {
+                return next({ ...action, payload: { amount: 5, tagged: true } });
+              }
+              return next(action);
+            },
+          ],
+        },
+      );
+
+      manager.onTransition((_prev, _current, action: Action) => {
+        trace.push(`sub:${action.payload?.amount}:${String(action.payload?.tagged)}`);
+      });
+
+      const result = manager.transition({ type: "INC" });
+
+      expect(result).toEqual({ type: "INC", payload: { amount: 5, tagged: true } });
+      expect(manager.getState().counter.context.n).toBe(5);
+
+      await vi.waitFor(() => {
+        expect(trace).toEqual(["reducer:5:true", "sub:5:true", "effect:5:true"]);
+      });
+    });
+
+    it("middleware может блокировать action (не вызывая next)", () => {
+      const trace: string[] = [];
+
+      const manager = MachineManager(
+        {
+          m: { config: { IDLE: { A: "ACTIVE" }, ACTIVE: {} }, initialState: "IDLE", initialContext: {} },
+        },
+        {
+          middleware: [
+            () => (next) => (action) => {
+              trace.push(`in:${action.type}`);
+              if (action.type === "BLOCKED") return action;
+              return next(action);
+            },
+          ],
+        },
+      );
+
+      manager.transition({ type: "BLOCKED" });
+      manager.transition({ type: "A" });
+
+      expect(trace).toEqual(["in:BLOCKED", "in:A"]);
+      expect(manager.getState().m.state).toBe("ACTIVE");
+    });
+
+    it("api.transition: redispatch из middleware проходит цепочку", () => {
+      const trace: string[] = [];
+
+      const manager = MachineManager(
+        {
+          m: { config: { IDLE: { A: "MID" }, MID: { B: "DONE" }, DONE: {} }, initialState: "IDLE", initialContext: {} },
+        },
+        {
+          middleware: [
+            (api) => (next) => (action) => {
+              trace.push(`mw:${action.type}`);
+              const result = next(action);
+              if (action.type === "A") api.transition({ type: "B" });
+              return result;
+            },
+          ],
+        },
+      );
+
+      manager.transition({ type: "A" });
+
+      expect(trace).toEqual(["mw:A", "mw:B"]);
+      expect(manager.getState().m.state).toBe("DONE");
+    });
+
+    it("api.getState возвращает актуальный state до и после next", () => {
+      const snapshots: string[] = [];
+
+      const manager = MachineManager(
+        {
+          m: { config: { IDLE: { GO: "ACTIVE" }, ACTIVE: {} }, initialState: "IDLE", initialContext: {} },
+        },
+        {
+          middleware: [
+            (api) => (next) => (action) => {
+              snapshots.push(api.getState().m.state);
+              const r = next(action);
+              snapshots.push(api.getState().m.state);
+              return r;
+            },
+          ],
+        },
+      );
+
+      manager.transition({ type: "GO" });
+
+      expect(snapshots).toEqual(["IDLE", "ACTIVE"]);
+    });
+
+    it("api.onTransition подписывается из middleware", () => {
+      const seen: string[] = [];
+
+      const manager = MachineManager(
+        {
+          m: { config: { IDLE: { A: "B" }, B: { C: "IDLE" } }, initialState: "IDLE", initialContext: {} },
+        },
+        {
+          middleware: [
+            (api) => {
+              api.onTransition((_p, c, a) => {
+                seen.push(`${a.type}@${c.m.state}`);
+              });
+              return (next) => (action) => next(action);
+            },
+          ],
+        },
+      );
+
+      manager.transition({ type: "A" });
+      manager.transition({ type: "C" });
+
+      expect(seen).toEqual(["A@B", "C@IDLE"]);
+    });
+
+    it("api.condition резолвится из middleware", async () => {
+      let resolved = false;
+
+      const manager = MachineManager(
+        {
+          m: { config: { IDLE: { A: "B" }, B: { C: "IDLE" } }, initialState: "IDLE", initialContext: {} },
+        },
+        {
+          middleware: [
+            (api) => {
+              api.condition((a) => a.type === "C").then(() => {
+                resolved = true;
+              });
+              return (next) => (action) => next(action);
+            },
+          ],
+        },
+      );
+
+      manager.transition({ type: "A" });
+      manager.transition({ type: "C" });
+
+      await vi.waitFor(() => {
+        expect(resolved).toBe(true);
+      });
+    });
+  });
+
+  describe("replaceReducer (публичный API)", () => {
+    it("переопределяет root reducer; оригинальный вызывается через переданную функцию", () => {
+      const manager = MachineManager({
+        m: { config: { IDLE: { GO: "ACTIVE" }, ACTIVE: {} }, initialState: "IDLE", initialContext: { flag: false } },
+      });
+
+      manager.replaceReducer((original) => (state, action) => {
+        if (action.type === "CUSTOM") {
+          return { ...state, m: { ...state.m, context: { flag: true } } };
+        }
+        return original(state, action);
+      });
+
+      manager.transition({ type: "CUSTOM" });
+      expect(manager.getState().m.context.flag).toBe(true);
+
+      manager.transition({ type: "GO" });
+      expect(manager.getState().m.state).toBe("ACTIVE");
+    });
+  });
+
+  describe("эффекты", () => {
+    it("onError ловит ошибку из эффекта, машина продолжает работать", async () => {
+      const onError = vi.fn();
+
+      const manager = MachineManager(
+        {
+          m: {
+            config: { IDLE: { GO: "ACTIVE" }, ACTIVE: {} },
+            initialState: "IDLE",
+            initialContext: {},
+            effects: {
+              ACTIVE: () => {
+                throw new Error("boom");
+              },
+            },
+          },
+        },
+        { onError },
+      );
+
+      manager.transition({ type: "GO" });
+
+      await vi.waitFor(() => {
+        expect(onError).toHaveBeenCalledOnce();
+      });
+      expect(onError.mock.calls[0][0]).toBeInstanceOf(Error);
+      expect(manager.getState().m.state).toBe("ACTIVE");
+    });
+
+    it("condition внутри эффекта: reject попадает в onError", async () => {
+      const onError = vi.fn();
+
+      const manager = MachineManager(
+        {
+          m: {
+            config: { IDLE: { GO: "ACTIVE" }, ACTIVE: {} },
+            initialState: "IDLE",
+            initialContext: {},
+            effects: {
+              ACTIVE: async ({ condition }) => {
+                await condition(() => {
+                  throw new Error("predicate");
+                });
+              },
+            },
+          },
+        },
+        { onError },
+      );
+
+      manager.transition({ type: "GO" });
+      manager.transition({ type: "TRIGGER" });
+
+      await vi.waitFor(() => {
+        expect(onError).toHaveBeenCalledOnce();
+      });
+    });
+
+    it("condition внутри эффекта: успешно резолвится на подходящем action", async () => {
+      const done = vi.fn();
+
+      const manager = MachineManager({
+        m: {
+          config: { IDLE: { GO: "ACTIVE" }, ACTIVE: { COMPLETE: "IDLE" } },
+          initialState: "IDLE",
+          initialContext: {},
+          effects: {
+            ACTIVE: async ({ condition }) => {
+              await condition((a: { type: string }) => a.type === "COMPLETE");
+              done();
+            },
+          },
+        },
+      });
+
+      manager.transition({ type: "GO" });
+      manager.transition({ type: "COMPLETE" });
+
+      await vi.waitFor(() => {
+        expect(done).toHaveBeenCalledOnce();
+      });
+      expect(manager.getState().m.state).toBe("IDLE");
+    });
   });
 });
