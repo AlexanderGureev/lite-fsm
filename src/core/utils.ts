@@ -23,7 +23,7 @@ export function compose<T, R = T>(
   ...fns: Array<(next: (action: T) => R) => (action: T) => R>
 ): (next: (action: T) => R) => (action: T) => R;
 
-export function compose(...fns: Function[]) {
+export function compose(...fns: Array<(...args: any[]) => any>) {
   if (fns.length === 0) {
     return <T>(x: T) => x;
   }
@@ -36,3 +36,19 @@ export function compose(...fns: Function[]) {
 }
 
 export const WILDCARD = "*";
+export const VOID_REDUCER_MIDDLEWARE_MARKER = "__liteFsmAllowVoidReducer";
+export const VOID_REDUCER_ERROR =
+  "Reducer returned undefined. Return the next state, or use immerMiddleware to mutate draft state without return.";
+
+/* v8 ignore next 2 */
+export const IS_DEV =
+  (globalThis as { process?: { env?: { NODE_ENV?: string } } }).process?.env?.NODE_ENV !== "production";
+
+export const deepFreeze = <T>(obj: T): T => {
+  if (obj === null || typeof obj !== "object" || Object.isFrozen(obj)) return obj;
+  Object.freeze(obj);
+  for (const key of Object.keys(obj)) {
+    deepFreeze((obj as Record<string, unknown>)[key]);
+  }
+  return obj;
+};

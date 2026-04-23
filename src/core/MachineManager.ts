@@ -1,8 +1,10 @@
-/* eslint-disable @typescript-eslint/ban-types -- ok */
 import { IMachine } from "./interfaces";
 import { CreateMachine } from "./Machine";
 import { FSMEvent, MachineConfig, MachinesState, Middleware, TransitionSubscriber } from "./types";
-import { compose } from "./utils";
+import { compose, deepFreeze, IS_DEV, VOID_REDUCER_ERROR, VOID_REDUCER_MIDDLEWARE_MARKER } from "./utils";
+
+const supportsVoidReducer = (middleware: Middleware<any, any>) =>
+  Boolean((middleware as Middleware & Record<string, unknown>)[VOID_REDUCER_MIDDLEWARE_MARKER]);
 
 export const MachineManager = <
   S extends {
@@ -19,12 +21,13 @@ export const MachineManager = <
   let deps = {};
   let subs: Array<TransitionSubscriber<S>> = [];
   let transition: (_action: P) => P;
+  const allowVoidReducer = Boolean(opts?.middleware?.some(supportsVoidReducer));
 
   const machines = Object.keys(config).reduce(
     (acc, name) => {
       return {
         ...acc,
-        [name]: CreateMachine(config[name]),
+        [name]: CreateMachine(config[name], { allowVoidReducer: () => allowVoidReducer }),
       };
     },
     {} as {
@@ -41,6 +44,9 @@ export const MachineManager = <
       },
     };
   }, {} as MachinesState<S>);
+
+  /* v8 ignore next */
+  if (IS_DEV) deepFreeze(state);
 
   let rootReducer = (prevState: MachinesState<S>, action: P) => {
     const newState: {
@@ -63,7 +69,7 @@ export const MachineManager = <
     };
   };
 
-  const getState = () => ({ ...state });
+  const getState = () => state;
 
   const onTransition = (cb: TransitionSubscriber<S>) => {
     subs.push(cb);
@@ -86,7 +92,15 @@ export const MachineManager = <
 
   const _transition = (action: P) => {
     const prevState = state;
-    state = rootReducer(prevState, action);
+    const nextState = rootReducer(prevState, action);
+
+    if (nextState === undefined) {
+      throw new Error(VOID_REDUCER_ERROR);
+    }
+
+    state = nextState;
+    /* v8 ignore next */
+    if (IS_DEV) deepFreeze(state);
     invokeSubscribers(prevState, state, action);
 
     return action;

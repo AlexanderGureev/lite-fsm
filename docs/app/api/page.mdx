@@ -171,7 +171,7 @@ onTransition(
   callback: (
     prevState: { [K in keyof M]: { state: State<C>; context: T } },
     nextState: { [K in keyof M]: { state: State<C>; context: T } },
-    action?: { type: string; machine?: string; payload?: any }
+    action: { type: string; payload?: any }
   ) => void
 ): () => void
 ```
@@ -561,20 +561,14 @@ const searchMachine = createMachine({
 });
 ```
 
-## Константы
+## Wildcard
 
-### WILDCARD
-
-```ts showLineNumbers copy
-WILDCARD: "*";
-```
-
-Специальный символ, используемый для обозначения состояния или события, которое должно соответствовать любому значению.
+Специальный символ `"*"` используется для обозначения состояния или события, которое должно соответствовать любому значению.
 
 **Пример:**
 
 ```ts showLineNumbers copy
-import { createMachine, WILDCARD } from "lite-fsm";
+import { createMachine } from "lite-fsm";
 
 const machine = createMachine({
   config: {
@@ -585,7 +579,7 @@ const machine = createMachine({
       STOP: "IDLE",
     },
     // Обработка RESET из любого состояния
-    [WILDCARD]: {
+    "*": {
       RESET: "IDLE",
     },
   },

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { compose } from "../../src/core/utils";
+import { compose, deepFreeze } from "../../src/core/utils";
 
 describe("compose", () => {
   it("должен компоновать функции справа налево", () => {
@@ -63,5 +63,29 @@ describe("compose", () => {
 
     // ((5 + 1) * 2) - 3 = 9
     expect(outerComposed(5)).toBe(9);
+  });
+});
+
+describe("deepFreeze", () => {
+  it("рекурсивно замораживает объект и все вложенные поля", () => {
+    const obj = { a: 1, nested: { b: 2, deep: { c: 3 } } };
+
+    deepFreeze(obj);
+
+    expect(Object.isFrozen(obj)).toBe(true);
+    expect(Object.isFrozen(obj.nested)).toBe(true);
+    expect(Object.isFrozen(obj.nested.deep)).toBe(true);
+  });
+
+  it("возвращает примитивы и null без изменений", () => {
+    expect(deepFreeze(null)).toBe(null);
+    expect(deepFreeze(42)).toBe(42);
+    expect(deepFreeze("str")).toBe("str");
+  });
+
+  it("идемпотентен: не падает на уже замороженном объекте", () => {
+    const obj = Object.freeze({ a: 1 });
+    expect(() => deepFreeze(obj)).not.toThrow();
+    expect(deepFreeze(obj)).toBe(obj);
   });
 });

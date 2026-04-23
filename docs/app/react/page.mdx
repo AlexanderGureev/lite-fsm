@@ -46,13 +46,13 @@ const counterMachine = createMachine({
   reducer: (state, action) => {
     switch (action.type) {
       case "INCREMENT":
-        s.context.count++;
+        state.context.count++;
         break;
       case "DECREMENT":
-        s.context.count--;
+        state.context.count--;
         break;
       case "RESET":
-        s.context.count = 0;
+        state.context.count = 0;
         break;
     }
   },

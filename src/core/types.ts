@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/ban-types -- ok */
 export type SType = string | number | symbol;
 
 export type WILDCARD = "*";
@@ -64,7 +63,7 @@ export type DefaultDeps<
   C extends CFG<C, P> = any,
   P extends FSMEvent<any, any> = any,
 > = {
-  transition: (data: P) => void;
+  transition: (data: P) => P;
   action: WILDCARD extends N
     ? P
     : // extends делаем специально внутри Extract иначе ts начинает сильно тормозить при попытке вывести AppState в useSelector

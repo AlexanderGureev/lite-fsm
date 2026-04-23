@@ -4,14 +4,14 @@
 
 ## Концепция глобальных переходов
 
-В `lite-fsm` глобальные переходы реализуются с помощью специального символа `*` (или константы `WILDCARD`), который указывает, что переход должен применяться ко всем состояниям.
+В `lite-fsm` глобальные переходы реализуются с помощью специального символа `"*"`, который указывает, что переход должен применяться ко всем состояниям.
 
 ## Синтаксис определения глобальных переходов
 
-Глобальные переходы определяются в конфигурации автомата с использованием символа `*` в качестве ключа:
+Глобальные переходы определяются в конфигурации автомата с использованием символа `"*"` в качестве ключа:
 
 ```ts showLineNumbers copy
-import { createMachine, WILDCARD } from "lite-fsm";
+import { createMachine } from "lite-fsm";
 
 export const player = createMachine({
   config: {
@@ -41,22 +41,6 @@ export const player = createMachine({
 });
 ```
 
-Вы также можете использовать константу `WILDCARD` для лучшей читаемости:
-
-```ts showLineNumbers copy
-import { createMachine, WILDCARD } from "lite-fsm";
-
-export const player = createMachine({
-  config: {
-    [WILDCARD]: {
-      CHANGE_TRACK: "LOAD_TRACK_DATA_PENDING",
-    },
-    // Остальные состояния...
-  },
-  // ...
-});
-```
-
 ## Приоритет переходов
 
 При обработке событий `lite-fsm` проверяет переходы в следующем порядке:
@@ -68,7 +52,7 @@ export const player = createMachine({
 
 ```ts showLineNumbers copy
 config: {
-  [WILDCARD]: {
+  "*": {
     RESET: "IDLE", // Применяется ко всем состояниям
     ERROR: "ERROR_STATE", // Применяется ко всем состояниям, кроме тех, где переопределено
   },
@@ -85,14 +69,14 @@ config: {
 ```ts showLineNumbers copy
 const playerMachine = createMachine({
   config: {
-    [WILDCARD]: {
-      CHANGE_TRACK: "PAUSED", 
+    "*": {
+      CHANGE_TRACK: "PAUSED",
     },
     PAUSED: {
       RESUME: "PLAYING",
     },
     PLAYING: {
-      PAUSE: "PAUSED
+      PAUSE: "PAUSED",
     },
     // Другие состояния...
   },
@@ -105,7 +89,7 @@ const playerMachine = createMachine({
 ```ts showLineNumbers copy
 const appMachine = createMachine({
   config: {
-    [WILDCARD]: {
+    "*": {
       NETWORK_ERROR: "ERROR",
       FATAL_ERROR: "CRASHED",
     },
@@ -129,7 +113,7 @@ const appMachine = createMachine({
 ```ts showLineNumbers copy
 const formMachine = createMachine({
   config: {
-    [WILDCARD]: {
+    "*": {
       RESET_FORM: "INITIAL", // Сброс формы из любого состояния
     },
     INITIAL: {
@@ -165,4 +149,4 @@ const formMachine = createMachine({
 3. **Переопределяйте где нужно**: В состояниях, где поведение должно отличаться, переопределите глобальный переход.
 4. **Документируйте глобальные события**: Явно указывайте, какие события обрабатываются глобально, для лучшей поддерживаемости.
 5. **Используйте для отладки**: Глобальные переходы удобны для добавления отладочных действий во время разработки. 
-6. **Осторожно с глобальными переходами**: Не злоупотребляйте глобальными переходами (WILDCARD), так как это усложняет контроль над логикой автомата. Используйте их в основном для сброса автомата в начальное состояние или для обработки критических ошибок. 
+6. **Осторожно с глобальными переходами**: Не злоупотребляйте ими, так как это усложняет контроль над логикой автомата. Используйте их в основном для сброса автомата в начальное состояние или для обработки критических ошибок.

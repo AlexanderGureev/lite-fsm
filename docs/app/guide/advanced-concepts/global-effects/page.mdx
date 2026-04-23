@@ -4,14 +4,14 @@
 
 ## Концепция глобальных эффектов
 
-Глобальные эффекты определяются с использованием специального символа `*` (или константы `WILDCARD`) в определении эффектов и срабатывают при любом переходе или событии.
+Глобальные эффекты определяются с использованием специального символа `"*"` в определении эффектов и срабатывают при любом переходе или событии.
 
 ## Создание глобальных эффектов
 
-Для определения глобального эффекта используйте символ `*` в качестве ключа в объекте `effects`:
+Для определения глобального эффекта используйте символ `"*"` в качестве ключа в объекте `effects`:
 
 ```ts showLineNumbers copy
-import { createMachine, WILDCARD } from "lite-fsm";
+import { createMachine } from "lite-fsm";
 
 export const analytics = createMachine({
   config: {
@@ -32,16 +32,6 @@ export const analytics = createMachine({
 });
 ```
 
-Вы также можете использовать константу `WILDCARD` для большей читаемости:
-
-```ts showLineNumbers copy
-effects: {
-  [WILDCARD]: ({ action, services, getState }) => {
-    // Реализация глобального эффекта
-  },
-}
-```
-
 ## Параметры глобальных эффектов
 
 Глобальные эффекты получают те же параметры, что и обычные эффекты, включая:
@@ -53,7 +43,7 @@ effects: {
 
 ```ts showLineNumbers copy
 effects: {
-  [WILDCARD]: ({ action, transition, services, getState }) => {
+  "*": ({ action, transition, services, getState }) => {
     // Используйте все доступные параметры
     const currentState = getState();
     console.log(`Action: ${action.type}`, action.payload);
@@ -82,7 +72,7 @@ const analyticsMachine = createMachine({
   initialState: "IDLE",
   initialContext: {},
   effects: {
-    [WILDCARD]: ({ action, services, getState }) => {
+    "*": ({ action, services, getState }) => {
       // Отправляем все действия в аналитику
       try {
         if (action.type.startsWith("__")) {
@@ -124,7 +114,7 @@ const loggingMachine = createMachine({
   initialState: "IDLE",
   initialContext: {},
   effects: {
-    [WILDCARD]: ({ action, getState }) => {
+    "*": ({ action, getState }) => {
       if (process.env.NODE_ENV === "development") {
         const currentState = getState();
         console.group(`📊 Action: ${action.type}`);
@@ -149,7 +139,7 @@ const errorMonitorMachine = createMachine({
   initialState: "IDLE",
   initialContext: { },
   effects: {
-    [WILDCARD]: ({ action, services }) => {
+    "*": ({ action, services }) => {
       // Отправка ошибок в систему мониторинга
       if (action.type.includes("ERROR") && action.payload?.error) {
         services.errorMonitoring.captureException(action.payload.error, {

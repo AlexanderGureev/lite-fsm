@@ -1,6 +1,6 @@
 import useSyncExternalStoreExports from "use-sync-external-store/shim/with-selector";
-import { CFG, FSMEvent, MachineConfig, StateType, WILDCARD } from "~/core/types";
-import { createMachine } from "~/core/Machine";
+import type { CFG, FSMEvent, MachineConfig, StateType, WILDCARD } from "../core/types";
+import { createMachine } from "../core/Machine";
 
 const { useSyncExternalStoreWithSelector } = useSyncExternalStoreExports;
 

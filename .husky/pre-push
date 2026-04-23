@@ -1,5 +1,2 @@
-#!/usr/bin/env sh
-. "$(dirname -- "$0")/_/husky.sh"
-
-# Запуск тестов с покрытием перед отправкой изменений
-npm run test:coverage 
+npm run lint:all
+npm run test:coverage

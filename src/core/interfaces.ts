@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/ban-types -- ok*/
 import {
   CFG,
   DefaultDeps,
@@ -32,7 +31,7 @@ export interface IMachineManager<
   },
   P extends FSMEvent<any, any> = any,
 > {
-  transition: (payload: P) => void;
+  transition: (payload: P) => P;
   getState: () => MachinesState<S>;
   onTransition: (cb: TransitionSubscriber<S>) => () => void;
   replaceReducer: (cb: (reducer: Reducer<MachinesState<S>, P>) => Reducer<MachinesState<S>, P>) => void;

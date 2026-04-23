@@ -25,16 +25,14 @@ const feedbackMachine = createMachine({
     feedback: ''
   },
   reducer: (s, action, { nextState }) => {
-    // По умолчанию устанавливаем следующее состояние
-    s.state = nextState;
-    
     // Guard: проверяем условие, что отзыв не пустой
     if (action.type === 'submit' && s.context.feedback.length === 0) {
-      // Если условие не выполнено, оставляем текущее состояние
-      s.state = s.state;
+      // Если условие не выполнено — не меняем состояние и выходим
       return;
     }
-    
+
+    // Условие выполнено — переходим в следующее состояние и обновляем контекст
+    s.state = nextState;
     s.context = {
       ...s.context,
       ...action.payload

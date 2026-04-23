@@ -1,8 +1,7 @@
-/* eslint-disable @typescript-eslint/no-empty-function -- ok */
 import React from "react";
 
-import { IMachineManager } from "~/core/interfaces";
-import { FSMEvent, MachineConfig } from "~/core/types";
+import type { IMachineManager } from "../core/interfaces";
+import type { FSMEvent, MachineConfig } from "../core/types";
 
 export type FSMContextType<
   S extends {
@@ -11,10 +10,6 @@ export type FSMContextType<
   P extends FSMEvent<any> = any,
 > = IMachineManager<S, P>;
 
-export const FSMContext = React.createContext<FSMContextType>({
-  transition: (): any => {},
-  getState: () => ({}),
-  onTransition: () => () => {},
-  replaceReducer: () => {},
-  setDependencies: () => {},
-});
+export const FSM_PROVIDER_ERROR = "Hooks from lite-fsm/react must be used within FSMContextProvider.";
+
+export const FSMContext = React.createContext<FSMContextType | null>(null);

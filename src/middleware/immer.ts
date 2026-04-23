@@ -1,8 +1,13 @@
 import { produce } from "immer";
 
-import { Middleware } from "~/core/types";
+import type { Middleware } from "../core/types";
+import { VOID_REDUCER_MIDDLEWARE_MARKER } from "../core/utils";
 
-export const immerMiddleware: Middleware = (api) => {
+type ImmerMiddleware = Middleware & {
+  [VOID_REDUCER_MIDDLEWARE_MARKER]: true;
+};
+
+const middleware = ((api) => {
   api.replaceReducer((reducer) => {
     const newReducer = produce((draft, action) => {
       const result = reducer(draft, action);
@@ -20,4 +25,8 @@ export const immerMiddleware: Middleware = (api) => {
   });
 
   return (next) => next;
-};
+}) as ImmerMiddleware;
+
+middleware[VOID_REDUCER_MIDDLEWARE_MARKER] = true;
+
+export const immerMiddleware = middleware;

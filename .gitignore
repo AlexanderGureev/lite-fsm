@@ -30,3 +30,5 @@ docs/node_modules/
 docs/public/_pagefind/
 out/
 coverage/
+internal
+.cursor

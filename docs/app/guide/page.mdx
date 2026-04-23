@@ -195,12 +195,12 @@ effects: {
 
 ## Дополнительные возможности
 
-### Обработка событий в любом состоянии (WILDCARD)
+### Обработка событий в любом состоянии
 
-Можно использовать специальный символ `*` для обработки любого состояния:
+Можно использовать специальный символ `"*"` для обработки любого состояния:
 
 ```ts showLineNumbers copy
-import { createMachine, WILDCARD } from "lite-fsm";
+import { createMachine } from "lite-fsm";
 
 const machine = createMachine({
   config: {
@@ -214,7 +214,7 @@ const machine = createMachine({
       EVENT_3: "STATE_A",
     },
     // Обработка событий в любом состоянии
-    [WILDCARD]: {
+    "*": {
       RESET: "STATE_A",
       LOG: null, // null означает, что состояние не меняется
     },

@@ -1,10 +1,8 @@
-import React from "react";
+import type { FSMEvent } from "../core/types";
 
-import { FSMEvent } from "~/core/types";
-
-import { FSMContext, FSMContextType } from "./FSMContext";
+import { useManager } from "./useManager";
 
 export const useTransition = <P extends FSMEvent<any, any> = any>() => {
-  const m = React.useContext<FSMContextType<any, P>>(FSMContext);
+  const m = useManager<any, P>();
   return m.transition;
 };

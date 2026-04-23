@@ -1,7 +1,11 @@
-import { Middleware } from "~/core/types";
+import type { Middleware } from "../core/types";
+
+type DevToolsOptions = {
+  blacklistActions?: string[];
+};
 
 export const devToolsMiddleware =
-  ({ blacklistActions = [] }: { blacklistActions: string[] }): Middleware =>
+  ({ blacklistActions = [] }: DevToolsOptions = {}): Middleware =>
   (api) => {
     if (typeof window === "undefined") {
       return (next) => (action: { type: string }) => next(action);

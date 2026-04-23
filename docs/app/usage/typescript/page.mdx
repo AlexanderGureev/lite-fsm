@@ -290,36 +290,38 @@ export const counter = createMachine({
 ```tsx showLineNumbers copy filename="src/App.tsx"
 import "./styles.css";
 import { useSelector, useTransition } from "./store/hooks";
-import { useEffect } from "react";
 
 export default function App() {
   const transition = useTransition();
-  const rootState = useSelector((s) => s.counter.state);
-  const value = useSelector((s) => s.counter.context.value);
-
-  useEffect(() => {
-    transition({ type: "DO_INIT" });
-  }, []);
+  const counterState = useSelector((s) => s.counter.state);
+  const count = useSelector((s) => s.counter.context.count);
 
   return (
     <div className="App">
-      <h1>Root state: {rootState}</h1>
-      <h1>Counter value: {value}</h1>
+      <h1>Counter state: {counterState}</h1>
+      <h1>Counter value: {count}</h1>
 
       <button
         onClick={() => {
-          transition({ type: "INC" });
+          transition({ type: "INCREMENT", payload: { step: 1 } });
         }}
       >
         +1
       </button>
       <button
         onClick={() => {
-          transition({ type: "DEC" });
+          transition({ type: "DECREMENT", payload: { step: 1 } });
         }}
-        disabled={!value}
+        disabled={!count}
       >
         -1
+      </button>
+      <button
+        onClick={() => {
+          transition({ type: "RESET" });
+        }}
+      >
+        Сбросить
       </button>
     </div>
   );
