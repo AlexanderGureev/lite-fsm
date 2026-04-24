@@ -32,3 +32,4 @@ out/
 coverage/
 internal
 .cursor
+tsconfig.tsbuildinfo

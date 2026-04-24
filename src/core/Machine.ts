@@ -30,7 +30,7 @@ export const CreateMachine = <
 ) => {
   return {
     config: cfg.config,
-    transition: (s: { state: State<keyof C>; context: T }, action: P) => {
+    transition: (s: { state: State<keyof C>; context: T }, action: P): { state: State<keyof C>; context: T } => {
       const _next = cfg.config[s.state]?.[action.type];
       const nextState = _next !== undefined ? _next : cfg.config[WILDCARD]?.[action.type];
 
@@ -51,7 +51,7 @@ export const CreateMachine = <
 
       return {
         state: nextState || s.state,
-        context: { ...s.context, ...payload },
+        context: { ...s.context, ...payload } as T,
       };
     },
     invokeEffect: async (prevState: State<keyof C>, currentState: State<keyof C>, deps: D & DefaultDeps<any, C, P>) => {

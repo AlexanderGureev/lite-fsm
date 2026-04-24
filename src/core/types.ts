@@ -99,19 +99,23 @@ export type CFG<R, P extends FSMEvent<any, any>, K extends keyof R = keyof R> = 
   } & { [key in Exclude<keyof R[state], P["type"]>]: never };
 };
 
-export type TypedCreateMachineFn<P extends FSMEvent<any, any> = any, D extends Record<string, any> = any> = <
+export type TypedCreateMachineFn<P extends FSMEvent<any, any> = any, D extends Record<string, any> = {}> = <
   C extends CFG<C, P, keyof C | WILDCARD>,
   T extends Record<string, any>,
 >(
   cfg: MachineConfig<C, T, P, D>,
 ) => MachineConfig<C, T, P, D>;
 
-export type FSMEvent<Name extends string, Payload = undefined> = Payload extends undefined
-  ? { type: Name }
-  : {
-      type: Name;
-      payload: Payload;
-    };
+type IsAny<T> = 0 extends 1 & T ? true : false;
+
+export type FSMEvent<Name extends string, Payload = undefined> = IsAny<Payload> extends true
+  ? { type: Name; payload?: Payload }
+  : [Payload] extends [undefined]
+    ? { type: Name }
+    : {
+        type: Name;
+        payload: Payload;
+      };
 
 export type TypedCreateReducerFn<P extends FSMEvent<any, any> = any> = <
   C extends CFG<C, P>,
@@ -129,7 +133,7 @@ export type TypedCreateConfigFn<P extends FSMEvent<any, any> = any> = <
 
 export type EffectType = "every" | "latest";
 
-export type TypedCreateEffectFn<P extends FSMEvent<any, any> = any, D extends Record<string, any> = any> = <
+export type TypedCreateEffectFn<P extends FSMEvent<any, any> = any, D extends Record<string, any> = {}> = <
   C extends CFG<C, P> = any,
   N extends keyof C | WILDCARD = any,
 >(opts: {

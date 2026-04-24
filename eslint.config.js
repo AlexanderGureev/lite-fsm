@@ -1,3 +1,4 @@
+import { defineConfig, globalIgnores } from "eslint/config";
 import js from "@eslint/js";
 import tseslint from "typescript-eslint";
 import reactPlugin from "eslint-plugin-react";
@@ -7,32 +8,36 @@ import importPlugin from "eslint-plugin-import";
 import prettier from "eslint-config-prettier";
 import globals from "globals";
 
-export default tseslint.config(
-  {
-    ignores: [
-      "node_modules/",
-      "dist/",
-      "coverage/",
-      "docs/",
-      "playground/",
-      "examples/",
-      "tests/",
-      "**/*.d.ts",
-      "eslint.config.js",
-    ],
-  },
-  js.configs.recommended,
-  ...tseslint.configs.recommended,
-  reactPlugin.configs.flat.recommended,
-  reactHooks.configs.flat["recommended-latest"],
-  jsxA11y.flatConfigs.recommended,
-  importPlugin.flatConfigs.recommended,
-  importPlugin.flatConfigs.typescript,
-  prettier,
+const tsconfigRootDir = import.meta.dirname;
+
+export default defineConfig([
+  globalIgnores([
+    "node_modules/",
+    "dist/",
+    "coverage/",
+    "docs/",
+    "playground/",
+    "playground/",
+    "examples/",
+    "tests/",
+    "**/*.d.ts",
+    "eslint.config.js",
+  ]),
   {
     files: ["**/*.{js,mjs,cjs,ts,tsx}"],
+    extends: [
+      js.configs.recommended,
+      tseslint.configs.recommended,
+      reactPlugin.configs.flat.recommended,
+      reactHooks.configs.flat["recommended-latest"],
+      jsxA11y.flatConfigs.recommended,
+      importPlugin.flatConfigs.recommended,
+      importPlugin.flatConfigs.typescript,
+      prettier,
+    ],
     languageOptions: {
       globals: { ...globals.browser, ...globals.node },
+      parserOptions: { tsconfigRootDir },
     },
     settings: {
       react: { version: "detect" },
@@ -51,4 +56,4 @@ export default tseslint.config(
       "react/prop-types": "off",
     },
   },
-);
+]);

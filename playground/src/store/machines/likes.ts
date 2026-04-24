@@ -1,4 +1,5 @@
 import type { FSMEvent } from "lite-fsm";
+
 import { createMachine } from "../create-machine";
 
 type LikeValue = "like" | "dislike" | null;
@@ -33,10 +34,8 @@ const initialItems = [
 ] as const;
 
 const WAIT_MIN_MS = 2500;
-// const WAIT_SPREAD_MS = 1300;
-// const ERROR_RATE = 0.35;
 
-const wait = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+const wait = (ms: number) => new Promise<void>((resolve) => globalThis.setTimeout(resolve, ms));
 
 const createLikeItem = (item: (typeof initialItems)[number]): LikeItem => ({
   id: item.id,

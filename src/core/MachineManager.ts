@@ -1,4 +1,4 @@
-import { IMachine } from "./interfaces";
+import { IMachine, IMachineManager, MachineDependencies, MachineEvents } from "./interfaces";
 import { CreateMachine } from "./Machine";
 import { FSMEvent, MachineConfig, MachinesState, Middleware, TransitionSubscriber } from "./types";
 import { compose, deepFreeze, IS_DEV, VOID_REDUCER_ERROR, VOID_REDUCER_MIDDLEWARE_MARKER } from "./utils";
@@ -10,16 +10,16 @@ export const MachineManager = <
   S extends {
     [key in string]: MachineConfig<any, any, any, any>;
   },
-  P extends FSMEvent<any, any> = any,
+  P extends FSMEvent<any, any> = MachineEvents<S>,
 >(
   config: S,
   opts?: {
     onError?: (err: any) => void;
     middleware?: Middleware<MachinesState<S>, P>[];
   },
-) => {
-  let deps = {};
-  let subs: Array<TransitionSubscriber<S>> = [];
+): IMachineManager<S, P> => {
+  let deps = {} as MachineDependencies<S>;
+  let subs: Array<TransitionSubscriber<S, P>> = [];
   let transition: (_action: P) => P;
   const allowVoidReducer = Boolean(opts?.middleware?.some(supportsVoidReducer));
 
@@ -71,7 +71,7 @@ export const MachineManager = <
 
   const getState = () => state;
 
-  const onTransition = (cb: TransitionSubscriber<S>) => {
+  const onTransition = (cb: TransitionSubscriber<S, P>) => {
     subs.push(cb);
     return () => {
       subs = subs.filter((c) => c !== cb);
@@ -128,7 +128,7 @@ export const MachineManager = <
       const current = currentState[name];
 
       m.invokeEffect(prev.state, current.state, {
-        ...deps,
+        ...(deps as Record<string, any>),
         transition,
         action,
         condition,
@@ -164,8 +164,13 @@ export const MachineManager = <
     return newAction;
   };
 
-  const setDependencies = <D extends Record<string, any> = {}>(d: D | ((deps: D) => D)) => {
-    deps = typeof d === "function" ? d(deps as D) : d;
+  const setDependencies = (d: MachineDependencies<S> | ((deps: MachineDependencies<S>) => MachineDependencies<S>)) => {
+    if (typeof d === "function") {
+      deps = (d as (deps: MachineDependencies<S>) => MachineDependencies<S>)(deps as MachineDependencies<S>);
+      return;
+    }
+
+    deps = d;
   };
 
   return {

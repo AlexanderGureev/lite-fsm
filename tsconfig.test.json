@@ -4,5 +4,6 @@
     "rootDir": ".",
     "types": ["vitest/globals", "node"]
   },
-  "include": ["src", "tests"]
+  "include": ["src", "tests"],
+  "exclude": ["tests/types", "tests/types-dist"]
 }

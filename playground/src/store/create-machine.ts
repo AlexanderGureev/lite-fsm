@@ -7,8 +7,13 @@ import {
 } from "lite-fsm";
 
 import type { AppEvents } from "./types";
+import type { AppState } from ".";
 
-export const createMachine: TypedCreateMachineFn<AppEvents> = baseCreateMachine;
+type AppDeps = {
+  getState: () => AppState;
+};
+
+export const createMachine: TypedCreateMachineFn<AppEvents, AppDeps> = baseCreateMachine;
 export const createReducer: TypedCreateReducerFn<AppEvents> = baseCreateReducer;
 export const createConfig: TypedCreateConfigFn<AppEvents> = baseCreateConfig;
-export const createEffect: TypedCreateEffectFn<AppEvents> = baseCreateEffect;
+export const createEffect: TypedCreateEffectFn<AppEvents, AppDeps> = baseCreateEffect;

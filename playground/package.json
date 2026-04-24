@@ -4,28 +4,30 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
+    "prepare:lite-fsm": "cd .. && npm run build && node playground/scripts/sync-lite-fsm.mjs",
+    "sync:lite-fsm": "node scripts/sync-lite-fsm.mjs",
+    "postinstall": "npm run prepare:lite-fsm",
+    "predev": "npm run prepare:lite-fsm",
+    "prebuild": "npm run prepare:lite-fsm",
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "check-types": "tsc --noEmit"
   },
   "dependencies": {
+    "immer": "^11.1.4",
+    "next": "^16.2.4",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "use-sync-external-store": "^1.6.0"
   },
   "devDependencies": {
-    "@eslint/js": "^9.39.4",
-    "@types/node": "^24.12.2",
+    "@tailwindcss/postcss": "^4.1.14",
+    "@types/node": "^25.6.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^6.0.1",
-    "eslint": "^9.39.4",
-    "eslint-plugin-react-hooks": "^7.0.1",
-    "eslint-plugin-react-refresh": "^0.5.2",
-    "globals": "^17.4.0",
-    "typescript": "~6.0.2",
-    "typescript-eslint": "^8.58.0",
-    "vite": "^8.0.4"
+    "tailwindcss": "^4.1.14",
+    "typescript": "^6.0.3"
   }
 }
