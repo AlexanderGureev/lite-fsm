@@ -32,4 +32,8 @@ export default {
     title: "Примеры",
     type: "page",
   },
+  releases: {
+    title: "Релизы",
+    type: "page",
+  },
 };

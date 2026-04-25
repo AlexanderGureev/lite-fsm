@@ -1,8 +1,8 @@
-import type { FSMEvent } from "../core/types";
+import type { AnyEvent, MachineStore } from "../core/types";
 
 import { useManager } from "./useManager";
 
-export const useTransition = <P extends FSMEvent<any, any> = any>() => {
-  const m = useManager<any, P>();
+export const useTransition = <P extends AnyEvent = AnyEvent>() => {
+  const m = useManager<MachineStore, P>();
   return m.transition;
 };

@@ -1,17 +1,15 @@
 import type { IMachineManager } from "../core/interfaces";
-import type { FSMEvent, MachineConfig } from "../core/types";
+import type { AnyEvent, MachineStore } from "../core/types";
 
 import type { FSMContextType } from "./FSMContext";
 
-export type TypedUseTransitionHook<P extends FSMEvent<any, any> = any> = () => FSMContextType<any, P>["transition"];
+export type TypedUseTransitionHook<P extends AnyEvent = AnyEvent> = () => FSMContextType<MachineStore, P>["transition"];
 
 export type TypedUseSelectorHook<S> = {
   <R>(selector: (state: S) => R, equalityFn?: (oldValue: R, newValue: R) => boolean): R;
 };
 
 export type TypedUseMachineHook<
-  S extends {
-    [key in string]: MachineConfig<any, any, any, any>;
-  },
-  P extends FSMEvent<any, any> = any,
+  S extends MachineStore,
+  P extends AnyEvent = AnyEvent,
 > = () => IMachineManager<S, P>;

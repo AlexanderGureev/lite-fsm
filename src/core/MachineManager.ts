@@ -1,20 +1,18 @@
-import { IMachine, IMachineManager, MachineDependencies, MachineEvents } from "./interfaces";
+import { IMachineManager, MachineDependencies, MachineEvents } from "./interfaces";
 import { CreateMachine } from "./Machine";
-import { FSMEvent, MachineConfig, MachinesState, Middleware, TransitionSubscriber } from "./types";
+import { AnyEvent, AnyRecord, MachineConfig, MachinesState, MachineStore, Middleware, StateType, TransitionSubscriber } from "./types";
 import { compose, deepFreeze, IS_DEV, VOID_REDUCER_ERROR, VOID_REDUCER_MIDDLEWARE_MARKER } from "./utils";
 
-const supportsVoidReducer = (middleware: Middleware<any, any>) =>
-  Boolean((middleware as Middleware & Record<string, unknown>)[VOID_REDUCER_MIDDLEWARE_MARKER]);
+const supportsVoidReducer = (middleware: unknown) =>
+  Boolean((middleware as Record<string, unknown>)[VOID_REDUCER_MIDDLEWARE_MARKER]);
 
-export const MachineManager = <
-  S extends {
-    [key in string]: MachineConfig<any, any, any, any>;
-  },
-  P extends FSMEvent<any, any> = MachineEvents<S>,
->(
+type RuntimeConfig<P extends AnyEvent> = MachineConfig<Record<string, unknown>, AnyRecord, P, AnyRecord>;
+type RuntimeState = StateType<Record<string, unknown>, AnyRecord>;
+
+export const MachineManager = <S extends MachineStore, P extends AnyEvent = MachineEvents<S>>(
   config: S,
   opts?: {
-    onError?: (err: any) => void;
+    onError?: (err: unknown) => void;
     middleware?: Middleware<MachinesState<S>, P>[];
   },
 ): IMachineManager<S, P> => {
@@ -27,11 +25,11 @@ export const MachineManager = <
     (acc, name) => {
       return {
         ...acc,
-        [name]: CreateMachine(config[name], { allowVoidReducer: () => allowVoidReducer }),
+        [name]: CreateMachine(config[name] as RuntimeConfig<P>, { allowVoidReducer: () => allowVoidReducer }),
       };
     },
     {} as {
-      [key in keyof S]: IMachine<any, any, any, any>;
+      [key in keyof S]: ReturnType<typeof CreateMachine<Record<string, unknown>, AnyRecord, string, P, AnyRecord>>;
     },
   );
 
@@ -49,18 +47,13 @@ export const MachineManager = <
   if (IS_DEV) deepFreeze(state);
 
   let rootReducer = (prevState: MachinesState<S>, action: P) => {
-    const newState: {
-      [key in keyof S]?: {
-        state: keyof S[key]["config"];
-        context: S[key]["initialContext"];
-      };
-    } = {};
+    const newState: Partial<MachinesState<S>> = {};
 
     for (const name of Object.keys(machines) as Array<keyof S>) {
       const m = machines[name];
       const s = prevState[name];
-      const nextState = m.transition(s, action);
-      newState[name] = nextState;
+      const nextState = m.transition(s as RuntimeState, action);
+      newState[name] = nextState as MachinesState<S>[typeof name];
     }
 
     return {
@@ -128,7 +121,7 @@ export const MachineManager = <
       const current = currentState[name];
 
       m.invokeEffect(prev.state, current.state, {
-        ...(deps as Record<string, any>),
+        ...(deps as AnyRecord),
         transition,
         action,
         condition,

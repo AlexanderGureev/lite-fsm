@@ -2,7 +2,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { devToolsMiddleware } from "../../src/middleware/devTools";
+import { immerMiddleware } from "../../src/middleware/immer";
 import { MachineManager } from "../../src/core/MachineManager";
+import type { AnyEvent, MachineReducer } from "../../src/core/types";
 
 type DevtoolsMessage = {
   type: string;
@@ -285,14 +287,15 @@ describe("devToolsMiddleware — с window, но без extension", () => {
 
   it("JUMP/ROLLBACK всё ещё работают через replaceReducer (без devtools)", () => {
     type Ctx = { manually?: boolean };
-    const manager = MachineManager(
-      {
-        m: {
-          config: { IDLE: { GO: "ACTIVE" }, ACTIVE: {} },
-          initialState: "IDLE",
-          initialContext: {} as Ctx,
-        },
+    const machines = {
+      m: {
+        config: { IDLE: { GO: "ACTIVE" }, ACTIVE: {} },
+        initialState: "IDLE",
+        initialContext: {} as Ctx,
       },
+    };
+    const manager = MachineManager<typeof machines, AnyEvent>(
+      machines,
       { middleware: [devToolsMiddleware({ blacklistActions: [] })] },
     );
 
@@ -303,5 +306,40 @@ describe("devToolsMiddleware — с window, но без extension", () => {
 
     expect(manager.getState().m.state).toBe("ACTIVE");
     expect(manager.getState().m.context.manually).toBe(true);
+  });
+
+  it("работает вместе с immerMiddleware в обоих порядках", () => {
+    const cases = [
+      [immerMiddleware, devToolsMiddleware({ blacklistActions: [] })],
+      [devToolsMiddleware({ blacklistActions: [] }), immerMiddleware],
+    ];
+
+    for (const middleware of cases) {
+      type Ctx = { count: number; restored?: boolean };
+      const manager = MachineManager(
+        {
+          m: {
+            config: { IDLE: { GO: "ACTIVE" }, ACTIVE: {} },
+            initialState: "IDLE",
+            initialContext: { count: 0 } as Ctx,
+            reducer: ((state, _action, meta) => {
+              state.state = meta.nextState;
+              state.context.count += 1;
+            }) satisfies MachineReducer<{ IDLE: { GO: "ACTIVE" }; ACTIVE: {} }, AnyEvent, Ctx>,
+          },
+        },
+        { middleware },
+      );
+
+      expect(() => manager.transition({ type: "GO" })).not.toThrow();
+      expect(manager.getState().m).toEqual({ state: "ACTIVE", context: { count: 1 } });
+
+      manager.transition({
+        type: "@devtools/JUMP_TO_ACTION",
+        payload: { m: { state: "IDLE", context: { count: 10, restored: true } } },
+      });
+
+      expect(manager.getState().m).toEqual({ state: "IDLE", context: { count: 10, restored: true } });
+    }
   });
 });

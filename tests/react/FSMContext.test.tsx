@@ -43,4 +43,35 @@ describe("FSMContext / FSMContextProvider", () => {
 
     expect(got).toBe(manager);
   });
+
+  it("Provider сохраняет ту же ссылку context value при rerender с тем же machineManager", () => {
+    const manager = MachineManager({
+      m: {
+        config: { IDLE: { GO: "ACTIVE" }, ACTIVE: {} },
+        initialState: "IDLE",
+        initialContext: {},
+      },
+    });
+    const seen: Array<React.ContextType<typeof FSMContext>> = [];
+
+    const Consumer = () => {
+      seen.push(React.useContext(FSMContext));
+      return null;
+    };
+
+    const { rerender } = render(
+      <FSMContextProvider machineManager={manager}>
+        <Consumer />
+      </FSMContextProvider>,
+    );
+
+    rerender(
+      <FSMContextProvider machineManager={manager}>
+        <Consumer />
+      </FSMContextProvider>,
+    );
+
+    expect(seen).toEqual([manager, manager]);
+    expect(seen[0]).toBe(seen[1]);
+  });
 });

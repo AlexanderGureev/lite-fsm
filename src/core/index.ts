@@ -1,11 +1,12 @@
 import type {
+  AnyEvent,
+  AnyRecord,
   CFG,
   EffectType,
-  FSMEvent,
   MachineConfig,
   MachineEffect,
-  TypedCreateConfigFn,
-  TypedCreateReducerFn,
+  MachineReducer,
+  StateName,
   WILDCARD,
 } from "./types";
 
@@ -15,23 +16,27 @@ export { MachineManager } from "./MachineManager";
 export type * from "./types";
 
 export const createMachine = <
-  P extends FSMEvent<any, any> = any,
-  D extends Record<string, any> = {},
-  C extends CFG<C, P, keyof C | WILDCARD> = any,
-  T extends Record<string, any> = any,
+  P extends AnyEvent = AnyEvent,
+  D extends AnyRecord = {},
+  C extends object = Record<string, never>,
+  T extends AnyRecord = {},
 >(
-  cfg: MachineConfig<C, T, P, D>,
-) => cfg;
+  cfg: MachineConfig<C, T, P, D> & { config: C & CFG<C, P, StateName<C> | WILDCARD> },
+): MachineConfig<C, T, P, D> => cfg;
 
-export const createReducer: TypedCreateReducerFn = (reducer) => reducer;
+export const createReducer = <C extends object, T extends AnyRecord, P extends AnyEvent = AnyEvent>(
+  reducer: MachineReducer<C, P, T>,
+) => reducer;
 
-export const createConfig: TypedCreateConfigFn = (cfg) => cfg;
+export const createConfig = <C extends object, P extends AnyEvent = AnyEvent>(
+  cfg: C & CFG<C, P, StateName<C> | WILDCARD>,
+): C => cfg;
 
 const take = <
-  P extends FSMEvent<any, any> = any,
-  D extends Record<string, any> = {},
-  C extends CFG<C, P> = any,
-  N extends keyof C | WILDCARD = any,
+  P extends AnyEvent = AnyEvent,
+  D extends AnyRecord = {},
+  C extends object = Record<string, never>,
+  N extends StateName<C> | WILDCARD = StateName<C> | WILDCARD,
 >({
   type,
   effect,
@@ -59,10 +64,10 @@ const take = <
 };
 
 export const createEffect = <
-  P extends FSMEvent<any, any> = any,
-  D extends Record<string, any> = {},
-  C extends CFG<C, P> = any,
-  N extends keyof C | WILDCARD = any,
+  P extends AnyEvent = AnyEvent,
+  D extends AnyRecord = {},
+  C extends object = Record<string, never>,
+  N extends StateName<C> | WILDCARD = StateName<C> | WILDCARD,
 >(opts: {
   effect: MachineEffect<N, C, P, D>;
   type?: EffectType;

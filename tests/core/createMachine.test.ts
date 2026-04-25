@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from "vitest";
 import { createMachine, defineMachine } from "../../src/core/Machine";
 import { immerMiddleware } from "../../src/middleware/immer";
 import { FSMEvent, Middleware } from "../../src/core/types";
-import { VOID_REDUCER_ERROR, WILDCARD } from "../../src/core/utils";
+import { VOID_REDUCER_ERROR, VOID_REDUCER_MIDDLEWARE_MARKER, WILDCARD } from "../../src/core/utils";
 
 describe("createMachine — stateful обёртка", () => {
   describe("базовое поведение", () => {
@@ -247,6 +247,33 @@ describe("createMachine — stateful обёртка", () => {
 
       expect(calls).toEqual(["A:GO", "B:GO", "B:STOP"]);
     });
+
+    it("подписчик, добавленный во время эмита, начинает получать только следующие transition", () => {
+      const machine = createMachine({
+        config: { IDLE: { GO: "ACTIVE" }, ACTIVE: { STOP: "IDLE" } },
+        initialState: "IDLE",
+        initialContext: {},
+      });
+
+      const calls: string[] = [];
+      let subscribed = false;
+
+      machine.onTransition((_p, _c, action) => {
+        calls.push(`A:${action.type}`);
+
+        if (!subscribed) {
+          subscribed = true;
+          machine.onTransition((_nextPrev, _nextCurrent, nextAction) => {
+            calls.push(`B:${nextAction.type}`);
+          });
+        }
+      });
+
+      machine.transition({ type: "GO" });
+      machine.transition({ type: "STOP" });
+
+      expect(calls).toEqual(["A:GO", "A:STOP", "B:STOP"]);
+    });
   });
 
   describe("эффекты", () => {
@@ -395,6 +422,36 @@ describe("createMachine — stateful обёртка", () => {
       });
       expect(onError.mock.calls[0][0].message).toBe("predicate error");
     });
+
+    it("несколько ожидающих condition резолвятся одним подходящим action", async () => {
+      const done = vi.fn();
+
+      const machine = createMachine({
+        config: {
+          IDLE: { GO: "ACTIVE" },
+          ACTIVE: { COMPLETE: "DONE" },
+          DONE: {},
+        },
+        initialState: "IDLE",
+        initialContext: {},
+        effects: {
+          ACTIVE: async ({ condition }) => {
+            const results = await Promise.all([
+              condition((a) => a.type === "COMPLETE"),
+              condition((a) => a.type === "COMPLETE"),
+            ]);
+            done(results);
+          },
+        },
+      });
+
+      machine.transition({ type: "GO" });
+      machine.transition({ type: "COMPLETE" });
+
+      await vi.waitFor(() => {
+        expect(done).toHaveBeenCalledWith([true, true]);
+      });
+    });
   });
 
   describe("addMiddleware", () => {
@@ -413,6 +470,25 @@ describe("createMachine — stateful обёртка", () => {
       machine.transition({ type: "GO" });
 
       expect(machine.getState()).toEqual({ state: "ACTIVE", context: { count: 1 } });
+    });
+
+    it("кастомный middleware с маркером разрешает void reducer без подключения immer", () => {
+      const allowVoidReducer = (((_api) => (next) => (action) => next(action)) as Middleware<any, any> & {
+        [VOID_REDUCER_MIDDLEWARE_MARKER]: true;
+      });
+      allowVoidReducer[VOID_REDUCER_MIDDLEWARE_MARKER] = true;
+
+      const machine = createMachine({
+        config: { IDLE: { GO: "ACTIVE" }, ACTIVE: {} },
+        initialState: "IDLE",
+        initialContext: {},
+        reducer: () => {},
+      });
+
+      machine.addMiddleware(allowVoidReducer);
+
+      expect(() => machine.transition({ type: "GO" })).not.toThrow();
+      expect(machine.getState()).toEqual({ state: "IDLE", context: {} });
     });
 
     it("api.transition: redispatch из middleware проходит через всю цепочку", () => {

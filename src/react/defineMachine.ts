@@ -1,16 +1,16 @@
 import useSyncExternalStoreExports from "use-sync-external-store/shim/with-selector";
-import type { CFG, FSMEvent, MachineConfig, StateType, WILDCARD } from "../core/types";
+import type { AnyEvent, AnyRecord, MachineConfig, StateType } from "../core/types";
 import { createMachine } from "../core/Machine";
 
 const { useSyncExternalStoreWithSelector } = useSyncExternalStoreExports;
 
-export const defineMachine = <P extends FSMEvent<any, any> = any, D extends Record<string, any> = {}>(
+export const defineMachine = <P extends AnyEvent = AnyEvent, D extends AnyRecord = {}>(
   opts: {
-    onError?: (err: any) => void;
+    onError?: (err: unknown) => void;
     dependencies?: D;
   } = {},
 ) => ({
-  create: <C extends CFG<C, P, keyof C | WILDCARD>, T extends Record<string, any>>(cfg: MachineConfig<C, T, P, D>) => {
+  create: <C extends object, T extends AnyRecord>(cfg: MachineConfig<C, T, P, D>) => {
     const machine = createMachine(cfg, opts);
 
     const use = <R>(selector: (state: StateType<C, T>) => R, equalityFn?: (oldValue: R, newValue: R) => boolean) =>

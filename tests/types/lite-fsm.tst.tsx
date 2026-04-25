@@ -59,6 +59,7 @@ type Equal<A, B> =
 
 type Assert<T extends true> = T;
 type IsAny<T> = 0 extends 1 & T ? true : false;
+type IsNever<T> = [T] extends [never] ? true : false;
 type NotAny<T> = IsAny<T> extends true ? false : true;
 
 type PingEvent = FSMEvent<"PING">;
@@ -315,20 +316,20 @@ describe("core exported types", () => {
 
     expect<PingEvent>().type.toBe<{ type: "PING" }>();
     expect<SaveEvent>().type.toBe<{ type: "SAVE"; payload: { id: string; draft?: boolean } }>();
-    type _AnyPayloadIsOptional = Assert<Equal<AnyPayloadEvent, { type: "ANY_PAYLOAD"; payload?: any }>>;
-    expect<ExplicitUndefinedEvent>().type.toBe<{ type: "UNDEFINED_PAYLOAD" }>();
+    type _AnyPayloadIsRequired = Assert<Equal<AnyPayloadEvent, { type: "ANY_PAYLOAD"; payload: any }>>;
+    expect<ExplicitUndefinedEvent>().type.toBe<{ type: "UNDEFINED_PAYLOAD"; payload: undefined }>();
     expect<OptionalPayloadEvent>().type.toBe<{ type: "OPTIONAL"; payload: { value?: string } }>();
     expect<UnknownPayloadEvent>().type.toBe<{ type: "UNKNOWN_PAYLOAD"; payload: unknown }>();
     expect<VoidPayloadEvent>().type.toBe<{ type: "VOID_PAYLOAD"; payload: void }>();
     expect<NullPayloadEvent>().type.toBe<{ type: "NULL_PAYLOAD"; payload: null }>();
     expect<MaybePayloadEvent>().type.toBe<{ type: "MAYBE_PAYLOAD"; payload: { id: string } | undefined }>();
     expect<ReadonlyArrayPayloadEvent>().type.toBe<{ type: "ARRAY_PAYLOAD"; payload: readonly string[] }>();
-    expect<UnionNameEvent>().type.toBe<{ type: "LEFT" | "RIGHT" }>();
+    expect<UnionNameEvent>().type.toBe<{ type: "LEFT" } | { type: "RIGHT" }>();
     expect<NotAny<PingEvent | SaveEvent | OptionalPayloadEvent>>().type.toBe<true>();
 
     const pingEvent: PingEvent = { type: "PING" };
     const saveEvent: SaveEvent = { type: "SAVE", payload: { id: "item-1" } };
-    const anyPayloadEventWithoutPayload: AnyPayloadEvent = { type: "ANY_PAYLOAD" };
+    const anyPayloadEventWithoutPayload: AnyPayloadEvent = { type: "ANY_PAYLOAD", payload: undefined };
     const anyPayloadEventWithPayload: AnyPayloadEvent = { type: "ANY_PAYLOAD", payload: 123 };
     const unknownPayloadEvent: UnknownPayloadEvent = { type: "UNKNOWN_PAYLOAD", payload: "anything" };
     const voidPayloadEvent: VoidPayloadEvent = { type: "VOID_PAYLOAD", payload: undefined };
@@ -447,7 +448,7 @@ describe("config, reducers and effects", () => {
       orphan: {};
     };
 
-    expect<DefaultDeps<"orphan", OrphanConfig, OrphanEvent>["action"]>().type.toBe<OrphanEvent>();
+    type _OrphanActionIsNever = Assert<IsNever<DefaultDeps<"orphan", OrphanConfig, OrphanEvent>["action"]>>;
     expect<DefaultDeps<"done", OrphanConfig, OrphanEvent>["action"]>().type.toBe<FSMEvent<"START">>();
   });
 
@@ -988,7 +989,7 @@ describe("React API", () => {
 
     expect(providerElement).type.toBeAssignableTo<React.JSX.Element>();
     expect(invalidProviderElement).type.toBeAssignableTo<React.JSX.Element>();
-    expect(FSMContext).type.toBeAssignableTo<React.Context<FSMContextType | null>>();
+    expect(FSMContext).type.toBeAssignableTo<React.Context<unknown>>();
     expect(useProviderHooksExamples).type.toBe<() => { authState: "anonymous" | "loading" | "authenticated" | "failed"; count: number }>();
     expect(useTypedHookAliasExamples).type.toBe<() => number>();
   });

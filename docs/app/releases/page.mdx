@@ -1,0 +1,126 @@
+# Релизы
+
+История опубликованных версий `lite-fsm`.
+
+## 1.2.0
+
+В этой версии типовая система стала строже и проще для сопровождения без изменений runtime API.
+
+- `FSMEvent` теперь корректно различает события с payload и без payload, нормально распределяется по union имён событий и схлопывается в `never` для `FSMEvent<never>`.
+- Типы effects стали точнее: orphan state больше не получает весь union событий, если в состояние нет входящих переходов.
+- Пустые зависимости менеджера выводятся как `{}`, а не `unknown`.
+- React hooks больше не проваливаются в silent `any`: базовые `useManager` и `useTransition` получают безопасные defaults.
+- Defaults для middleware стали безопаснее: `Middleware` использует `unknown` и `AnyEvent`, а reusable middleware можно описывать через `GenericMiddleware`.
+- Внутренняя типовая модель упрощена вокруг `StateType`, `StateName`, `IncomingEventTypes` и связанных helper-типов; часть внутренних строительных типов убрана из публичного экспорта.
+
+### Примеры изменений
+
+`FSMEvent<"SAVE", any>` больше не делает `payload` опциональным:
+
+```ts
+// До
+type E = FSMEvent<"SAVE", any>;
+// { type: "SAVE"; payload?: any }
+
+// После
+type E = FSMEvent<"SAVE", any>;
+// { type: "SAVE"; payload: any }
+```
+
+Union имён событий теперь становится discriminated union:
+
+```ts
+// До
+type E = FSMEvent<"START" | "STOP">;
+// { type: "START" | "STOP" }
+
+// После
+type E = FSMEvent<"START" | "STOP">;
+// { type: "START" } | { type: "STOP" }
+```
+
+`FSMEvent<never>` больше не создаёт бесполезный объект:
+
+```ts
+// До
+type E = FSMEvent<never>;
+// { type: never }
+
+// После
+type E = FSMEvent<never>;
+// never
+```
+
+Orphan state больше не получает весь union событий:
+
+```ts
+// До
+type Action = DefaultDeps<"orphan", Config, Event>["action"];
+// Event
+
+// После
+type Action = DefaultDeps<"orphan", Config, Event>["action"];
+// never
+```
+
+Пустые зависимости менеджера стали понятнее:
+
+```ts
+// До
+type Deps = MachineDependencies<{}>;
+// unknown
+
+// После
+type Deps = MachineDependencies<{}>;
+// {}
+```
+
+React hooks и middleware больше не проваливаются в silent `any`:
+
+```ts
+// До
+useManager();
+// IMachineManager<any, any>
+
+useTransition();
+// (payload: any) => any
+
+type M = Middleware;
+// Middleware<any, { type: any; payload?: any }>
+
+// После
+useManager();
+// IMachineManager<MachineStore, AnyEvent>
+
+useTransition();
+// (payload: AnyEvent) => AnyEvent
+
+type M = Middleware;
+// Middleware<unknown, AnyEvent>
+```
+
+Для строгого app-level API типы по-прежнему можно фиксировать явно:
+
+```ts
+const manager = useManager<AppMachines, AppEvent>();
+const transition = useTransition<AppEvent>();
+```
+
+Reusable middleware теперь описывается отдельно:
+
+```ts
+type M = GenericMiddleware;
+```
+
+## Опубликованные версии
+
+- `1.1.0-beta.2`: 25 сентября 2025
+- `1.1.0-beta.1`: 5 мая 2025
+- `1.0.0`: 27 января 2025
+- `0.0.6`: 23 ноября 2023
+- `0.0.5`: 10 октября 2023
+- `0.0.4`: 23 июня 2023
+- `0.0.3`: 23 июня 2023
+- `0.0.2`: 23 июня 2023
+- `0.0.1`: 21 июня 2023
+

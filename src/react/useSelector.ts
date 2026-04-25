@@ -1,16 +1,11 @@
 import useSyncExternalStoreExports from "use-sync-external-store/shim/with-selector";
 
-import type { MachineConfig, MachinesState } from "../core/types";
+import type { MachinesState, MachineStore } from "../core/types";
 import { useManager } from "./useManager";
 
 const { useSyncExternalStoreWithSelector } = useSyncExternalStoreExports;
 
-export const useSelector = <
-  S extends {
-    [key in string]: MachineConfig<any, any, any, any>;
-  },
-  R,
->(
+export const useSelector = <S extends MachineStore, R>(
   selector: (state: MachinesState<S>) => R,
   equalityFn?: (oldValue: R, newValue: R) => boolean,
 ) => {

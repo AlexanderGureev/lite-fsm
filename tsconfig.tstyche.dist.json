@@ -6,5 +6,5 @@
     "noUnusedParameters": false,
     "types": ["node", "react"]
   },
-  "include": ["tests/types-dist"]
+  "include": ["tests/types"]
 }

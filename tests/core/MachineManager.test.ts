@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from "vitest";
 import { MachineManager } from "../../src/core/MachineManager";
 import { immerMiddleware } from "../../src/middleware/immer";
 import { VOID_REDUCER_ERROR, WILDCARD } from "../../src/core/utils";
-import type { Middleware } from "../../src/core/types";
+import type { AnyEvent, MachineReducer, Middleware } from "../../src/core/types";
 
 describe("MachineManager", () => {
   describe("базовое поведение", () => {
@@ -19,12 +19,23 @@ describe("MachineManager", () => {
       });
     });
 
+    it("пустая карта машин корректна и возвращает пустой state", () => {
+      const manager = MachineManager<{}, AnyEvent>({});
+
+      expect(manager.getState()).toEqual({});
+      expect(manager.transition({ type: "ANY" })).toEqual({ type: "ANY" });
+      expect(manager.getState()).toEqual({});
+    });
+
     it("transition обновляет все машины, которые реагируют на событие", () => {
       const manager = MachineManager({
         a: { config: { IDLE: { GO: "ON" }, ON: {} }, initialState: "IDLE", initialContext: {} },
         b: { config: { OFF: { GO: "RUN" }, RUN: {} }, initialState: "OFF", initialContext: {} },
         c: { config: { READY: {} }, initialState: "READY", initialContext: {} },
       });
+
+      const before = manager.getState();
+      const untouched = before.c;
 
       manager.transition({ type: "GO" });
 
@@ -33,6 +44,7 @@ describe("MachineManager", () => {
         b: { state: "RUN", context: {} },
         c: { state: "READY", context: {} },
       });
+      expect(manager.getState().c).toBe(untouched);
     });
 
     it("getState возвращает прямую ссылку на state: стабильна между вызовами, меняется после transition", () => {
@@ -108,10 +120,10 @@ describe("MachineManager", () => {
             config: { IDLE: { GO: "ACTIVE" }, ACTIVE: {} },
             initialState: "IDLE",
             initialContext: { count: 0 },
-            reducer: (state, _action, meta) => {
+            reducer: ((state, _action, meta) => {
               state.state = meta.nextState;
               state.context.count += 1;
-            },
+            }) satisfies MachineReducer<{ IDLE: { GO: "ACTIVE" }; ACTIVE: {} }, AnyEvent, { count: number }>,
           },
         },
         { middleware: [immerMiddleware] },
@@ -158,6 +170,35 @@ describe("MachineManager", () => {
 
       await vi.waitFor(() => {
         expect(order).toEqual(["sub:GO:ON/RUN", "effect:a.ON", "effect:b.RUN"]);
+      });
+    });
+
+    it("эффекты машин вызываются в порядке вставки ключей, без сортировки по имени", async () => {
+      const order: string[] = [];
+
+      const manager = MachineManager({
+        z: {
+          config: { IDLE: { GO: "DONE" }, DONE: {} },
+          initialState: "IDLE",
+          initialContext: {},
+          effects: {
+            DONE: () => order.push("z"),
+          },
+        },
+        a: {
+          config: { IDLE: { GO: "DONE" }, DONE: {} },
+          initialState: "IDLE",
+          initialContext: {},
+          effects: {
+            DONE: () => order.push("a"),
+          },
+        },
+      });
+
+      manager.transition({ type: "GO" });
+
+      await vi.waitFor(() => {
+        expect(order).toEqual(["z", "a"]);
       });
     });
 
@@ -272,7 +313,7 @@ describe("MachineManager", () => {
           initialState: "IDLE",
           initialContext: {},
           effects: {
-            ACTIVE: ({ services }) => services.log("hi"),
+            ACTIVE: ({ services }: { services: { log: typeof log } }) => services.log("hi"),
           },
         },
       });
@@ -292,7 +333,7 @@ describe("MachineManager", () => {
           initialState: "IDLE",
           initialContext: {},
           effects: {
-            ACTIVE: ({ services }) => {
+            ACTIVE: ({ services }: { services: { tag: string; extra?: boolean } }) => {
               seen.push(services);
             },
           },
@@ -336,28 +377,29 @@ describe("MachineManager", () => {
     it("middleware может трансформировать action для reducer, subscribers и wildcard effect", async () => {
       type Action = { type: "INC"; payload?: { amount: number; tagged: boolean } };
       const trace: string[] = [];
-
-      const manager = MachineManager(
-        {
-          counter: {
-            config: { IDLE: { INC: null } },
-            initialState: "IDLE",
-            initialContext: { n: 0 },
-            reducer: (state, action: Action) => {
-              trace.push(`reducer:${action.payload?.amount}:${String(action.payload?.tagged)}`);
-              if (action.type === "INC") {
-                const amount = action.payload?.amount ?? 1;
-                return { state: state.state, context: { n: state.context.n + amount } };
-              }
-              return state;
-            },
-            effects: {
-              [WILDCARD]: ({ action }) => {
-                trace.push(`effect:${action.payload?.amount}:${String(action.payload?.tagged)}`);
-              },
+      const store = {
+        counter: {
+          config: { IDLE: { INC: null } },
+          initialState: "IDLE",
+          initialContext: { n: 0 },
+          reducer: ((state, action) => {
+            trace.push(`reducer:${action.payload?.amount}:${String(action.payload?.tagged)}`);
+            if (action.type === "INC") {
+              const amount = action.payload?.amount ?? 1;
+              return { state: state.state, context: { n: state.context.n + amount } };
+            }
+            return state;
+          }) satisfies MachineReducer<{ IDLE: { INC: null } }, Action, { n: number }>,
+          effects: {
+            [WILDCARD]: ({ action }: { action: Action }) => {
+              trace.push(`effect:${action.payload?.amount}:${String(action.payload?.tagged)}`);
             },
           },
         },
+      };
+
+      const manager = MachineManager<typeof store, Action>(
+        store,
         {
           middleware: [
             () => (next) => (action: Action) => {
@@ -386,11 +428,12 @@ describe("MachineManager", () => {
 
     it("middleware может блокировать action (не вызывая next)", () => {
       const trace: string[] = [];
+      const machines = {
+        m: { config: { IDLE: { A: "ACTIVE" }, ACTIVE: {} }, initialState: "IDLE", initialContext: {} },
+      };
 
-      const manager = MachineManager(
-        {
-          m: { config: { IDLE: { A: "ACTIVE" }, ACTIVE: {} }, initialState: "IDLE", initialContext: {} },
-        },
+      const manager = MachineManager<typeof machines, AnyEvent>(
+        machines,
         {
           middleware: [
             () => (next) => (action) => {
@@ -513,9 +556,10 @@ describe("MachineManager", () => {
 
   describe("replaceReducer (публичный API)", () => {
     it("переопределяет root reducer; оригинальный вызывается через переданную функцию", () => {
-      const manager = MachineManager({
+      const machines = {
         m: { config: { IDLE: { GO: "ACTIVE" }, ACTIVE: {} }, initialState: "IDLE", initialContext: { flag: false } },
-      });
+      };
+      const manager = MachineManager<typeof machines, AnyEvent>(machines);
 
       manager.replaceReducer((original) => (state, action) => {
         if (action.type === "CUSTOM") {
@@ -563,22 +607,23 @@ describe("MachineManager", () => {
 
     it("condition внутри эффекта: reject попадает в onError", async () => {
       const onError = vi.fn();
-
-      const manager = MachineManager(
-        {
-          m: {
-            config: { IDLE: { GO: "ACTIVE" }, ACTIVE: {} },
-            initialState: "IDLE",
-            initialContext: {},
-            effects: {
-              ACTIVE: async ({ condition }) => {
-                await condition(() => {
-                  throw new Error("predicate");
-                });
-              },
+      const machines = {
+        m: {
+          config: { IDLE: { GO: "ACTIVE" }, ACTIVE: {} },
+          initialState: "IDLE",
+          initialContext: {},
+          effects: {
+            ACTIVE: async ({ condition }: { condition: (predicate: (action: AnyEvent) => boolean) => Promise<boolean> }) => {
+              await condition(() => {
+                throw new Error("predicate");
+              });
             },
           },
         },
+      };
+
+      const manager = MachineManager<typeof machines, AnyEvent>(
+        machines,
         { onError },
       );
 
@@ -599,7 +644,7 @@ describe("MachineManager", () => {
           initialState: "IDLE",
           initialContext: {},
           effects: {
-            ACTIVE: async ({ condition }) => {
+            ACTIVE: async ({ condition }: { condition: (predicate: (action: AnyEvent) => boolean) => Promise<boolean> }) => {
               await condition((a: { type: string }) => a.type === "COMPLETE");
               done();
             },

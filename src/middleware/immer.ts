@@ -1,20 +1,19 @@
 import { produce } from "immer";
 
-import type { Middleware } from "../core/types";
+import type { AnyEvent, MiddlewareApi, VoidReducerMiddleware } from "../core/types";
 import { VOID_REDUCER_MIDDLEWARE_MARKER } from "../core/utils";
 
-type ImmerMiddleware = Middleware & {
-  [VOID_REDUCER_MIDDLEWARE_MARKER]: true;
-};
-
-const middleware = ((api) => {
+const createMiddleware = <S, P extends AnyEvent>(api: MiddlewareApi<S, P>) => {
   api.replaceReducer((reducer) => {
     const newReducer = produce((draft, action) => {
-      const result = reducer(draft, action);
+      const result = reducer(draft as S, action);
 
-      if (typeof result === "object") {
+      if (typeof result === "object" && result !== null) {
+        const next = result as Record<string, unknown>;
+        const target = draft as Record<string, unknown>;
+
         for (const k of Object.keys(result)) {
-          if (result[k] !== undefined) draft[k] = result[k];
+          if (next[k] !== undefined) target[k] = next[k];
         }
       }
 
@@ -24,8 +23,10 @@ const middleware = ((api) => {
     return newReducer;
   });
 
-  return (next) => next;
-}) as ImmerMiddleware;
+  return (next: (action: P) => P) => next;
+};
+
+const middleware = createMiddleware as VoidReducerMiddleware;
 
 middleware[VOID_REDUCER_MIDDLEWARE_MARKER] = true;
 

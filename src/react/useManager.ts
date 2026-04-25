@@ -1,15 +1,13 @@
 import React from "react";
 
-import type { FSMEvent, MachineConfig } from "../core/types";
+import type { AnyEvent, MachineStore } from "../core/types";
 
 import { FSMContext, FSM_PROVIDER_ERROR } from "./FSMContext";
 import type { FSMContextType } from "./FSMContext";
 
 export const useManager = <
-  S extends {
-    [key in string]: MachineConfig<any, any, any, any>;
-  } = any,
-  P extends FSMEvent<any, any> = any,
+  S extends MachineStore = MachineStore,
+  P extends AnyEvent = AnyEvent,
 >() => {
   const manager = React.useContext(FSMContext) as FSMContextType<S, P> | null;
 

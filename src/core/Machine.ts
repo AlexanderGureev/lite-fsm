@@ -1,13 +1,14 @@
 import {
+  AnyEvent,
+  AnyRecord,
   CFG,
   DefaultDeps,
-  FSMEvent,
   MachineConfig,
+  MachineEffect,
   Middleware,
-  State,
+  StateName,
   StateType,
   Subscriber,
-  WILDCARD as WTYPE,
 } from "./types";
 import { compose, deepFreeze, IS_DEV, VOID_REDUCER_ERROR, VOID_REDUCER_MIDDLEWARE_MARKER, WILDCARD } from "./utils";
 
@@ -15,24 +16,26 @@ type RuntimeOptions = {
   allowVoidReducer?: () => boolean;
 };
 
-const supportsVoidReducer = (middleware: Middleware<any, any>) =>
-  Boolean((middleware as Middleware & Record<string, unknown>)[VOID_REDUCER_MIDDLEWARE_MARKER]);
+const supportsVoidReducer = (middleware: unknown) =>
+  Boolean((middleware as Record<string, unknown>)[VOID_REDUCER_MIDDLEWARE_MARKER]);
 
 export const CreateMachine = <
-  C extends CFG<C, P, keyof C | WTYPE>,
-  T extends Record<string, any>,
-  E extends string,
-  P extends FSMEvent<E, any> = any,
-  D extends Record<string, any> = {},
+  C extends object,
+  T extends AnyRecord,
+  E extends string = string,
+  P extends AnyEvent = AnyEvent & { type: E },
+  D extends AnyRecord = {},
 >(
   cfg: MachineConfig<C, T, P, D>,
   runtimeOptions: RuntimeOptions = {},
 ) => {
   return {
     config: cfg.config,
-    transition: (s: { state: State<keyof C>; context: T }, action: P): { state: State<keyof C>; context: T } => {
-      const _next = cfg.config[s.state]?.[action.type];
-      const nextState = _next !== undefined ? _next : cfg.config[WILDCARD]?.[action.type];
+    transition: (s: StateType<C, T>, action: P): StateType<C, T> => {
+      const graph = cfg.config as C & CFG<C, P, StateName<C> | "*">;
+      const actionType = action.type as P["type"];
+      const _next = graph[s.state]?.[actionType];
+      const nextState = _next !== undefined ? _next : graph[WILDCARD]?.[actionType];
 
       if (nextState === undefined) return s;
 
@@ -47,34 +50,40 @@ export const CreateMachine = <
         return next;
       }
 
-      const payload = "payload" in action ? action.payload : {};
+      const payload = "payload" in action ? (action.payload as object) : {};
 
       return {
         state: nextState || s.state,
         context: { ...s.context, ...payload } as T,
       };
     },
-    invokeEffect: async (prevState: State<keyof C>, currentState: State<keyof C>, deps: D & DefaultDeps<any, C, P>) => {
+    invokeEffect: async (
+      prevState: StateName<C>,
+      currentState: StateName<C>,
+      deps: D & DefaultDeps<StateName<C> | "*", C, P>,
+    ) => {
       if (!cfg.effects) return;
 
       if (prevState !== currentState && cfg.effects[currentState]) {
-        await cfg.effects[currentState]?.(deps);
+        const effect = cfg.effects[currentState] as MachineEffect<StateName<C>, C, P, D> | undefined;
+        await effect?.(deps as Parameters<MachineEffect<StateName<C>, C, P, D>>[0]);
       } else if (cfg.effects[WILDCARD]) {
-        await cfg.effects[WILDCARD]?.(deps);
+        const effect = cfg.effects[WILDCARD] as MachineEffect<"*", C, P, D> | undefined;
+        await effect?.(deps);
       }
     },
   };
 };
 
 export const createMachine = <
-  C extends CFG<C, P, keyof C | WTYPE>,
-  T extends Record<string, any>,
-  P extends FSMEvent<any, any>,
-  D extends Record<string, any>,
+  C extends object,
+  T extends AnyRecord,
+  P extends AnyEvent,
+  D extends AnyRecord,
 >(
   cfg: MachineConfig<C, T, P, D>,
   opts: {
-    onError?: (err: any) => void;
+    onError?: (err: unknown) => void;
     dependencies?: D;
   } = {},
 ) => {
@@ -203,12 +212,12 @@ export const createMachine = <
   return { transition, getState, onTransition, addMiddleware };
 };
 
-export const defineMachine = <P extends FSMEvent<any, any> = any, D extends Record<string, any> = {}>(
+export const defineMachine = <P extends AnyEvent = AnyEvent, D extends AnyRecord = {}>(
   opts: {
-    onError?: (err: any) => void;
+    onError?: (err: unknown) => void;
     dependencies?: D;
   } = {},
 ) => ({
-  create: <C extends CFG<C, P, keyof C | WTYPE>, T extends Record<string, any>>(cfg: MachineConfig<C, T, P, D>) =>
+  create: <C extends object, T extends AnyRecord>(cfg: MachineConfig<C, T, P, D>) =>
     createMachine(cfg, opts),
 });

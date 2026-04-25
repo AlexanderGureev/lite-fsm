@@ -3,38 +3,36 @@ export type SType = string | number | symbol;
 export type WILDCARD = "*";
 export type State<S extends SType> = Exclude<S, WILDCARD | number | symbol>;
 
-export type StateType<C extends CFG<any, any, any>, T extends Record<string, any>> = {
+export type AnyRecord = Record<string, unknown>;
+export type AnyEvent = { type: string; payload?: unknown };
+export type StateName<C extends object> = State<keyof C & SType>;
+
+type TransitionTarget<States extends SType> = State<States> | null;
+type TransitionMap<States extends SType, P extends AnyEvent> = Partial<Record<P["type"], TransitionTarget<States>>>;
+type StrictTransitionMap<Edges, States extends SType, P extends AnyEvent> = TransitionMap<States, P> & {
+  [Event in Exclude<keyof Edges, P["type"]>]: never;
+};
+
+export type CFG<R extends object, P extends AnyEvent, K extends SType = keyof R & SType> = {
+  [state in K]?: state extends keyof R ? StrictTransitionMap<R[state], K, P> : TransitionMap<K, P>;
+};
+
+export type StateType<C extends object, T extends AnyRecord> = {
   context: T;
-  state: State<keyof C>;
+  state: StateName<C>;
 };
 
-export type Subscriber<
-  C extends CFG<any, any, any>,
-  T extends Record<string, any>,
-  P extends FSMEvent<any, any> = any,
-> = (prevState: StateType<C, T>, currentState: StateType<C, T>, action: P) => void;
+export type MachineState<C extends object, T extends AnyRecord> = StateType<C, T>;
 
-export type MachinesState<
-  S extends {
-    [key in string]: MachineConfig<any, any, any, any>;
-  },
-> = {
-  [key in keyof S]: {
-    state: State<keyof S[key]["config"]>;
-    context: S[key]["initialContext"];
-  };
-};
+export type Subscriber<C extends object, T extends AnyRecord, P extends AnyEvent = AnyEvent> = (
+  prevState: StateType<C, T>,
+  currentState: StateType<C, T>,
+  action: P,
+) => void;
 
-export type TransitionSubscriber<
-  S extends {
-    [key in string]: MachineConfig<any, any, any, any>;
-  },
-  P extends FSMEvent<any, any> = any,
-> = (prevState: MachinesState<S>, currentState: MachinesState<S>, action: P) => void;
+export type Reducer<S, P extends AnyEvent = AnyEvent> = (state: S, action: P) => S;
 
-export type Reducer<S, P extends FSMEvent<any, any> = any> = (state: S, action: P) => S;
-
-export type MiddlewareApi<S, P extends FSMEvent<any, any> = any> = {
+export type MiddlewareApi<S, P extends AnyEvent = AnyEvent> = {
   getState: () => S;
   transition: (action: P) => P;
   replaceReducer: (cb: (reducer: Reducer<S, P>) => Reducer<S, P>) => void;
@@ -42,100 +40,123 @@ export type MiddlewareApi<S, P extends FSMEvent<any, any> = any> = {
   condition: (predicate: (a: P) => boolean) => Promise<boolean>;
 };
 
-export type Middleware<S = any, P extends FSMEvent<any, any> = { type: any; payload?: any }> = (
+export type Middleware<S = unknown, P extends AnyEvent = AnyEvent> = (
   api: MiddlewareApi<S, P>,
 ) => (next: (action: P) => P) => (action: P) => P;
 
-export type MachineReducer<C extends CFG<C, P>, P extends FSMEvent<any, any>, T extends Record<string, any>> = (
-  state: { state: State<keyof C>; context: T },
+export type GenericMiddleware = <S, P extends AnyEvent>(
+  api: MiddlewareApi<S, P>,
+) => (next: (action: P) => P) => (action: P) => P;
+
+export type VoidReducerMiddleware = GenericMiddleware & {
+  __liteFsmAllowVoidReducer: true;
+};
+
+export type MachineReducer<C extends object, P extends AnyEvent, T extends AnyRecord> = (
+  state: StateType<C, T>,
   payload: P,
-  meta: { nextState: State<keyof C>; config: C },
-) => { state: State<keyof C>; context: T } | void;
+  meta: { nextState: StateName<C>; config: C },
+) => StateType<C, T> | void;
 
-type KeysWithValsOfType<T, V> = keyof { [P in keyof T as T[P] extends V ? P : never]: P };
+type EventKeysForTarget<Edges, Target extends SType> = {
+  [Event in keyof Edges]: Edges[Event] extends Target ? Event : never;
+}[keyof Edges];
 
-type Parse<T, E> = { [K in keyof T]: KeysWithValsOfType<T[K], E> };
+export type IncomingEventTypes<C extends object, N extends SType> = {
+  [Source in keyof C]: C[Source] extends object ? EventKeysForTarget<C[Source], N> : never;
+}[keyof C] &
+  string;
 
-type GetEvents<T> = T[keyof T] extends string ? T[keyof T] : never;
+export type ActionForState<C extends object, N extends SType, P extends AnyEvent> = WILDCARD extends N
+  ? P
+  : Extract<P, { type: IncomingEventTypes<C, N> }>;
 
 export type DefaultDeps<
-  N extends keyof C | WILDCARD = any,
-  C extends CFG<C, P> = any,
-  P extends FSMEvent<any, any> = any,
+  N extends SType = WILDCARD,
+  C extends object = Record<string, never>,
+  P extends AnyEvent = AnyEvent,
 > = {
   transition: (data: P) => P;
-  action: WILDCARD extends N
-    ? P
-    : // extends делаем специально внутри Extract иначе ts начинает сильно тормозить при попытке вывести AppState в useSelector
-      Extract<P, { type: GetEvents<Parse<C, N>> extends never ? P["type"] : GetEvents<Parse<C, N>> }>;
+  action: ActionForState<C, N, P>;
   condition: (predicate: (a: P) => boolean) => Promise<boolean>;
 };
 
 export type MachineEffect<
-  N extends keyof C | WILDCARD = any,
-  C extends CFG<C, P> = any,
-  P extends FSMEvent<any, any> = any,
-  D extends Record<string, any> = {},
+  N extends SType = WILDCARD,
+  C extends object = Record<string, never>,
+  P extends AnyEvent = AnyEvent,
+  D extends AnyRecord = {},
 > = (deps: D & DefaultDeps<N, C, P>) => Promise<void> | void;
 
 export type MachineConfig<
-  C extends CFG<C, P, keyof C | WILDCARD>,
-  T extends Record<string, any>,
-  P extends FSMEvent<any, any>,
-  D extends Record<string, any> = {},
+  C extends object,
+  T extends AnyRecord,
+  P extends AnyEvent,
+  D extends AnyRecord = {},
 > = {
   config: C;
-  initialState: State<keyof C>;
+  initialState: StateName<C>;
   initialContext: T;
   reducer?: MachineReducer<C, P, T>;
   effects?: {
-    [key in keyof C | WILDCARD]?: MachineEffect<key, C, P, D>;
+    [key in StateName<C> | WILDCARD]?: MachineEffect<key, C, P, D>;
   };
 };
 
-export type CFG<R, P extends FSMEvent<any, any>, K extends keyof R = keyof R> = {
-  [state in K]?: {
-    [event in P["type"]]?: State<K> | null;
-  } & { [key in Exclude<keyof R[state], P["type"]>]: never };
+type AnyMachineConfig = {
+  config: object;
+  initialState: string;
+  initialContext: AnyRecord;
+  reducer?: unknown;
+  effects?: unknown;
 };
 
-export type TypedCreateMachineFn<P extends FSMEvent<any, any> = any, D extends Record<string, any> = {}> = <
-  C extends CFG<C, P, keyof C | WILDCARD>,
-  T extends Record<string, any>,
+export type MachineStore = Record<string, AnyMachineConfig>;
+
+export type MachinesState<S extends MachineStore> = {
+  [key in keyof S]: {
+    state: StateName<S[key]["config"] & object>;
+    context: S[key]["initialContext"];
+  };
+};
+
+export type TransitionSubscriber<S extends MachineStore, P extends AnyEvent = AnyEvent> = (
+  prevState: MachinesState<S>,
+  currentState: MachinesState<S>,
+  action: P,
+) => void;
+
+export type TypedCreateMachineFn<P extends AnyEvent = AnyEvent, D extends AnyRecord = {}> = <
+  C extends object,
+  T extends AnyRecord,
 >(
-  cfg: MachineConfig<C, T, P, D>,
+  cfg: MachineConfig<C, T, P, D> & { config: C & CFG<C, P, StateName<C> | WILDCARD> },
 ) => MachineConfig<C, T, P, D>;
 
 type IsAny<T> = 0 extends 1 & T ? true : false;
+type NoPayload = { readonly __liteFsmNoPayload: never };
 
-export type FSMEvent<Name extends string, Payload = undefined> = IsAny<Payload> extends true
-  ? { type: Name; payload?: Payload }
-  : [Payload] extends [undefined]
-    ? { type: Name }
-    : {
-        type: Name;
-        payload: Payload;
-      };
+export type FSMEvent<Name extends string, Payload = NoPayload> = Name extends string
+  ? IsAny<Payload> extends true
+    ? { type: Name; payload: Payload }
+    : [Payload] extends [NoPayload]
+      ? { type: Name }
+      : { type: Name; payload: Payload }
+  : never;
 
-export type TypedCreateReducerFn<P extends FSMEvent<any, any> = any> = <
-  C extends CFG<C, P>,
-  T extends Record<string, any>,
->(
+export type TypedCreateReducerFn<P extends AnyEvent = AnyEvent> = <C extends object, T extends AnyRecord>(
   reducer: MachineReducer<C, P, T>,
 ) => MachineReducer<C, P, T>;
 
-export type TypedCreateConfigFn<P extends FSMEvent<any, any> = any> = <
-  C extends CFG<C, P, keyof C | WILDCARD>,
-  T extends Record<string, any>,
->(
-  cfg: MachineConfig<C, T, P, any>["config"],
-) => MachineConfig<C, T, P, any>["config"];
+export type TypedCreateConfigFn<P extends AnyEvent = AnyEvent> = <C extends object>(
+  cfg: C & CFG<C, P, StateName<C> | WILDCARD>,
+) => C;
 
 export type EffectType = "every" | "latest";
 
-export type TypedCreateEffectFn<P extends FSMEvent<any, any> = any, D extends Record<string, any> = {}> = <
-  C extends CFG<C, P> = any,
-  N extends keyof C | WILDCARD = any,
+export type TypedCreateEffectFn<P extends AnyEvent = AnyEvent, D extends AnyRecord = {}> = <
+  C extends object = Record<string, never>,
+  N extends StateName<C> | WILDCARD = StateName<C> | WILDCARD,
 >(opts: {
   effect: MachineEffect<N, C, P, D>;
   type?: EffectType;
