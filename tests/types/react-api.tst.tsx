@@ -6,6 +6,7 @@ import type {
   AnyEvent,
   MachineConfig,
   MachineDependencies,
+  MachineManagerSnapshot,
   MachineStore,
   MachineReducer,
   MachinesState,
@@ -18,11 +19,13 @@ import {
   FSMContext,
   type FSMContextType,
   FSMContextProvider,
+  FSMHydrationBoundary,
   type TypedUseMachineHook,
   type TypedUseManagerHook,
   type TypedUseSelectorHook,
   type TypedUseTransitionHook,
   useManager,
+  useHydrateSnapshot,
   useSelector,
   useTransition,
 } from "lite-fsm/react";
@@ -60,26 +63,26 @@ type Store = typeof store;
 type StoreState = MachinesState<Store>;
 
 describe("FSMContextType<S, P>", () => {
-  test("is an alias of IMachineManager<S, P>", () => {
+  test("является alias для IMachineManager<S, P>", () => {
     type FC = FSMContextType<Store, Evt>;
     type MM = IMachineManager<Store, Evt>;
     type _SameShape = Assert<Equal<FC, MM>>;
   });
 
-  test("defaults to safe MachineStore/AnyEvent manager", () => {
+  test("по умолчанию даёт безопасный manager MachineStore/AnyEvent", () => {
     type Default = FSMContextType;
     expect<Default>().type.toBe<IMachineManager<MachineStore, AnyEvent>>();
   });
 });
 
 describe("FSMContext", () => {
-  test("stores an erased context value; useManager restores the typed manager", () => {
+  test("хранит erased context value, а useManager восстанавливает typed manager", () => {
     expect(FSMContext).type.toBe<React.Context<unknown>>();
   });
 });
 
 describe("FSMContextProvider", () => {
-  test("accepts machineManager of matching IMachineManager<S, P>", () => {
+  test("принимает machineManager с подходящим IMachineManager<S, P>", () => {
     const manager = MachineManager<Store, Evt>(store);
     const el = (
       <FSMContextProvider<Store, Evt> machineManager={manager}>
@@ -89,7 +92,7 @@ describe("FSMContextProvider", () => {
     expect(el).type.toBeAssignableTo<React.JSX.Element>();
   });
 
-  test("rejects bogus machineManager shape", () => {
+  test("отклоняет неправильную форму machineManager", () => {
     const el = (
       <FSMContextProvider<Store, Evt>
         // @ts-expect-error!
@@ -101,7 +104,7 @@ describe("FSMContextProvider", () => {
     void el;
   });
 
-  test("requires children via PropsWithChildren", () => {
+  test("типизирует children через PropsWithChildren", () => {
     const manager = MachineManager<Store, Evt>(store);
     const elWithChildren = (
       <FSMContextProvider<Store, Evt> machineManager={manager}>
@@ -116,23 +119,23 @@ describe("FSMContextProvider", () => {
 });
 
 describe("useManager<S, P>", () => {
-  test("returns IMachineManager<S, P>", () => {
+  test("возвращает IMachineManager<S, P>", () => {
     const m = useManager<Store, Evt>();
     expect(m).type.toBe<IMachineManager<Store, Evt>>();
   });
 
-  test("defaults to safe MachineStore/AnyEvent manager", () => {
+  test("по умолчанию даёт безопасный manager MachineStore/AnyEvent", () => {
     const m = useManager();
     expect(m).type.toBe<IMachineManager<MachineStore, AnyEvent>>();
   });
 
-  test("aliasing through TypedUseMachineHook narrows it", () => {
+  test("alias через TypedUseMachineHook сужает тип manager", () => {
     const typed: TypedUseMachineHook<Store, Evt> = useManager;
     const m = typed();
     expect(m).type.toBe<IMachineManager<Store, Evt>>();
   });
 
-  test("aliasing through TypedUseManagerHook narrows it", () => {
+  test("alias через TypedUseManagerHook сужает тип manager", () => {
     const typed: TypedUseManagerHook<Store, Evt> = useManager;
     const m = typed();
     expect(m).type.toBe<IMachineManager<Store, Evt>>();
@@ -140,33 +143,33 @@ describe("useManager<S, P>", () => {
 });
 
 describe("useSelector<S, R>", () => {
-  test("returns R extracted by selector", () => {
+  test("возвращает R, извлечённый selector", () => {
     const count = useSelector<Store, number>((state) => state.x.context.requests);
     expect(count).type.toBe<number>();
   });
 
-  test("selector receives MachinesState<S>", () => {
+  test("selector получает MachinesState<S>", () => {
     useSelector<Store, string>((state) => {
       expect(state).type.toBe<StoreState>();
       return state.x.state;
     });
   });
 
-  test("equalityFn is optional and typed (oldValue, newValue) => boolean", () => {
+  test("equalityFn опционален и типизирован как (oldValue, newValue) => boolean", () => {
     useSelector<Store, number>(
       (state) => state.x.context.requests,
       (a, b) => a === b,
     );
   });
 
-  test("rejects selector that reads missing key", () => {
+  test("отклоняет selector, который читает отсутствующий key", () => {
     useSelector<Store, number>(
       // @ts-expect-error!
       (state) => state.missing.context.requests,
     );
   });
 
-  test("rejects equalityFn with wrong R", () => {
+  test("отклоняет equalityFn с неправильным R", () => {
     useSelector<Store, number>(
       (state) => state.x.context.requests,
       // @ts-expect-error!
@@ -174,7 +177,7 @@ describe("useSelector<S, R>", () => {
     );
   });
 
-  test("TypedUseSelectorHook<S> pins store state but keeps R generic", () => {
+  test("TypedUseSelectorHook<S> фиксирует store state, но оставляет R generic", () => {
     const typed: TypedUseSelectorHook<Store> = useSelector;
     const r = typed((state) => state.x.state);
     expect(r).type.toBe<"idle" | "busy">();
@@ -182,33 +185,58 @@ describe("useSelector<S, R>", () => {
 });
 
 describe("useTransition<P>", () => {
-  test("returns a dispatch function (payload: P) => P", () => {
+  test("возвращает dispatch-функцию (payload: P) => P", () => {
     const dispatch = useTransition<Evt>();
     expect(dispatch).type.toBe<(payload: Evt) => Evt>();
     dispatch({ type: "PING" });
     dispatch({ type: "DONE" });
   });
 
-  test("rejects events outside P", () => {
+  test("отклоняет events вне P", () => {
     const dispatch = useTransition<Evt>();
     // @ts-expect-error!
     dispatch({ type: "UNKNOWN" });
   });
 
-  test("defaults to dispatch for AnyEvent", () => {
+  test("по умолчанию возвращает dispatch для AnyEvent", () => {
     const dispatch = useTransition();
     expect(dispatch).type.toBe<(payload: AnyEvent) => AnyEvent>();
   });
 
-  test("TypedUseTransitionHook<P> narrows transition signature", () => {
+  test("TypedUseTransitionHook<P> сужает сигнатуру transition", () => {
     const typed: TypedUseTransitionHook<Evt> = useTransition;
     const dispatch = typed();
     expect(dispatch).type.toBe<(payload: Evt) => Evt>();
   });
 });
 
-describe("defineMachine (react)", () => {
-  test("returns { create } factory that yields a hook with machine API", () => {
+describe("API гидратации snapshot", () => {
+  const snapshot: MachineManagerSnapshot<Store> = {
+    machines: {
+      x: { state: "idle", context: { requests: 1 } },
+    },
+  };
+
+  test("useHydrateSnapshot принимает typed manager snapshot", () => {
+    expect(useHydrateSnapshot<Store>).type.toBe<
+      (snapshot: MachineManagerSnapshot<Store>, opts?: { strategy?: "replace" | "merge" }) => void
+    >();
+    useHydrateSnapshot<Store>(snapshot);
+    useHydrateSnapshot<Store>(snapshot, { strategy: "replace" });
+  });
+
+  test("FSMHydrationBoundary принимает snapshot и children", () => {
+    const el = (
+      <FSMHydrationBoundary<Store> snapshot={snapshot} strategy="merge">
+        <span>child</span>
+      </FSMHydrationBoundary>
+    );
+    expect(el).type.toBeAssignableTo<React.JSX.Element>();
+  });
+});
+
+describe("defineMachine для React", () => {
+  test("возвращает factory { create }, которая создаёт hook с machine API", () => {
     const factory = defineMachine<Evt, Deps>({
       dependencies: { api: { call: async () => {} } },
     });
@@ -221,7 +249,7 @@ describe("defineMachine (react)", () => {
     expect(use).type.toHaveProperty("addMiddleware");
   });
 
-  test("invoking the hook with selector returns R", () => {
+  test("вызов hook с selector возвращает R", () => {
     const use = defineMachine<Evt, Deps>({
       dependencies: { api: { call: async () => {} } },
     }).create(machineCfg);
@@ -230,7 +258,7 @@ describe("defineMachine (react)", () => {
     expect(r).type.toBe<number>();
   });
 
-  test("hook selector sees StateType<C, T>", () => {
+  test("selector внутри hook видит StateType<C, T>", () => {
     const use = defineMachine<Evt, Deps>({
       dependencies: { api: { call: async () => {} } },
     }).create(machineCfg);
@@ -241,7 +269,7 @@ describe("defineMachine (react)", () => {
     });
   });
 
-  test("hook accepts optional equalityFn", () => {
+  test("hook принимает опциональный equalityFn", () => {
     const use = defineMachine<Evt, Deps>({
       dependencies: { api: { call: async () => {} } },
     }).create(machineCfg);
@@ -252,7 +280,7 @@ describe("defineMachine (react)", () => {
     );
   });
 
-  test("hook rejects equality for wrong R", () => {
+  test("hook отклоняет equalityFn для неправильного R", () => {
     const use = defineMachine<Evt, Deps>({
       dependencies: { api: { call: async () => {} } },
     }).create(machineCfg);
@@ -264,7 +292,7 @@ describe("defineMachine (react)", () => {
     );
   });
 
-  test("machine.transition enforces P", () => {
+  test("machine.transition требует P", () => {
     const use = defineMachine<Evt, Deps>({
       dependencies: { api: { call: async () => {} } },
     }).create(machineCfg);
@@ -274,7 +302,7 @@ describe("defineMachine (react)", () => {
     use.transition({ type: "UNKNOWN" });
   });
 
-  test("machine.onTransition accepts Subscriber<C, T, P>", () => {
+  test("machine.onTransition принимает Subscriber<C, T, P>", () => {
     const use = defineMachine<Evt, Deps>({
       dependencies: { api: { call: async () => {} } },
     }).create(machineCfg);
@@ -282,7 +310,7 @@ describe("defineMachine (react)", () => {
     expect(use.onTransition).type.toBe<(cb: Subscriber<Cfg, Ctx, Evt>) => () => void>();
   });
 
-  test("defineMachine() with no deps still works when D = {}", () => {
+  test("defineMachine() без deps работает, когда D = {}", () => {
     const use = defineMachine<Evt>().create({
       config: { idle: { PING: "busy" }, busy: { DONE: "idle" } } as Cfg,
       initialState: "idle" as const,
@@ -292,7 +320,7 @@ describe("defineMachine (react)", () => {
     expect(use.transition).type.toBe<(action: Evt) => Evt>();
   });
 
-  test("dependencies must match D", () => {
+  test("dependencies должны соответствовать D", () => {
     defineMachine<Evt, Deps>({
       // @ts-expect-error!
       dependencies: {},
@@ -300,8 +328,8 @@ describe("defineMachine (react)", () => {
   });
 });
 
-describe("store-dependency inference via hooks", () => {
-  test("useSelector inside provider reads MachineDependencies<S> via manager", () => {
+describe("вывод store dependencies через hooks", () => {
+  test("useSelector внутри provider читает MachineDependencies<S> через manager", () => {
     const Example = () => {
       const manager = useManager<Store, Evt>();
       expect(manager.setDependencies).type.toBe<(d: Deps | ((deps: Deps) => Deps)) => void>();

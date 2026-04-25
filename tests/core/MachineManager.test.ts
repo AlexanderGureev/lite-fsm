@@ -412,7 +412,8 @@ describe("MachineManager", () => {
         },
       );
 
-      manager.onTransition((_prev, _current, action: Action) => {
+      manager.onTransition((_prev, _current, action) => {
+        if (action.type !== "INC") return;
         trace.push(`sub:${action.payload?.amount}:${String(action.payload?.tagged)}`);
       });
 

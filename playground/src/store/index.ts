@@ -7,6 +7,8 @@ import { likesPending } from "./machines/likesPending";
 import { profileSession } from "./machines/profileSession";
 import { entityList } from "./machines/entityList";
 import { ssrDemo2Grid } from "./machines/ssrDemo2Grid";
+import { ssrDemo3EntityList } from "./machines/ssrDemo3EntityList";
+import { ssrDemo3Grid } from "./machines/ssrDemo3Grid";
 import { widgetFeed } from "./machines/widgetFeed";
 import type { AppEvents } from "./types";
 
@@ -16,6 +18,8 @@ const machines = {
   likesPending,
   profileSession,
   ssrDemo2Grid,
+  ssrDemo3Grid,
+  ssrDemo3EntityList,
   entityList,
   widgetFeed,
 };
@@ -26,6 +30,7 @@ export const makeStore = () => {
   const manager = MachineManager<FSMConfigType, AppEvents>(machines, {
     onError: console.error,
     middleware: [immerMiddleware],
+    schemaVersion: 1,
   });
 
   manager.setDependencies({

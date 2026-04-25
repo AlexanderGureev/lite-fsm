@@ -14,7 +14,7 @@
 | `lite-fsm/middleware`          | `immerMiddleware`, `devToolsMiddleware` (barrel)                                                               |
 | `lite-fsm/middleware/immer`    | `immerMiddleware`                                                                                              |
 | `lite-fsm/middleware/devTools` | `devToolsMiddleware`                                                                                           |
-| `lite-fsm/react`               | `FSMContext`, `FSMContextProvider`, `useManager`, `useSelector`, `useTransition`, `defineMachine`              |
+| `lite-fsm/react`               | `FSMContext`, `FSMContextProvider`, `FSMHydrationBoundary`, `useHydrateSnapshot`, `useManager`, `useSelector`, `useTransition`, `defineMachine` |
 
 > Примечание: `lite-fsm/react` помечен `"use client"`. В SSR импорт безопасен, а runtime-хуки и провайдер используются только на клиенте.
 
@@ -117,8 +117,8 @@ const b = factory.create(cfgB);
 Источник: [`tests/core/MachineManager.test.ts`](tests/core/MachineManager.test.ts).
 
 ```ts
-MachineManager(machines, { onError?, middleware? })
-  → { getState, transition, setDependencies, onTransition, replaceReducer }
+MachineManager(machines, { onError?, middleware?, snapshot?, schemaVersion? })
+  → { getState, getSnapshot, getHydratedState, hydrate, dehydrate, transition, setDependencies, onTransition, replaceReducer }
 ```
 
 ### Поведение
@@ -129,16 +129,87 @@ MachineManager(machines, { onError?, middleware? })
 - В DEV — снимок целиком `deepFreeze`-ится.
 - Порядок исполнения: rootReducer (по всем машинам) → подписчики → эффекты по каждой машине.
 - Каскад: вложенные `transition` из эффектов работают как в одиночной машине — LIFO для возвратов, эффекты внешних машин видят финальное состояние.
+- `@@lite-fsm/*` — reserved namespace. Такие actions нельзя отправлять через `transition`.
 
 ### Методы
 
 | Метод                                     | Что делает                                                                                                   |
 | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | `getState()`                              | весь снимок (`{ [name]: { state, context } }`)                                                               |
+| `getSnapshot()`                           | runtime envelope `{ schemaVersion, machines }`; hooks `dehydrate` не вызывает                                |
+| `getHydratedState(snapshot, opts?)`       | pure preview: считает state после hydrate поверх `opts.baseState ?? getState()` без commit/callbacks/warnings |
+| `hydrate(snapshot, opts?)`                | применяет partial snapshot без middleware/effects; подписчики видят system action `@@lite-fsm/HYDRATE`       |
+| `dehydrate(opts?)`                        | собирает transport envelope и вызывает per-machine `dehydrate` hooks; unknown requested key → throw          |
 | `transition(action)`                      | то же, что в `createMachine`, но по карте машин; возвращает финальный action                                 |
-| `onTransition(cb)`                        | `(prev, current, action) => void`; возвращает `unsubscribe`                                                  |
+| `onTransition(cb)`                        | `(prev, current, action) => void`; action может быть user action или `@@lite-fsm/HYDRATE`                    |
 | `replaceReducer((prev) => next)`          | оборачивает существующий root-reducer; внутри можно сделать short-circuit или мутацию state до делегирования |
 | `setDependencies(deps \| (prev) => next)` | устанавливает или обновляет `D`, общий для всех эффектов                                                     |
+
+### Snapshot / SSR hydration
+
+`getSnapshot()` и `dehydrate()` возвращают envelope-объект, но решают разные задачи:
+
+- `getSnapshot()` — runtime read текущего manager state. Он не вызывает hooks и сохраняет slice-ссылки из `getState()`.
+- `getHydratedState()` — чистая версия hydrate для React SSR preview. Она вызывает machine `hydrate` hooks, но не мутирует manager, не вызывает subscribers/effects/middleware, не вызывает `onSchemaVersionMismatch`, `onUnknownMachineKey` и DEV warnings. Unknown keys silently skip'аются.
+- `dehydrate()` — transport/persistence export. Для каждой машины вызывает `cfg.dehydrate`, если hook задан.
+- `hydrate()` принимает совместимый snapshot и вызывает `cfg.hydrate(prev, snapshot, { strategy })` для машин с hook'ом. Если hook не задан, incoming slice трактуется как runtime `{ state, context }`.
+
+`hydrate` forgiving: неизвестные machine keys пропускаются, в DEV пишется warning, `onUnknownMachineKey` получает `(key, "hydrate" | "opts.snapshot")`. `schemaVersion` core не мигрирует: при mismatch вызывает `onSchemaVersionMismatch`, если callback задан, и продолжает apply.
+
+React entrypoint добавляет `FSMHydrationBoundary` и `useHydrateSnapshot`. Boundary не мутирует настоящий manager во время render: он даёт subtree read overlay только для `useSelector`, а настоящий `manager.hydrate(...)` выполняет в layout effect. `useManager().getState()`, effects, middleware и event handlers до commit видят настоящий до-hydrated state. `useHydrateSnapshot` — низкоуровневый commit-only hook без read overlay.
+
+Snapshot-объекты считаются immutable value objects: если содержимое snapshot изменилось, передавайте новую ссылку. React helpers дедуплицируют повторный commit по ссылке `snapshot` и `strategy`, а content-noop обязан жить в machine `hydrate` hook'ах через `return prev`.
+
+#### Hydration checklist
+
+- `FSMHydrationBoundary` нужен для SSR/RSC/Suspense seed'ов, которые должны быть видны subtree на первом render. `useHydrateSnapshot` используйте только когда read overlay не нужен.
+- Overlay видит только `useSelector`. Прямые чтения через `useManager().getState()`, middleware, effects и event handlers до layout-effect commit читают настоящий committed store.
+- `hydrate` hooks должны быть идемпотентными по содержимому: повторный snapshot с теми же данными возвращает `prev`, иначе будут лишние commits/subscriber notifications.
+- Snapshot лучше держать маленьким и partial: одна grid page, один widget/list entry, один cache segment. Глубокий merge на уровне core не делается.
+- `hydrate` и `getHydratedState` не запускают effects. Если после hydrate нужно что-то догрузить, делайте это отдельным user action из компонента или эффекта приложения.
+- Nested boundaries складываются по read path: дочерний boundary считает preview поверх ближайшего parent overlay, но каждый boundary отдельно коммитит свой snapshot в настоящий manager.
+- Boundaries должны быть scoped к **разным** machine keys. Если parent и child boundary гидратят одну машину с разным содержимым, итоговый committed state будет от **parent** (commits идут child→parent), а UI до commit показывает **child** через overlay → flicker. Подробнее ниже в "Overlapping boundaries".
+- Для custom transport shape задавайте парные `dehydrate`/`hydrate` hooks на машине. Без `hydrate` hook incoming slice считается runtime `{ state, context }`.
+- `schemaVersion` — сигнал совместимости, не мигратор. Core вызывает callback на commit hydrate, но решение skip/migrate должно быть принято приложением до вызова `hydrate`.
+
+#### Overlapping boundaries (non-commutative composition)
+
+Preview и commit идут в **разном** порядке:
+
+| Фаза            | Порядок                                                                             |
+| --------------- | ----------------------------------------------------------------------------------- |
+| Preview build   | parent → child (child видит parent preview как `baseState`)                         |
+| Layout-effect   | child → parent (React effects bottom-up, ближе к листу — раньше)                    |
+
+Для **разных** машин коммутативно (как в `ssr-demo-3`: outer = `ssrDemo3Grid`, inner = `ssrDemo3EntityList`) — порядок не важен, итог одинаков. Для **одной** машины с overlapping содержимым выигрывает parent, и UI flickает с child→parent после commit.
+
+Минимальный пример:
+
+```tsx
+const counter = {
+  config: { IDLE: {} },
+  initialState: "IDLE",
+  initialContext: { count: 0 },
+  hydrate: (prev, snap: { count: number }) =>
+    prev.context.count === snap.count ? prev : { state: prev.state, context: { count: snap.count } },
+};
+
+<FSMHydrationBoundary snapshot={{ machines: { counter: { count: 5 } } }}>
+  <FSMHydrationBoundary snapshot={{ machines: { counter: { count: 10 } } }}>
+    <Counter />  {/* useSelector((s) => s.counter.context.count) */}
+  </FSMHydrationBoundary>
+</FSMHydrationBoundary>
+```
+
+| Шаг | Что произошло                                                                | `manager.getState()` | `<Counter />` |
+| --- | ---------------------------------------------------------------------------- | -------------------- | ------------- |
+| 1   | Render outer → preview = 5, overlay активен                                  | 0                    | —             |
+| 2   | Render inner → baseState = 5, preview = 10, overlay поверх parent overlay    | 0                    | **10**        |
+| 3   | React layout effects bottom-up: inner commits → `manager.hydrate({ 10 })`    | 10                   | 10            |
+| 4   | Outer commits → `manager.hydrate({ 5 })` (parent коммитит **последним**)     | **5**                | 10 (overlay)  |
+| 5   | `forceRender` после commit → preview idempotent → overlay collapses          | 5                    | **5**         |
+
+Итог: одна frame пользователь видел `10`, потом UI "перепрыгнул" на `5`. Решение — не делайте overlapping boundaries по одной машине: либо гидратите её только в одном boundary (обычно в parent), либо разнесите данные по разным машинам/ключам.
 
 ### `setDependencies` — детали
 
@@ -331,7 +402,7 @@ default:
 | Поведение                | Детали                                                              |
 | ------------------------ | ------------------------------------------------------------------- |
 | Подписка                 | через `manager.onTransition`                                        |
-| Снимок                   | `manager.getState()`                                                |
+| Снимок                   | `manager.getState()`; внутри `FSMHydrationBoundary` временно overlay preview |
 | Селектор                 | `(state) => R` — изоляция нужного среза                             |
 | `equalityFn(prev, next)` | если возвращает `true` — компонент **не** ререндерится              |
 | Без `equalityFn`         | сравнение по `===` — стабильные ссылки в state не вызывают ререндер |

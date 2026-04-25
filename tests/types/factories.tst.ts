@@ -29,8 +29,8 @@ type Cfg = {
 type Ctx = { calls: number };
 type Deps = { log: (s: string) => void };
 
-describe("createConfig (untyped)", () => {
-  test("acts as identity on CFG-compatible literal", () => {
+describe("createConfig без типизированной обёртки", () => {
+  test("работает как identity для литерала, совместимого с CFG", () => {
     const cfg = createConfig({
       idle: { PING: "busy", SAVE: "busy" },
       busy: {},
@@ -41,7 +41,7 @@ describe("createConfig (untyped)", () => {
     }>();
   });
 
-  test("rejects invalid target state", () => {
+  test("отклоняет переход в несуществующее состояние", () => {
     createConfig({
       // @ts-expect-error!
       idle: {
@@ -51,7 +51,7 @@ describe("createConfig (untyped)", () => {
     });
   });
 
-  test("accepts null transition (dead-end)", () => {
+  test("принимает null transition как self-transition", () => {
     const cfg = createConfig({
       idle: { PING: null },
     });
@@ -59,8 +59,8 @@ describe("createConfig (untyped)", () => {
   });
 });
 
-describe("createReducer (untyped)", () => {
-  test("is identity: returns same reducer type", () => {
+describe("createReducer без типизированной обёртки", () => {
+  test("работает как identity и сохраняет тип reducer", () => {
     const reducer = createReducer<Cfg, Ctx>((state, action, meta) => {
       expect(state.state).type.toBe<"idle" | "busy">();
       expect(meta.nextState).type.toBe<"idle" | "busy">();
@@ -70,19 +70,19 @@ describe("createReducer (untyped)", () => {
     expect(reducer).type.toBe<MachineReducer<Cfg, AnyEvent, Ctx>>();
   });
 
-  test("rejects wrong return state", () => {
+  test("отклоняет возврат несуществующего state", () => {
     // @ts-expect-error!
     createReducer<Cfg, Ctx>((state) => ({ state: "missing", context: state.context }));
   });
 
-  test("allows void reducer return", () => {
+  test("разрешает reducer, который возвращает void", () => {
     const reducer = createReducer<Cfg, Ctx>(() => {});
     expect(reducer).type.toBe<MachineReducer<Cfg, AnyEvent, Ctx>>();
   });
 });
 
-describe("createMachine (untyped)", () => {
-  test("returns MachineConfig with preserved generics", () => {
+describe("createMachine без типизированной обёртки", () => {
+  test("возвращает MachineConfig с сохранёнными generics", () => {
     const machine = createMachine<Evt, Deps, Cfg, Ctx>({
       config: { idle: { PING: "busy", SAVE: "busy" }, busy: {} },
       initialState: "idle",
@@ -91,7 +91,7 @@ describe("createMachine (untyped)", () => {
     expect(machine).type.toBe<MachineConfig<Cfg, Ctx, Evt, Deps>>();
   });
 
-  test("without explicit generics still infers C and T from literal", () => {
+  test("без явных generics выводит C и T из литерала", () => {
     const machine = createMachine({
       config: { idle: {} },
       initialState: "idle",
@@ -102,7 +102,7 @@ describe("createMachine (untyped)", () => {
     expect(machine.config).type.toBe<{ idle: {} }>();
   });
 
-  test("rejects invalid initialState", () => {
+  test("отклоняет невалидный initialState", () => {
     createMachine<Evt, Deps, Cfg, Ctx>({
       config: { idle: { PING: "busy", SAVE: "busy" }, busy: {} },
       // @ts-expect-error!
@@ -111,7 +111,7 @@ describe("createMachine (untyped)", () => {
     });
   });
 
-  test("rejects initialState = wildcard", () => {
+  test("отклоняет initialState = wildcard", () => {
     createMachine<Evt, Deps, Cfg, Ctx>({
       config: { idle: { PING: "busy", SAVE: "busy" }, busy: {} },
       // @ts-expect-error!
@@ -121,8 +121,8 @@ describe("createMachine (untyped)", () => {
   });
 });
 
-describe("createEffect (untyped)", () => {
-  test("returns MachineEffect bound to state key", () => {
+describe("createEffect без типизированной обёртки", () => {
+  test("возвращает MachineEffect, привязанный к ключу state", () => {
     const fx = createEffect<Evt, Deps, Cfg, "busy">({
       effect: ({ action, log }) => {
         expect(action).type.toBe<Ping | Save>();
@@ -132,7 +132,7 @@ describe("createEffect (untyped)", () => {
     expect(fx).type.toBe<MachineEffect<"busy", Cfg, Evt, Deps>>();
   });
 
-  test("accepts type: 'latest' and cancelFn", () => {
+  test("принимает type: 'latest' и cancelFn", () => {
     const fx = createEffect<Evt, Deps, Cfg, "busy">({
       type: "latest",
       effect: () => {},
@@ -144,7 +144,7 @@ describe("createEffect (untyped)", () => {
     expect(fx).type.toBe<MachineEffect<"busy", Cfg, Evt, Deps>>();
   });
 
-  test("accepts type: 'every'", () => {
+  test("принимает type: 'every'", () => {
     const fx = createEffect<Evt, Deps, Cfg, "idle">({
       type: "every",
       effect: () => {},
@@ -152,7 +152,7 @@ describe("createEffect (untyped)", () => {
     expect(fx).type.toBe<MachineEffect<"idle", Cfg, Evt, Deps>>();
   });
 
-  test("rejects unknown type literal", () => {
+  test("отклоняет неизвестный литерал type", () => {
     createEffect<Evt, Deps, Cfg, "busy">({
       // @ts-expect-error!
       type: "once",
@@ -160,7 +160,7 @@ describe("createEffect (untyped)", () => {
     });
   });
 
-  test("wildcard effect receives all actions", () => {
+  test("wildcard effect получает все actions", () => {
     const fx = createEffect<Evt, Deps, Cfg, "*">({
       effect: ({ action }) => {
         expect(action).type.toBe<Evt>();
@@ -171,7 +171,7 @@ describe("createEffect (untyped)", () => {
 });
 
 describe("TypedCreateConfigFn<P>", () => {
-  test("narrows accepted transitions to P['type']", () => {
+  test("сужает допустимые transitions до P['type']", () => {
     const typed: TypedCreateConfigFn<Ping> = createConfig;
     const cfg = typed({ idle: { PING: null } });
     expect(cfg).type.toBe<{ idle: { PING: null } }>();
@@ -186,7 +186,7 @@ describe("TypedCreateConfigFn<P>", () => {
 });
 
 describe("TypedCreateMachineFn<P, D>", () => {
-  test("returns MachineConfig<C, T, P, D>", () => {
+  test("возвращает MachineConfig<C, T, P, D>", () => {
     const typed: TypedCreateMachineFn<Evt, Deps> = createMachine;
     const machine = typed<Cfg, Ctx>({
       config: { idle: { PING: "busy", SAVE: "busy" }, busy: {} },
@@ -196,7 +196,7 @@ describe("TypedCreateMachineFn<P, D>", () => {
     expect(machine).type.toBe<MachineConfig<Cfg, Ctx, Evt, Deps>>();
   });
 
-  test("infers C and T from cfg properties", () => {
+  test("выводит C и T из свойств cfg", () => {
     const typed: TypedCreateMachineFn<Evt> = createMachine;
     const machine = typed({
       config: { idle: { PING: "busy", SAVE: "busy" }, busy: {} },
@@ -207,7 +207,7 @@ describe("TypedCreateMachineFn<P, D>", () => {
     expect(machine.initialContext).type.toBe<{ calls: number }>();
   });
 
-  test("rejects event types not in P", () => {
+  test("отклоняет event types, которых нет в P", () => {
     const typed: TypedCreateMachineFn<Ping, Deps> = createMachine;
     typed<Cfg, Ctx>({
       config: {
@@ -225,7 +225,7 @@ describe("TypedCreateMachineFn<P, D>", () => {
 });
 
 describe("TypedCreateReducerFn<P>", () => {
-  test("reducer body sees narrowed action union", () => {
+  test("тело reducer видит суженный union actions", () => {
     const typed: TypedCreateReducerFn<Evt> = createReducer;
     const reducer = typed<Cfg, Ctx>((state, action, meta) => {
       expect(action).type.toBe<Evt>();
@@ -237,7 +237,7 @@ describe("TypedCreateReducerFn<P>", () => {
     expect(reducer).type.toBe<MachineReducer<Cfg, Evt, Ctx>>();
   });
 
-  test("rejects return state that is not in Cfg keys", () => {
+  test("отклоняет return state, которого нет в ключах Cfg", () => {
     const typed: TypedCreateReducerFn<Evt> = createReducer;
     // @ts-expect-error!
     typed<Cfg, Ctx>((state) => ({ state: "missing", context: state.context }));
@@ -245,7 +245,7 @@ describe("TypedCreateReducerFn<P>", () => {
 });
 
 describe("TypedCreateEffectFn<P, D>", () => {
-  test("effect signature matches MachineEffect<N, C, P, D>", () => {
+  test("сигнатура effect совпадает с MachineEffect<N, C, P, D>", () => {
     const typed: TypedCreateEffectFn<Evt, Deps> = createEffect;
     const fx = typed<Cfg, "busy">({
       effect: ({ action, log }) => {
@@ -256,7 +256,7 @@ describe("TypedCreateEffectFn<P, D>", () => {
     expect(fx).type.toBe<MachineEffect<"busy", Cfg, Evt, Deps>>();
   });
 
-  test("rejects transition with unknown event", () => {
+  test("отклоняет transition с неизвестным event", () => {
     type PingCfg = { idle: { PING: "done" }; done: {} };
     const typed: TypedCreateEffectFn<Ping> = createEffect;
     typed<PingCfg, "idle">({
@@ -268,8 +268,8 @@ describe("TypedCreateEffectFn<P, D>", () => {
   });
 });
 
-describe("factory interop", () => {
-  test("result of createReducer is directly assignable to MachineConfig.reducer", () => {
+describe("совместимость фабрик", () => {
+  test("результат createReducer напрямую присваивается в MachineConfig.reducer", () => {
     const reducer = createReducer<Cfg, Ctx>((state, _a, meta) => ({
       state: meta.nextState,
       context: state.context,
@@ -283,7 +283,7 @@ describe("factory interop", () => {
     void _machine;
   });
 
-  test("result of createEffect is directly assignable to MachineConfig.effects[key]", () => {
+  test("результат createEffect напрямую присваивается в MachineConfig.effects[key]", () => {
     const fx = createEffect<Evt, Deps, Cfg, "idle">({ effect: () => {} });
     type _Shape = Assert<Equal<typeof fx, MachineEffect<"idle", Cfg, Evt, Deps>>>;
   });

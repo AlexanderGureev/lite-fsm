@@ -29,14 +29,14 @@ type FlowDeps = { logger: (e: FlowEvent) => void };
 const createFlowConfig: TypedCreateConfigFn<FlowEvent> = createConfig;
 const createFlowMachine: TypedCreateMachineFn<FlowEvent, FlowDeps> = createMachine;
 
-describe("CFG structural constraints", () => {
-  test("empty CFG is assignable", () => {
+describe("структурные ограничения CFG", () => {
+  test("пустой CFG можно присвоить", () => {
     const empty = createFlowConfig({});
     expect<typeof empty>().type.toBe<object>();
     expect<typeof empty>().type.toBeAssignableTo<CFG<typeof empty, FlowEvent>>();
   });
 
-  test("wildcard-only CFG is accepted and exposes the wildcard key", () => {
+  test("CFG только с wildcard принимается и раскрывает wildcard key", () => {
     const wildcardOnly = createFlowConfig({
       "*": { RESET: "idle" },
       idle: {},
@@ -44,7 +44,7 @@ describe("CFG structural constraints", () => {
     expect(wildcardOnly["*"]).type.toBe<{ RESET: "idle" }>();
   });
 
-  test("self-transition via null is accepted for every event", () => {
+  test("self-transition через null принимается для каждого event", () => {
     const selfOnly = createFlowConfig({
       idle: { START: null, RESOLVE: null, REJECT: null, STOP: null, RESET: null },
     });
@@ -52,7 +52,7 @@ describe("CFG structural constraints", () => {
     expect(selfOnly.idle.RESOLVE).type.toBe<null>();
   });
 
-  test("partial event maps are allowed (not every event must be listed)", () => {
+  test("разрешены частичные event maps, где перечислены не все events", () => {
     const partial = createFlowConfig({
       idle: { START: "running" },
       running: {},
@@ -60,14 +60,14 @@ describe("CFG structural constraints", () => {
     expect(partial.idle.START).type.toBe<"running">();
   });
 
-  test("state may point to itself by name", () => {
+  test("state может ссылаться на себя по имени", () => {
     const loop = createFlowConfig({
       idle: { START: "idle" },
     });
     expect(loop.idle.START).type.toBe<"idle">();
   });
 
-  test("unknown event names are rejected", () => {
+  test("неизвестные имена events отклоняются", () => {
     createFlowConfig({
       idle: {
         // @ts-expect-error!
@@ -76,7 +76,7 @@ describe("CFG structural constraints", () => {
     });
   });
 
-  test("target state must be declared in the map or be null", () => {
+  test("target state должен быть объявлен в map или быть null", () => {
     createFlowConfig({
       idle: {
         // @ts-expect-error!
@@ -85,7 +85,7 @@ describe("CFG structural constraints", () => {
     });
   });
 
-  test("wildcard is NOT a valid transition target", () => {
+  test("wildcard не является валидным target для transition", () => {
     createFlowConfig({
       idle: {
         // @ts-expect-error!
@@ -94,7 +94,7 @@ describe("CFG structural constraints", () => {
     });
   });
 
-  test("numeric or symbol targets are rejected", () => {
+  test("числовые и symbol targets отклоняются", () => {
     createFlowConfig({
       idle: {
         // @ts-expect-error!
@@ -109,7 +109,7 @@ describe("CFG structural constraints", () => {
     });
   });
 
-  test("CFG type parameter K controls allowed target states", () => {
+  test("type-параметр K в CFG управляет разрешёнными target states", () => {
     type Map = { idle?: { X: "done" | null }; done?: { X: null } };
     type _IsCfg = Assert<
       Equal<CFG<Map, FSMEvent<"X">, "idle" | "done">, CFG<Map, FSMEvent<"X">, "idle" | "done">>
@@ -117,8 +117,8 @@ describe("CFG structural constraints", () => {
   });
 });
 
-describe("MachineConfig minimal shapes", () => {
-  test("accepts minimal config without reducer and without effects", () => {
+describe("минимальные формы MachineConfig", () => {
+  test("принимает минимальный config без reducer и effects", () => {
     type MinEvent = FSMEvent<"E">;
     const min: MachineConfig<{ a: { E: "b" }; b: {} }, { v: number }, MinEvent> = {
       config: { a: { E: "b" }, b: {} },
@@ -131,7 +131,7 @@ describe("MachineConfig minimal shapes", () => {
     >();
   });
 
-  test("accepts config with empty effects object", () => {
+  test("принимает config с пустым объектом effects", () => {
     const machine = createFlowMachine({
       config: { idle: { START: "running" }, running: {} },
       initialState: "idle",
@@ -143,7 +143,7 @@ describe("MachineConfig minimal shapes", () => {
     >();
   });
 
-  test("accepts config with only wildcard effect", () => {
+  test("принимает config только с wildcard effect", () => {
     const machine = createFlowMachine({
       config: { idle: { START: "running" }, running: {} },
       initialState: "idle",
@@ -159,7 +159,7 @@ describe("MachineConfig minimal shapes", () => {
     >();
   });
 
-  test("rejects initialState === \"*\" (wildcard is not a public state)", () => {
+  test("отклоняет initialState === \"*\", потому что wildcard не public state", () => {
     createFlowMachine({
       config: { idle: {} },
       // @ts-expect-error!
@@ -168,7 +168,7 @@ describe("MachineConfig minimal shapes", () => {
     });
   });
 
-  test("rejects initialState not present in config map", () => {
+  test("отклоняет initialState, которого нет в config map", () => {
     createFlowMachine({
       config: { idle: {} },
       // @ts-expect-error!
@@ -177,7 +177,7 @@ describe("MachineConfig minimal shapes", () => {
     });
   });
 
-  test("rejects initialContext with wrong shape (checked via satisfies)", () => {
+  test("отклоняет initialContext с неправильной формой через satisfies", () => {
     const badContext = {
       // @ts-expect-error!
       runs: "wrong",
@@ -186,7 +186,7 @@ describe("MachineConfig minimal shapes", () => {
     void badContext;
   });
 
-  test("rejects unknown effect key (not in config and not wildcard)", () => {
+  test("отклоняет неизвестный ключ effect, которого нет в config и который не wildcard", () => {
     createFlowMachine({
       config: { idle: {} },
       initialState: "idle",
@@ -198,13 +198,15 @@ describe("MachineConfig minimal shapes", () => {
     });
   });
 
-  test("MachineConfig shape exposes all expected keys", () => {
+  test("форма MachineConfig раскрывает все ожидаемые ключи", () => {
     type M = MachineConfig<{ a: {} }, { x: 1 }, FSMEvent<"E">>;
-    type _Keys = Assert<Equal<keyof M, "config" | "initialState" | "initialContext" | "reducer" | "effects">>;
+    type _Keys = Assert<
+      Equal<keyof M, "config" | "initialState" | "initialContext" | "reducer" | "hydrate" | "dehydrate" | "effects">
+    >;
   });
 });
 
-describe("DefaultDeps structural contract", () => {
+describe("структурный контракт DefaultDeps", () => {
   type Cfg = {
     "*": { RESET: "idle" };
     idle: { START: "running" };
@@ -213,32 +215,32 @@ describe("DefaultDeps structural contract", () => {
   };
   type Evt = FSMEvent<"START"> | FSMEvent<"STOP"> | FSMEvent<"TICK"> | FSMEvent<"RESET">;
 
-  test("has exactly 3 keys: transition, action, condition", () => {
+  test("содержит ровно 3 ключа: transition, action, condition", () => {
     type _Keys = Assert<Equal<keyof DefaultDeps<"running", Cfg, Evt>, "transition" | "action" | "condition">>;
   });
 
-  test("transition signature echoes the event type", () => {
+  test("сигнатура transition возвращает тот же event type", () => {
     expect<DefaultDeps<"running", Cfg, Evt>["transition"]>().type.toBe<(data: Evt) => Evt>();
     expect<DefaultDeps<"*", Cfg, Evt>["transition"]>().type.toBe<(data: Evt) => Evt>();
   });
 
-  test("condition signature is predicate → Promise<boolean>", () => {
+  test("сигнатура condition: predicate → Promise<boolean>", () => {
     expect<DefaultDeps<"running", Cfg, Evt>["condition"]>().type.toBe<
       (predicate: (a: Evt) => boolean) => Promise<boolean>
     >();
   });
 
-  test("action narrows by incoming events that target the state", () => {
+  test("action сужается по incoming events, которые ведут в state", () => {
     expect<DefaultDeps<"running", Cfg, Evt>["action"]>().type.toBe<Extract<Evt, { type: "START" }>>();
     expect<DefaultDeps<"idle", Cfg, Evt>["action"]>().type.toBe<Extract<Evt, { type: "STOP" | "RESET" }>>();
     expect<DefaultDeps<"*", Cfg, Evt>["action"]>().type.toBe<Evt>();
   });
 
-  test("orphan state (no incoming transitions) narrows action to never", () => {
+  test("orphan state без incoming transitions сужает action до never", () => {
     type _OrphanActionIsNever = Assert<IsNever<DefaultDeps<"done", Cfg, Evt>["action"]>>;
   });
 
-  test("union of target states collects events that hit either", () => {
+  test("union target states собирает events, ведущие в любой из target", () => {
     type TwoPaths = {
       a: { X: "b" };
       b: { Y: "c" };
@@ -250,19 +252,19 @@ describe("DefaultDeps structural contract", () => {
   });
 });
 
-describe("MachineReducer return contract", () => {
+describe("контракт return у MachineReducer", () => {
   type Cfg = { idle: { INC: null; NEXT: "done" }; done: {} };
   type Evt = FSMEvent<"INC", { amount: number }> | FSMEvent<"NEXT">;
   type Ctx = { count: number };
 
   const createEvtReducer: TypedCreateReducerFn<Evt> = (r) => r;
 
-  test("return type is `{ state, context } | void` (void is valid for immer)", () => {
+  test("return type равен `{ state, context } | void`, где void валиден для immer", () => {
     type R = MachineReducer<Cfg, Evt, Ctx>;
     type _Ret = Assert<Equal<ReturnType<R>, { state: "idle" | "done"; context: Ctx } | void>>;
   });
 
-  test("reducer may return void (mutating style for immer)", () => {
+  test("reducer может вернуть void для mutating style с immer", () => {
     const voidReducer = createEvtReducer<Cfg, Ctx>((state, action, _meta) => {
       if (action.type === "INC") {
         state.context.count += action.payload.amount;
@@ -272,7 +274,7 @@ describe("MachineReducer return contract", () => {
     expect(voidReducer).type.toBeAssignableTo<MachineReducer<Cfg, Evt, Ctx>>();
   });
 
-  test("reducer may return next state object", () => {
+  test("reducer может вернуть объект next state", () => {
     const nextReducer = createEvtReducer<Cfg, Ctx>((state, action, meta) => {
       if (action.type === "INC") {
         return { state: state.state, context: { count: state.context.count + action.payload.amount } };
@@ -282,7 +284,7 @@ describe("MachineReducer return contract", () => {
     expect(nextReducer).type.toBeAssignableTo<MachineReducer<Cfg, Evt, Ctx>>();
   });
 
-  test("reducer may mix void and object returns in different branches", () => {
+  test("reducer может смешивать void и объектные return в разных ветках", () => {
     const mixed = createEvtReducer<Cfg, Ctx>((state, action, meta) => {
       if (action.type === "INC") {
         state.context.count += action.payload.amount;
@@ -293,14 +295,14 @@ describe("MachineReducer return contract", () => {
     expect(mixed).type.toBeAssignableTo<MachineReducer<Cfg, Evt, Ctx>>();
   });
 
-  test("reducer meta exposes nextState typed by target literal union", () => {
+  test("reducer meta раскрывает nextState как union target literals", () => {
     createEvtReducer<Cfg, Ctx>((_state, _action, meta) => {
       expect(meta.nextState).type.toBe<"idle" | "done">();
       expect(meta.config).type.toBe<Cfg>();
     });
   });
 
-  test("returning non-state object is rejected", () => {
+  test("возврат объекта не той формы отклоняется", () => {
     // @ts-expect-error!
     createEvtReducer<Cfg, Ctx>((state, action) => {
       if (action.type === "INC") {
@@ -310,21 +312,21 @@ describe("MachineReducer return contract", () => {
     });
   });
 
-  test("returning invalid state literal is rejected", () => {
+  test("возврат невалидного state literal отклоняется", () => {
     // @ts-expect-error!
     createEvtReducer<Cfg, Ctx>((state) => {
       return { state: "nonexistent", context: state.context };
     });
   });
 
-  test("returning wildcard as state is rejected", () => {
+  test("возврат wildcard как state отклоняется", () => {
     // @ts-expect-error!
     createEvtReducer<Cfg, Ctx>((state) => {
       return { state: "*", context: state.context };
     });
   });
 
-  test("reducer params are strictly typed (state, action, meta)", () => {
+  test("params reducer строго типизированы: state, action, meta", () => {
     type R = MachineReducer<Cfg, Evt, Ctx>;
     expect<Parameters<R>[0]>().type.toBe<StateType<Cfg, Ctx>>();
     expect<Parameters<R>[1]>().type.toBe<Evt>();
@@ -332,30 +334,30 @@ describe("MachineReducer return contract", () => {
   });
 });
 
-describe("MachineEffect return type", () => {
+describe("return type у MachineEffect", () => {
   type Cfg = { idle: { GO: "done" }; done: {} };
   type Evt = FSMEvent<"GO">;
 
-  test("return type is `Promise<void> | void` (sync and async allowed)", () => {
+  test("return type равен `Promise<void> | void`, разрешая sync и async", () => {
     type E = MachineEffect<"done", Cfg, Evt>;
     type _Ret = Assert<Equal<ReturnType<E>, Promise<void> | void>>;
   });
 
-  test("sync effect (void) is accepted", () => {
+  test("sync effect с void принимается", () => {
     const syncEffect: MachineEffect<"done", Cfg, Evt> = ({ action }) => {
       void action;
     };
     expect(syncEffect).type.toBe<MachineEffect<"done", Cfg, Evt>>();
   });
 
-  test("async effect (Promise<void>) is accepted", () => {
+  test("async effect с Promise<void> принимается", () => {
     const asyncEffect: MachineEffect<"done", Cfg, Evt> = async ({ action }) => {
       void action;
     };
     expect(asyncEffect).type.toBe<MachineEffect<"done", Cfg, Evt>>();
   });
 
-  test("effect receives DefaultDeps merged with user deps", () => {
+  test("effect получает DefaultDeps, смерженные с user deps", () => {
     type Deps = { api: { load: () => Promise<void> } };
     const effect: MachineEffect<"done", Cfg, Evt, Deps> = ({ action, transition, condition, api }) => {
       expect(action).type.toBe<FSMEvent<"GO">>();
@@ -366,7 +368,7 @@ describe("MachineEffect return type", () => {
     expect(effect).type.toBe<MachineEffect<"done", Cfg, Evt, Deps>>();
   });
 
-  test("user deps are merged with DefaultDeps via intersection", () => {
+  test("user deps мержатся с DefaultDeps через intersection", () => {
     type Deps = { api: string; clock: () => number };
     const effect: MachineEffect<"done", Cfg, Evt, Deps> = ({ api, clock, transition, action, condition }) => {
       expect(api).type.toBe<string>();
@@ -378,7 +380,7 @@ describe("MachineEffect return type", () => {
     expect(effect).type.toBe<MachineEffect<"done", Cfg, Evt, Deps>>();
   });
 
-  test("empty user deps (D = {}) keeps only DefaultDeps keys", () => {
+  test("пустые user deps (D = {}) оставляют только ключи DefaultDeps", () => {
     type E = MachineEffect<"done", Cfg, Evt>;
     const effect: E = ({ action, transition, condition }) => {
       expect(action).type.toBe<FSMEvent<"GO">>();
@@ -388,7 +390,7 @@ describe("MachineEffect return type", () => {
     expect(effect).type.toBe<E>();
   });
 
-  test("wildcard effect receives the full event union", () => {
+  test("wildcard effect получает полный union events", () => {
     type Wider = FSMEvent<"GO"> | FSMEvent<"STOP">;
     const wild: MachineEffect<"*", { idle: { GO: "done" }; done: { STOP: "idle" } }, Wider> = ({ action }) => {
       expect(action).type.toBe<Wider>();

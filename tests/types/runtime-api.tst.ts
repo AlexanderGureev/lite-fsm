@@ -8,9 +8,13 @@ import {
   MachineManager,
   type MachineReducer,
   type MachineConfig,
+  type MachineManagerRuntimeSnapshot,
+  type MachineManagerSnapshot,
   type Middleware,
   type MachineEvents,
   type MachineDependencies,
+  type MachineStore,
+  type ManagerCommitAction,
   type StateType,
   type Subscriber,
   type MachinesState,
@@ -46,29 +50,29 @@ const counterCfg = {
   },
 } satisfies MachineConfig<CounterCfg, CounterCtx, CounterEvt, CounterDeps>;
 
-describe("Machine(cfg) — pure factory", () => {
-  test("returns an IMachine<C, T, P, D>", () => {
+describe("Machine(cfg) — чистая фабрика", () => {
+  test("возвращает IMachine<C, T, P, D>", () => {
     const m = Machine<CounterCfg, CounterCtx, CounterEvt["type"], CounterEvt, CounterDeps>(counterCfg);
     expect(m).type.toBe<IMachine<CounterCfg, CounterCtx, CounterEvt, CounterDeps>>();
   });
 
-  test("exposes exactly { transition, invokeEffect, config }", () => {
+  test("экспортирует ровно { transition, invokeEffect, config }", () => {
     const m = Machine<CounterCfg, CounterCtx, CounterEvt["type"], CounterEvt, CounterDeps>(counterCfg);
     type _Keys = Assert<Equal<keyof typeof m, "transition" | "invokeEffect" | "config">>;
   });
 
-  test("config preserves the original CFG literal", () => {
+  test("config сохраняет исходный CFG literal", () => {
     const m = Machine<CounterCfg, CounterCtx, CounterEvt["type"], CounterEvt, CounterDeps>(counterCfg);
     expect(m.config).type.toBe<CounterCfg>();
   });
 
-  test("transition returns narrowed StateType", () => {
+  test("transition возвращает суженный StateType", () => {
     const m = Machine<CounterCfg, CounterCtx, CounterEvt["type"], CounterEvt, CounterDeps>(counterCfg);
     const result = m.transition({ state: "idle", context: { count: 0 } }, { type: "START" });
     expect(result).type.toBe<{ state: "idle" | "running"; context: CounterCtx }>();
   });
 
-  test("transition rejects unknown state literal", () => {
+  test("transition отклоняет неизвестный state literal", () => {
     const m = Machine<CounterCfg, CounterCtx, CounterEvt["type"], CounterEvt, CounterDeps>(counterCfg);
     m.transition(
       // @ts-expect-error!
@@ -77,7 +81,7 @@ describe("Machine(cfg) — pure factory", () => {
     );
   });
 
-  test("invokeEffect demands full merged deps and returns Promise<void>", () => {
+  test("invokeEffect требует полные merged deps и возвращает Promise<void>", () => {
     const m = Machine<CounterCfg, CounterCtx, CounterEvt["type"], CounterEvt, CounterDeps>(counterCfg);
     const p = m.invokeEffect("idle", "running", {
       clock: () => 0,
@@ -88,7 +92,7 @@ describe("Machine(cfg) — pure factory", () => {
     expect(p).type.toBe<Promise<void>>();
   });
 
-  test("invokeEffect rejects partial deps", () => {
+  test("invokeEffect отклоняет неполные deps", () => {
     const m = Machine<CounterCfg, CounterCtx, CounterEvt["type"], CounterEvt, CounterDeps>(counterCfg);
     // @ts-expect-error!
     m.invokeEffect("idle", "running", {
@@ -99,8 +103,8 @@ describe("Machine(cfg) — pure factory", () => {
   });
 });
 
-describe("defineMachine(opts).create(cfg) — stateful runtime", () => {
-  test("returns an API with transition, getState, onTransition, addMiddleware", () => {
+describe("stateful runtime для defineMachine(opts).create(cfg)", () => {
+  test("возвращает API с transition, getState, onTransition, addMiddleware", () => {
     const runtime = defineMachine<CounterEvt, CounterDeps>({
       dependencies: { clock: () => 0 },
     }).create(counterCfg);
@@ -109,14 +113,14 @@ describe("defineMachine(opts).create(cfg) — stateful runtime", () => {
     >;
   });
 
-  test("getState returns StateType<C, T>", () => {
+  test("getState возвращает StateType<C, T>", () => {
     const runtime = defineMachine<CounterEvt, CounterDeps>({
       dependencies: { clock: () => 0 },
     }).create(counterCfg);
     expect(runtime.getState()).type.toBe<StateType<CounterCfg, CounterCtx>>();
   });
 
-  test("transition signature is (action: P) => P", () => {
+  test("сигнатура transition равна (action: P) => P", () => {
     const runtime = defineMachine<CounterEvt, CounterDeps>({
       dependencies: { clock: () => 0 },
     }).create(counterCfg);
@@ -130,14 +134,14 @@ describe("defineMachine(opts).create(cfg) — stateful runtime", () => {
     runtime.transition({ type: "UNKNOWN" });
   });
 
-  test("onTransition accepts Subscriber<C, T, P>", () => {
+  test("onTransition принимает Subscriber<C, T, P>", () => {
     const runtime = defineMachine<CounterEvt, CounterDeps>({
       dependencies: { clock: () => 0 },
     }).create(counterCfg);
     expect(runtime.onTransition).type.toBe<(cb: Subscriber<CounterCfg, CounterCtx, CounterEvt>) => () => void>();
   });
 
-  test("addMiddleware is variadic and accepts Middleware<StateType<C,T>, P>", () => {
+  test("addMiddleware вариативный и принимает Middleware<StateType<C,T>, P>", () => {
     const runtime = defineMachine<CounterEvt, CounterDeps>({
       dependencies: { clock: () => 0 },
     }).create(counterCfg);
@@ -146,7 +150,7 @@ describe("defineMachine(opts).create(cfg) — stateful runtime", () => {
     >();
   });
 
-  test("dependencies option is required to match D", () => {
+  test("опция dependencies должна соответствовать D", () => {
     defineMachine<CounterEvt, CounterDeps>({
       // @ts-expect-error!
       dependencies: {},
@@ -160,7 +164,7 @@ describe("defineMachine(opts).create(cfg) — stateful runtime", () => {
     });
   });
 
-  test("onError receives any", () => {
+  test("onError принимает ошибку любого типа", () => {
     defineMachine<CounterEvt, CounterDeps>({
       dependencies: { clock: () => 0 },
       onError: (err: unknown) => {
@@ -169,14 +173,14 @@ describe("defineMachine(opts).create(cfg) — stateful runtime", () => {
     });
   });
 
-  test("defaults: no dependencies required when D is empty", () => {
+  test("по умолчанию dependencies не требуются, когда D пустой", () => {
     const runtime = defineMachine<CounterEvt>({}).create({
       ...counterCfg,
     } as MachineConfig<CounterCfg, CounterCtx, CounterEvt>);
     void runtime;
   });
 
-  test("no options overload works", () => {
+  test("overload без options работает", () => {
     const factory = defineMachine<CounterEvt, CounterDeps>();
     expect(factory).type.toHaveProperty("create");
   });
@@ -188,31 +192,60 @@ describe("MachineManager(machines, opts?)", () => {
   };
   type Machines = typeof machines;
 
-  test("returns IMachineManager<S, P> with S inferred", () => {
+  test("возвращает IMachineManager<S, P> с выведенным S", () => {
     const manager = MachineManager(machines);
     expect(manager).type.toBe<IMachineManager<Machines, MachineEvents<Machines>>>();
   });
 
-  test("explicit generics enforce given event union", () => {
+  test("явные generics фиксируют переданный event union", () => {
     const manager = MachineManager<Machines, CounterEvt>(machines);
     expect(manager).type.toBe<IMachineManager<Machines, CounterEvt>>();
   });
 
-  test("exposes exactly 5 keys", () => {
+  test("экспортирует ровно 9 ключей", () => {
     const manager = MachineManager(machines);
     type _Keys = Assert<
-      Equal<keyof typeof manager, "transition" | "getState" | "onTransition" | "replaceReducer" | "setDependencies">
+      Equal<
+        keyof typeof manager,
+        | "transition"
+        | "getState"
+        | "getSnapshot"
+        | "getHydratedState"
+        | "hydrate"
+        | "dehydrate"
+        | "onTransition"
+        | "replaceReducer"
+        | "setDependencies"
+      >
     >;
   });
 
-  test("empty machines map yields IMachineManager with never events by default", () => {
+  test("snapshot-методы раскрывают runtime и dehydrated envelopes", () => {
+    const manager = MachineManager<Machines, CounterEvt>(machines);
+    expect(manager.getSnapshot()).type.toBe<MachineManagerRuntimeSnapshot<Machines>>();
+    expect(manager.getHydratedState).type.toBe<
+      (
+        snapshot: MachineManagerSnapshot<Machines>,
+        opts?: { strategy?: "replace" | "merge"; baseState?: MachinesState<Machines> },
+      ) => MachinesState<Machines>
+    >();
+    expect(manager.dehydrate()).type.toBe<MachineManagerSnapshot<Machines>>();
+    expect(manager.hydrate).type.toBe<
+      (snapshot: MachineManagerSnapshot<Machines>, opts?: { strategy?: "replace" | "merge" }) => void
+    >();
+  });
+
+  test("пустая machines map по умолчанию даёт IMachineManager с never events", () => {
     const empty = MachineManager({});
     expect(empty).type.toBe<IMachineManager<{}, never>>();
   });
 
-  test("middleware option requires compatible state/event pair", () => {
+  test("опция middleware требует совместимую пару state/event", () => {
     const mw: Middleware<MachinesState<Machines>, CounterEvt> = (api) => (next) => (action) => {
       expect(api.getState()).type.toBe<MachinesState<Machines>>();
+      api.onTransition((_prev, _current, committed) => {
+        expect(committed).type.toBe<ManagerCommitAction<MachineStore, CounterEvt>>();
+      });
       return next(action);
     };
     MachineManager<Machines, CounterEvt>(machines, { middleware: [mw] });
@@ -224,7 +257,7 @@ describe("MachineManager(machines, opts?)", () => {
     });
   });
 
-  test("onError option is typed permissively", () => {
+  test("опция onError типизирована permissive", () => {
     MachineManager<Machines, CounterEvt>(machines, {
       onError: (err: unknown) => {
         expect(err).type.toBe<unknown>();
@@ -232,7 +265,7 @@ describe("MachineManager(machines, opts?)", () => {
     });
   });
 
-  test("setDependencies accepts MachineDependencies<S> and updater", () => {
+  test("setDependencies принимает MachineDependencies<S> и updater", () => {
     const manager = MachineManager<Machines, CounterEvt>(machines);
     expect<MachineDependencies<Machines>>().type.toBe<CounterDeps>();
     expect(manager.setDependencies).type.toBe<
@@ -242,7 +275,7 @@ describe("MachineManager(machines, opts?)", () => {
     manager.setDependencies((deps: CounterDeps) => ({ ...deps, clock: () => deps.clock() + 1 }));
   });
 
-  test("transition rejects events not in P", () => {
+  test("transition отклоняет events, которых нет в P", () => {
     const manager = MachineManager<Machines, CounterEvt>(machines);
     manager.transition({ type: "INC", payload: { amount: 1 } });
     // @ts-expect-error!

@@ -184,7 +184,7 @@ describe("devToolsMiddleware — с window и extension", () => {
     expect(manager.getState().m.context.rolled).toBe(true);
   });
 
-  it("default case в replaceReducer пропускает action в оригинальный reducer", () => {
+  it("ветка по умолчанию в replaceReducer пропускает action в оригинальный reducer", () => {
     const manager = MachineManager(
       {
         m: {

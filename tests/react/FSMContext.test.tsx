@@ -44,7 +44,7 @@ describe("FSMContext / FSMContextProvider", () => {
     expect(got).toBe(manager);
   });
 
-  it("Provider сохраняет ту же ссылку context value при rerender с тем же machineManager", () => {
+  it("Provider сохраняет ту же ссылку значения контекста при rerender с тем же machineManager", () => {
     const manager = MachineManager({
       m: {
         config: { IDLE: { GO: "ACTIVE" }, ACTIVE: {} },

@@ -2,9 +2,66 @@
 
 История опубликованных версий `lite-fsm`.
 
+## Next
+
+Пока без заметок.
+
 ## 1.2.0
 
-В этой версии типовая система стала строже и проще для сопровождения без изменений runtime API.
+В этой версии добавлен snapshot/SSR hydration API, а типовая система стала строже и проще для сопровождения.
+
+### Snapshot / SSR hydration
+
+- `MachineManager` получил `getSnapshot()`, `getHydratedState()`, `hydrate()` и `dehydrate()` с envelope-формой `{ schemaVersion, machines }`.
+- Машины могут задавать `hydrate` и `dehydrate` hooks для custom transport shape, merge/replace политики и content-noop идемпотентности.
+- `hydrate` не проходит через middleware и не запускает effects; подписчики видят system action `@@lite-fsm/HYDRATE`.
+- React entrypoint получил `useHydrateSnapshot` и `FSMHydrationBoundary`: boundary даёт `useSelector` временный snapshot уже на первом render, а затем до первого paint переносит snapshot в настоящий manager.
+- Playground содержит новый `/ssr-demo-3` как reference для manifest-first SSR на snapshot API.
+
+Сервер может собрать transport snapshot:
+
+```ts
+const snapshot = manager.dehydrate({ machines: ["profileSession"] });
+```
+
+Клиент может восстановить его напрямую:
+
+```ts
+manager.hydrate(snapshot);
+```
+
+Для React SSR/RSC удобнее обернуть subtree:
+
+```tsx
+<FSMHydrationBoundary snapshot={snapshot}>
+  <Profile />
+</FSMHydrationBoundary>
+```
+
+Boundary можно вкладывать под `Suspense`: дочерний snapshot считается поверх родительского preview, поэтому widget видит и grid seed, и свой seed на первом render.
+
+```tsx
+<FSMHydrationBoundary snapshot={gridSnapshot}>
+  {items.map((item) => (
+    <Suspense key={item.id} fallback={<WidgetSkeleton />}>
+      <FSMHydrationBoundary snapshot={createWidgetSnapshot(item)}>
+        <Widget item={item} />
+      </FSMHydrationBoundary>
+    </Suspense>
+  ))}
+</FSMHydrationBoundary>
+```
+
+Машина сама решает, как мержить и когда не будить подписчиков:
+
+```ts
+hydrate: (prev, snapshot) => {
+  if (prev.context.version === snapshot.version) return prev;
+  return { ...prev, context: { ...prev.context, ...snapshot } };
+};
+```
+
+### Типы и DX
 
 - `FSMEvent` теперь корректно различает события с payload и без payload, нормально распределяется по union имён событий и схлопывается в `never` для `FSMEvent<never>`.
 - Типы effects стали точнее: orphan state больше не получает весь union событий, если в состояние нет входящих переходов.
@@ -123,4 +180,3 @@ type M = GenericMiddleware;
 - `0.0.3`: 23 июня 2023
 - `0.0.2`: 23 июня 2023
 - `0.0.1`: 21 июня 2023
-

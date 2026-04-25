@@ -57,6 +57,12 @@ export default function Playground() {
         >
           SSR demo 2
         </Link>
+        <Link
+          href="/ssr-demo-3"
+          className="rounded-full border border-slate-400/15 px-3 py-1 text-slate-300 hover:text-slate-50"
+        >
+          SSR demo 3
+        </Link>
       </nav>
     </main>
   );

@@ -22,8 +22,8 @@ import type { TypedUseMachineHook } from "lite-fsm/react";
 
 import type { Assert, Equal, IsNever } from "./_helpers";
 
-describe("public entry point regression matrix", () => {
-  test("core entry exposes exactly the public runtime API", () => {
+describe("регрессионная матрица public entry points", () => {
+  test("core entry экспортирует ровно публичный runtime API", () => {
     type _CoreKeys = Assert<
       Equal<
         keyof typeof core,
@@ -38,16 +38,23 @@ describe("public entry point regression matrix", () => {
     >;
   });
 
-  test("react entry exposes exactly the public runtime API", () => {
+  test("react entry экспортирует ровно публичный runtime API", () => {
     type _ReactKeys = Assert<
       Equal<
         keyof typeof react,
-        "FSMContext" | "FSMContextProvider" | "defineMachine" | "useManager" | "useSelector" | "useTransition"
+        | "FSMContext"
+        | "FSMContextProvider"
+        | "FSMHydrationBoundary"
+        | "defineMachine"
+        | "useHydrateSnapshot"
+        | "useManager"
+        | "useSelector"
+        | "useTransition"
       >
     >;
   });
 
-  test("middleware entries keep root and subpath exports aligned", () => {
+  test("middleware entries сохраняют согласованность root и subpath exports", () => {
     type _MiddlewareKeys = Assert<Equal<keyof typeof middleware, "devToolsMiddleware" | "immerMiddleware">>;
     type _DevToolsKeys = Assert<Equal<keyof typeof devToolsEntry, "devToolsMiddleware">>;
     type _ImmerKeys = Assert<Equal<keyof typeof immerEntry, "immerMiddleware">>;
@@ -57,7 +64,7 @@ describe("public entry point regression matrix", () => {
   });
 });
 
-describe("machine declaration style regression matrix", () => {
+describe("регрессионная матрица стилей объявления machine", () => {
   type Start = FSMEvent<"START">;
   type Patch = FSMEvent<"PATCH", { count?: number }>;
   type Finish = FSMEvent<"FINISH", { result: "ok" }>;
@@ -96,7 +103,7 @@ describe("machine declaration style regression matrix", () => {
     done: {},
   } satisfies Config;
 
-  test("inline typed createMachine preserves inferred state/context/event contract", () => {
+  test("inline typed createMachine сохраняет выведенный контракт state/context/event", () => {
     const createTypedMachine: TypedCreateMachineFn<Event> = core.createMachine;
     const machine = createTypedMachine({
       config: {
@@ -115,7 +122,7 @@ describe("machine declaration style regression matrix", () => {
     >();
   });
 
-  test("satisfies MachineConfig keeps literals without widening public state", () => {
+  test("satisfies MachineConfig сохраняет literals без расширения public state", () => {
     const machine = {
       config: configLiteral,
       initialState: "idle",
@@ -136,7 +143,7 @@ describe("machine declaration style regression matrix", () => {
     expect<StateType<typeof machine.config, Context>["state"]>().type.toBe<"idle" | "running" | "done">();
   });
 
-  test("typed factory rejects transitions outside the declared event union", () => {
+  test("typed factory отклоняет transitions вне объявленного event union", () => {
     const createTypedMachine: TypedCreateMachineFn<Event, Deps> = core.createMachine;
 
     createTypedMachine({
@@ -163,7 +170,7 @@ describe("machine declaration style regression matrix", () => {
     });
   });
 
-  test("runtime factory created from typed config keeps transition payload strict", () => {
+  test("runtime factory из typed config сохраняет строгий payload у transition", () => {
     const createTypedMachine: TypedCreateMachineFn<Event, Deps> = core.createMachine;
     const machineConfig = createTypedMachine<Config, Context>({
       config: configLiteral,
@@ -186,7 +193,7 @@ describe("machine declaration style regression matrix", () => {
   });
 });
 
-describe("multi-machine event and dependency regression matrix", () => {
+describe("регрессионная матрица events и dependencies для нескольких machines", () => {
   type SaveString = FSMEvent<"SAVE", { id: string }>;
   type SaveNumber = FSMEvent<"SAVE", { id: number }>;
   type Reset = FSMEvent<"RESET">;
@@ -267,7 +274,7 @@ describe("multi-machine event and dependency regression matrix", () => {
     byNumber: typeof numberMachine;
   };
 
-  test("same event type with different payloads remains a real event union", () => {
+  test("одинаковый event type с разными payloads остаётся настоящим event union", () => {
     type Events = MachineEvents<Store>;
 
     expect<Events>().type.toBe<SaveString | Reset | SaveNumber>();
@@ -284,7 +291,7 @@ describe("multi-machine event and dependency regression matrix", () => {
     manager.transition({ type: "SAVE", payload: { id: true } });
   });
 
-  test("dependency inference intersects shared object keys instead of overwriting them", () => {
+  test("вывод dependencies пересекает общие object keys вместо перезаписи", () => {
     type Deps = MachineDependencies<Store>;
     type Service = Deps["service"];
 
@@ -311,7 +318,7 @@ describe("multi-machine event and dependency regression matrix", () => {
     });
   });
 
-  test("incompatible dependency collisions stay visible as never", () => {
+  test("несовместимые collisions dependencies остаются видимыми как never", () => {
     type BrokenStore = {
       a: typeof tokenStringMachine;
       b: typeof tokenNumberMachine;
@@ -320,7 +327,7 @@ describe("multi-machine event and dependency regression matrix", () => {
     type _TokenIsNever = Assert<IsNever<MachineDependencies<BrokenStore>["token"]>>;
   });
 
-  test("MachinesState keeps each machine state and context isolated by key", () => {
+  test("MachinesState изолирует state и context каждой machine по ключу", () => {
     type State = MachinesState<Store>;
 
     type _State = Assert<
@@ -335,13 +342,13 @@ describe("multi-machine event and dependency regression matrix", () => {
   });
 });
 
-describe("effect and middleware strictness regression matrix", () => {
+describe("регрессионная матрица строгости effect и middleware", () => {
   type Event = FSMEvent<"START"> | FSMEvent<"STOP">;
   type Config = { idle: { START: "running" }; running: { STOP: "idle" } };
   type Context = { active: boolean };
   type Deps = { log: (message: string) => void };
 
-  test("createEffect cancelFn sees the same narrowed deps as effect", () => {
+  test("createEffect cancelFn видит те же суженные deps, что и effect", () => {
     const createEffect: TypedCreateEffectFn<Event, Deps> = core.createEffect;
 
     createEffect<Config, "running">({
@@ -358,7 +365,7 @@ describe("effect and middleware strictness regression matrix", () => {
     });
   });
 
-  test("createEffect rejects invalid cancelFn return shape", () => {
+  test("createEffect отклоняет невалидную форму return у cancelFn", () => {
     const createEffect: TypedCreateEffectFn<Event, Deps> = core.createEffect;
 
     createEffect<Config, "running">({
@@ -368,7 +375,7 @@ describe("effect and middleware strictness regression matrix", () => {
     });
   });
 
-  test("middleware keeps state/event generics when assigned before invocation", () => {
+  test("middleware сохраняет state/event generics при присваивании до вызова", () => {
     const immer: Middleware<StateType<Config, Context>, Event> = middleware.immerMiddleware;
     const devTools: Middleware<StateType<Config, Context>, Event> = middleware.devToolsMiddleware();
 
@@ -400,7 +407,7 @@ describe("effect and middleware strictness regression matrix", () => {
   });
 });
 
-describe("react provider generic regression matrix", () => {
+describe("регрессионная матрица generics у React provider", () => {
   type Go = FSMEvent<"GO">;
   type Stop = FSMEvent<"STOP">;
   type Config = { idle: { GO: "done" }; done: {} };
@@ -417,7 +424,7 @@ describe("react provider generic regression matrix", () => {
     },
   } satisfies Store;
 
-  test("provider rejects manager with incompatible machine map", () => {
+  test("provider отклоняет manager с несовместимой machine map", () => {
     type OtherStore = {
       other: MachineConfig<Config, Context, Go>;
     };
@@ -437,7 +444,7 @@ describe("react provider generic regression matrix", () => {
     void element;
   });
 
-  test("provider rejects manager with incompatible event contract", () => {
+  test("provider отклоняет manager с несовместимым event contract", () => {
     const manager = core.MachineManager<Store, Stop>(store);
 
     const element = FSMContextProvider<Store, Go>({
@@ -447,7 +454,7 @@ describe("react provider generic regression matrix", () => {
     void element;
   });
 
-  test("typed useManager alias preserves the exact manager contract", () => {
+  test("typed alias useManager сохраняет точный contract manager", () => {
     const useFlowManager: TypedUseMachineHook<Store, Go> = react.useManager;
     const manager = useFlowManager();
 

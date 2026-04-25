@@ -29,6 +29,9 @@ export default function SSRDemoTopBar() {
         <Link href="/ssr-demo-2" className={getLinkClass(pathname.startsWith("/ssr-demo-2"))}>
           SSR demo 2
         </Link>
+        <Link href="/ssr-demo-3" className={getLinkClass(pathname.startsWith("/ssr-demo-3"))}>
+          SSR demo 3
+        </Link>
         {demoScreens.map((screen) => (
           <Link
             key={screen.id}

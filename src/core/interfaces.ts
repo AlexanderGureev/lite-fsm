@@ -3,12 +3,19 @@ import {
   AnyRecord,
   DefaultDeps,
   MachineConfig,
+  MachineManagerRuntimeSnapshot,
+  MachineManagerSnapshot,
   MachineStore,
   MachinesState,
   Reducer,
   StateName,
   StateType,
   TransitionSubscriber,
+  HydrateOptions,
+  HydratePreviewOptions,
+  DehydrateOptions,
+  UnknownMachineKeyContext,
+  Middleware,
   WILDCARD,
 } from "./types";
 
@@ -54,6 +61,15 @@ export type MachineEvents<S extends MachineStore> = {
     : EventFromReducer<S[key]>;
 }[keyof S];
 
+export type MachineManagerOptions<S extends MachineStore, P extends AnyEvent = MachineEvents<S>> = {
+  onError?: (err: unknown) => void;
+  middleware?: Middleware<MachinesState<S>, P>[];
+  snapshot?: MachineManagerSnapshot<S>;
+  schemaVersion?: number;
+  onUnknownMachineKey?: (key: string, context: UnknownMachineKeyContext) => void;
+  onSchemaVersionMismatch?: (incoming: number | undefined, current: number | undefined) => void;
+};
+
 export type IMachine<
   C extends object,
   T extends AnyRecord = {},
@@ -72,6 +88,10 @@ export type IMachine<
 export type IMachineManager<S extends MachineStore, P extends AnyEvent = MachineEvents<S>> = {
   transition: (payload: P) => P;
   getState: () => MachinesState<S>;
+  getSnapshot: () => MachineManagerRuntimeSnapshot<S>;
+  getHydratedState: (snapshot: MachineManagerSnapshot<S>, opts?: HydratePreviewOptions<S>) => MachinesState<S>;
+  hydrate: (snapshot: MachineManagerSnapshot<S>, opts?: HydrateOptions) => void;
+  dehydrate: (opts?: DehydrateOptions<S>) => MachineManagerSnapshot<S>;
   onTransition: (cb: TransitionSubscriber<S, P>) => () => void;
   replaceReducer: (cb: (reducer: Reducer<MachinesState<S>, P>) => Reducer<MachinesState<S>, P>) => void;
   setDependencies: (d: MachineDependencies<S> | ((deps: MachineDependencies<S>) => MachineDependencies<S>)) => void;

@@ -17,7 +17,7 @@ type RuntimeOptions = {
 };
 
 const supportsVoidReducer = (middleware: unknown) =>
-  Boolean((middleware as Record<string, unknown>)[VOID_REDUCER_MIDDLEWARE_MARKER]);
+  typeof middleware === "function" && VOID_REDUCER_MIDDLEWARE_MARKER in middleware;
 
 export const CreateMachine = <
   C extends object,

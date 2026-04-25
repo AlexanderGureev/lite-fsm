@@ -70,7 +70,7 @@ describe("createEffect", () => {
     });
   });
 
-  describe("identity helpers (src/core/index.ts)", () => {
+  describe("identity helpers из src/core/index.ts", () => {
     it("createMachine возвращает переданный объект по ссылке (без копирования)", () => {
       const cfg = {
         config: { IDLE: { GO: "ACTIVE" }, ACTIVE: {} },

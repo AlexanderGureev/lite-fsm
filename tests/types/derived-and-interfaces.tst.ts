@@ -4,8 +4,11 @@ import type {
   IMachine,
   IMachineManager,
   MachineConfig,
+  MachineManagerRuntimeSnapshot,
+  MachineManagerSnapshot,
   MachineDependencies,
   MachineEvents,
+  ManagerCommitAction,
   MachineReducer,
   MachinesState,
   Reducer,
@@ -119,20 +122,20 @@ type MachineWithClock = typeof machineWithClock;
 type MachineNoEffects = typeof machineNoEffects;
 
 describe("MachineEvents<S>", () => {
-  test("empty store yields never", () => {
+  test("пустой store даёт never", () => {
     type _Empty = Assert<Equal<MachineEvents<{}>, never>>;
   });
 
-  test("single machine yields its event union", () => {
+  test("одна machine даёт свой union events", () => {
     expect<MachineEvents<{ x: MachineX }>>().type.toBe<XEvent>();
     expect<MachineEvents<{ y: MachineY }>>().type.toBe<YEvent>();
   });
 
-  test("multiple machines yield the union across all events", () => {
+  test("несколько machines дают общий union всех events", () => {
     expect<MachineEvents<{ x: MachineX; y: MachineY; z: MachineZ }>>().type.toBe<XEvent | YEvent | ZEvent>();
   });
 
-  test("same machine reused twice still yields that event", () => {
+  test("одна и та же machine, использованная дважды, сохраняет тот же event", () => {
     type Reused = MachineEvents<{ x1: MachineX; x2: MachineX }>;
     expect<XEvent>().type.toBeAssignableTo<Reused>();
     expect<Reused>().type.toBeAssignableTo<XEvent>();
@@ -140,40 +143,40 @@ describe("MachineEvents<S>", () => {
 });
 
 describe("MachineDependencies<S>", () => {
-  test("empty store has no dependencies", () => {
+  test("пустой store не имеет dependencies", () => {
     type _Empty = Assert<Equal<MachineDependencies<{}>, {}>>;
   });
 
-  test("single machine's deps reflect its effect parameter shape", () => {
+  test("deps одной machine отражают форму параметров её effect", () => {
     type Deps = MachineDependencies<{ x: MachineX }>;
     type _HasApi = Assert<Equal<Deps["api"], { load: () => void }>>;
   });
 
-  test("multiple machines INTERSECT their deps key-by-key", () => {
+  test("несколько machines пересекают deps по ключам", () => {
     type Deps = MachineDependencies<{ x: MachineX; y: MachineY }>;
     type _HasApi = Assert<Equal<Deps["api"], { load: () => void }>>;
     type _HasLogger = Assert<Equal<Deps["logger"], (s: string) => void>>;
   });
 
-  test("overlapping deps collapse (shared key appears once)", () => {
+  test("пересекающиеся deps схлопываются, и общий ключ появляется один раз", () => {
     type Deps = MachineDependencies<{ x: MachineX; shared: MachineWithClock }>;
     expect<Deps["api"]>().type.toBe<{ load: () => void }>();
     expect<Deps["clock"]>().type.toBe<() => number>();
   });
 
-  test("machine without effects contributes empty intersection", () => {
+  test("machine без effects добавляет пустое intersection", () => {
     type Deps = MachineDependencies<{ m: MachineNoEffects }>;
     type _NoKeys = Assert<Equal<keyof Deps, never>>;
   });
 
-  test("combining machine-with-effects and machine-without keeps only the effective deps", () => {
+  test("machine с effects и machine без effects вместе оставляют только реальные deps", () => {
     type Deps = MachineDependencies<{ x: MachineX; n: MachineNoEffects }>;
     type _HasApi = Assert<Equal<Deps["api"], { load: () => void }>>;
   });
 });
 
 describe("MachinesState<S>", () => {
-  test("maps every machine to its literal state and context", () => {
+  test("мапит каждую machine в её literal state и context", () => {
     type State = MachinesState<{ x: MachineX; y: MachineY }>;
     type _Shape = Assert<
       Equal<
@@ -186,12 +189,12 @@ describe("MachinesState<S>", () => {
     >;
   });
 
-  test("single machine map keeps the key", () => {
+  test("map с одной machine сохраняет её ключ", () => {
     type State = MachinesState<{ only: MachineZ }>;
     type _Shape = Assert<Equal<State, { only: { state: "p" | "q"; context: CtxZ } }>>;
   });
 
-  test("empty map yields empty object", () => {
+  test("пустая map даёт пустой объект", () => {
     expect<MachinesState<{}>>().type.toBe<{}>();
   });
 });
@@ -201,20 +204,20 @@ describe("Subscriber<C, T, P>", () => {
   type Ctx = { n: number };
   type Evt = FSMEvent<"E">;
 
-  test("explicit signature (prevState, currentState, action) => void", () => {
+  test("явная сигнатура равна (prevState, currentState, action) => void", () => {
     type S = Subscriber<Cfg, Ctx, Evt>;
     type _Shape = Assert<
       Equal<S, (prevState: StateType<Cfg, Ctx>, currentState: StateType<Cfg, Ctx>, action: Evt) => void>
     >;
   });
 
-  test("prevState and currentState share the same StateType", () => {
+  test("prevState и currentState используют один StateType", () => {
     type S = Subscriber<Cfg, Ctx, Evt>;
     expect<Parameters<S>[0]>().type.toBe<StateType<Cfg, Ctx>>();
     expect<Parameters<S>[1]>().type.toBe<StateType<Cfg, Ctx>>();
   });
 
-  test("returns void", () => {
+  test("возвращает void", () => {
     type S = Subscriber<Cfg, Ctx, Evt>;
     expect<ReturnType<S>>().type.toBe<void>();
   });
@@ -224,14 +227,14 @@ describe("TransitionSubscriber<S, P>", () => {
   type M = { x: MachineX; y: MachineY };
   type Evt = XEvent | YEvent;
 
-  test("explicit signature with MachinesState", () => {
+  test("явная сигнатура использует MachinesState", () => {
     type T = TransitionSubscriber<M, Evt>;
-    type _Shape = Assert<
-      Equal<T, (prevState: MachinesState<M>, currentState: MachinesState<M>, action: Evt) => void>
-    >;
+    expect<Parameters<T>[0]>().type.toBe<MachinesState<M>>();
+    expect<Parameters<T>[1]>().type.toBe<MachinesState<M>>();
+    expect<Parameters<T>[2]>().type.toBe<ManagerCommitAction<M, Evt>>();
   });
 
-  test("returns void and receives MachinesState on both sides", () => {
+  test("возвращает void и получает MachinesState с обеих сторон", () => {
     type T = TransitionSubscriber<M, Evt>;
     expect<Parameters<T>[0]>().type.toBe<MachinesState<M>>();
     expect<Parameters<T>[1]>().type.toBe<MachinesState<M>>();
@@ -246,15 +249,15 @@ describe("IMachine<C, T, P, D>", () => {
   type Deps = { api: { load: () => void } };
   type M = IMachine<Cfg, Ctx, Evt, Deps>;
 
-  test("shape has exactly three keys: transition, invokeEffect, config", () => {
+  test("форма содержит ровно три ключа: transition, invokeEffect, config", () => {
     type _Keys = Assert<Equal<keyof M, "transition" | "invokeEffect" | "config">>;
   });
 
-  test("config field preserves original CFG literal", () => {
+  test("поле config сохраняет исходный CFG literal", () => {
     expect<M["config"]>().type.toBe<Cfg>();
   });
 
-  test("transition signature matches the documented contract", () => {
+  test("сигнатура transition совпадает с документированным контрактом", () => {
     type _Sig = Assert<
       Equal<
         M["transition"],
@@ -263,7 +266,7 @@ describe("IMachine<C, T, P, D>", () => {
     >;
   });
 
-  test("invokeEffect signature accepts prev/current state + merged deps, returns Promise<void>", () => {
+  test("сигнатура invokeEffect принимает prev/current state и merged deps, возвращая Promise<void>", () => {
     expect<M["invokeEffect"]>().type.toBe<
       (
         prevState: "a" | "b",
@@ -277,7 +280,7 @@ describe("IMachine<C, T, P, D>", () => {
     >();
   });
 
-  test("empty deps default to DefaultDeps only", () => {
+  test("пустые deps по умолчанию сводятся только к DefaultDeps", () => {
     type Bare = IMachine<Cfg, Ctx, Evt>;
     expect<Parameters<Bare["invokeEffect"]>[2]>().type.toBe<{
       transition: (data: Evt) => Evt;
@@ -294,35 +297,58 @@ describe("IMachineManager<S, P>", () => {
   type State = MachinesState<M>;
   type Manager = IMachineManager<M, Evt>;
 
-  test("shape has exactly 5 keys", () => {
+  test("форма содержит ровно 9 ключей", () => {
     type _Keys = Assert<
-      Equal<keyof Manager, "transition" | "getState" | "onTransition" | "replaceReducer" | "setDependencies">
+      Equal<
+        keyof Manager,
+        | "transition"
+        | "getState"
+        | "getSnapshot"
+        | "getHydratedState"
+        | "hydrate"
+        | "dehydrate"
+        | "onTransition"
+        | "replaceReducer"
+        | "setDependencies"
+      >
     >;
   });
 
-  test("getState signature", () => {
+  test("сигнатура getState возвращает MachinesState", () => {
     expect<Manager["getState"]>().type.toBe<() => State>();
   });
 
-  test("transition signature echoes the event type", () => {
+  test("сигнатуры snapshot-методов типизируют runtime и dehydrated envelopes", () => {
+    expect<Manager["getSnapshot"]>().type.toBe<() => MachineManagerRuntimeSnapshot<M>>();
+    expect<Manager["getHydratedState"]>().type.toBe<
+      (
+        snapshot: MachineManagerSnapshot<M>,
+        opts?: { strategy?: "replace" | "merge"; baseState?: MachinesState<M> },
+      ) => MachinesState<M>
+    >();
+    expect<Manager["hydrate"]>().type.toBe<(snapshot: MachineManagerSnapshot<M>, opts?: { strategy?: "replace" | "merge" }) => void>();
+    expect<Manager["dehydrate"]>().type.toBe<(opts?: { machines?: Array<keyof M> }) => MachineManagerSnapshot<M>>();
+  });
+
+  test("сигнатура transition возвращает тот же event type", () => {
     expect<Manager["transition"]>().type.toBe<(payload: Evt) => Evt>();
   });
 
-  test("onTransition signature returns unsubscribe function", () => {
+  test("сигнатура onTransition возвращает функцию unsubscribe", () => {
     expect<Manager["onTransition"]>().type.toBe<(cb: TransitionSubscriber<M, Evt>) => () => void>();
   });
 
-  test("replaceReducer signature composes reducer", () => {
+  test("сигнатура replaceReducer композирует reducer", () => {
     expect<Manager["replaceReducer"]>().type.toBe<
       (cb: (reducer: Reducer<State, Evt>) => Reducer<State, Evt>) => void
     >();
   });
 
-  test("setDependencies accepts both object and updater forms", () => {
+  test("setDependencies принимает объект и updater-функцию", () => {
     expect<Manager["setDependencies"]>().type.toBe<(d: Deps | ((deps: Deps) => Deps)) => void>();
   });
 
-  test("default P equals explicit MachineEvents<S>", () => {
+  test("P по умолчанию совпадает с явным MachineEvents<S>", () => {
     type Default = IMachineManager<M>;
     type Explicit = IMachineManager<M, MachineEvents<M>>;
     type _SameShape = Assert<Equal<Default, Explicit>>;

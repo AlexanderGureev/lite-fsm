@@ -5,7 +5,7 @@ import { render, renderHook, act } from "@testing-library/react";
 
 import { defineMachine } from "../../src/react";
 
-describe("react defineMachine", () => {
+describe("defineMachine для React", () => {
   it("создаёт hook-машину: use/getState/transition/onTransition/addMiddleware", () => {
     const machine = defineMachine<{ type: "GO" } | { type: "STOP" }>().create({
       config: { IDLE: { GO: "ACTIVE" }, ACTIVE: { STOP: "IDLE" } },

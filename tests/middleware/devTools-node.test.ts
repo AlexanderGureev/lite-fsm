@@ -5,7 +5,7 @@ import { devToolsMiddleware } from "../../src/middleware/devTools";
 import { MachineManager } from "../../src/core/MachineManager";
 
 describe("devToolsMiddleware — без window (SSR)", () => {
-  it("возвращает pass-through middleware и не трогает state", () => {
+  it("возвращает сквозной middleware и не трогает state", () => {
     expect(typeof window).toBe("undefined");
 
     const manager = MachineManager(
@@ -45,7 +45,7 @@ describe("devToolsMiddleware — без window (SSR)", () => {
     expect(manager.getState().m.state).toBe("IDLE");
   });
 
-  it("вызывается с дефолтным blacklistActions, когда он не передан", () => {
+  it("использует дефолтный blacklistActions, когда он не передан", () => {
     expect(() =>
       MachineManager(
         {

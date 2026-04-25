@@ -36,9 +36,14 @@ export function compose(...fns: Array<(...args: any[]) => any>) {
 }
 
 export const WILDCARD = "*";
+export const LITE_FSM_SYSTEM_ACTION_PREFIX = "@@lite-fsm/";
+export const HYDRATE_ACTION_TYPE = "@@lite-fsm/HYDRATE";
 export const VOID_REDUCER_MIDDLEWARE_MARKER = "__liteFsmAllowVoidReducer";
 export const VOID_REDUCER_ERROR =
   "Reducer returned undefined. Return the next state, or use immerMiddleware to mutate draft state without return.";
+
+export const isSystemAction = (action: { type?: unknown }): action is { type: `${typeof LITE_FSM_SYSTEM_ACTION_PREFIX}${string}` } =>
+  typeof action.type === "string" && action.type.startsWith(LITE_FSM_SYSTEM_ACTION_PREFIX);
 
 /* v8 ignore next 2 */
 export const IS_DEV =
@@ -48,7 +53,7 @@ export const deepFreeze = <T>(obj: T): T => {
   if (obj === null || typeof obj !== "object" || Object.isFrozen(obj)) return obj;
   Object.freeze(obj);
   for (const key of Object.keys(obj)) {
-    deepFreeze((obj as Record<string, unknown>)[key]);
+    deepFreeze(Reflect.get(obj, key));
   }
   return obj;
 };

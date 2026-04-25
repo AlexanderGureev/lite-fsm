@@ -19,6 +19,7 @@ export default defineConfig({
       reporter: ["text", "json", "html", "lcov"],
       include: ["src/**/*.{ts,tsx}"],
       exclude: [
+        "playground/**",
         "src/**/*.d.ts",
         "src/middleware.ts",
         "src/middleware/index.ts",

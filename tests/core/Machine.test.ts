@@ -4,7 +4,7 @@ import { CreateMachine } from "../../src/core/Machine";
 import { WILDCARD } from "../../src/core/utils";
 
 describe("CreateMachine — чистая функция", () => {
-  describe("config", () => {
+  describe("переданный config", () => {
     it("экспонирует переданный config как поле", () => {
       const config = {
         IDLE: { GO: "ACTIVE" },
@@ -103,7 +103,7 @@ describe("CreateMachine — чистая функция", () => {
     });
   });
 
-  describe("transition c reducer", () => {
+  describe("transition с reducer", () => {
     it("reducer вызывается с (state, action, { nextState, config })", () => {
       const reducer = vi.fn((s, _a, meta) => ({ state: meta.nextState, context: s.context }));
       const config = { IDLE: { GO: "ACTIVE" }, ACTIVE: {} } as const;
@@ -162,7 +162,7 @@ describe("CreateMachine — чистая функция", () => {
   describe("invokeEffect", () => {
     const noopDeps = { transition: vi.fn(), action: { type: "X" }, condition: vi.fn() };
 
-    it("без effects — Promise<undefined>", async () => {
+    it("без effects возвращает Promise<undefined>", async () => {
       const machine = CreateMachine({
         config: { IDLE: { GO: "ACTIVE" }, ACTIVE: {} },
         initialState: "IDLE",

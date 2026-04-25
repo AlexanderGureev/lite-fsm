@@ -18,6 +18,7 @@ import {
   type MachineDependencies,
   type MachineEvents,
   type MachineEffect,
+  type ManagerCommitAction,
   type MachineReducer,
   type MachinesState,
   type Middleware,
@@ -294,8 +295,8 @@ type AppMachines = typeof machines;
 type AppState = MachinesState<AppMachines>;
 type AppContext = FSMContextType<AppMachines, AppEvent>;
 
-describe("core exported types", () => {
-  test("literal utility types stay exact", () => {
+describe("экспортируемые core-типы", () => {
+  test("literal utility types остаются точными", () => {
     expect<SType>().type.toBe<string | number | symbol>();
     expect<WILDCARD>().type.toBe<"*">();
     expect<State<"idle" | "*" | 1 | symbol>>().type.toBe<"idle">();
@@ -305,7 +306,7 @@ describe("core exported types", () => {
     >();
   });
 
-  test("FSMEvent keeps payload strictness", () => {
+  test("FSMEvent сохраняет строгую типизацию payload", () => {
     type UnknownPayloadEvent = FSMEvent<"UNKNOWN_PAYLOAD", unknown>;
     type VoidPayloadEvent = FSMEvent<"VOID_PAYLOAD", void>;
     type NullPayloadEvent = FSMEvent<"NULL_PAYLOAD", null>;
@@ -375,8 +376,8 @@ describe("core exported types", () => {
   });
 });
 
-describe("config, reducers and effects", () => {
-  test("createConfig preserves states and rejects invalid transitions", () => {
+describe("config, reducers и effects", () => {
+  test("createConfig сохраняет states и отклоняет невалидные transitions", () => {
     expect<typeof authConfig>().type.toBe<{
       "*": { RESET: "anonymous" };
       anonymous: { LOGIN: "loading" };
@@ -428,7 +429,7 @@ describe("config, reducers and effects", () => {
     expect(partialAuthConfig.loading.LOGOUT).type.toBe<"anonymous">();
   });
 
-  test("DefaultDeps narrows action by target state", () => {
+  test("DefaultDeps сужает action по target state", () => {
     expect<DefaultDeps<"loading", typeof authConfig, AuthEvent>["action"]>().type.toBe<
       Extract<AuthEvent, { type: "LOGIN" | "REFRESH" }>
     >();
@@ -452,7 +453,7 @@ describe("config, reducers and effects", () => {
     expect<DefaultDeps<"done", OrphanConfig, OrphanEvent>["action"]>().type.toBe<FSMEvent<"START">>();
   });
 
-  test("MachineConfig keeps context, reducer, effects and deps strict", () => {
+  test("MachineConfig строго типизирует context, reducer, effects и deps", () => {
     const authMachineCreatedWithDeps = createAuthMachineWithDeps(authMachineConfig);
 
     expect<typeof authMachineConfig>().type.toBeAssignableTo<AuthMachineConfig>();
@@ -529,7 +530,7 @@ describe("config, reducers and effects", () => {
     >();
   });
 
-  test("createReducer rejects invalid state and context returns", () => {
+  test("createReducer отклоняет невалидный return для state и context", () => {
     expect(appCounterReducer).type.toBe<MachineReducer<CounterConfig, AppEvent, { count: number }>>();
 
     // @ts-expect-error!
@@ -547,7 +548,7 @@ describe("config, reducers and effects", () => {
     });
   });
 
-  test("createEffect preserves state-specific actions", () => {
+  test("createEffect сохраняет actions, специфичные для state", () => {
     type TimerEvent = FSMEvent<"TICK"> | FSMEvent<"DONE">;
     const createTimerConfig: TypedCreateConfigFn<TimerEvent> = createConfig;
     const createTimerEffect: TypedCreateEffectFn<TimerEvent> = createEffect;
@@ -618,8 +619,8 @@ describe("config, reducers and effects", () => {
   });
 });
 
-describe("Machine and defineMachine", () => {
-  test("pure Machine exposes exact transition and invokeEffect types", () => {
+describe("Machine и defineMachine", () => {
+  test("чистая Machine раскрывает точные типы transition и invokeEffect", () => {
     const pureAuthMachine = Machine<typeof authConfig, AuthContext, AuthEvent["type"], AuthEvent, AuthDeps>(authMachineConfig);
     const inferredCounterMachine = Machine(counterMachineConfig);
     const pureAuthNext = pureAuthMachine.transition(
@@ -678,7 +679,7 @@ describe("Machine and defineMachine", () => {
     });
   });
 
-  test("defineMachine returns a stateful API typed by events and deps", () => {
+  test("defineMachine возвращает stateful API, типизированный events и deps", () => {
     const authRuntimeMachine = defineMachine<AuthEvent, AuthDeps>({
       dependencies: {
         api: { loadUser: async () => ({ name: "Ada" }) },
@@ -708,8 +709,8 @@ describe("Machine and defineMachine", () => {
   });
 });
 
-describe("MachineManager and middleware", () => {
-  test("MachinesState maps every machine to its literal state and context", () => {
+describe("MachineManager и middleware", () => {
+  test("MachinesState мапит каждую machine в её literal state и context", () => {
     expect<AppState>().type.toBe<{
       auth: {
         state: "anonymous" | "loading" | "authenticated" | "failed";
@@ -726,7 +727,7 @@ describe("MachineManager and middleware", () => {
     expect<MachineDependencies<AppMachines>>().type.toBe<AuthDeps>();
   });
 
-  test("manager transition, subscribers, deps and reducer replacement stay typed", () => {
+  test("manager сохраняет типы transition, subscribers, deps и replaceReducer", () => {
     const manager = MachineManager<AppMachines, AppEvent>(machines, {
       onError: (error: unknown) => {
         expect(error).type.toBe<unknown>();
@@ -761,14 +762,14 @@ describe("MachineManager and middleware", () => {
     const appTransitionSubscriber: TransitionSubscriber<AppMachines, AppEvent> = (prevState, currentState, action) => {
       expect(prevState).type.toBe<AppState>();
       expect(currentState).type.toBe<AppState>();
-      expect(action).type.toBe<AppEvent>();
+      expect(action).type.toBe<ManagerCommitAction<AppMachines, AppEvent>>();
     };
 
     manager.onTransition(appTransitionSubscriber);
     manager.onTransition((prevState, currentState, action) => {
       expect(prevState).type.toBe<AppState>();
       expect(currentState).type.toBe<AppState>();
-      expect(action).type.toBe<AppEvent>();
+      expect(action).type.toBe<ManagerCommitAction<AppMachines, AppEvent>>();
 
       if (action.type === "INC") {
         expect(action.payload.amount).type.toBe<number>();
@@ -816,7 +817,7 @@ describe("MachineManager and middleware", () => {
     });
   });
 
-  test("middleware API keeps state and event contracts", () => {
+  test("middleware API сохраняет контракты state и event", () => {
     const authRuntimeMachine = defineMachine<AuthEvent, AuthDeps>({
       dependencies: {
         api: { loadUser: async () => ({ name: "Ada" }) },
@@ -914,8 +915,8 @@ describe("MachineManager and middleware", () => {
   });
 });
 
-describe("React API", () => {
-  test("provider hooks can be specialized for app machines and events", () => {
+describe("React API в lite-fsm", () => {
+  test("provider hooks можно специализировать под app machines и events", () => {
     const manager = MachineManager<AppMachines, AppEvent>(machines, {
       middleware: [immerMiddleware],
     });
@@ -994,7 +995,7 @@ describe("React API", () => {
     expect(useTypedHookAliasExamples).type.toBe<() => number>();
   });
 
-  test("react defineMachine returns hook and machine methods", () => {
+  test("react defineMachine возвращает hook и методы machine", () => {
     const reactAuthMachine = defineReactMachine<AuthEvent, AuthDeps>({
       dependencies: {
         api: { loadUser: async () => ({ name: "Katherine" }) },
@@ -1038,8 +1039,8 @@ describe("React API", () => {
   });
 });
 
-describe("edge cases", () => {
-  test("inline createMachine infers state and context without project aliases", () => {
+describe("пограничные случаи", () => {
+  test("inline createMachine выводит state и context без project aliases", () => {
     const inlineMachineConfig = createMachine({
       config: {
         idle: {
@@ -1078,7 +1079,7 @@ describe("edge cases", () => {
     Machine(inlineMachineConfig).transition({ state: "missing", context: { count: 0, label: "draft" } }, { type: "START" });
   });
 
-  test("self-transition merges payload while keeping state literal", () => {
+  test("self-transition мержит payload и сохраняет state literal", () => {
     type PatchEvent = FSMEvent<"PATCH", Partial<AuthContext>>;
     const createPatchMachine: TypedCreateMachineFn<PatchEvent> = createMachine;
 
@@ -1101,7 +1102,7 @@ describe("edge cases", () => {
     expect(patchedState.state).type.toBe<"idle">();
   });
 
-  test("wildcard config key is not part of public state union", () => {
+  test("wildcard key в config не входит в public state union", () => {
     type LiteralStates = StateType<
       {
         "*": {
@@ -1120,7 +1121,7 @@ describe("edge cases", () => {
     expect<LiteralStates>().type.toBe<"idle" | "running">();
   });
 
-  test("machine manager infers event unions from machine configs", () => {
+  test("machine manager выводит event unions из machine configs", () => {
     const inferredManager = MachineManager(machines);
 
     inferredManager.transition({ type: "INC", payload: { amount: 1 } });

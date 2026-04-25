@@ -63,9 +63,9 @@ const createRequest = (key: string): WidgetFeedRequest => ({
   limit: 3,
 });
 
-describe("ssr-demo-2 playground store", () => {
+describe("хранилище playground ssr-demo-2", () => {
   describe("ssrDemo2Grid", () => {
-    it("hydrates manifest, merges append pages with dedupe and stores loading/error status", () => {
+    it("гидратирует manifest, мержит append-страницы без дублей и хранит status loading/error", () => {
       let state = getInitialState<SSRDemo2GridContext>(ssrDemo2Grid);
       const firstPage: GridPage = { items: [createItem("a"), createItem("b")], nextCursor: "2", hasNext: true };
       const secondPage: GridPage = { items: [createItem("b"), createItem("c")], hasNext: false };
@@ -105,7 +105,7 @@ describe("ssr-demo-2 playground store", () => {
   });
 
   describe("entityList", () => {
-    it("hydrates seeds, appends cursor pages and keeps list fetches independent", () => {
+    it("гидратирует seed-данные, добавляет cursor-страницы и изолирует загрузки списков", () => {
       let state = getInitialState<EntityListContext>(entityList);
       const firstRequest = createRequest("first");
       const secondRequest = createRequest("second");
@@ -155,7 +155,7 @@ describe("ssr-demo-2 playground store", () => {
       expect(state.context.lists[getListId(secondRequest)].status).toBe("idle");
     });
 
-    it("applyLoadedPage appends non-empty pages and preserves empty pages as no-op", () => {
+    it("applyLoadedPage добавляет непустые страницы, а пустые оставляет no-op", () => {
       const request = createRequest("append");
       const entry = createEntry(request);
       const withData = applyLoadedPage(entry, {

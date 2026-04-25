@@ -24,6 +24,13 @@ export type StateType<C extends object, T extends AnyRecord> = {
 
 export type MachineState<C extends object, T extends AnyRecord> = StateType<C, T>;
 
+export type HydrateStrategy = "replace" | "merge";
+export type HydrateOptions = { strategy?: HydrateStrategy };
+export type HydratePreviewOptions<S extends MachineStore> = HydrateOptions & {
+  baseState?: MachinesState<S>;
+};
+export type HydrateMeta = { strategy: HydrateStrategy };
+
 export type Subscriber<C extends object, T extends AnyRecord, P extends AnyEvent = AnyEvent> = (
   prevState: StateType<C, T>,
   currentState: StateType<C, T>,
@@ -32,11 +39,23 @@ export type Subscriber<C extends object, T extends AnyRecord, P extends AnyEvent
 
 export type Reducer<S, P extends AnyEvent = AnyEvent> = (state: S, action: P) => S;
 
+export type UnknownMachineKeyContext = "hydrate" | "opts.snapshot";
+
+export type HydrateAction<S extends MachineStore> = {
+  type: "@@lite-fsm/HYDRATE";
+  payload: {
+    strategy: HydrateStrategy;
+    snapshot: MachineManagerSnapshot<S>;
+  };
+};
+
+export type ManagerCommitAction<S extends MachineStore, P extends AnyEvent = AnyEvent> = P | HydrateAction<S>;
+
 export type MiddlewareApi<S, P extends AnyEvent = AnyEvent> = {
   getState: () => S;
   transition: (action: P) => P;
   replaceReducer: (cb: (reducer: Reducer<S, P>) => Reducer<S, P>) => void;
-  onTransition: (cb: (prevState: S, currentState: S, action: P) => void) => () => void;
+  onTransition: (cb: (prevState: S, currentState: S, action: ManagerCommitAction<MachineStore, P>) => void) => () => void;
   condition: (predicate: (a: P) => boolean) => Promise<boolean>;
 };
 
@@ -93,11 +112,14 @@ export type MachineConfig<
   T extends AnyRecord,
   P extends AnyEvent,
   D extends AnyRecord = {},
+  Snapshot = StateType<C, T>,
 > = {
   config: C;
   initialState: StateName<C>;
   initialContext: T;
   reducer?: MachineReducer<C, P, T>;
+  hydrate?: (prev: StateType<C, T>, snapshot: Snapshot, meta: HydrateMeta) => StateType<C, T>;
+  dehydrate?: (state: StateType<C, T>) => Snapshot;
   effects?: {
     [key in StateName<C> | WILDCARD]?: MachineEffect<key, C, P, D>;
   };
@@ -108,6 +130,8 @@ type AnyMachineConfig = {
   initialState: string;
   initialContext: AnyRecord;
   reducer?: unknown;
+  hydrate?: unknown;
+  dehydrate?: unknown;
   effects?: unknown;
 };
 
@@ -120,10 +144,42 @@ export type MachinesState<S extends MachineStore> = {
   };
 };
 
+export type MachineRuntimeSnapshot<C extends object, T extends AnyRecord> = StateType<C, T>;
+
+export type MachineRuntimeSnapshotForMachine<M> = M extends MachineConfig<infer C, infer T, infer P, infer D, infer Snapshot>
+  ? [P, D, Snapshot] extends [AnyEvent, AnyRecord, unknown]
+    ? MachineRuntimeSnapshot<C, T>
+    : never
+  : M extends { config: infer C extends object; initialContext: infer T extends AnyRecord }
+    ? MachineRuntimeSnapshot<C, T>
+    : never;
+
+export type SnapshotForMachine<M> = M extends { dehydrate: (...args: any[]) => infer Snapshot }
+  ? Snapshot
+  : M extends { hydrate: (prev: any, snapshot: infer Snapshot, meta: any) => unknown }
+    ? Snapshot
+    : MachineRuntimeSnapshotForMachine<M>;
+
+export type MachineSnapshot<M> = SnapshotForMachine<M>;
+
+export type MachineManagerSnapshot<S extends MachineStore> = {
+  schemaVersion?: number;
+  machines: Partial<{ [key in keyof S]: SnapshotForMachine<S[key]> }>;
+};
+
+export type MachineManagerRuntimeSnapshot<S extends MachineStore> = {
+  schemaVersion?: number;
+  machines: { [key in keyof S]: MachineRuntimeSnapshotForMachine<S[key]> };
+};
+
+export type DehydrateOptions<S extends MachineStore> = {
+  machines?: Array<keyof S>;
+};
+
 export type TransitionSubscriber<S extends MachineStore, P extends AnyEvent = AnyEvent> = (
   prevState: MachinesState<S>,
   currentState: MachinesState<S>,
-  action: P,
+  action: ManagerCommitAction<S, P>,
 ) => void;
 
 export type TypedCreateMachineFn<P extends AnyEvent = AnyEvent, D extends AnyRecord = {}> = <
