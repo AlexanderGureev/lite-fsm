@@ -20,13 +20,12 @@ app/
     page.tsx                         ← server, index со ссылками на routes
     featured/page.tsx                ← server, <SSRDemoScreen screen=... />
     night/page.tsx                   ← server, <SSRDemoScreen screen=... />
-
-  _components/
-    SSRDemoTopBar                    ← client, useSelector(profileSession)
-    SSRDemoScreen                    ← server, grid + Suspense per widget
-    SSRDemoWidgetLoader              ← async server, loadWidgetSeed(widget)
-      SSRDemoWidgetInitialize        ← client bridge, INITIAL_WIDGET_FEED_DATA
-        SSRDemoWidget                ← client, contentType dispatcher + view
+    _components/
+      SSRDemoTopBar                  ← client, useSelector(profileSession)
+      SSRDemoScreen                  ← server, grid + Suspense per widget
+      SSRDemoWidgetLoader            ← async server, loadWidgetSeed(widget)
+        SSRDemoWidgetInitialize      ← client bridge, INITIAL_WIDGET_FEED_DATA
+          SSRDemoWidget              ← client, contentType dispatcher + view
 
 src/store/
   index.ts                           ← makeStore() + MachineManager

@@ -19,6 +19,7 @@ import {
   type FSMContextType,
   FSMContextProvider,
   type TypedUseMachineHook,
+  type TypedUseManagerHook,
   type TypedUseSelectorHook,
   type TypedUseTransitionHook,
   useManager,
@@ -130,6 +131,12 @@ describe("useManager<S, P>", () => {
     const m = typed();
     expect(m).type.toBe<IMachineManager<Store, Evt>>();
   });
+
+  test("aliasing through TypedUseManagerHook narrows it", () => {
+    const typed: TypedUseManagerHook<Store, Evt> = useManager;
+    const m = typed();
+    expect(m).type.toBe<IMachineManager<Store, Evt>>();
+  });
 });
 
 describe("useSelector<S, R>", () => {
@@ -167,8 +174,8 @@ describe("useSelector<S, R>", () => {
     );
   });
 
-  test("TypedUseSelectorHook<S> pins state but keeps R generic", () => {
-    const typed: TypedUseSelectorHook<StoreState> = useSelector;
+  test("TypedUseSelectorHook<S> pins store state but keeps R generic", () => {
+    const typed: TypedUseSelectorHook<Store> = useSelector;
     const r = typed((state) => state.x.state);
     expect(r).type.toBe<"idle" | "busy">();
   });

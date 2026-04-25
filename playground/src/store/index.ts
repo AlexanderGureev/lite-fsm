@@ -5,6 +5,8 @@ import { lamp } from "./machines/lamp";
 import { likes } from "./machines/likes";
 import { likesPending } from "./machines/likesPending";
 import { profileSession } from "./machines/profileSession";
+import { entityList } from "./machines/entityList";
+import { ssrDemo2Grid } from "./machines/ssrDemo2Grid";
 import { widgetFeed } from "./machines/widgetFeed";
 import type { AppEvents } from "./types";
 
@@ -13,6 +15,8 @@ const machines = {
   likes,
   likesPending,
   profileSession,
+  ssrDemo2Grid,
+  entityList,
   widgetFeed,
 };
 

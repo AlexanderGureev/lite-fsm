@@ -921,7 +921,7 @@ describe("React API", () => {
     });
 
     const useAppTransition: TypedUseTransitionHook<AppEvent> = useTransition;
-    const useAppSelector: TypedUseSelectorHook<AppState> = useSelector;
+    const useAppSelector: TypedUseSelectorHook<AppMachines> = useSelector;
     const useAppManager: TypedUseMachineHook<AppMachines, AppEvent> = useManager;
 
     function useProviderHooksExamples() {

@@ -1,6 +1,14 @@
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      "lite-fsm/middleware/immer": fileURLToPath(new URL("./src/middleware/immer.ts", import.meta.url)),
+      "lite-fsm/react": fileURLToPath(new URL("./src/react/index.ts", import.meta.url)),
+      "lite-fsm": fileURLToPath(new URL("./src/core/index.ts", import.meta.url)),
+    },
+  },
   test: {
     globals: true,
     environment: "node",

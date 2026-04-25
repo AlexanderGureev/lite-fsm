@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 
 import LampPanel from "./LampPanel";
@@ -42,6 +43,21 @@ export default function Playground() {
       </div>
 
       {activeTab === "lamp" ? <LampPanel /> : <LikesPanel />}
+
+      <nav className="flex flex-wrap justify-center gap-2 text-sm">
+        <Link
+          href="/ssr-demo"
+          className="rounded-full border border-slate-400/15 px-3 py-1 text-slate-300 hover:text-slate-50"
+        >
+          SSR demo
+        </Link>
+        <Link
+          href="/ssr-demo-2"
+          className="rounded-full border border-slate-400/15 px-3 py-1 text-slate-300 hover:text-slate-50"
+        >
+          SSR demo 2
+        </Link>
+      </nav>
     </main>
   );
 }

@@ -14,6 +14,7 @@
 - Prefer simple TypeScript functions and `type` aliases over extra abstractions.
 - Preserve ESM/CJS exports and generated `.d.ts`/`.d.cts` package types.
 - Add or update Vitest tests for runtime behavior and Tstyche tests for type behavior.
+- When public API or types change, update `API-CHEATSHEET.md` and `TYPES-CHEATSHEET.md` as clear capability references, not changelogs.
 - Do not add runtime dependencies lightly; React, Immer and `use-sync-external-store` are peer/optional.
 - Use `npm` commands from the repo root.
 

@@ -26,7 +26,7 @@
 | `lite-fsm/middleware` | `immerMiddleware`, `devToolsMiddleware` (barrel) | — |
 | `lite-fsm/middleware/immer` | `immerMiddleware` | — |
 | `lite-fsm/middleware/devTools` | `devToolsMiddleware` | — |
-| `lite-fsm/react` | `FSMContext`, `FSMContextProvider`, `useManager`, `useSelector`, `useTransition`, `defineMachine` | `FSMContextType`, `TypedUseMachineHook`, `TypedUseSelectorHook`, `TypedUseTransitionHook` |
+| `lite-fsm/react` | `FSMContext`, `FSMContextProvider`, `useManager`, `useSelector`, `useTransition`, `defineMachine` | `FSMContextType`, `TypedUseManagerHook`, `TypedUseMachineHook`, `TypedUseSelectorHook`, `TypedUseTransitionHook` |
 
 ## Утилитарные типы
 
@@ -416,9 +416,26 @@ props: React.PropsWithChildren<{ machineManager: IMachineManager<S, P> }>
 
 | Alias | Что фиксирует |
 |---|---|
-| `TypedUseMachineHook<S, P>` | хук, возвращающий `IMachineManager<S, P>` |
-| `TypedUseSelectorHook<S>` | фиксирует state, оставляет `R` обобщённым |
+| `TypedUseManagerHook<S, P>` | хук, возвращающий `IMachineManager<S, P>` |
+| `TypedUseMachineHook<S, P>` | backward-compatible alias к `TypedUseManagerHook<S, P>` |
+| `TypedUseSelectorHook<S>` | фиксирует карту машин (`S extends MachineStore`), селектор получает `MachinesState<S>`, `R` остаётся обобщённым |
 | `TypedUseTransitionHook<P>` | фиксирует payload-тип |
+
+Рекомендуемый DX для приложения — типизировать локальные hooks прямым присваиванием, без wrapper-функций и `as`:
+
+```ts
+import type { TypedUseManagerHook, TypedUseSelectorHook, TypedUseTransitionHook } from "lite-fsm/react";
+import { useManager as baseUseManager, useSelector as baseUseSelector, useTransition as baseUseTransition } from "lite-fsm/react";
+
+import type { FSMConfigType } from "./store";
+import type { AppEvents } from "./types";
+
+export const useTransition: TypedUseTransitionHook<AppEvents> = baseUseTransition;
+export const useSelector: TypedUseSelectorHook<FSMConfigType> = baseUseSelector;
+export const useManager: TypedUseManagerHook<FSMConfigType, AppEvents> = baseUseManager;
+```
+
+Важно: `TypedUseSelectorHook<S>` принимает **тип карты машин**, а не уже вычисленный `MachinesState<S>` / `AppState`. Это симметрично обычному `useSelector<S, R>()`, где `S` — `MachineStore`, а `state` внутри селектора уже выводится как `MachinesState<S>`.
 
 ### `defineMachine<P, D>(opts?).create(cfg)` — react
 
