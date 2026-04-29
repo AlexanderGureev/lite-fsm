@@ -204,7 +204,7 @@ function PacketInspector({ packet }: { packet: SyncPacket | null }) {
         ) : null}
       </CardHeader>
       <CardContent className="px-5 pb-5 pt-4">
-        <pre className="max-h-[360px] overflow-auto rounded-md border border-hairline bg-canvas-parchment p-4 text-caption leading-relaxed text-ink-muted-80">
+        <pre className="h-[360px] overflow-auto rounded-md border border-hairline bg-canvas-parchment p-4 text-caption leading-relaxed text-ink-muted-80">
           <code>{text}</code>
         </pre>
       </CardContent>

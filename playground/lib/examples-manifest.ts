@@ -154,6 +154,8 @@ export const exampleById = (id: string) => examples.find((entry) => entry.id ===
 
 export const examplePath = (id: string) => `/examples/${id}`;
 
+export const exampleSourcePath = (id: string) => `playground/app/examples/${id}`;
+
 type CategoryStyle = {
   text: string;
   bgSoft: string;

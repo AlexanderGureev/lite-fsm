@@ -6,6 +6,7 @@ const isProduction = process.env.NODE_ENV === "production";
 
 const DOCS_URL = isProduction ? "/lite-fsm/" : "https://alexandergureev.github.io/lite-fsm/";
 const GITHUB_URL = "https://github.com/AlexanderGureev/lite-fsm";
+const GITHUB_SOURCE_URL = "https://github.com/AlexanderGureev/lite-fsm/tree/rc-2.0";
 const NPM_URL = "https://www.npmjs.com/package/lite-fsm";
 
 export function TopBar() {
@@ -44,4 +45,5 @@ export function TopBar() {
 
 export const docsUrl = DOCS_URL;
 export const githubUrl = GITHUB_URL;
+export const githubSourceUrl = GITHUB_SOURCE_URL;
 export const npmUrl = NPM_URL;

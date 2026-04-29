@@ -153,9 +153,9 @@ export default function HomePage() {
               <p className="text-fine-print font-medium uppercase tracking-[0.08em] text-ink-muted-48">
                 Документация
               </p>
-              <FooterExternalLink href={docsUrl}>Гайд</FooterExternalLink>
-              <FooterExternalLink href={`${docsUrl}guide/api/`}>API</FooterExternalLink>
-              <FooterExternalLink href={`${docsUrl}guide/usage/react/`}>React</FooterExternalLink>
+              <FooterExternalLink href={`${docsUrl}guide`}>Гайд</FooterExternalLink>
+              <FooterExternalLink href={`${docsUrl}api`}>API</FooterExternalLink>
+              <FooterExternalLink href={`${docsUrl}react`}>React</FooterExternalLink>
             </div>
 
             <div className="flex flex-col gap-2">
