@@ -3,6 +3,7 @@ import {
   AnyRecord,
   DefaultDeps,
   MachineConfig,
+  MachineManagerDehydrateFn,
   MachineManagerRuntimeSnapshot,
   MachineManagerSnapshot,
   MachineStore,
@@ -13,24 +14,28 @@ import {
   TransitionSubscriber,
   HydrateOptions,
   HydratePreviewOptions,
-  DehydrateOptions,
   UnknownMachineKeyContext,
   Middleware,
   WILDCARD,
+  ManagerAction,
 } from "./types";
 
 type UnionToIntersection<U> = (U extends unknown ? (value: U) => void : never) extends (value: infer I) => void ? I : never;
 
+type ConfigDependencies<E> = E extends MachineConfig<object, AnyRecord, AnyEvent, infer D> ? D : never;
+
 type EffectDependencies<E> = "effects" extends keyof E
   ? keyof NonNullable<E["effects"]> extends never
     ? {}
-    : UnionToIntersection<
-        {
-          [key in keyof NonNullable<E["effects"]>]: NonNullable<E["effects"]>[key] extends (deps: infer D) => unknown
-            ? Omit<D, keyof DefaultDeps>
-            : {};
-        }[keyof NonNullable<E["effects"]>]
-      >
+    : [ConfigDependencies<E>] extends [never]
+      ? UnionToIntersection<
+          {
+            [key in keyof NonNullable<E["effects"]>]: NonNullable<E["effects"]>[key] extends (deps: infer D) => unknown
+              ? Omit<D, keyof DefaultDeps | "self">
+              : {};
+          }[keyof NonNullable<E["effects"]>]
+        >
+      : ConfigDependencies<E>
   : {};
 
 export type MachineDependencies<S extends MachineStore> = keyof S extends never
@@ -86,13 +91,13 @@ export type IMachine<
 };
 
 export type IMachineManager<S extends MachineStore, P extends AnyEvent = MachineEvents<S>> = {
-  transition: (payload: P) => P;
+  transition: (payload: ManagerAction<P>) => ManagerAction<P>;
   getState: () => MachinesState<S>;
   getSnapshot: () => MachineManagerRuntimeSnapshot<S>;
   getHydratedState: (snapshot: MachineManagerSnapshot<S>, opts?: HydratePreviewOptions<S>) => MachinesState<S>;
   hydrate: (snapshot: MachineManagerSnapshot<S>, opts?: HydrateOptions) => void;
-  dehydrate: (opts?: DehydrateOptions<S>) => MachineManagerSnapshot<S>;
+  dehydrate: MachineManagerDehydrateFn<S>;
   onTransition: (cb: TransitionSubscriber<S, P>) => () => void;
-  replaceReducer: (cb: (reducer: Reducer<MachinesState<S>, P>) => Reducer<MachinesState<S>, P>) => void;
+  replaceReducer: (cb: (reducer: Reducer<MachinesState<S>, ManagerAction<P>>) => Reducer<MachinesState<S>, ManagerAction<P>>) => void;
   setDependencies: (d: MachineDependencies<S> | ((deps: MachineDependencies<S>) => MachineDependencies<S>)) => void;
 };

@@ -1,40 +1,46 @@
 # AGENTS.md
 
-## Project
+## Проект
 
-`lite-fsm` is a lightweight TypeScript finite state machine library.
+`lite-fsm` — легковесная TypeScript-библиотека для FSM.
 
-- `lite-fsm`: framework-agnostic FSM core, `createMachine`, `MachineManager`, effects and middleware.
-- `lite-fsm/react`: React context and hooks.
-- `lite-fsm/middleware`: optional middleware integrations, including DevTools and Immer.
+- `lite-fsm`: независимые от фреймворков `createMachine`, `MachineManager`, эффекты и middleware.
+- `lite-fsm/react`: React-контекст и хуки.
+- `lite-fsm/middleware`: опциональные интеграции, такие как DevTools и Immer.
 
-## Guidelines
+## Жесткие правила
 
-- Keep the public API small, predictable and strongly typed.
-- Prefer simple TypeScript functions and `type` aliases over extra abstractions.
-- Preserve ESM/CJS exports and generated `.d.ts`/`.d.cts` package types.
-- Add or update Vitest tests for runtime behavior and Tstyche tests for type behavior.
-- When public API or types change, update `API-CHEATSHEET.md` and `TYPES-CHEATSHEET.md` as clear capability references, not changelogs.
-- Do not add runtime dependencies lightly; React, Immer and `use-sync-external-store` are peer/optional.
-- Use `npm` commands from the repo root.
+- Держи публичный API небольшим, предсказуемым и строго типизированным.
+- При изменении публичного API или типов обновляй `API-CHEATSHEET.md` и `TYPES-CHEATSHEET.md`; они должны оставаться справочниками возможностей, а не changelog.
 
-## Structure
+## Стиль кода
 
-- `src/core/`: FSM runtime, manager, types and interfaces.
-- `src/react/`: React provider, context and hooks.
-- `src/middleware/`: middleware entrypoints and integrations.
-- `tests/`: runtime tests, smoke tests and Tstyche type tests.
-- `docs/` and `playground/`: documentation and demos.
+- Вноси минимальное корректное изменение. Не добавляй helpers без второго места использования, абстракции "на всякий случай" и copy-paste, который будет расходиться.
+- Предпочитай простые TypeScript-функции и `type` aliases классам или фреймворкоподобным абстракциям.
+- Код должен читаться сверху вниз. Называй намерение, а не механику.
+- Пиши линейный код: предпочитай ранние `return`/`continue` вложенным `if-else`.
+- Держи одну концепцию на функцию: разделяй шаги validate, transform и mutate.
+- Держи одного владельца на каждую ответственность. Не дублируй validation или canonicalization между слоями.
+- Сначала валидируй входные данные, затем выводи состояние.
+- Удаляй мертвые generics: никаких `_phantom?: P` placeholders для type parameters, не используемых в field types.
+- Используй дискриминирующие поля режима (`mode: "preview" | "commit"`) вместо связанных boolean-флагов.
+- Выноси type alias, когда сложная сигнатура встречается больше одного раза.
+- Комментарии должны объяснять неочевидное намерение или ограничения, а не пересказывать код.
 
-## Commands
+## Тестирование
 
-- `npm run test`: run Vitest tests.
-- `npm run test:watch`: run Vitest in watch mode.
-- `npm run test:types`: run source type tests with Tstyche.
-- `npm run check-types`: run TypeScript checks and source type tests.
-- `npm run lint`: run ESLint.
-- `npm run build`: build ESM/CJS bundles and declarations.
-- `npm run test:types:dist`: validate built package types.
-- `npm run verify:release`: full release verification.
-- `npm run docs:dev`: start docs locally.
-- `npm run playground:dev`: start playground locally.
+- Тесты обязательны для изменений поведения: покрывай runtime через Vitest и публичные типы через Tstyche.
+- Названия тестов (`describe`, `it`, `test`) пиши на русском; идентификаторы кода и термины API оставляй на английском.
+
+## Структура
+
+- `src/core/`: FSM runtime, manager, types и interfaces.
+- `src/react/`: React provider, context и hooks.
+- `src/middleware/`: middleware entrypoints и integrations.
+- `tests/`: runtime tests, smoke tests и Tstyche type tests.
+- `docs/` и `playground/`: документация и demos.
+
+## Команды
+
+- Основные проверки: `npm run test`, `npm run test:types`, `npm run check-types`, `npm run lint`.
+- Релизные проверки: `npm run build`, `npm run verify:release`.

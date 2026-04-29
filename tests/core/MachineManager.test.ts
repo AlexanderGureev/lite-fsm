@@ -478,6 +478,56 @@ describe("MachineManager", () => {
       expect(manager.getState().m.state).toBe("DONE");
     });
 
+    it("запрещает несколько next() в одном middleware dispatch", () => {
+      const manager = MachineManager(
+        {
+          m: { config: { IDLE: { A: "B" }, B: {} }, initialState: "IDLE", initialContext: {} },
+        },
+        {
+          middleware: [
+            () => (next) => (action) => {
+              next(action);
+              return next(action);
+            },
+          ],
+        },
+      );
+
+      expect(() => manager.transition({ type: "A" })).toThrow(/next\(\) more than once/);
+    });
+
+    it("effects после вложенного api.transition используют prevState фактического outer commit", async () => {
+      const seen: string[] = [];
+      const manager = MachineManager(
+        {
+          m: {
+            config: { IDLE: { B: "DONE" }, DONE: { A: null } },
+            initialState: "IDLE",
+            initialContext: {},
+            effects: {
+              DONE: () => seen.push("done"),
+              [WILDCARD]: () => seen.push("wildcard"),
+            },
+          },
+        },
+        {
+          middleware: [
+            (api) => (next) => (action) => {
+              if (action.type === "A") api.transition({ type: "B" });
+              return next(action);
+            },
+          ],
+        },
+      );
+
+      manager.transition({ type: "A" });
+
+      await vi.waitFor(() => {
+        expect(seen).toEqual(["done", "wildcard"]);
+      });
+      expect(manager.getState().m.state).toBe("DONE");
+    });
+
     it("api.getState возвращает актуальный state до и после next", () => {
       const snapshots: string[] = [];
 

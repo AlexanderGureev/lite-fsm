@@ -8,6 +8,7 @@ import {
   createMachine,
   createReducer,
   defineMachine,
+  type AnyEvent,
   type CFG,
   type DefaultDeps,
   type EffectType,
@@ -18,6 +19,7 @@ import {
   type MachineDependencies,
   type MachineEvents,
   type MachineEffect,
+  type ManagerAction,
   type ManagerCommitAction,
   type MachineReducer,
   type MachinesState,
@@ -762,14 +764,14 @@ describe("MachineManager и middleware", () => {
     const appTransitionSubscriber: TransitionSubscriber<AppMachines, AppEvent> = (prevState, currentState, action) => {
       expect(prevState).type.toBe<AppState>();
       expect(currentState).type.toBe<AppState>();
-      expect(action).type.toBe<ManagerCommitAction<AppMachines, AppEvent>>();
+      expect(action).type.toBe<ManagerCommitAction<AppMachines, ManagerAction<AppEvent>>>();
     };
 
     manager.onTransition(appTransitionSubscriber);
     manager.onTransition((prevState, currentState, action) => {
       expect(prevState).type.toBe<AppState>();
       expect(currentState).type.toBe<AppState>();
-      expect(action).type.toBe<ManagerCommitAction<AppMachines, AppEvent>>();
+      expect(action).type.toBe<ManagerCommitAction<AppMachines, ManagerAction<AppEvent>>>();
 
       if (action.type === "INC") {
         expect(action.payload.amount).type.toBe<number>();
@@ -859,7 +861,7 @@ describe("MachineManager и middleware", () => {
       });
 
       return (next) => (action) => {
-        expect(next(action)).type.toBe<AuthEvent>();
+        expect(next(action)).type.toBe<ManagerAction<AuthEvent>>();
 
         // @ts-expect-error!
         api.transition({ type: "UNKNOWN_EVENT" });
@@ -1128,7 +1130,7 @@ describe("пограничные случаи", () => {
     inferredManager.transition({ type: "LOGIN", payload: { userId: "u7" } });
     inferredManager.transition({ type: "LOGOUT" });
 
-    expect(inferredManager.transition).type.toBe<(payload: AppEvent) => AppEvent>();
+    expect(inferredManager.transition).type.toBe<(payload: ManagerAction<AppEvent>) => ManagerAction<AppEvent>>();
     expect(inferredManager.onTransition).type.toBe<(cb: TransitionSubscriber<AppMachines, AppEvent>) => () => void>();
 
     // @ts-expect-error!

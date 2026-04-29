@@ -225,6 +225,125 @@ describe("FSMHydrationBoundary", () => {
     expect(hydrate).not.toHaveBeenCalled();
   });
 
+  it("пропускает overlay и commit для actor template snapshot", () => {
+    type ActorAction = { type: "SPAWN"; payload: { id: string } };
+    type Event = Action | ActorAction;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const actor = {
+      config: { __INIT: { SPAWN: "PENDING" }, PENDING: {} },
+      initialState: "__INIT",
+      initialContext: { id: "" },
+      reducer: (state, action, meta) => {
+        if (action.type === "SPAWN") return { state: meta.nextState, context: { id: action.payload.id } };
+        return { state: meta.nextState, context: state.context };
+      },
+    } satisfies MachineConfig<{ __INIT: { SPAWN: "PENDING" }; PENDING: {} }, { id: string }, Event>;
+    const actorStore = { counter, sync: actor };
+    type ActorStore = typeof actorStore;
+    const manager = MachineManager<ActorStore, Event>(actorStore);
+    manager.transition({ type: "SPAWN", payload: { id: "live" } });
+    const hydrate = vi.spyOn(manager, "hydrate");
+    const baseState = manager.getState();
+    const runtimeSnapshot = {
+      machines: {
+        sync: { ghost: { state: "PENDING", context: { id: "ghost" } } },
+      },
+    } as never;
+    const preview = manager.getHydratedState(runtimeSnapshot);
+
+    const ActorReadout = () => {
+      const ids = useSelector<ActorStore, string>((state) => Object.keys(state.sync).join(","));
+      return <span data-testid="actors">{ids}</span>;
+    };
+
+    const { getByTestId } = render(
+      <FSMContextProvider machineManager={manager}>
+        <FSMHydrationBoundary
+          snapshot={runtimeSnapshot}
+        >
+          <ActorReadout />
+        </FSMHydrationBoundary>
+      </FSMContextProvider>,
+    );
+
+    expect(getByTestId("actors").textContent).toBe("sync/0");
+    expect(preview.sync).toBe(baseState.sync);
+    expect(hydrate).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("actor template 'sync' was skipped"));
+    warn.mockRestore();
+  });
+
+  it("preview показывает snapshot actors до commit, а после commit selectors читают restored actors", () => {
+    type ActorAction = { type: "SPAWN"; payload: { id: string } } | { type: "BUMP" };
+    type Event = Action | ActorAction;
+    const actor = {
+      config: { __INIT: { SPAWN: "PENDING" }, PENDING: { BUMP: null } },
+      initialState: "__INIT",
+      initialContext: { id: "", count: 0 },
+      persistence: "snapshot",
+      reducer: (state, action, meta) => {
+        if (action.type === "SPAWN") return { state: meta.nextState, context: { id: action.payload.id, count: 1 } };
+        if (action.type === "BUMP") {
+          return { state: meta.nextState, context: { ...state.context, count: state.context.count + 1 } };
+        }
+        return { state: meta.nextState, context: state.context };
+      },
+    } satisfies MachineConfig<
+      { __INIT: { SPAWN: "PENDING" }; PENDING: { BUMP: null } },
+      { id: string; count: number },
+      Event
+    >;
+    const actorStore = { sync: actor };
+    type ActorStore = typeof actorStore;
+    const manager = MachineManager<ActorStore, Event>(actorStore);
+    const realReads: string[] = [];
+    const renders: string[] = [];
+    const snapshot = {
+      machines: {
+        sync: {
+          "server/actor": {
+            snapshot: {
+              state: "PENDING",
+              context: { id: "restored", count: 1 },
+            },
+            meta: { actorId: "server/actor", groupId: "server/group", groupTag: "sync" },
+          },
+        },
+      },
+    } satisfies MachineManagerSnapshot<ActorStore>;
+
+    const ActorReadout = () => {
+      const managerFromContext = useManager<ActorStore>();
+      const label = useSelector<ActorStore, string>((state) =>
+        Object.values(state.sync)
+          .map((slice) => `${slice.context.id}:${slice.context.count}`)
+          .join(","),
+      );
+      renders.push(label);
+      realReads.push(Object.keys(managerFromContext.getState().sync).join(","));
+      return <span data-testid="actors">{label}</span>;
+    };
+
+    const { getByTestId } = render(
+      <FSMContextProvider machineManager={manager}>
+        <FSMHydrationBoundary<ActorStore> snapshot={snapshot}>
+          <ActorReadout />
+        </FSMHydrationBoundary>
+      </FSMContextProvider>,
+    );
+
+    expect(renders[0]).toBe("restored:1");
+    expect(realReads[0]).toBe("");
+    expect(getByTestId("actors").textContent).toBe("restored:1");
+    expect(manager.getState().sync["server/actor"].context.id).toBe("restored");
+
+    act(() => {
+      manager.transition({ type: "BUMP", meta: { actorId: "server/actor" } });
+    });
+
+    expect(getByTestId("actors").textContent).toBe("restored:2");
+  });
+
   it("композирует вложенные boundaries поверх overlay state родителя", () => {
     const manager = MachineManager(nestedStore);
 
@@ -316,5 +435,109 @@ describe("FSMHydrationBoundary", () => {
 
     expect(html).toContain(">7<");
     expect(manager.getState().counter.context.count).toBe(0);
+  });
+
+  it("под React.StrictMode FSMHydrationBoundary вызывает manager.hydrate ровно один раз", () => {
+    const manager = createManager();
+    const hydrate = vi.spyOn(manager, "hydrate");
+
+    render(
+      <React.StrictMode>
+        <FSMContextProvider machineManager={manager}>
+          <FSMHydrationBoundary snapshot={createSnapshot(5)}>
+            <Counter />
+          </FSMHydrationBoundary>
+        </FSMContextProvider>
+      </React.StrictMode>,
+    );
+
+    expect(hydrate).toHaveBeenCalledOnce();
+    expect(manager.getState().counter.context.count).toBe(5);
+  });
+
+  it("под React.StrictMode useHydrateSnapshot вызывает manager.hydrate ровно один раз", () => {
+    const manager = createManager();
+    const hydrate = vi.spyOn(manager, "hydrate");
+
+    render(
+      <React.StrictMode>
+        <FSMContextProvider machineManager={manager}>
+          <CommitOnlyHydrator snapshot={createSnapshot(8)} />
+          <Counter />
+        </FSMContextProvider>
+      </React.StrictMode>,
+    );
+
+    expect(hydrate).toHaveBeenCalledOnce();
+    expect(manager.getState().counter.context.count).toBe(8);
+  });
+
+  it("unmount FSMHydrationBoundary убирает overlay, потомки переключаются на live state manager", () => {
+    type Store = { counter: typeof counter };
+    const manager = MachineManager<Store>(store);
+
+    const renders: number[] = [];
+    const Probe = () => {
+      const value = useSelector<Store, number>((state) => state.counter.context.count);
+      renders.push(value);
+      return <span data-testid="probe">{value}</span>;
+    };
+
+    const Toggle = ({ withBoundary }: { withBoundary: boolean }) => (
+      <FSMContextProvider machineManager={manager}>
+        {withBoundary ? (
+          <FSMHydrationBoundary snapshot={createSnapshot(11)}>
+            <Probe />
+          </FSMHydrationBoundary>
+        ) : (
+          <Probe />
+        )}
+      </FSMContextProvider>
+    );
+
+    const { rerender, getByTestId } = render(<Toggle withBoundary={true} />);
+    expect(getByTestId("probe").textContent).toBe("11");
+    expect(manager.getState().counter.context.count).toBe(11);
+
+    rerender(<Toggle withBoundary={false} />);
+    expect(getByTestId("probe").textContent).toBe("11");
+
+    act(() => {
+      manager.hydrate(createSnapshot(20));
+    });
+    expect(getByTestId("probe").textContent).toBe("20");
+    expect(renders[renders.length - 1]).toBe(20);
+  });
+
+  it("hydrate hook возвращает prev — manager.hydrate не дёргает subscribers и не вызывает rerender", () => {
+    type Store = { counter: typeof counter };
+    const manager = MachineManager<Store>(store);
+    manager.hydrate(createSnapshot(7));
+    const subscriber = vi.fn();
+    manager.onTransition(subscriber);
+
+    let renders = 0;
+    const Probe = () => {
+      renders++;
+      const value = useSelector<Store, number>((state) => state.counter.context.count);
+      return <span data-testid="value">{value}</span>;
+    };
+
+    const { getByTestId } = render(
+      <FSMContextProvider machineManager={manager}>
+        <Probe />
+      </FSMContextProvider>,
+    );
+
+    expect(getByTestId("value").textContent).toBe("7");
+    const initial = renders;
+
+    act(() => {
+      manager.hydrate(createSnapshot(7));
+      manager.hydrate(createSnapshot(7));
+    });
+
+    expect(subscriber).not.toHaveBeenCalled();
+    expect(renders).toBe(initial);
   });
 });

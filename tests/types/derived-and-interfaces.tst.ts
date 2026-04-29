@@ -4,10 +4,12 @@ import type {
   IMachine,
   IMachineManager,
   MachineConfig,
+  MachineManagerDehydrateFn,
   MachineManagerRuntimeSnapshot,
   MachineManagerSnapshot,
   MachineDependencies,
   MachineEvents,
+  ManagerAction,
   ManagerCommitAction,
   MachineReducer,
   MachinesState,
@@ -231,7 +233,7 @@ describe("TransitionSubscriber<S, P>", () => {
     type T = TransitionSubscriber<M, Evt>;
     expect<Parameters<T>[0]>().type.toBe<MachinesState<M>>();
     expect<Parameters<T>[1]>().type.toBe<MachinesState<M>>();
-    expect<Parameters<T>[2]>().type.toBe<ManagerCommitAction<M, Evt>>();
+    expect<Parameters<T>[2]>().type.toBe<ManagerCommitAction<M, ManagerAction<Evt>>>();
   });
 
   test("возвращает void и получает MachinesState с обеих сторон", () => {
@@ -327,11 +329,11 @@ describe("IMachineManager<S, P>", () => {
       ) => MachinesState<M>
     >();
     expect<Manager["hydrate"]>().type.toBe<(snapshot: MachineManagerSnapshot<M>, opts?: { strategy?: "replace" | "merge" }) => void>();
-    expect<Manager["dehydrate"]>().type.toBe<(opts?: { machines?: Array<keyof M> }) => MachineManagerSnapshot<M>>();
+    expect<Manager["dehydrate"]>().type.toBe<MachineManagerDehydrateFn<M>>();
   });
 
   test("сигнатура transition возвращает тот же event type", () => {
-    expect<Manager["transition"]>().type.toBe<(payload: Evt) => Evt>();
+    expect<Manager["transition"]>().type.toBe<(payload: ManagerAction<Evt>) => ManagerAction<Evt>>();
   });
 
   test("сигнатура onTransition возвращает функцию unsubscribe", () => {
@@ -340,7 +342,7 @@ describe("IMachineManager<S, P>", () => {
 
   test("сигнатура replaceReducer композирует reducer", () => {
     expect<Manager["replaceReducer"]>().type.toBe<
-      (cb: (reducer: Reducer<State, Evt>) => Reducer<State, Evt>) => void
+      (cb: (reducer: Reducer<State, ManagerAction<Evt>>) => Reducer<State, ManagerAction<Evt>>) => void
     >();
   });
 

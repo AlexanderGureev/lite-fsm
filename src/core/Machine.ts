@@ -1,7 +1,11 @@
+// Standalone-машина: фабрика `Machine` (pure) и stateful `createMachine`/`defineMachine`.
+// Actor template запрещён (только внутри `MachineManager`).
+
+import { isActorTemplateConfig, resolveTransitionTarget } from "./actor";
 import {
   AnyEvent,
   AnyRecord,
-  CFG,
+  DefaultActorSnapshot,
   DefaultDeps,
   MachineConfig,
   MachineEffect,
@@ -9,51 +13,73 @@ import {
   StateName,
   StateType,
   Subscriber,
+  TransitionNextState,
 } from "./types";
-import { compose, deepFreeze, IS_DEV, VOID_REDUCER_ERROR, VOID_REDUCER_MIDDLEWARE_MARKER, WILDCARD } from "./utils";
+import {
+  compose,
+  deepFreeze,
+  IS_DEV,
+  LiteFsmError,
+  supportsVoidReducer,
+  VOID_REDUCER_ERROR,
+  WILDCARD,
+} from "./utils";
 
 type RuntimeOptions = {
   allowVoidReducer?: () => boolean;
+  // true только в `MachineManager`-е.
+  allowActorTemplate?: boolean;
 };
 
-const supportsVoidReducer = (middleware: unknown) =>
-  typeof middleware === "function" && VOID_REDUCER_MIDDLEWARE_MARKER in middleware;
-
+// Pure-фабрика без state и subscribers. Используется и `MachineManager`-ом для domain/actor templates.
 export const CreateMachine = <
   C extends object,
   T extends AnyRecord,
   E extends string = string,
   P extends AnyEvent = AnyEvent & { type: E },
   D extends AnyRecord = {},
+  Snapshot = string extends keyof C
+    ? StateType<C, T>
+    : "__INIT" extends keyof C
+      ? DefaultActorSnapshot<C, T>
+      : StateType<C, T>,
 >(
-  cfg: MachineConfig<C, T, P, D>,
+  cfg: MachineConfig<C, T, P, D, Snapshot>,
   runtimeOptions: RuntimeOptions = {},
 ) => {
+  const isActorTemplate = isActorTemplateConfig(cfg);
+
   return {
     config: cfg.config,
     transition: (s: StateType<C, T>, action: P): StateType<C, T> => {
-      const graph = cfg.config as C & CFG<C, P, StateName<C> | "*">;
-      const actionType = action.type as P["type"];
-      const _next = graph[s.state]?.[actionType];
-      const nextState = _next !== undefined ? _next : graph[WILDCARD]?.[actionType];
+      if (isActorTemplate && !runtimeOptions.allowActorTemplate) {
+        throw new LiteFsmError(
+          "LITE_FSM_STANDALONE_ACTOR_TEMPLATE",
+          "[lite-fsm] actor templates can only be used inside MachineManager.",
+        );
+      }
+
+      const graph = cfg.config as Record<string, Record<string, unknown> | undefined>;
+      const nextState = resolveTransitionTarget(graph, s.state, action.type, isActorTemplate);
 
       if (nextState === undefined) return s;
 
       if (cfg.reducer) {
-        const next = cfg.reducer(s, action, { nextState: nextState || s.state, config: cfg.config });
+        const reducerNextState = (nextState || s.state) as TransitionNextState<C>;
+        const next = cfg.reducer(s, action, { nextState: reducerNextState, config: cfg.config });
 
         if (next === undefined) {
           if (runtimeOptions.allowVoidReducer?.()) return s;
           throw new Error(VOID_REDUCER_ERROR);
         }
 
-        return next;
+        return next as StateType<C, T>;
       }
 
       const payload = "payload" in action ? (action.payload as object) : {};
 
       return {
-        state: nextState || s.state,
+        state: (nextState || s.state) as StateName<C>,
         context: { ...s.context, ...payload } as T,
       };
     },
@@ -63,13 +89,14 @@ export const CreateMachine = <
       deps: D & DefaultDeps<StateName<C> | "*", C, P>,
     ) => {
       if (!cfg.effects) return;
+      const effects = cfg.effects as Partial<Record<StateName<C> | "*", MachineEffect<any, C, P, D>>>;
 
-      if (prevState !== currentState && cfg.effects[currentState]) {
-        const effect = cfg.effects[currentState] as MachineEffect<StateName<C>, C, P, D> | undefined;
+      if (prevState !== currentState && effects[currentState]) {
+        const effect = effects[currentState] as MachineEffect<StateName<C>, C, P, D> | undefined;
         await effect?.(deps as Parameters<MachineEffect<StateName<C>, C, P, D>>[0]);
-      } else if (cfg.effects[WILDCARD]) {
-        const effect = cfg.effects[WILDCARD] as MachineEffect<"*", C, P, D> | undefined;
-        await effect?.(deps);
+      } else if (effects[WILDCARD]) {
+        const effect = effects[WILDCARD] as MachineEffect<"*", C, P, D> | undefined;
+        await effect?.(deps as Parameters<MachineEffect<"*", C, P, D>>[0]);
       }
     },
   };
@@ -80,8 +107,13 @@ export const createMachine = <
   T extends AnyRecord,
   P extends AnyEvent,
   D extends AnyRecord,
+  Snapshot = string extends keyof C
+    ? StateType<C, T>
+    : "__INIT" extends keyof C
+      ? DefaultActorSnapshot<C, T>
+      : StateType<C, T>,
 >(
-  cfg: MachineConfig<C, T, P, D>,
+  cfg: MachineConfig<C, T, P, D, Snapshot>,
   opts: {
     onError?: (err: unknown) => void;
     dependencies?: D;
@@ -218,6 +250,15 @@ export const defineMachine = <P extends AnyEvent = AnyEvent, D extends AnyRecord
     dependencies?: D;
   } = {},
 ) => ({
-  create: <C extends object, T extends AnyRecord>(cfg: MachineConfig<C, T, P, D>) =>
-    createMachine(cfg, opts),
+  create: <
+    C extends object,
+    T extends AnyRecord,
+    Snapshot = string extends keyof C
+      ? StateType<C, T>
+      : "__INIT" extends keyof C
+        ? DefaultActorSnapshot<C, T>
+        : StateType<C, T>,
+  >(
+    cfg: MachineConfig<C, T, P, D, Snapshot>,
+  ) => createMachine(cfg, opts),
 });

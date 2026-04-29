@@ -8,6 +8,7 @@ import {
   type MachineConfig,
   type MachineEffect,
   type MachineReducer,
+  type ManagerAction,
   type StateType,
   type TypedCreateConfigFn,
   type TypedCreateMachineFn,
@@ -198,11 +199,46 @@ describe("минимальные формы MachineConfig", () => {
     });
   });
 
-  test("форма MachineConfig раскрывает все ожидаемые ключи", () => {
-    type M = MachineConfig<{ a: {} }, { x: 1 }, FSMEvent<"E">>;
-    type _Keys = Assert<
-      Equal<keyof M, "config" | "initialState" | "initialContext" | "reducer" | "hydrate" | "dehydrate" | "effects">
+  test("форма MachineConfig для domain не содержит persistence и groupTag", () => {
+    type DomainM = MachineConfig<{ a: {} }, { x: 1 }, FSMEvent<"E">>;
+    type _DomainKeys = Assert<
+      Equal<
+        keyof DomainM,
+        "config" | "initialState" | "initialContext" | "reducer" | "hydrate" | "dehydrate" | "effects"
+      >
     >;
+  });
+
+  test("форма MachineConfig для actor template включает persistence и groupTag", () => {
+    type ActorM = MachineConfig<{ __INIT: { GO: "DONE" }; DONE: {} }, { x: 1 }, FSMEvent<"GO">>;
+    type _ActorKeys = Assert<
+      Equal<
+        keyof ActorM,
+        | "config"
+        | "initialState"
+        | "initialContext"
+        | "groupTag"
+        | "persistence"
+        | "reducer"
+        | "hydrate"
+        | "dehydrate"
+        | "effects"
+      >
+    >;
+  });
+
+  test("широкий Record config остаётся domain-like для default Snapshot", () => {
+    createMachine<FlowEvent, FlowDeps, Record<string, object>, FlowContext>({
+      config: { idle: {} },
+      initialState: "idle",
+      initialContext: { runs: 0, error: null },
+      hydrate: (prev, snapshot) => {
+        expect(snapshot).type.toBe<StateType<Record<string, object>, FlowContext>>();
+        // @ts-expect-error!
+        snapshot.meta;
+        return prev;
+      },
+    });
   });
 });
 
@@ -329,7 +365,7 @@ describe("контракт return у MachineReducer", () => {
   test("params reducer строго типизированы: state, action, meta", () => {
     type R = MachineReducer<Cfg, Evt, Ctx>;
     expect<Parameters<R>[0]>().type.toBe<StateType<Cfg, Ctx>>();
-    expect<Parameters<R>[1]>().type.toBe<Evt>();
+    expect<Parameters<R>[1]>().type.toBe<ManagerAction<Evt>>();
     expect<Parameters<R>[2]>().type.toBe<{ nextState: "idle" | "done"; config: Cfg }>();
   });
 });

@@ -1,512 +1,375 @@
 # lite-fsm — Types Cheat Sheet
 
-Краткий справочник по всему публичному типовому API `lite-fsm`. Построен "от сигнатуры к тестам" — каждая секция ссылается на тестовый файл, который формально закрепляет поведение. Если захочешь переписать типы с нуля — проверочный контур и есть этот набор тестов.
-
-- Тесты против `src/`: `npm run test:types`
-- Тесты против `dist/`: `npm run test:types:dist`
-- Полный цикл: `npm run test:types:all`
-
-## Соглашения по generic-параметрам
-
-| Параметр | Роль |
-|---|---|
-| `C` | Карта переходов FSM (тип конфига), `C extends object`, дополнительно `C extends CFG<C, P>` для valid-graph constraint |
-| `P` | Событие машины, `P extends AnyEvent` (т.е. `{ type: string; payload?: unknown }`) |
-| `T` | Контекст машины, `T extends AnyRecord` (т.е. `Record<string, unknown>`) |
-| `D` | Пользовательские зависимости эффекта, `D extends AnyRecord = {}` |
-| `N` | Имя состояния (`StateName<C>`) или `WILDCARD` (`"*"`) |
-| `S` | Либо произвольный state (в `Reducer`/`Middleware`), либо карта машин в `MachineManager` (`S extends MachineStore`) |
-| `R` | Результат селектора в React-хуках |
+Сжатый справочник по типовому API. Runtime — в [`API-CHEATSHEET.md`](API-CHEATSHEET.md).
 
 ## Точки входа
 
-| Импорт | Что экспортирует (runtime) | Что экспортирует (types) |
-|---|---|---|
-| `lite-fsm` | `Machine`, `MachineManager`, `defineMachine`, `createMachine`, `createConfig`, `createReducer`, `createEffect` | Все core-типы и интерфейсы (`CFG`, `MachineConfig`, `MachineReducer`, `MachineEffect`, `DefaultDeps`, `FSMEvent`, `AnyEvent`, `AnyRecord`, `StateType`, `State`, `StateName`, `SType`, `WILDCARD`, `EffectType`, `Reducer`, `Middleware`, `MiddlewareApi`, `GenericMiddleware`, `VoidReducerMiddleware`, `Subscriber`, `TransitionSubscriber`, `IncomingEventTypes`, `ActionForState`, `MachineManagerSnapshot`, `MachineManagerRuntimeSnapshot`, `MachineRuntimeSnapshot`, `MachineSnapshot`, `HydrateStrategy`, `HydrateOptions`, `HydratePreviewOptions`, `DehydrateOptions`, `HydrateMeta`, `HydrateAction`, `ManagerCommitAction`, `UnknownMachineKeyContext`, `IMachine`, `IMachineManager`, `MachineStore`, `MachineEvents`, `MachineDependencies`, `MachinesState`, `TypedCreate*Fn`). `MachineState<C, T>` остаётся как backward-compat alias к `StateType<C, T>`. |
-| `lite-fsm/middleware` | `immerMiddleware`, `devToolsMiddleware` (barrel) | — |
-| `lite-fsm/middleware/immer` | `immerMiddleware` | — |
-| `lite-fsm/middleware/devTools` | `devToolsMiddleware` | — |
-| `lite-fsm/react` | `FSMContext`, `FSMContextProvider`, `FSMHydrationBoundary`, `useHydrateSnapshot`, `useManager`, `useSelector`, `useTransition`, `defineMachine` | `FSMContextType`, `FSMHydrationBoundaryProps`, `TypedUseManagerHook`, `TypedUseMachineHook`, `TypedUseSelectorHook`, `TypedUseTransitionHook` |
+| Импорт                | Типы                                                                                                                                                                                                                                                               |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `lite-fsm`            | весь `types.ts` + `interfaces.ts`: `FSMEvent`, `MachineConfig`, `CFG`, `MachineReducer`, `MachineEffect`, `MachineManagerSnapshot`, `MachinesState`, `MachineEvents`, `MachineDependencies`, `IMachineManager`, `Middleware`, actor types, snapshot types, helpers |
+| `lite-fsm/react`      | `FSMContextType`, `FSMHydrationBoundaryProps`, `TypedUseManagerHook`, `TypedUseMachineHook`, `TypedUseSelectorHook`, `TypedUseTransitionHook`                                                                                                                      |
+| `lite-fsm/middleware` | только runtime middleware                                                                                                                                                                                                                                          |
 
-## Утилитарные типы
+## Generics
 
-Источник: [`tests/types/utility-types.tst.ts`](tests/types/utility-types.tst.ts)
+| Generic    | Значение                                   |
+| ---------- | ------------------------------------------ |
+| `C`        | config graph object                        |
+| `T`        | machine context, `Record<string, unknown>` |
+| `P`        | union events, совместимый с `AnyEvent`     |
+| `D`        | custom effect dependencies                 |
+| `N`        | state name или `"*"` для effect/deps       |
+| `S`        | `MachineStore`, карта машин manager-а      |
+| `R`        | selector result                            |
+| `Snapshot` | transport shape для hydrate/dehydrate      |
 
-| Тип | Определение | Ключевое поведение |
-|---|---|---|
-| `SType` | `string \| number \| symbol` | набор ключей объекта |
-| `WILDCARD` | `"*"` | буквальная строка, маркер "любое состояние/событие" |
-| `State<S>` | `Exclude<S, WILDCARD \| number \| symbol>` | отсекает `"*"`, числа, символы; `State<"*">` → `never` |
-| `StateName<C>` | `State<keyof C & SType>` | публичные state-имена машины (без `"*"`/числа/символа) |
-| `AnyEvent` | `{ type: string; payload?: unknown }` | безопасный дефолт для event-shape (используется во всех `... = AnyEvent` дефолтах) |
-| `AnyRecord` | `Record<string, unknown>` | дефолт `T` / `D` в сигнатурах |
-| `StateType<C, T>` | `{ state: StateName<C>; context: T }` | форма состояния одной машины (канонический тип) |
-| `MachineState<C, T>` | `= StateType<C, T>` | backward-compat alias — те же поля |
-| `EffectType` | `"every" \| "latest"` | режим работы `createEffect` |
-| `Reducer<S, P>` | `(state: S, action: P) => S` | `S` свободен, `P` по умолчанию `AnyEvent` |
+## Базовые типы
 
-### `FSMEvent<Name, Payload>`
+| Тип                                      | Форма                                     |
+| ---------------------------------------- | ----------------------------------------- |
+| `AnyEvent`                               | `{ type: string; payload?: unknown }`     |
+| `AnyRecord`                              | `Record<string, unknown>`                 |
+| `SType`                                  | `string \| number \| symbol`              |
+| `WILDCARD`                               | literal `"*"`                             |
+| `State<S>`                               | `Exclude<S, "*" \| number \| symbol>`     |
+| `StateName<C>`                           | public state keys из `keyof C`, без `"*"` |
+| `StateType<C, T>` · `MachineState<C, T>` | `{ state: StateName<C>; context: T }`     |
+| `Reducer<S, P>`                          | `(state: S, action: P) => S`              |
+| `EffectType`                             | `"every" \| "latest"`                     |
 
-| Вариант `Payload` | Итоговый тип | Ключ `payload` |
-|---|---|---|
-| опущен | `{ type: Name }` | отсутствует |
-| `never` | `{ type: Name }` | отсутствует (`never` — подтип sentinel) |
-| `undefined` | `{ type: Name; payload: undefined }` | **обязателен** |
-| `any` | `{ type: Name; payload: any }` | **обязателен** |
-| `unknown` | `{ type: Name; payload: unknown }` | **обязателен** |
-| `null` | `{ type: Name; payload: null }` | **обязателен** |
-| `void` | `{ type: Name; payload: void }` | **обязателен** |
-| `X \| undefined` | `{ type: Name; payload: X \| undefined }` | **обязателен** |
-| примитив / литерал / объект / tuple | `{ type: Name; payload: Payload }` | **обязателен** |
-
-Distribution и edge-cases:
-- `FSMEvent<"A" \| "B">` = `{ type: "A" } \| { type: "B" }` (distributive по `Name`).
-- `FSMEvent<"A" \| "B", P>` = `{ type: "A"; payload: P } \| { type: "B"; payload: P }`.
-- `FSMEvent<never>` = `never` (zero-distribution).
-- `FSMEvent<string>` = `{ type: string }` (голое `string` не распадается, но и не схлопывается).
-- `FSMEvent<string, P>` = `{ type: string; payload: P }`.
-
-## `CFG<R, P, K>` — карта переходов
-
-Источник: [`tests/types/cfg-and-config.tst.ts`](tests/types/cfg-and-config.tst.ts) (секция `CFG structural constraints`)
+## События
 
 ```ts
-type CFG<R extends object, P extends AnyEvent, K extends SType = keyof R & SType> = {
-  [state in K]?: state extends keyof R
-    ? Partial<Record<P["type"], State<K> | null>> & {
-        [Event in Exclude<keyof R[state], P["type"]>]: never;
-      }
-    : Partial<Record<P["type"], State<K> | null>>;
-};
+type AppEvent = FSMEvent<"INC"> | FSMEvent<"SET", { count: number }> | FSMEvent<"RESET", undefined>;
 ```
 
-Внутренние `TransitionMap` и `StrictTransitionMap` остались строительными блоками `CFG`, но не экспортируются.
+| Форма                    | Результат                         |
+| ------------------------ | --------------------------------- |
+| `FSMEvent<"A">`          | `{ type: "A" }`                   |
+| `FSMEvent<"A", Payload>` | `{ type: "A"; payload: Payload }` |
+| `FSMEvent<"A" \| "B">`   | `{ type: "A" } \| { type: "B" }`  |
+| `FSMEvent<never>`        | `never`                           |
 
-Правила (по тестам):
+`payload` отсутствует только когда второй generic не передан. Для `undefined`, `void`, `null`, `unknown`, `any`, `X | undefined` — ключ обязателен.
 
-| Конструкция | Поведение |
-|---|---|
-| `{}` | пустой CFG — валиден |
-| `{ "*": { RESET: "idle" } }` | wildcard как ключ — валиден |
-| `idle: { X: null }` | `null` = self-transition (без смены) — валиден |
-| `idle: { X: "idle" }` | явная ссылка на само себя — валиден |
-| `{ idle: { X: "running" }, running: {} }` | частичная карта событий — валиден |
-| `idle: { UNKNOWN: ... }` | событие вне `P["type"]` — **reject** |
-| `idle: { X: "missing" }` | target state отсутствует в карте — **reject** |
-| `idle: { X: "*" }` | wildcard как target — **reject** (`State<K>` исключает `"*"`) |
-| `idle: { X: 1 }` / `Symbol()` | non-string target — **reject** |
+### Routed actions
 
-## `MachineConfig<C, T, P, D, Snapshot>`
+| Тип                         | Форма                                                                                |
+| --------------------------- | ------------------------------------------------------------------------------------ |
+| `FSMEventMeta`              | `{ actorId?, groupId?, groupTag?, senderActorId?, senderGroupId?, senderGroupTag? }` |
+| `ManagerAction<P>`          | `P & { meta?: FSMEventMeta }`                                                        |
+| `ManagerCommitAction<S, P>` | user action или `HydrateAction<S>`                                                   |
 
-Источник: `cfg-and-config.tst.ts`, `runtime-api.tst.ts`.
+`actorId`, `groupId`, `groupTag` — `string | string[]`.
 
-Поля:
+## Граф переходов · `CFG<C, P>`
 
-| Поле | Обязательное | Тип |
-|---|---|---|
-| `config` | ✓ | `C` |
-| `initialState` | ✓ | `StateName<C>` — не `"*"`, не число, не symbol |
-| `initialContext` | ✓ | `T` (строго совпадает с заявленным) |
-| `reducer` | — | `MachineReducer<C, P, T>` |
-| `hydrate` | — | `(prev: StateType<C, T>, snapshot: Snapshot, meta: HydrateMeta) => StateType<C, T>` |
-| `dehydrate` | — | `(state: StateType<C, T>) => Snapshot` |
-| `effects` | — | `{ [k in StateName<C> \| WILDCARD]?: MachineEffect<k, C, P, D> }` |
+```ts
+const config = {
+  idle: { START: "loading" },
+  loading: { DONE: "idle", FAIL: "error" },
+  "*": { RESET: "idle" },
+} satisfies CFG<Config, Event>;
+```
 
-`Snapshot` по умолчанию равен `StateType<C, T>`. Если `dehydrate` возвращает transport shape, отличный от runtime slice, задайте пятый generic или дайте TypeScript вывести форму из литерала машины.
+| Проверка       | Type-level правило                                      |
+| -------------- | ------------------------------------------------------- |
+| event keys     | только `P["type"]`                                      |
+| targets        | state keys из `C`, `null`, для actors — terminal states |
+| `"*"` source   | разрешён как fallback                                   |
+| `"*"` target   | запрещён                                                |
+| `initialState` | `StateName<C>`, без `"*"`                               |
 
-`keyof MachineConfig<...>` = `"config" \| "initialState" \| "initialContext" \| "reducer" \| "hydrate" \| "dehydrate" \| "effects"`.
+Удобнее всего — `createMachine(...)` или `satisfies MachineConfig<...>`: TS проверяет `CFG` и сохраняет literal types.
 
-Невалидно:
-- `initialState: "*"` — wildcard не публичное состояние;
-- `initialState: "missing"` — ключа нет в `config`;
-- `initialContext` с несовместимой формой;
-- `effects: { missing: ... }` — ключа нет в `config` и он не `"*"`.
+## `MachineConfig<C, T, P, D = {}, Snapshot = ...>`
+
+| Поле                      | Тип                                                         |
+| ------------------------- | ----------------------------------------------------------- |
+| `config`                  | `C`                                                         |
+| `initialState`            | `StateName<C>`                                              |
+| `initialContext`          | `T`                                                         |
+| `groupTag?`               | `string` (actor template only)                              |
+| `reducer?`                | `MachineReducer<C, P, T>`                                   |
+| `effects?`                | `{ [N in EffectStateName<C>]?: MachineEffect<N, C, P, D> }` |
+| `hydrate?` · `dehydrate?` | domain transport hooks или actor snapshot hooks             |
+| `persistence?`            | actor template only: `"runtime"` (default) \| `"snapshot"`  |
+
+Default `Snapshot`: domain → `StateType<C, T>`, actor hook payload → `DefaultActorSnapshot<C, T>`.
 
 ## `MachineReducer<C, P, T>`
 
-Источник: `cfg-and-config.tst.ts` (секция `MachineReducer return contract`).
-
 ```ts
-(
-  state: StateType<C, T>,
-  payload: P,
-  meta: { nextState: StateName<C>; config: C }
-) => StateType<C, T> | void
+type R = MachineReducer<C, P, T>;
+//      (state: MachineReducerInputState<C, T>,
+//       payload: ManagerAction<P>,
+//       meta: { nextState: TransitionNextState<C>; config: C }) => MachineReducerState<C, T> | void
 ```
 
-| Возврат | Допустим? |
-|---|---|
-| `{ state, context }` с валидным `state` | ✓ |
-| `void` (мутация, напр. через immer) | ✓ |
-| Смесь `void` и object в разных ветках | ✓ |
-| `{ state: "missing", ... }` | ✗ |
-| `{ state: "*", ... }` | ✗ |
-| Объект без `state`/`context` или с лишними полями | ✗ |
+| Тип                              | Форма                                                                                                |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `MachineReducerInputState<C, T>` | domain: `StateType<C, T>`; actor: `{ state: StateName<C> \| ActorTerminalState; context: T }`        |
+| `TransitionNextState<C>`         | domain: `StateName<C>`; actor: public actor state \| terminal state                                  |
+| `MachineReducerState<C, T>`      | domain: `StateType<C, T>`; actor: `{ state: ActorPublicState<C> \| ActorTerminalState; context: T }` |
 
-## `DefaultDeps<N, C, P>`
+`void` на уровне типов разрешён (для `immerMiddleware`); runtime без void-reducer middleware бросит ошибку, если reducer реально вернул `undefined`.
 
-Источник: `cfg-and-config.tst.ts` (секция `DefaultDeps structural contract`).
-
-Ровно 3 ключа: `transition`, `action`, `condition`.
-
-| Ключ | Тип |
-|---|---|
-| `transition` | `(data: P) => P` |
-| `condition` | `(predicate: (a: P) => boolean) => Promise<boolean>` |
-| `action` | см. таблицу ниже |
-
-Сужение `action` (зависит от `N`):
-
-| `N` | `action` |
-|---|---|
-| `WILDCARD` (`"*"`) | `P` целиком |
-| конкретное состояние, есть входящие события | `Extract<P, { type: <имена этих событий> }>` |
-| конкретное состояние, входящих нет | `P` целиком (fallback) |
-| Union состояний | события, ведущие в любое из них |
-
-## `MachineEffect<N, C, P, D>`
-
-Источник: `cfg-and-config.tst.ts` (секция `MachineEffect return type`).
+## Effects
 
 ```ts
-(deps: D & DefaultDeps<N, C, P>) => Promise<void> | void
-```
-
-| Форма | Допустима? |
-|---|---|
-| `() => void` / `async () => {}` | ✓ |
-| `D = {}` → в `deps` только `DefaultDeps` | ✓ |
-| `D = { api, clock }` → `deps` интерсекция (все 5 ключей) | ✓ |
-| `N = "*"` → `deps.action` = весь union `P` | ✓ |
-
-## Производные типы
-
-Источник: [`tests/types/derived-and-interfaces.tst.ts`](tests/types/derived-and-interfaces.tst.ts).
-
-### `MachineEvents<S>`
-
-Внутренне работает в три ступени fallback'а на каждой машине, чтобы не схлопывать generic-параметр `P`:
-
-```ts
-// упрощённо: для каждой машины пытаемся вытащить P в порядке
-//   1) reducer-инференция, 2) MachineConfig-инференция, 3) AnyEvent
-type MachineEvents<S> = {
-  [k in keyof S]:
-    EventFromReducer<S[k]> extends never
-      ? EventFromMachineConfig<S[k]> extends never
-        ? AnyEvent
-        : EventFromMachineConfig<S[k]>
-      : EventFromReducer<S[k]>;
-}[keyof S];
-```
-
-| Вход | Результат |
-|---|---|
-| `{}` | `never` |
-| `{ x: MachineX }` | `XEvent` |
-| `{ x: MachineX; y: MachineY; z: MachineZ }` | `XEvent \| YEvent \| ZEvent` |
-| `{ x1: MachineX; x2: MachineX }` | `XEvent` (дубли схлопываются) |
-| Машина без `reducer` и без явного `P` | `AnyEvent` (безопасный fallback) |
-
-### `MachineDependencies<S>`
-
-Собирает `D`-параметры всех эффектов через **UnionToIntersection**, удаляя ключи `DefaultDeps`.
-
-| Вход | Результат |
-|---|---|
-| `{}` | `{}` (пустой стор не накладывает требований) |
-| Машина без `effects` | `{}` (не добавляет требований) |
-| 1 машина с эффектом, требующим `{ api }` | `{ api: ... }` |
-| 2 машины: `{ api }` + `{ logger }` | `{ api: ...; logger: ... }` |
-| 2 машины c перекрывающимся ключом `api` | `{ api: ... }` (один ключ) |
-
-### `MachinesState<S>`
-
-```ts
-type MachinesState<S> = {
-  [k in keyof S]: { state: StateName<S[k]["config"] & object>; context: S[k]["initialContext"] };
+const saveEffect: MachineEffect<"saving", SaveConfig, SaveEvent, { api: Api }> = async ({
+  api,
+  action,
+  transition,
+}) => {
+  await api.save();
+  transition({ type: "DONE" });
 };
 ```
 
-| Вход | Результат |
-|---|---|
-| `{}` | `{}` |
-| `{ only: MachineZ }` | `{ only: { state: "p" \| "q"; context: CtxZ } }` |
-| `{ x: MachineX; y: MachineY }` | `{ x: {...}; y: {...} }` |
+| Тип                         | Назначение                                                                  |
+| --------------------------- | --------------------------------------------------------------------------- |
+| `MachineEffect<N, C, P, D>` | `(deps: D & DefaultDeps...) => void \| Promise<void>`                       |
+| `EffectStateName<C>`        | domain: `StateName<C> \| "*"`; actor: `ActorPublicState<C> \| "*"`          |
+| `IncomingEventTypes<C, N>`  | event names, ведущие в state `N`                                            |
+| `ActionForState<C, N, P>`   | `Extract<P, { type: IncomingEventTypes<C, N> }>` (для `N = "*"` — весь `P`) |
+| `DefaultDeps<N, C, P>`      | `{ transition, action: ActionForState<C, N, P>, condition }`                |
 
-## Подписчики
+### Actor effects
 
-Источник: `derived-and-interfaces.tst.ts`.
+| Тип                            | Форма                                                                      |
+| ------------------------------ | -------------------------------------------------------------------------- |
+| `ActorDefaultDeps<N, C, P>`    | `self`, routed `action`, actor-aware `transition`, actor-aware `condition` |
+| `ActorTransition<P>`           | callable `(action) => action` + `.unscoped`, `.actor`, `.group`, `.tag`    |
+| `ActorActionForState<C, N, P>` | `ManagerAction<ActionForState<C, N, P>>`                                   |
+| `Self`                         | alias к `ActorMeta`                                                        |
 
-| Тип | Сигнатура |
-|---|---|
-| `Subscriber<C, T, P>` | `(prev: StateType<C, T>, curr: StateType<C, T>, action: P) => void` |
-| `TransitionSubscriber<S, P>` | `(prev: MachinesState<S>, curr: MachinesState<S>, action: ManagerCommitAction<S, P>) => void` |
+## Actors
 
-## `IMachine<C, T, P, D>`
-
-Источник: `derived-and-interfaces.tst.ts` (секция `IMachine`).
-
-Ровно 3 ключа: `transition`, `invokeEffect`, `config`.
-
-| Ключ | Тип |
-|---|---|
-| `config` | `C` (литерал сохраняется) |
-| `transition` | `(state: StateType<C, T>, action: P) => StateType<C, T>` |
-| `invokeEffect` | `(prev: StateName<C>, curr: StateName<C>, deps: D & DefaultDeps<StateName<C> \| WILDCARD, C, P>) => Promise<void>` |
-
-Когда `D = {}`, `deps` состоит только из `DefaultDeps`.
-
-## `IMachineManager<S, P = MachineEvents<S>>`
-
-Источник: `derived-and-interfaces.tst.ts`, `runtime-api.tst.ts`.
-
-Ровно 9 ключей.
-
-| Ключ | Тип |
-|---|---|
-| `transition` | `(payload: P) => P` |
-| `getState` | `() => MachinesState<S>` |
-| `getSnapshot` | `() => MachineManagerRuntimeSnapshot<S>` |
-| `getHydratedState` | `(snapshot: MachineManagerSnapshot<S>, opts?: HydratePreviewOptions<S>) => MachinesState<S>` |
-| `hydrate` | `(snapshot: MachineManagerSnapshot<S>, opts?: HydrateOptions) => void` |
-| `dehydrate` | `(opts?: DehydrateOptions<S>) => MachineManagerSnapshot<S>` |
-| `onTransition` | `(cb: TransitionSubscriber<S, P>) => () => void` |
-| `replaceReducer` | `(cb: (r: Reducer<MachinesState<S>, P>) => Reducer<MachinesState<S>, P>) => void` |
-| `setDependencies` | `(d: MachineDependencies<S> \| ((deps: MachineDependencies<S>) => MachineDependencies<S>)) => void` |
-
-Дефолт `P` = `MachineEvents<S>`. `IMachineManager<S>` и `IMachineManager<S, MachineEvents<S>>` — эквивалентны по форме.
-
-## Фабрики (core)
-
-Источник: [`tests/types/factories.tst.ts`](tests/types/factories.tst.ts).
-
-| Функция | Сигнатура | Когда нужна `Typed*Fn`-обёртка |
-|---|---|---|
-| `createConfig(cfg)` | identity, сохраняет литерал `CFG` | чтобы заранее сузить допустимые события через `TypedCreateConfigFn<P>` |
-| `createReducer(reducer)` | identity над `MachineReducer`; без `P` → `action: AnyEvent` | `TypedCreateReducerFn<P>` сужает `action` до `P` |
-| `createMachine(cfg)` | identity над `MachineConfig`; выводит `C`, `T` из литерала | `TypedCreateMachineFn<P, D>` фиксирует `P` и `D` |
-| `createEffect({ effect, type?, cancelFn? })` | оборачивает `MachineEffect<N, C, P, D>`; `type` = `"every" \| "latest"` | `TypedCreateEffectFn<P, D>` фиксирует `P`/`D` |
-
-Детали по `createEffect`:
-
-| Опция | Тип |
-|---|---|
-| `effect` | `MachineEffect<N, C, P, D>` (обязательна) |
-| `type` | `EffectType` (`"every" \| "latest"`) — необязательна |
-| `cancelFn` | `(deps) => () => boolean` — необязательна, сигнатура `deps` совпадает с `Parameters<MachineEffect<...>>[0]` |
-
-Без явных generic'ов у `createMachine` **всё равно** выводит `C` и `T` из формы литерала (не схлопывается в `any`).
-
-## Runtime API
-
-### `Machine<C, T, E, P, D>(cfg)` — чистая фабрика
-
-Источник: [`tests/types/runtime-api.tst.ts`](tests/types/runtime-api.tst.ts) (секция `Machine(cfg) — pure factory`).
-
-Возвращает `IMachine<C, T, P, D>` (ровно 3 ключа: `transition`, `invokeEffect`, `config`). Никакой подписки или внутреннего состояния — только чистые функции.
-
-### `defineMachine<P, D>(opts?).create(cfg)` — core
-
-Источник: `runtime-api.tst.ts` (секция `defineMachine(opts).create(cfg)`).
+Actor template определяется literal `__INIT` в `config`.
 
 ```ts
-defineMachine<P, D>(opts?: { onError?: (err: unknown) => void; dependencies?: D })
-  .create(cfg: MachineConfig<C, T, P, D>)
+type RequestConfig = {
+  __INIT: { START: "pending" };
+  pending: { DONE: "__RESOLVED"; FAIL: "__REJECTED" };
+};
+type RequestSlice = PublicActorSlice<RequestConfig, { id: string }>;
 ```
 
-Возвращает API с 4 ключами:
+| Тип                      | Назначение                                                              |
+| ------------------------ | ----------------------------------------------------------------------- |
+| `ActorMeta`              | `{ actorId: string; groupId: string; groupTag: string }`                |
+| `PublicActorSlice<C, T>` | `{ state: ActorPublicState<C>; context: T; meta: Readonly<ActorMeta> }` |
+| `ActorTerminalState`     | `"__RESOLVED" \| "__REJECTED" \| "__CANCELLED"`                         |
+| `ActorSystemState`       | `"__INIT" \| ActorTerminalState`                                        |
+| `ActorPublicState<C>`    | `StateName<C>` без actor system states                                  |
+| `ActorPersistence`       | `"runtime" \| "snapshot"`                                               |
+| `IsActorTemplate<M>`     | `true`, если `M["config"]` содержит literal `__INIT`                    |
 
-| Ключ | Тип |
-|---|---|
-| `transition` | `(action: P) => P` |
-| `getState` | `() => StateType<C, T>` |
-| `onTransition` | `(cb: Subscriber<C, T, P>) => () => void` |
-| `addMiddleware` | `(...mw: Middleware<StateType<C, T>, P>[]) => void` |
+Terminal states допустимы как targets, но не как public state и не как keys в `effects`.
 
-`dependencies` обязательно при непустом `D`; опция `onError` принимает `(err: unknown) => void`.
+## State и derived типы
 
-### `MachineManager<S, P = MachineEvents<S>>(machines, opts?)`
+```ts
+type Store = { counter: typeof counter; request: typeof requestActor };
+type AppState = MachinesState<Store>;
+type AppEvents = MachineEvents<Store>;
+type AppDeps = MachineDependencies<Store>;
+```
 
-Источник: `runtime-api.tst.ts` (секция `MachineManager`).
+| Тип                      | Что выводит                                    |
+| ------------------------ | ---------------------------------------------- |
+| `MachineStore`           | `Record<string, AnyMachineConfig>`             |
+| `MachineSliceState<M>`   | domain slice или actor record для одной машины |
+| `MachinesState<S>`       | manager state по карте машин                   |
+| `MachineEvents<S>`       | union событий всех машин                       |
+| `MachineDependencies<S>` | intersection custom deps всех effects          |
 
-Возвращает `IMachineManager<S, P>` (9 ключей).
+`MachineEvents<{}>` → `never`. `MachineDependencies<{}>` → `{}`.
 
-`opts`:
+## Snapshots
 
-| Опция | Тип |
-|---|---|
-| `onError` | `(err: unknown) => void` |
-| `middleware` | `Middleware<MachinesState<S>, P>[]` |
-| `snapshot` | `MachineManagerSnapshot<S>` |
-| `schemaVersion` | `number` |
-| `onUnknownMachineKey` | `(key: string, context: "hydrate" \| "opts.snapshot") => void` |
-| `onSchemaVersionMismatch` | `(incoming: number \| undefined, current: number \| undefined) => void` |
+| Тип                                            | Назначение                                                                                        |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `MachineRuntimeSnapshot<C, T>`                 | runtime domain slice (= `StateType<C, T>`)                                                        |
+| `MachineRuntimeSnapshotForMachine<M>`          | runtime snapshot одного machine config                                                            |
+| `SnapshotForMachine<M>` · `MachineSnapshot<M>` | transport snapshot одной machine                                                                  |
+| `MachineManagerRuntimeSnapshot<S>`             | envelope из `getSnapshot()`; включает live actor records                                          |
+| `MachineManagerSnapshot<S>`                    | partial envelope для `hydrate()`; domain + snapshot actors                                        |
+| `MachineManagerDehydratedSnapshot<S, K>`       | точный envelope из `dehydrate()`; ключи `K` обязательны                                           |
+| `MachineManagerDehydrateResult<S, Keys>`       | результат `dehydrate({ machines: Keys })`: tuple keys обязательны, dynamic array остаётся partial |
+| `MachineManagerDehydrateFn<S>`                 | overloads для `dehydrate`: без opts все snapshot keys, с literal `machines` выбранные keys        |
+| `SnapshotActorTemplateKey<S>`                  | ключи actor templates с `persistence: "snapshot"`                                                 |
+| `SnapshotMachineKey<S>`                        | domain keys + snapshot-actor keys                                                                 |
+| `DehydrateOptions<S>`                          | `{ machines?: ReadonlyArray<SnapshotMachineKey<S>> }`                                             |
 
-- `MachineManager({})` → `IMachineManager<{}, never>`.
-- Без явного `P` — вычисляется `MachineEvents<S>`.
-- `transition` принимает только события из `P`.
-- `onTransition` получает `ManagerCommitAction<S, P>`: user action или system action `@@lite-fsm/HYDRATE`.
-- `setDependencies` требует `MachineDependencies<S>` или updater.
+### Hydration
 
-### Snapshot-типы
+| Тип                        | Форма                                                             |
+| -------------------------- | ----------------------------------------------------------------- |
+| `HydrateStrategy`          | `"replace" \| "merge"`                                            |
+| `HydrateOptions`           | `{ strategy?: HydrateStrategy }`                                  |
+| `HydratePreviewOptions<S>` | `HydrateOptions & { baseState?: MachinesState<S> }`               |
+| `HydrateMeta`              | `{ strategy: HydrateStrategy }`                                   |
+| `HydrateAction<S>`         | `{ type: "@@lite-fsm/HYDRATE"; payload: { strategy; snapshot } }` |
+| `UnknownMachineKeyContext` | `"hydrate" \| "opts.snapshot"`                                    |
 
-| Тип | Роль |
-|---|---|
-| `MachineManagerSnapshot<S>` | dehydrated/transport envelope `{ schemaVersion?, machines }`; per-machine shape берётся из `dehydrate`, затем `hydrate`, иначе runtime slice |
-| `MachineManagerRuntimeSnapshot<S>` | runtime envelope для `getSnapshot()`; каждая машина всегда `StateType<C, T>` |
-| `MachineSnapshot<M>` / `SnapshotForMachine<M>` | inferred serialized shape одной машины |
-| `MachineRuntimeSnapshot<C, T>` | alias к `StateType<C, T>` для runtime slice |
-| `HydrateStrategy` | `"replace" \| "merge"` |
-| `HydratePreviewOptions<S>` | `{ strategy?: HydrateStrategy; baseState?: MachinesState<S> }` для pure `getHydratedState` preview |
-| `HydrateAction<S>` | system action `@@lite-fsm/HYDRATE`, видимый в subscriber/inspection path |
+### Actor snapshot hooks
+
+| Тип                                  | Сигнатура                                                        |
+| ------------------------------------ | ---------------------------------------------------------------- |
+| `ActorDataSlice<C, T>`               | `{ state: ActorPublicState<C>; context: T }`                     |
+| `DefaultActorSnapshot<C, T>`         | `ActorDataSlice<C, T>`                                           |
+| `ActorSnapshotEntry<Snapshot>`       | `{ snapshot: Snapshot; meta: Readonly<ActorMeta> }`              |
+| `ActorTemplateSnapshot<C, T>`        | `Record<string, ActorSnapshotEntry<DefaultActorSnapshot<C, T>>>` |
+| `ActorHydrateHook<C, T, Snapshot>`   | `(prev, snapshot, meta: HydrateMeta) => ActorDataSlice<C, T>`    |
+| `ActorDehydrateHook<C, T, Snapshot>` | `(slice) => Snapshot`                                            |
+
+В `MachineManagerSnapshot` для snapshot actor хранится per-actor entry `{ snapshot, meta }`. Пользовательские hooks получают только `snapshot`, data-slice и hydrate meta `{ strategy }`; `actorId`, `groupId` и `groupTag` остаются под управлением manager-а.
+
+## Runtime интерфейсы
+
+### `IMachine<C, T, P, D>`
+
+| Ключ           | Тип                                                                                  |
+| -------------- | ------------------------------------------------------------------------------------ |
+| `config`       | `C`                                                                                  |
+| `transition`   | `(state: StateType<C, T>, action: P) => StateType<C, T>`                             |
+| `invokeEffect` | `(prev, current, deps: D & DefaultDeps<StateName<C> \| "*", C, P>) => Promise<void>` |
+
+### `IMachineManager<S, P = MachineEvents<S>>`
+
+| Ключ               | Тип                                                               |
+| ------------------ | ----------------------------------------------------------------- |
+| `transition`       | `(payload: ManagerAction<P>) => ManagerAction<P>`                 |
+| `getState`         | `() => MachinesState<S>`                                          |
+| `getSnapshot`      | `() => MachineManagerRuntimeSnapshot<S>`                          |
+| `getHydratedState` | `(snapshot, opts?: HydratePreviewOptions<S>) => MachinesState<S>` |
+| `hydrate`          | `(snapshot, opts?: HydrateOptions) => void`                       |
+| `dehydrate`        | `MachineManagerDehydrateFn<S>`                                    |
+| `onTransition`     | `(cb: TransitionSubscriber<S, P>) => () => void`                  |
+| `replaceReducer`   | `(enhancer: (reducer) => reducer) => void`                        |
+| `setDependencies`  | `(deps \| updater) => void`                                       |
+
+### Manager options и subscribers
+
+| Тип                           | Форма                                                                                                           |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `MachineManagerOptions<S, P>` | `{ onError?, middleware?, snapshot?, schemaVersion?, onUnknownMachineKey?, onSchemaVersionMismatch? }`          |
+| `Subscriber<C, T, P>`         | `(prev: StateType<C, T>, current: StateType<C, T>, action: P) => void`                                          |
+| `TransitionSubscriber<S, P>`  | `(prev: MachinesState<S>, current: MachinesState<S>, action: ManagerCommitAction<S, ManagerAction<P>>) => void` |
+
+## Typed factory aliases
+
+`Typed*Fn` фиксируют `P`/`D` один раз для всего приложения.
+
+```ts
+export const defineConfig: TypedCreateConfigFn<AppEvent> = createConfig;
+export const defineReducer: TypedCreateReducerFn<AppEvent> = createReducer;
+export const defineMachine: TypedCreateMachineFn<AppEvent, Deps> = createMachine;
+export const defineEffect: TypedCreateEffectFn<AppEvent, Deps> = createEffect;
+```
+
+| Alias                        | Фиксирует                     |
+| ---------------------------- | ----------------------------- |
+| `TypedCreateConfigFn<P>`     | union событий для `CFG`       |
+| `TypedCreateReducerFn<P>`    | `action` в reducer            |
+| `TypedCreateMachineFn<P, D>` | union событий и deps эффектов |
+| `TypedCreateEffectFn<P, D>`  | union событий и deps эффектов |
 
 ## Middleware
 
-Источник: [`tests/types/middleware.tst.ts`](tests/types/middleware.tst.ts).
+```ts
+const logger: Middleware<AppState, AppEvent> = (api) => (next) => (action) => next(action);
+```
 
-### `Middleware<S = unknown, P extends AnyEvent = AnyEvent>`
+| Тип                                     | Форма                                                                   |
+| --------------------------------------- | ----------------------------------------------------------------------- |
+| `Middleware<S = unknown, P = AnyEvent>` | `(api) => (next) => (action) => action`                                 |
+| `MiddlewareApi<S, P>`                   | `getState`, `transition`, `replaceReducer`, `onTransition`, `condition` |
+| `GenericMiddleware`                     | middleware, совместимое с любыми `S`/`P`                                |
+| `VoidReducerMiddleware`                 | `GenericMiddleware & { __liteFsmAllowVoidReducer: true }`               |
+
+`Middleware` работает с `ManagerAction<P>`, поэтому `api.transition`, `next` и `action` могут содержать routing `meta`.
+
+## React
+
+| Тип                                                       | Форма                                                                                    |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `FSMContextType<S = MachineStore, P = AnyEvent>`          | `IMachineManager<S, P>`                                                                  |
+| `FSMHydrationBoundaryProps<S>`                            | `PropsWithChildren<{ snapshot: MachineManagerSnapshot<S>; strategy?: HydrateStrategy }>` |
+| `TypedUseManagerHook<S, P>` · `TypedUseMachineHook<S, P>` | `() => IMachineManager<S, P>`                                                            |
+| `TypedUseSelectorHook<S>`                                 | `<R>(selector: (state: MachinesState<S>) => R, equalityFn?) => R`                        |
+| `TypedUseTransitionHook<P>`                               | `() => (payload: ManagerAction<P>) => ManagerAction<P>`                                  |
+
+App-typed hooks:
 
 ```ts
-(api: MiddlewareApi<S, P>) => (next: (action: P) => P) => (action: P) => P
+type Store = typeof machines;
+type Event = MachineEvents<Store>;
+
+export const useManager: TypedUseManagerHook<Store, Event> = baseUseManager;
+export const useSelector: TypedUseSelectorHook<Store> = baseUseSelector;
+export const useTransition: TypedUseTransitionHook<Event> = baseUseTransition;
 ```
 
-По умолчанию: `S = unknown`, `P = AnyEvent` (т.е. `{ type: string; payload?: unknown }`). Никаких `any` в дефолтах.
+`TypedUseSelectorHook<S>` принимает `MachineStore`, не computed `MachinesState<S>`.
 
-`GenericMiddleware` — отдельная public-форма для middleware, которое работает с произвольными `S/P` (используется как возвращаемый тип `devToolsMiddleware()`):
+### React `defineMachine`
 
 ```ts
-type GenericMiddleware = <S, P extends AnyEvent>(
-  api: MiddlewareApi<S, P>,
-) => (next: (action: P) => P) => (action: P) => P;
+const useCounter = defineMachine<AppEvent, Deps>().create(counter);
+const count = useCounter((slice) => slice.context.count);
+useCounter.transition({ type: "INC" });
 ```
 
-`VoidReducerMiddleware = GenericMiddleware & { __liteFsmAllowVoidReducer: true }` — форма для middleware, разрешающего `void`-возврат из reducer'а (например, `immerMiddleware`).
+Возвращает hook `(selector, equalityFn?) => R` + методы standalone machine: `transition`, `getState`, `onTransition`, `addMiddleware`.
 
-### `MiddlewareApi<S, P>` — ровно 5 ключей
+## Шаблоны вывода типов
 
-| Ключ | Тип |
-|---|---|
-| `getState` | `() => S` |
-| `transition` | `(action: P) => P` |
-| `replaceReducer` | `(cb: (r: Reducer<S, P>) => Reducer<S, P>) => void` |
-| `onTransition` | `(cb: (prev: S, curr: S, action: P) => void) => () => void` |
-| `condition` | `(predicate: (a: P) => boolean) => Promise<boolean>` |
-
-### `immerMiddleware`
-
-- Совместим с `Middleware<S, P>` для любой пары `S/P`.
-- Несёт маркер `__liteFsmAllowVoidReducer: true` — включает поддержку `void`-возврата в reducer'е.
-
-### `devToolsMiddleware(options?)`
-
-- Без аргументов возвращает `Middleware`.
-- `options.blacklistActions: string[]` — допустимо. Не-string массив — ошибка типа.
-- Неизвестные опции — ошибка типа.
-- Маркер `__liteFsmAllowVoidReducer` отсутствует.
-
-## React API
-
-Источник: [`tests/types/react-api.tst.tsx`](tests/types/react-api.tst.tsx).
-
-### `FSMContext` / `FSMContextType<S, P>`
+### Strict машина через `satisfies`
 
 ```ts
-FSMContext: React.Context<unknown>
-type FSMContextType<
-  S extends MachineStore = MachineStore,
-  P extends AnyEvent = AnyEvent,
-> = IMachineManager<S, P>
+const machine = {
+  config: { idle: { START: "loading" }, loading: { DONE: "idle" } },
+  initialState: "idle",
+  initialContext: { value: 0 },
+} satisfies MachineConfig<Config, Context, Event>;
 ```
 
-`FSMContextType` без аргументов = `IMachineManager<MachineStore, AnyEvent>`. Внутри значение контекста хранится как `unknown` и сужается до `FSMContextType<S, P>` через `useManager` (или ваш собственный hook).
+Используйте, когда важны derived: `MachineEvents`, `MachineDependencies`, `MachinesState`, snapshot-типы, typed hooks.
 
-### `<FSMContextProvider<S, P> machineManager={...}>`
+### Store-уровень
 
 ```ts
-props: React.PropsWithChildren<{ machineManager: IMachineManager<S, P> }>
+export const machines = { counter, request };
+
+export type Store = typeof machines;
+export type AppState = MachinesState<Store>;
+export type AppEvent = MachineEvents<Store>;
+export type AppDeps = MachineDependencies<Store>;
+export type AppSnapshot = MachineManagerSnapshot<Store>;
+export type AppManager = IMachineManager<Store, AppEvent>;
 ```
 
-`children` опционален (как любой `PropsWithChildren`). Невалидный `machineManager` — ошибка типа.
+## Подводные камни
 
-### Хуки
+| Камень                     | Правило                                                               |
+| -------------------------- | --------------------------------------------------------------------- |
+| расширенный `initialState` | используйте literal / `as const`, иначе state станет `string`         |
+| потерянные derived events  | типизируйте через `MachineConfig` или typed factory                   |
+| `FSMEvent<"X", undefined>` | payload обязателен: `{ type: "X", payload: undefined }`               |
+| wildcard target            | `"*"` — только source key, не target и не `initialState`              |
+| actor `__INIT`             | system state, не public state и не effect key                         |
+| runtime actors в snapshot  | `DehydrateOptions` принимает только domain keys и snapshot-actor keys |
+| `MachineManager({})`       | events → `never`, deps → `{}`, state → `{}`                           |
+| тип action в middleware    | используйте `ManagerAction<P>`, если нужен routing `meta`             |
+| `TypedUseSelectorHook`     | generic `S` — store config, не computed state                         |
 
-| Хук | Сигнатура | Без generic'ов |
-|---|---|---|
-| `useHydrateSnapshot<S>(snapshot, opts?)` | `(snapshot: MachineManagerSnapshot<S>, opts?: HydrateOptions) => void` | требует явный `S`, если snapshot не выводится из аргумента |
-| `useManager<S, P>()` | `() => IMachineManager<S, P>` | `IMachineManager<MachineStore, AnyEvent>` |
-| `useSelector<S, R>(selector, equalityFn?)` | `(selector: (state: MachinesState<S>) => R, equalityFn?: (a: R, b: R) => boolean) => R` | требует явных `<S, R>` |
-| `useTransition<P>()` | `() => (payload: P) => P` | `(payload: AnyEvent) => AnyEvent` |
+## Команды
 
-### `<FSMHydrationBoundary<S> snapshot={...}>`
-
-```tsx
-<FSMHydrationBoundary<Store> snapshot={snapshot} strategy="merge">
-  <Consumer />
-</FSMHydrationBoundary>
-```
-
-`snapshot` типизируется как `MachineManagerSnapshot<S>`, `strategy` — `"merge"` или `"replace"`. Boundary прозрачен для `children`: во время render `useSelector` читает staged overlay state, а настоящий manager коммитится в layout effect. `useManager`, `useTransition`, effects и middleware overlay не видят.
-
-Snapshot-объекты в React hydration API ожидаются immutable: при изменении содержимого передавайте новый object reference. Повторная ссылка с той же `strategy` может быть пропущена helper'ами; идемпотентность одинакового содержимого обеспечивается machine `hydrate` hook'ами через `return prev`.
-
-`Typed*Hook`-обёртки для фиксации типов на уровне проекта:
-
-| Alias | Что фиксирует |
-|---|---|
-| `TypedUseManagerHook<S, P>` | хук, возвращающий `IMachineManager<S, P>` |
-| `TypedUseMachineHook<S, P>` | backward-compatible alias к `TypedUseManagerHook<S, P>` |
-| `TypedUseSelectorHook<S>` | фиксирует карту машин (`S extends MachineStore`), селектор получает `MachinesState<S>`, `R` остаётся обобщённым |
-| `TypedUseTransitionHook<P>` | фиксирует payload-тип |
-
-Рекомендуемый DX для приложения — типизировать локальные hooks прямым присваиванием, без wrapper-функций и `as`:
-
-```ts
-import type { TypedUseManagerHook, TypedUseSelectorHook, TypedUseTransitionHook } from "lite-fsm/react";
-import { useManager as baseUseManager, useSelector as baseUseSelector, useTransition as baseUseTransition } from "lite-fsm/react";
-
-import type { FSMConfigType } from "./store";
-import type { AppEvents } from "./types";
-
-export const useTransition: TypedUseTransitionHook<AppEvents> = baseUseTransition;
-export const useSelector: TypedUseSelectorHook<FSMConfigType> = baseUseSelector;
-export const useManager: TypedUseManagerHook<FSMConfigType, AppEvents> = baseUseManager;
-```
-
-Важно: `TypedUseSelectorHook<S>` принимает **тип карты машин**, а не уже вычисленный `MachinesState<S>` / `AppState`. Это симметрично обычному `useSelector<S, R>()`, где `S` — `MachineStore`, а `state` внутри селектора уже выводится как `MachinesState<S>`.
-
-### `defineMachine<P, D>(opts?).create(cfg)` — react
-
-Возвращает **функцию-хук** с прикреплённым API машины.
-
-- Вызов хука: `use(selector, equalityFn?)` — селектор получает `StateType<C, T>`, возвращает `R`.
-- Хук также содержит `transition`, `getState`, `onTransition`, `addMiddleware` (как в core-версии `defineMachine`).
-- `equalityFn` типизирован относительно `R`; передача `(a: string)` при `R = number` — ошибка типа.
-- `dependencies` должен соответствовать `D` (ошибка типа при несовпадении).
-
-## Правила вывода типов и подводные камни
-
-Закреплено в `derived-and-interfaces.tst.ts` и `runtime-api.tst.ts`; возникло из реального прогона тестов.
-
-1. **Всегда описывай машину через `satisfies MachineConfig<C, T, P, D>`**.
-   Без этого TS часто теряет generic-параметры на производных типах (`MachineEvents`, `MachineDependencies`, `MachinesState`) и схлопывает их до `any`/`unknown`. Минимальный рабочий шаблон:
-
-   ```ts
-   const reducer: MachineReducer<Cfg, Evt, Ctx> = (s, _a, meta) => ({ state: meta.nextState, context: s.context });
-   const machine = {
-     config: { idle: { GO: "done" }, done: {} } as Cfg,
-     initialState: "idle" as const,
-     initialContext: { n: 0 } as Ctx,
-     reducer,
-   } satisfies MachineConfig<Cfg, Ctx, Evt>;
-   ```
-
-2. **`initialState` → `as const`**, иначе расширяется до `string` и `State<keyof C>` перестаёт работать.
-3. **`initialContext` → `as Ctx`** (или типизированный const), иначе поля расширяются до базовых типов и ломается вывод в `MachinesState`.
-4. **Payload в `FSMEvent`** — везде обязателен, кроме случая, когда payload вообще опущен или передан как `never`. `any`, `unknown`, `null`, `void`, `X | undefined` — ключ `payload` обязателен в литерале.
-5. **`MachineDependencies<S>`** — это **интерсекция** по всем эффектам. Машина без эффектов не ослабляет требований (возвращает `{}`). Пустая карта машин (`MachineDependencies<{}>`) тоже даёт `{}`, а не `unknown`.
-6. **`MachineManager({})`** типизируется как `IMachineManager<{}, never>` — `transition` становится принципиально непригодным к вызову (что логично: событий нет).
-7. **`Middleware`** по умолчанию использует `S = unknown` и `P = AnyEvent` (`{ type: string; payload?: unknown }`). Никаких silent-`any` в дефолтах — это важно при передаче в `immerMiddleware` / `devToolsMiddleware` без явных generic'ов.
-8. **`immerMiddleware`** распознаётся в runtime через маркер `__liteFsmAllowVoidReducer`. При написании собственного middleware, разрешающего `void`-возврат из reducer'а, нужно выставить такой же маркер.
-9. **`WILDCARD = "*"`** — литерал, не просто `string`. `State<"*">` = `never`, поэтому wildcard никогда не пройдёт как валидный target/initialState.
-10. **Typed*Fn-обёртки не меняют runtime** — это только identity-функции с жёсткими типами. Их назначение — закрепить `P`/`D` на уровне проекта, чтобы все `create*` возвращали узкий тип.
+| Проверка                  | Команда                   |
+| ------------------------- | ------------------------- |
+| Типы по `src/`            | `npm run test:types`      |
+| Типы по собранному пакету | `npm run test:types:dist` |
+| Полный type-loop          | `npm run test:types:all`  |

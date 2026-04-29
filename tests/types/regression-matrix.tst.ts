@@ -7,6 +7,7 @@ import type {
   MachineDependencies,
   MachineEvents,
   MachineReducer,
+  ManagerAction,
   MachinesState,
   Middleware,
   StateType,
@@ -29,11 +30,13 @@ describe("регрессионная матрица public entry points", () => 
         keyof typeof core,
         | "Machine"
         | "MachineManager"
+        | "createActorMeta"
         | "createConfig"
         | "createEffect"
         | "createMachine"
         | "createReducer"
         | "defineMachine"
+        | "LiteFsmError"
       >
     >;
   });
@@ -61,6 +64,13 @@ describe("регрессионная матрица public entry points", () => 
 
     expect(middleware.devToolsMiddleware).type.toBe<typeof devToolsEntry.devToolsMiddleware>();
     expect(middleware.immerMiddleware).type.toBe<typeof immerEntry.immerMiddleware>();
+  });
+
+  test("internal coordination symbols не доступны из public entry points", () => {
+    type InternalSymbolName = "LATE_DISPATCH" | "DEVTOOLS_API" | "ACTOR_RESTORE" | "REGISTER_BAG_DISPOSE";
+    type _NoCoreInternals = Assert<IsNever<Extract<keyof typeof core, InternalSymbolName>>>;
+    type _NoMiddlewareInternals = Assert<IsNever<Extract<keyof typeof middleware, InternalSymbolName>>>;
+    type _NoDevToolsInternals = Assert<IsNever<Extract<keyof typeof devToolsEntry, InternalSymbolName>>>;
   });
 });
 
@@ -381,29 +391,35 @@ describe("регрессионная матрица строгости effect и
 
     const api = {
       getState: () => ({ state: "idle" as const, context: { active: false } }),
-      transition: (action: Event) => action,
+      transition: (action: ManagerAction<Event>) => action,
       replaceReducer: (
-        cb: (reducer: (state: StateType<Config, Context>, action: Event) => StateType<Config, Context>) => (
+        cb: (
+          reducer: (state: StateType<Config, Context>, action: ManagerAction<Event>) => StateType<Config, Context>,
+        ) => (
           state: StateType<Config, Context>,
-          action: Event,
+          action: ManagerAction<Event>,
         ) => StateType<Config, Context>,
       ) => {
         void cb;
       },
       onTransition: (
-        cb: (prevState: StateType<Config, Context>, currentState: StateType<Config, Context>, action: Event) => void,
+        cb: (
+          prevState: StateType<Config, Context>,
+          currentState: StateType<Config, Context>,
+          action: ManagerAction<Event>,
+        ) => void,
       ) => {
         void cb;
         return () => {};
       },
-      condition: async (predicate: (action: Event) => boolean) => {
+      condition: async (predicate: (action: ManagerAction<Event>) => boolean) => {
         void predicate;
         return true;
       },
     };
 
-    expect(immer(api)((action) => action)).type.toBe<(action: Event) => Event>();
-    expect(devTools(api)((action) => action)).type.toBe<(action: Event) => Event>();
+    expect(immer(api)((action) => action)).type.toBe<(action: ManagerAction<Event>) => ManagerAction<Event>>();
+    expect(devTools(api)((action) => action)).type.toBe<(action: ManagerAction<Event>) => ManagerAction<Event>>();
   });
 });
 
@@ -459,6 +475,6 @@ describe("регрессионная матрица generics у React provider",
     const manager = useFlowManager();
 
     expect(manager).type.toBe<IMachineManager<Store, Go>>();
-    expect(manager.transition).type.toBe<(payload: Go) => Go>();
+    expect(manager.transition).type.toBe<(payload: ManagerAction<Go>) => ManagerAction<Go>>();
   });
 });

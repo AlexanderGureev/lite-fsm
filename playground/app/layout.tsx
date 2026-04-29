@@ -1,25 +1,24 @@
 import type { Metadata } from "next";
+import { Inter } from "next/font/google";
 
-import StoreSeedInitialize from "./_components/StoreSeedInitialize";
-import StoreProvider from "./StoreProvider";
 import "./globals.css";
-import { loadDemoProfile } from "../src/ssr-demo";
+
+const inter = Inter({
+  subsets: ["latin", "cyrillic"],
+  weight: ["300", "400", "600", "700"],
+  variable: "--font-sans",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
-  title: "lite-fsm playground · Next.js",
-  description: "Примеры lite-fsm на Next.js 16 + Tailwind v4",
+  title: "lite-fsm playground",
+  description: "Apple-style примеры lite-fsm на Next.js",
 };
 
-export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const profile = await loadDemoProfile();
-
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="ru">
-      <body>
-        <StoreProvider>
-          <StoreSeedInitialize seeds={{ profileSession: profile }}>{children}</StoreSeedInitialize>
-        </StoreProvider>
-      </body>
+    <html lang="ru" className={inter.variable}>
+      <body>{children}</body>
     </html>
   );
 }

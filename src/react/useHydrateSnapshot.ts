@@ -18,7 +18,7 @@ export const useHydrateSnapshot = <S extends MachineStore>(
   const appliedRef = useRef<AppliedSnapshot | null>(null);
 
   useIsomorphicLayoutEffect(() => {
-    /* v8 ignore next -- Guards StrictMode effect replay for the same snapshot reference. */
+    /* v8 ignore next -- защита от StrictMode replay с той же ссылкой. */
     if (appliedRef.current?.snapshot === snapshot && appliedRef.current.strategy === strategy) return;
 
     manager.hydrate(snapshot, { strategy });

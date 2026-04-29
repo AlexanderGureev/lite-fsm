@@ -22,6 +22,7 @@ export default defineConfig([
     "tests/",
     "**/*.d.ts",
     "eslint.config.js",
+    ".preview"
   ]),
   {
     files: ["**/*.{js,mjs,cjs,ts,tsx}"],
@@ -53,6 +54,16 @@ export default defineConfig([
       "@typescript-eslint/no-empty-object-type": "off",
       "@typescript-eslint/no-empty-function": "off",
       "@typescript-eslint/ban-ts-comment": "off",
+      "@typescript-eslint/no-unused-vars": [
+        "error",
+        {
+          argsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
+          destructuredArrayIgnorePattern: "^_",
+          caughtErrorsIgnorePattern: "^_",
+          ignoreRestSiblings: true,
+        },
+      ],
       "react/prop-types": "off",
     },
   },

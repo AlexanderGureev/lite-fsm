@@ -9,6 +9,7 @@ import {
   type MachineConfig,
   type MachineEffect,
   type MachineReducer,
+  type ManagerAction,
   type TypedCreateConfigFn,
   type TypedCreateEffectFn,
   type TypedCreateMachineFn,
@@ -64,7 +65,7 @@ describe("createReducer без типизированной обёртки", () 
     const reducer = createReducer<Cfg, Ctx>((state, action, meta) => {
       expect(state.state).type.toBe<"idle" | "busy">();
       expect(meta.nextState).type.toBe<"idle" | "busy">();
-      expect(action).type.toBe<AnyEvent>();
+      expect(action).type.toBe<ManagerAction<AnyEvent>>();
       return { state: meta.nextState, context: state.context };
     });
     expect(reducer).type.toBe<MachineReducer<Cfg, AnyEvent, Ctx>>();
@@ -207,9 +208,24 @@ describe("TypedCreateMachineFn<P, D>", () => {
     expect(machine.initialContext).type.toBe<{ calls: number }>();
   });
 
-  test("отклоняет event types, которых нет в P", () => {
+  test("отклоняет event types, которых нет в P (явный Cfg несовместим с P)", () => {
     const typed: TypedCreateMachineFn<Ping, Deps> = createMachine;
+    // Cfg включает SAVE, которого нет в Ping. Constraint `C extends CFG<C, Ping, ...>`
+    // отвергает фиксированный Cfg на месте generic-параметра.
+    // @ts-expect-error!
     typed<Cfg, Ctx>({
+      config: {
+        idle: { PING: "busy", SAVE: "busy" },
+        busy: {},
+      },
+      initialState: "idle",
+      initialContext: { calls: 0 },
+    });
+  });
+
+  test("отклоняет event types, которых нет в P (inferred config — ошибка на пропе)", () => {
+    const typed: TypedCreateMachineFn<Ping, Deps> = createMachine;
+    typed({
       config: {
         idle: {
           PING: "busy",
@@ -224,11 +240,169 @@ describe("TypedCreateMachineFn<P, D>", () => {
   });
 });
 
+describe("createMachine DX-регрессии", () => {
+  type DomainEvt = FSMEvent<"GO"> | FSMEvent<"BACK">;
+  type ActorEvt = FSMEvent<"SPAWN", { id: string }> | FSMEvent<"DONE">;
+
+  test("inferred config: typeof machine.config — чистый литерал без CFG-intersection", () => {
+    // Регрессия: раньше cfg.config типизировался как `C & CFG<C, P, ...>`, что
+    // делало hover нечитаемым. Constraint `C extends CFG<...>` убирает intersection.
+    const typed: TypedCreateMachineFn<DomainEvt> = createMachine;
+    const machine = typed({
+      config: {
+        idle: { GO: "running" },
+        running: { BACK: "idle" },
+      },
+      initialState: "idle",
+      initialContext: { count: 0 },
+    });
+
+    expect(machine.config).type.toBe<{
+      idle: { GO: "running" };
+      running: { BACK: "idle" };
+    }>();
+  });
+
+  test("inferred actor template: typeof machine.config — чистый литерал с __INIT", () => {
+    const typed: TypedCreateMachineFn<ActorEvt> = createMachine;
+    const machine = typed({
+      config: {
+        __INIT: { SPAWN: "pending" },
+        pending: { DONE: "__RESOLVED" },
+      },
+      initialState: "__INIT",
+      initialContext: { id: "" },
+    });
+
+    expect(machine.config).type.toBe<{
+      __INIT: { SPAWN: "pending" };
+      pending: { DONE: "__RESOLVED" };
+    }>();
+  });
+
+  test("inferred actor template: config выводится до initialState", () => {
+    const typed: TypedCreateMachineFn<ActorEvt> = createMachine;
+    // @ts-expect-error!
+    const machine = typed({
+      config: {
+        __INIT: { SPAWN: "pending" },
+        pending: { DONE: "__RESOLVED" },
+      },
+      initialContext: { id: "" },
+    });
+
+    expect(machine.config).type.toBe<{
+      __INIT: { SPAWN: "pending" };
+      pending: { DONE: "__RESOLVED" };
+    }>();
+  });
+
+  test("inferred config: невалидный target подсвечивается на конкретной пропе", () => {
+    const typed: TypedCreateMachineFn<DomainEvt> = createMachine;
+    typed({
+      config: {
+        idle: {
+          // @ts-expect-error!
+          GO: "missing",
+        },
+        running: {},
+      },
+      initialState: "idle",
+      initialContext: { count: 0 },
+    });
+  });
+
+  test("inferred config: невалидный initialContext подсвечивается на пропе initialContext", () => {
+    const typed: TypedCreateMachineFn<DomainEvt> = createMachine;
+    typed({
+      config: { idle: {}, running: {} },
+      initialState: "idle",
+      // @ts-expect-error!
+      initialContext: "not-an-object",
+    });
+  });
+
+  test("inferred config: невалидный initialState подсвечивается на пропе initialState", () => {
+    const typed: TypedCreateMachineFn<DomainEvt> = createMachine;
+    typed({
+      config: { idle: {}, running: {} },
+      // @ts-expect-error!
+      initialState: "missing",
+      initialContext: { count: 0 },
+    });
+  });
+
+  test("actor template: target __INIT в публичных переходах запрещён", () => {
+    const typed: TypedCreateMachineFn<ActorEvt> = createMachine;
+    typed({
+      config: {
+        __INIT: { SPAWN: "pending" },
+        pending: {
+          // @ts-expect-error! нельзя возвращаться в __INIT
+          DONE: "__INIT",
+        },
+      },
+      initialState: "__INIT",
+      initialContext: { id: "" },
+    });
+  });
+
+  test("actor template: terminal __CANCELLED как target принимается", () => {
+    const typed: TypedCreateMachineFn<ActorEvt> = createMachine;
+    const machine = typed({
+      config: {
+        __INIT: { SPAWN: "pending" },
+        pending: { DONE: "__CANCELLED" },
+      },
+      initialState: "__INIT",
+      initialContext: { id: "" },
+    });
+
+    expect(machine.config.pending.DONE).type.toBe<"__CANCELLED">();
+  });
+
+  test('snapshot persistence: persistence сохраняется как литерал "snapshot" в результате', () => {
+    const typed: TypedCreateMachineFn<ActorEvt> = createMachine;
+    const machine = typed({
+      config: {
+        __INIT: { SPAWN: "pending" },
+        pending: { DONE: "__RESOLVED" },
+      },
+      initialState: "__INIT",
+      initialContext: { id: "" },
+      persistence: "snapshot",
+    });
+
+    expect(machine.persistence).type.toBe<"snapshot">();
+  });
+
+  test("actor с hydrate/dehydrate: persistence остаётся литералом, output config — single shape", () => {
+    type Snap = { id: string; t: number };
+    const typed: TypedCreateMachineFn<ActorEvt> = createMachine;
+    const machine = typed({
+      config: {
+        __INIT: { SPAWN: "pending" },
+        pending: { DONE: "__RESOLVED" },
+      },
+      initialState: "__INIT",
+      initialContext: { id: "" },
+      persistence: "snapshot",
+      dehydrate: (slice): Snap => ({ id: slice.context.id, t: 0 }),
+    });
+
+    expect(machine.persistence).type.toBe<"snapshot">();
+    expect(machine.config).type.toBe<{
+      __INIT: { SPAWN: "pending" };
+      pending: { DONE: "__RESOLVED" };
+    }>();
+  });
+});
+
 describe("TypedCreateReducerFn<P>", () => {
   test("тело reducer видит суженный union actions", () => {
     const typed: TypedCreateReducerFn<Evt> = createReducer;
     const reducer = typed<Cfg, Ctx>((state, action, meta) => {
-      expect(action).type.toBe<Evt>();
+      expect(action).type.toBe<ManagerAction<Evt>>();
       if (action.type === "SAVE") {
         expect(action.payload.id).type.toBe<string>();
       }
@@ -264,6 +438,14 @@ describe("TypedCreateEffectFn<P, D>", () => {
         // @ts-expect-error!
         transition({ type: "SAVE", payload: { id: "1" } });
       },
+    });
+  });
+
+  test("отклоняет event union, случайно переданный как config generic", () => {
+    const typed: TypedCreateEffectFn<Evt, Deps> = createEffect;
+    // @ts-expect-error!
+    typed<Evt>({
+      effect: () => {},
     });
   });
 });

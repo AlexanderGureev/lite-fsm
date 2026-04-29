@@ -9,7 +9,9 @@ import type {
   MachineManagerSnapshot,
   MachineStore,
   MachineReducer,
+  ManagerAction,
   MachinesState,
+  PublicActorSlice,
   StateType,
   Subscriber,
 } from "lite-fsm";
@@ -61,6 +63,19 @@ const machineCfg = {
 const store = { x: machineCfg };
 type Store = typeof store;
 type StoreState = MachinesState<Store>;
+
+type ActorCfg = {
+  __INIT: { PING: "pending" };
+  pending: { DONE: "__RESOLVED" };
+};
+type ActorCtx = { id: string };
+const actorCfg = {
+  config: { __INIT: { PING: "pending" }, pending: { DONE: "__RESOLVED" } },
+  initialState: "__INIT",
+  initialContext: { id: "" },
+} satisfies MachineConfig<ActorCfg, ActorCtx, Evt>;
+const mixedStore = { x: machineCfg, sync: actorCfg };
+type MixedStore = typeof mixedStore;
 
 describe("FSMContextType<S, P>", () => {
   test("является alias для IMachineManager<S, P>", () => {
@@ -182,12 +197,25 @@ describe("useSelector<S, R>", () => {
     const r = typed((state) => state.x.state);
     expect(r).type.toBe<"idle" | "busy">();
   });
+
+  test("TypedUseSelectorHook<S> видит actor slice как public record с readonly meta", () => {
+    const typed: TypedUseSelectorHook<MixedStore> = useSelector;
+    typed((state) => {
+      expect(state.sync).type.toBe<Record<string, PublicActorSlice<ActorCfg, ActorCtx>>>();
+      const slice = state.sync["sync/0"];
+      expect(slice.state).type.toBe<"pending">();
+      expect(slice.meta.actorId).type.toBe<string>();
+      // @ts-expect-error!
+      slice.meta.actorId = "next";
+      return slice.meta.groupId;
+    });
+  });
 });
 
 describe("useTransition<P>", () => {
-  test("возвращает dispatch-функцию (payload: P) => P", () => {
+  test("возвращает dispatch-функцию (payload: ManagerAction<P>) => ManagerAction<P>", () => {
     const dispatch = useTransition<Evt>();
-    expect(dispatch).type.toBe<(payload: Evt) => Evt>();
+    expect(dispatch).type.toBe<(payload: ManagerAction<Evt>) => ManagerAction<Evt>>();
     dispatch({ type: "PING" });
     dispatch({ type: "DONE" });
   });
@@ -200,13 +228,13 @@ describe("useTransition<P>", () => {
 
   test("по умолчанию возвращает dispatch для AnyEvent", () => {
     const dispatch = useTransition();
-    expect(dispatch).type.toBe<(payload: AnyEvent) => AnyEvent>();
+    expect(dispatch).type.toBe<(payload: ManagerAction<AnyEvent>) => ManagerAction<AnyEvent>>();
   });
 
   test("TypedUseTransitionHook<P> сужает сигнатуру transition", () => {
     const typed: TypedUseTransitionHook<Evt> = useTransition;
     const dispatch = typed();
-    expect(dispatch).type.toBe<(payload: Evt) => Evt>();
+    expect(dispatch).type.toBe<(payload: ManagerAction<Evt>) => ManagerAction<Evt>>();
   });
 });
 
@@ -225,9 +253,41 @@ describe("API гидратации snapshot", () => {
     useHydrateSnapshot<Store>(snapshot, { strategy: "replace" });
   });
 
+  test("useHydrateSnapshot отклоняет invalid strategy и actor keys", () => {
+    useHydrateSnapshot<Store>(
+      snapshot,
+      // @ts-expect-error!
+      { strategy: "invalid" },
+    );
+
+    useHydrateSnapshot<MixedStore>({
+      machines: {
+        x: { state: "idle", context: { requests: 1 } },
+        // @ts-expect-error!
+        sync: {},
+      },
+    });
+  });
+
   test("FSMHydrationBoundary принимает snapshot и children", () => {
     const el = (
       <FSMHydrationBoundary<Store> snapshot={snapshot} strategy="merge">
+        <span>child</span>
+      </FSMHydrationBoundary>
+    );
+    expect(el).type.toBeAssignableTo<React.JSX.Element>();
+  });
+
+  test("FSMHydrationBoundary snapshot отклоняет actor keys", () => {
+    const actorSnapshot: MachineManagerSnapshot<MixedStore> = {
+      machines: {
+        x: { state: "idle", context: { requests: 1 } },
+        // @ts-expect-error!
+        sync: {},
+      },
+    };
+    const el = (
+      <FSMHydrationBoundary<MixedStore> snapshot={actorSnapshot} strategy="replace">
         <span>child</span>
       </FSMHydrationBoundary>
     );

@@ -1,454 +1,472 @@
 # lite-fsm — API Cheat Sheet
 
-Краткий справочник по runtime-поведению публичного API `lite-fsm`. Парный документ к [`TYPES-CHEATSHEET.md`](TYPES-CHEATSHEET.md): там — про типы, здесь — про то, что код реально делает.
+Сжатый справочник по runtime API. Типы — в [`TYPES-CHEATSHEET.md`](TYPES-CHEATSHEET.md).
 
-- Юнит-тесты: `npm run test`
-- Покрытие: `npm run test:coverage`
-- Полный релиз-цикл: `npm run verify:release`
+## Точки входа
 
-## Точки входа (runtime)
+| Импорт                                                       | Runtime exports                                                                                                                                   |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lite-fsm`                                                   | `createMachine`, `createConfig`, `createReducer`, `createEffect`, `createActorMeta`, `Machine`, `defineMachine`, `MachineManager`, `LiteFsmError` |
+| `lite-fsm/middleware`                                        | `immerMiddleware`, `devToolsMiddleware`                                                                                                           |
+| `lite-fsm/middleware/immer` · `lite-fsm/middleware/devTools` | per-feature entry points                                                                                                                          |
+| `lite-fsm/react`                                             | `FSMContext`, `FSMContextProvider`, `FSMHydrationBoundary`, `useHydrateSnapshot`, `useManager`, `useSelector`, `useTransition`, `defineMachine`   |
 
-| Импорт                         | Экспортирует                                                                                                   |
-| ------------------------------ | -------------------------------------------------------------------------------------------------------------- |
-| `lite-fsm`                     | `Machine`, `createMachine`, `defineMachine`, `MachineManager`, `createConfig`, `createReducer`, `createEffect` |
-| `lite-fsm/middleware`          | `immerMiddleware`, `devToolsMiddleware` (barrel)                                                               |
-| `lite-fsm/middleware/immer`    | `immerMiddleware`                                                                                              |
-| `lite-fsm/middleware/devTools` | `devToolsMiddleware`                                                                                           |
-| `lite-fsm/react`               | `FSMContext`, `FSMContextProvider`, `FSMHydrationBoundary`, `useHydrateSnapshot`, `useManager`, `useSelector`, `useTransition`, `defineMachine` |
+`lite-fsm/react` помечен `"use client"`. Импортировать можно из SSR/RSC, hooks/provider — только в client tree.
 
-> Примечание: `lite-fsm/react` помечен `"use client"`. В SSR импорт безопасен, а runtime-хуки и провайдер используются только на клиенте.
+## Mental model
 
-## Жизненный цикл события
+| Термин         | Форма                                                              |
+| -------------- | ------------------------------------------------------------------ |
+| Event / action | `{ type: string; payload?: unknown; meta?: FSMEventMeta }`         |
+| Domain slice   | `{ state, context }`                                               |
+| Actor slice    | `{ state, context, meta: { actorId, groupId, groupTag } }`         |
+| Manager state  | `{ [machineKey]: domainSlice \| Record<actorId, actorSlice> }`     |
+| Snapshot       | `{ schemaVersion?: number; machines: { [machineKey]: snapshot } }` |
 
-Источники: [`tests/core/createMachine.test.ts`](tests/core/createMachine.test.ts), [`tests/core/MachineManager.test.ts`](tests/core/MachineManager.test.ts).
+Pipeline события: `middleware (pre next) → reducer graph → subscribers → middleware (post next) → effects`. Middleware "оборачивает" reducer + subscribers; effects идут уже после возврата всей middleware-цепочки. `transition(action)` возвращает action, дошедший до reducer-а.
 
-При вызове `transition(action)`:
+## Фазы обработки события (transition)
 
-1. `wrappedTransition` (compose всех middleware) запускается над action.
-2. `rootReducer` пересчитывает `state` всех машин (или одной — для `createMachine`).
-3. Выбрасывается `VOID_REDUCER_ERROR`, если результат `undefined` (без `immerMiddleware`).
-4. В DEV — `deepFreeze(state)` нового снимка.
-5. Синхронно вызываются все `onTransition`-подписчики: `(prev, current, action)`.
-6. Запускаются эффекты: для каждой машины, если `prev.state !== current.state` и есть эффект для current — вызывается он; иначе — wildcard-эффект `"*"`, если задан.
-7. Эффекты исполняются как `Promise.catch(opts.onError)` — ошибки не ломают работу машины.
+Что происходит внутри `manager.transition(action)`.
 
-## `Machine(cfg)` — чистая фабрика (он же `CreateMachine`)
+| #   | Фаза                    | Что происходит                                                                             |
+| --- | ----------------------- | ------------------------------------------------------------------------------------------ |
+| 0   | pre-normalize           | sender / default routing; late-dispatch отбрасывается                                      |
+| 1   | middleware (pre next)   | каждое middleware до `next(action)` в порядке регистрации                                  |
+| 2   | post-normalize          | committed action фиксируется в `ctx.committed`                                             |
+| 3–7 | root reducer            | routing → domain reducers → spawn actors → reduce routed actors → collapse terminal actors |
+| 9   | commit                  | `state` + sidecar обновляются атомарно                                                     |
+| 10  | resolve effects targets | список domain + delivered/spawned actors для фазы 12                                       |
+| 11  | subscribers             | `onTransition` (sync)                                                                      |
+| —   | middleware (post next)  | каждое middleware после `next(action)` в обратном порядке                                  |
+| 12  | effects                 | domain effects на каждом dispatch + actor effects для delivered/spawned                    |
 
-Источник: [`tests/core/Machine.test.ts`](tests/core/Machine.test.ts).
+Фазы 2–11 проходят внутри middleware-чейна (через `next` → `_transition`). Effects (12) — после возврата всей цепочки. Standalone-машина из `Machine.ts` использует подмножество: middleware → reducer → subscribers → middleware (post) → effects, без actor-фаз 5–7, 10, 12.
 
-`Machine(cfg)` возвращает 3 чистые функции — без подписки, без внутреннего state:
-
-| Метод                            | Что делает                                                         |
-| -------------------------------- | ------------------------------------------------------------------ |
-| `config`                         | ссылка на переданный `cfg.config` (тот же объект, не копия)        |
-| `transition(state, action)`      | синхронно вычисляет следующий `{ state, context }`                 |
-| `invokeEffect(prev, curr, deps)` | `Promise<void>` — вызывает нужный эффект (или `void`, если нечего) |
-
-### Правила `transition`
-
-| Сценарий                                                  | Результат                                                                                          |
-| --------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `config[state][action.type]` определён                    | `nextState = config[state][action.type]`                                                           |
-| Ключа нет у текущего state, но он есть у `"*"`            | wildcard-переход (`config["*"][action.type]`)                                                      |
-| `nextState === null`                                      | self-transition: state не меняется, payload мержится в context (если без reducer'а)                |
-| `nextState === undefined` (нет ни в state, ни в `"*"`)    | возвращается **тот же** объект state по ссылке                                                     |
-| `cfg.reducer` задан                                       | вызывается `reducer(state, action, { nextState, config })`; ожидается возврат `{ state, context }` |
-| `cfg.reducer` без явного reducer'а                        | `{ state: nextState, context: { ...state.context, ...action.payload } }`                           |
-| `reducer` вернул `undefined`, и runtime не разрешает void | бросает `VOID_REDUCER_ERROR` (`/immerMiddleware/`)                                                 |
-
-`meta.nextState` в reducer'е при self-transition (`null`) равен **текущему** state, не `null`.
-
-### Правила `invokeEffect`
-
-| Условие                                                            | Что вызывается                                       |
-| ------------------------------------------------------------------ | ---------------------------------------------------- |
-| `prev !== current` и `effects[current]` есть                       | `effects[current]`                                   |
-| `prev !== current`, есть `effects["*"]`, но нет `effects[current]` | `effects["*"]`                                       |
-| `prev === current`, есть `effects["*"]`                            | `effects["*"]` (self-transition активирует wildcard) |
-| `prev === current`, нет `effects["*"]`                             | ничего                                               |
-| `effects` отсутствует                                              | ничего, `Promise<undefined>`                         |
-
-Явный эффект состояния всегда **приоритетнее** wildcard'а.
-
-## `createMachine(cfg, opts?)` — stateful обёртка
-
-Источник: [`tests/core/createMachine.test.ts`](tests/core/createMachine.test.ts).
+## Описание машины
 
 ```ts
-createMachine(cfg, { onError?, dependencies? })
-  → { getState, transition, onTransition, addMiddleware }
-```
-
-| Метод                  | Семантика                                                                                                                                      |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `getState()`           | возвращает прямую ссылку на текущий снимок (стабильна между вызовами, меняется после `transition`)                                             |
-| `transition(action)`   | прогоняет middleware-цепочку, обновляет state, синхронно вызывает подписчиков, асинхронно — эффекты; возвращает финальный action из middleware |
-| `onTransition(cb)`     | подписка `(prev, current, action) => void`; возвращает `unsubscribe`                                                                           |
-| `addMiddleware(...mw)` | добавляет middleware **в конец** существующей цепочки и пересобирает обёртку                                                                   |
-
-### Контрактные детали
-
-- В DEV (`process.env.NODE_ENV !== "production"`) каждый снимок проходит `deepFreeze`. Попытка мутировать его извне → `TypeError`.
-- `transition` возвращает action **после** прохождения middleware (middleware может его модифицировать).
-- Подписчики получают `(prev, current, action)` уже с обновлённым state. Отписка во время эмита **не** влияет на текущий цикл, но отключает следующий.
-- Эффекты получают `deps = { ...opts.dependencies, transition, action, condition }`.
-- `condition(predicate)` создаёт `Promise<boolean>`, который резолвится на ближайшем action, для которого `predicate` вернул `true`. Бросок в predicate → `reject` → `opts.onError`.
-- Каскад: `transition` из эффекта углубляет стек; внешние эффекты дожидаются вложенных и видят уже финальный state. Эффекты разворачиваются LIFO.
-- `addMiddleware` перевычисляет `allowVoidReducer` (см. `__liteFsmAllowVoidReducer`).
-
-## `defineMachine<P, D>(opts?).create(cfg)` — core
-
-Источник: [`tests/core/createMachine.test.ts`](tests/core/createMachine.test.ts) (секция `defineMachine (core)`).
-
-Тонкая фабрика поверх `createMachine`: фиксирует `P`/`D`/`opts` один раз, дальше создаёт независимые машины:
-
-```ts
-const factory = defineMachine<Events, Deps>({ onError, dependencies });
-const a = factory.create(cfgA);
-const b = factory.create(cfgB);
-```
-
-- `a` и `b` — **независимые** stateful-машины (разный state, разные подписчики).
-- `opts.dependencies` и `opts.onError` прокидываются в каждую `create(...)`.
-- Набор методов совпадает с `createMachine`: `getState/transition/onTransition/addMiddleware`.
-
-## `MachineManager(machines, opts?)` — оркестратор
-
-Источник: [`tests/core/MachineManager.test.ts`](tests/core/MachineManager.test.ts).
-
-```ts
-MachineManager(machines, { onError?, middleware?, snapshot?, schemaVersion? })
-  → { getState, getSnapshot, getHydratedState, hydrate, dehydrate, transition, setDependencies, onTransition, replaceReducer }
-```
-
-### Поведение
-
-- Initial state собирается как `{ [name]: { state: cfg.initialState, context: cfg.initialContext } }`.
-- `transition(action)` прогоняет одно событие через **все** машины: каждая решает сама — реагировать или вернуть state как есть.
-- Машины, для которых нет соответствия `state→event`, оставляют snapshot **по ссылке** (важно для referential equality в селекторах).
-- В DEV — снимок целиком `deepFreeze`-ится.
-- Порядок исполнения: rootReducer (по всем машинам) → подписчики → эффекты по каждой машине.
-- Каскад: вложенные `transition` из эффектов работают как в одиночной машине — LIFO для возвратов, эффекты внешних машин видят финальное состояние.
-- `@@lite-fsm/*` — reserved namespace. Такие actions нельзя отправлять через `transition`.
-
-### Методы
-
-| Метод                                     | Что делает                                                                                                   |
-| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `getState()`                              | весь снимок (`{ [name]: { state, context } }`)                                                               |
-| `getSnapshot()`                           | runtime envelope `{ schemaVersion, machines }`; hooks `dehydrate` не вызывает                                |
-| `getHydratedState(snapshot, opts?)`       | pure preview: считает state после hydrate поверх `opts.baseState ?? getState()` без commit/callbacks/warnings |
-| `hydrate(snapshot, opts?)`                | применяет partial snapshot без middleware/effects; подписчики видят system action `@@lite-fsm/HYDRATE`       |
-| `dehydrate(opts?)`                        | собирает transport envelope и вызывает per-machine `dehydrate` hooks; unknown requested key → throw          |
-| `transition(action)`                      | то же, что в `createMachine`, но по карте машин; возвращает финальный action                                 |
-| `onTransition(cb)`                        | `(prev, current, action) => void`; action может быть user action или `@@lite-fsm/HYDRATE`                    |
-| `replaceReducer((prev) => next)`          | оборачивает существующий root-reducer; внутри можно сделать short-circuit или мутацию state до делегирования |
-| `setDependencies(deps \| (prev) => next)` | устанавливает или обновляет `D`, общий для всех эффектов                                                     |
-
-### Snapshot / SSR hydration
-
-`getSnapshot()` и `dehydrate()` возвращают envelope-объект, но решают разные задачи:
-
-- `getSnapshot()` — runtime read текущего manager state. Он не вызывает hooks и сохраняет slice-ссылки из `getState()`.
-- `getHydratedState()` — чистая версия hydrate для React SSR preview. Она вызывает machine `hydrate` hooks, но не мутирует manager, не вызывает subscribers/effects/middleware, не вызывает `onSchemaVersionMismatch`, `onUnknownMachineKey` и DEV warnings. Unknown keys silently skip'аются.
-- `dehydrate()` — transport/persistence export. Для каждой машины вызывает `cfg.dehydrate`, если hook задан.
-- `hydrate()` принимает совместимый snapshot и вызывает `cfg.hydrate(prev, snapshot, { strategy })` для машин с hook'ом. Если hook не задан, incoming slice трактуется как runtime `{ state, context }`.
-
-`hydrate` forgiving: неизвестные machine keys пропускаются, в DEV пишется warning, `onUnknownMachineKey` получает `(key, "hydrate" | "opts.snapshot")`. `schemaVersion` core не мигрирует: при mismatch вызывает `onSchemaVersionMismatch`, если callback задан, и продолжает apply.
-
-React entrypoint добавляет `FSMHydrationBoundary` и `useHydrateSnapshot`. Boundary не мутирует настоящий manager во время render: он даёт subtree read overlay только для `useSelector`, а настоящий `manager.hydrate(...)` выполняет в layout effect. `useManager().getState()`, effects, middleware и event handlers до commit видят настоящий до-hydrated state. `useHydrateSnapshot` — низкоуровневый commit-only hook без read overlay.
-
-Snapshot-объекты считаются immutable value objects: если содержимое snapshot изменилось, передавайте новую ссылку. React helpers дедуплицируют повторный commit по ссылке `snapshot` и `strategy`, а content-noop обязан жить в machine `hydrate` hook'ах через `return prev`.
-
-#### Hydration checklist
-
-- `FSMHydrationBoundary` нужен для SSR/RSC/Suspense seed'ов, которые должны быть видны subtree на первом render. `useHydrateSnapshot` используйте только когда read overlay не нужен.
-- Overlay видит только `useSelector`. Прямые чтения через `useManager().getState()`, middleware, effects и event handlers до layout-effect commit читают настоящий committed store.
-- `hydrate` hooks должны быть идемпотентными по содержимому: повторный snapshot с теми же данными возвращает `prev`, иначе будут лишние commits/subscriber notifications.
-- Snapshot лучше держать маленьким и partial: одна grid page, один widget/list entry, один cache segment. Глубокий merge на уровне core не делается.
-- `hydrate` и `getHydratedState` не запускают effects. Если после hydrate нужно что-то догрузить, делайте это отдельным user action из компонента или эффекта приложения.
-- Nested boundaries складываются по read path: дочерний boundary считает preview поверх ближайшего parent overlay, но каждый boundary отдельно коммитит свой snapshot в настоящий manager.
-- Boundaries должны быть scoped к **разным** machine keys. Если parent и child boundary гидратят одну машину с разным содержимым, итоговый committed state будет от **parent** (commits идут child→parent), а UI до commit показывает **child** через overlay → flicker. Подробнее ниже в "Overlapping boundaries".
-- Для custom transport shape задавайте парные `dehydrate`/`hydrate` hooks на машине. Без `hydrate` hook incoming slice считается runtime `{ state, context }`.
-- `schemaVersion` — сигнал совместимости, не мигратор. Core вызывает callback на commit hydrate, но решение skip/migrate должно быть принято приложением до вызова `hydrate`.
-
-#### Overlapping boundaries (non-commutative composition)
-
-Preview и commit идут в **разном** порядке:
-
-| Фаза            | Порядок                                                                             |
-| --------------- | ----------------------------------------------------------------------------------- |
-| Preview build   | parent → child (child видит parent preview как `baseState`)                         |
-| Layout-effect   | child → parent (React effects bottom-up, ближе к листу — раньше)                    |
-
-Для **разных** машин коммутативно (как в `ssr-demo-3`: outer = `ssrDemo3Grid`, inner = `ssrDemo3EntityList`) — порядок не важен, итог одинаков. Для **одной** машины с overlapping содержимым выигрывает parent, и UI flickает с child→parent после commit.
-
-Минимальный пример:
-
-```tsx
-const counter = {
-  config: { IDLE: {} },
-  initialState: "IDLE",
+const counter = createMachine({
+  config: {
+    idle: { INC: "idle", RESET: null },
+    "*": { BOOT: "idle" },
+  },
+  initialState: "idle",
   initialContext: { count: 0 },
-  hydrate: (prev, snap: { count: number }) =>
-    prev.context.count === snap.count ? prev : { state: prev.state, context: { count: snap.count } },
-};
-
-<FSMHydrationBoundary snapshot={{ machines: { counter: { count: 5 } } }}>
-  <FSMHydrationBoundary snapshot={{ machines: { counter: { count: 10 } } }}>
-    <Counter />  {/* useSelector((s) => s.counter.context.count) */}
-  </FSMHydrationBoundary>
-</FSMHydrationBoundary>
+  reducer: (slice, action, { nextState }) => ({
+    state: nextState,
+    context: { count: action.type === "RESET" ? 0 : slice.context.count + 1 },
+  }),
+  effects: {
+    idle: ({ action }) => console.log(action.type),
+    "*": ({ action }) => console.log("any", action.type),
+  },
+});
 ```
 
-| Шаг | Что произошло                                                                | `manager.getState()` | `<Counter />` |
-| --- | ---------------------------------------------------------------------------- | -------------------- | ------------- |
-| 1   | Render outer → preview = 5, overlay активен                                  | 0                    | —             |
-| 2   | Render inner → baseState = 5, preview = 10, overlay поверх parent overlay    | 0                    | **10**        |
-| 3   | React layout effects bottom-up: inner commits → `manager.hydrate({ 10 })`    | 10                   | 10            |
-| 4   | Outer commits → `manager.hydrate({ 5 })` (parent коммитит **последним**)     | **5**                | 10 (overlay)  |
-| 5   | `forceRender` после commit → preview idempotent → overlay collapses          | 5                    | **5**         |
+| Поле                              | Назначение                                                                |
+| --------------------------------- | ------------------------------------------------------------------------- |
+| `config`                          | граф `{ [state]: { [eventType]: target } }`; `"*"` — fallback transitions |
+| `initialState` · `initialContext` | стартовое `state` / `context`                                             |
+| `reducer?`                        | собирает следующее `{ state, context }`                                   |
+| `effects?`                        | sync/async side-effects по target state или `"*"`                         |
+| `hydrate?` · `dehydrate?`         | кастомная форма snapshot; дефолт — `{ state, context }`                   |
+| `groupTag?`                       | actor template only — tag группы                                          |
+| `persistence?`                    | actor template only — `"runtime"` (default) или `"snapshot"`              |
 
-Итог: одна frame пользователь видел `10`, потом UI "перепрыгнул" на `5`. Решение — не делайте overlapping boundaries по одной машине: либо гидратите её только в одном boundary (обычно в parent), либо разнесите данные по разным машинам/ключам.
+### Targets
 
-### `setDependencies` — детали
+| Target                                            | Поведение                                                             |
+| ------------------------------------------------- | --------------------------------------------------------------------- |
+| `"next"`                                          | переход в `"next"`                                                    |
+| `null`                                            | self-transition (state не меняется, action дойдёт до reducer/effects) |
+| `undefined` / нет ключа                           | action игнорируется                                                   |
+| `"__RESOLVED"` · `"__REJECTED"` · `"__CANCELLED"` | actor terminal — actor удаляется                                      |
 
-- Объектом — полностью заменяет deps.
-- Функцией — получает текущие deps, должна вернуть новые.
-- В эффектах `deps` доступны как `(deps & DefaultDeps) → effect(deps)`. `DefaultDeps` (`transition`, `action`, `condition`) добавляются менеджером — их в `setDependencies` отправлять **не нужно**.
+Явный `config[state][type]` важнее `"*"`. У actor template `__INIT` не наследует `"*"`: spawn только через явный `__INIT` transition.
 
-### Ошибки эффектов
-
-- Эффект синхронный или async — итог в `Promise.catch(opts.onError)`. Машина не падает.
-- Reject из `condition` (бросок в predicate) тоже идёт в `onError`.
-
-### `replaceReducer` (публичный API)
-
-Принимает функцию `(prev) => next`. Можно:
-
-- сделать short-circuit на конкретный action: вернуть свой state без вызова `prev`;
-- делегировать `prev(state, action)` для остальных случаев.
-
-Используется внутри `immerMiddleware` и `devToolsMiddleware` через `MiddlewareApi.replaceReducer`.
-
-## Identity-хелперы
-
-Источник: [`tests/core/createEffect.test.ts`](tests/core/createEffect.test.ts) (секция `identity helpers`).
-
-| Функция                                           | Поведение                                            | Когда нужна                                                                                                        |
-| ------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `createConfig(cfg)`                               | возвращает `cfg` по ссылке                           | захватить узкий тип конфига; ничего не делает в runtime                                                            |
-| `createReducer(reducer)`                          | возвращает reducer по ссылке                         | то же — фиксация типа                                                                                              |
-| `createMachine(cfg)` _(публичный API `lite-fsm`)_ | возвращает `cfg` по ссылке                           | identity-фабрика для `MachineConfig`; в `MachineManager`/`Machine`/`defineMachine` передаются именно такие конфиги |
-| `createEffect({ effect, type?, cancelFn? })`      | оборачивает эффект логикой `every`/`latest` + cancel | не identity — реально модифицирует поведение `transition` внутри                                                   |
-
-> Внутри `src/core/Machine.ts` есть одноимённая **stateful** функция `createMachine`, наружу она экспортируется как `Machine` (`export { CreateMachine as Machine }`). Публичный `createMachine` из `lite-fsm` — всегда identity для `MachineConfig`.
-
-### `createEffect` — детали
+## Reducer
 
 ```ts
-createEffect({ effect, type, cancelFn });
+reducer: (slice, action, { nextState, config }) => ({
+  state: nextState,
+  context: { ...slice.context, ...action.payload },
+});
 ```
 
-- `type: "every"` _(default)_ — `effect` запускается на каждый вызов; внутренний `transition` всегда проходит к оригинальному.
-- `type: "latest"` — каждый запуск получает свой `id`; если на момент вызова `transition` (внутри эффекта) появился более новый запуск — `transition` **подавляется** (effect выполняется до конца, но его результат не доходит).
-- `cancelFn(deps) => () => boolean` — вызывается на каждый запуск **до** эффекта; возвращённый `cancel()` проверяется при каждом `transition` внутри эффекта. `true` → `transition` подавляется.
-- `effect`-функция получает `deps` от вызывающего (от `MachineManager`/`createMachine`), но `transition` подменяется на обёртку, учитывающую `type`/`cancelFn`.
+Без `reducer` runtime делает default merge: `{ state: target ?? current, context: { ...context, ...action.payload } }`.
+
+`undefined` из reducer-а бросает `VOID_REDUCER_ERROR`, кроме случая, когда подключён `immerMiddleware` или middleware с маркером `__liteFsmAllowVoidReducer`.
+
+## Effects
+
+```ts
+effects: {
+  saving: async ({ action, transition, condition, api }) => {
+    await api.save(action.payload);
+    await condition((e) => e.type === "ACK");
+    transition({ type: "DONE" });
+  },
+  "*": ({ action }) => console.log(action.type),
+}
+```
+
+Effect получает один объект:
+
+| Ключ                   | Что даёт                                                                |
+| ---------------------- | ----------------------------------------------------------------------- |
+| `action`               | action, прошедший middleware                                            |
+| `transition(action)`   | dispatch нового события                                                 |
+| `condition(predicate)` | promise, резолвится на ближайший matching action                        |
+| `self`                 | (actor only) `{ actorId, groupId, groupTag }`                           |
+| user deps              | из `defineMachine({ dependencies })` или `manager.setDependencies(...)` |
+
+State effect приоритетнее `"*"`. Wildcard срабатывает и на self-transition. Ошибки и reject из `condition` уходят в `onError`.
+
+## Factories
+
+Все фабрики — typed identity helpers. Runtime ничего не создают, только сужают типы.
+
+| Factory                                      | Назначение                                       |
+| -------------------------------------------- | ------------------------------------------------ |
+| `createMachine(cfg)`                         | полный machine config                            |
+| `createConfig(cfg)`                          | только граф переходов                            |
+| `createReducer(fn)`                          | reducer с фиксированным action union             |
+| `createActorMeta(meta)`                      | frozen `Readonly<ActorMeta>` для replacement/time-travel input |
+| `createEffect({ effect, type?, cancelFn? })` | оборачивает effect политикой запуска             |
+
+### `createEffect`
+
+```ts
+const load = createEffect({
+  type: "latest",
+  cancelFn:
+    ({ signal }) =>
+    () =>
+      signal.aborted,
+  effect: async ({ transition }) => transition({ type: "DONE" }),
+});
+```
+
+| Опция                     | Поведение                                                                            |
+| ------------------------- | ------------------------------------------------------------------------------------ |
+| `type: "every"` (default) | каждый запуск может dispatch-ить                                                     |
+| `type: "latest"`          | старый запуск продолжает работать, его `transition` подавляется после нового запуска |
+| `cancelFn(deps)`          | возвращает `cancel(): boolean` — `true` подавляет любой `transition`                 |
+
+В actor effect guard покрывает и `transition.unscoped/actor/group/tag`.
+
+## `Machine(cfg)` — pure machine
+
+Низкоуровневая фабрика без state, middleware, подписок.
+
+```ts
+const machine = Machine(counter);
+const next = machine.transition({ state: "idle", context: { count: 0 } }, { type: "INC" });
+await machine.invokeEffect("idle", next.state, deps);
+```
+
+| Метод                               | Что делает                      |
+| ----------------------------------- | ------------------------------- |
+| `config`                            | ссылка на `cfg.config`          |
+| `transition(slice, action)`         | следующее `{ state, context }`  |
+| `invokeEffect(prev, current, deps)` | вызывает state effect или `"*"` |
+
+Actor templates standalone не работают — только в `MachineManager`.
+
+## `defineMachine(opts?).create(cfg)` — standalone stateful
+
+```ts
+const machine = defineMachine<AppEvent, Deps>({ dependencies, onError }).create(counter);
+
+machine.transition({ type: "INC" });
+machine.getState();
+const off = machine.onTransition((prev, next, action) => {});
+machine.addMiddleware(immerMiddleware);
+```
+
+| Метод                  | Что делает                                                         |
+| ---------------------- | ------------------------------------------------------------------ |
+| `getState()`           | текущее `{ state, context }`                                       |
+| `transition(action)`   | middleware → reducer → subscribers → effects                       |
+| `onTransition(cb)`     | подписка `(prev, current, action) => void`; возвращает unsubscribe |
+| `addMiddleware(...mw)` | добавляет middleware в конец цепочки                               |
+
+`defineMachine` фиксирует `P`, `D`, `opts` один раз; каждый `.create(cfg)` возвращает независимую машину.
+
+## `MachineManager(machines, opts?)`
+
+```ts
+const manager = MachineManager(
+  { counter, todos, syncActor },
+  {
+    middleware: [immerMiddleware, devToolsMiddleware()],
+    schemaVersion: 1,
+    snapshot: initialSnapshot,
+    onError: console.error,
+  },
+);
+
+manager.setDependencies({ api });
+manager.transition({ type: "INC" });
+```
+
+| Опция                      | Назначение                                              |
+| -------------------------- | ------------------------------------------------------- |
+| `middleware?`              | цепочка middleware на все user actions                  |
+| `snapshot?`                | начальный snapshot, применяется со strategy `"replace"` |
+| `schemaVersion?`           | версия snapshot                                         |
+| `onError?`                 | ошибки effects / `condition`                            |
+| `onUnknownMachineKey?`     | unknown key в `hydrate` или initial snapshot            |
+| `onSchemaVersionMismatch?` | mismatch `snapshot.schemaVersion`                       |
+
+| Метод                               | Назначение                                                     |
+| ----------------------------------- | -------------------------------------------------------------- |
+| `getState()`                        | текущий manager state                                          |
+| `transition(action)`                | dispatch user action; возвращает фактически применённый action |
+| `onTransition(cb)`                  | `(prev, current, action) => void`                              |
+| `setDependencies(deps \| updater)`  | задаёт user deps для effects                                   |
+| `replaceReducer(enhancer)`          | подменяет root reducer (вызывается из middleware)              |
+| `getSnapshot()`                     | runtime snapshot `{ schemaVersion, machines }` без hooks       |
+| `dehydrate(opts?)`                  | snapshot с `dehydrate` hooks                                   |
+| `hydrate(snapshot, opts?)`          | применяет snapshot без middleware/effects                      |
+| `getHydratedState(snapshot, opts?)` | preview `hydrate` без мутации manager-а                        |
+
+Action идёт во все domain machines; машина без подходящего transition остаётся без изменений (селекторы не дёргаются). Префикс `@@lite-fsm/*` зарезервирован — отправлять через `transition` нельзя.
+
+## Hydration
+
+```ts
+const snapshot = manager.dehydrate({ machines: ["counter"] });
+manager.hydrate(snapshot, { strategy: "merge" });
+
+const preview = manager.getHydratedState(snapshot, {
+  strategy: "replace",
+  baseState: manager.getState(),
+});
+```
+
+`dehydrate()` типизирует все snapshot-eligible machines как обязательные. `dehydrate({ machines: ["counter"] })` делает обязательными только выбранные literal keys; dynamic array остаётся partial envelope для безопасности.
+
+| API                  | Hooks       | Mutates | Subscribers          | Effects |
+| -------------------- | ----------- | ------- | -------------------- | ------- |
+| `getSnapshot()`      | —           | —       | —                    | —       |
+| `dehydrate()`        | `dehydrate` | —       | —                    | —       |
+| `getHydratedState()` | `hydrate`   | —       | —                    | —       |
+| `hydrate()`          | `hydrate`   | да      | `@@lite-fsm/HYDRATE` | —       |
+
+| Strategy    | Поведение                                                                                                                |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `"merge"`   | применяет только keys из snapshot                                                                                        |
+| `"replace"` | для actor templates сбрасывает actors, отсутствующих в snapshot; для domain machines форму replace решает `hydrate` hook |
+
+Domain hooks:
+
+```ts
+const profile = createMachine({
+  config: { ready: {} },
+  initialState: "ready",
+  initialContext: { user: null },
+  dehydrate: (slice) => slice.context.user,
+  hydrate: (prev, user) => (prev.context.user === user ? prev : { state: prev.state, context: { user } }),
+});
+```
+
+Unknown machine keys пропускаются: в DEV — warning + `onUnknownMachineKey`. `schemaVersion` миграцию не делает, только триггерит `onSchemaVersionMismatch`. Snapshot объекты считайте immutable; hooks делайте идемпотентными и возвращайте `prev`, если данные те же.
+
+## Actor templates
+
+Машина становится actor template, если в `config` есть literal `__INIT`.
+
+```ts
+const request = createMachine({
+  groupTag: "request",
+  config: {
+    __INIT: { START: "pending" },
+    pending: { RESOLVE: "__RESOLVED", FAIL: "__REJECTED" },
+  },
+  initialState: "__INIT",
+  initialContext: { id: "" },
+});
+```
+
+| Правило          | Значение                                                  |
+| ---------------- | --------------------------------------------------------- |
+| `initialState`   | всегда `"__INIT"`                                         |
+| spawn            | action должен match-ить `__INIT` transition               |
+| public record    | `state.requests[actorId] = { state, context, meta }`      |
+| terminal targets | `__RESOLVED` · `__REJECTED` · `__CANCELLED` удаляют actor |
+| domain machines  | получают action независимо от actor routing               |
+| standalone       | actor templates работают только в `MachineManager`        |
+
+### Routing
+
+```ts
+manager.transition({ type: "RESOLVE", meta: { actorId: "request/0" } });
+manager.transition({ type: "FAIL", meta: { groupId: "request/0" } });
+manager.transition({ type: "CANCEL", meta: { groupTag: "request" } });
+```
+
+Приоритет: `actorId > groupId > groupTag > unscoped`. Все три принимают `string | string[]`.
+
+Actor effect получает `self` и actor-aware dispatch:
+
+```ts
+effects: {
+  pending: ({ self, transition }) => {
+    transition.actor(self.actorId, { type: "RESOLVE" });
+    transition.group(self.groupId, { type: "PING" });
+    transition.tag(self.groupTag,   { type: "BROADCAST" });
+    transition.unscoped({ type: "GLOBAL_DONE" });
+  },
+}
+```
+
+Action из actor effect без явного routing остаётся в своей группе. `transition.unscoped(...)` снимает routing.
+
+### Persistence
+
+По умолчанию actors живут только в runtime: `dehydrate()` их пропускает, `hydrate()` пропускает входящий actor key. Чтобы actors попали в snapshot — `persistence: "snapshot"`:
+
+```ts
+const request = createMachine({
+  persistence: "snapshot",
+  groupTag: "request",
+  config: { __INIT: { START: "pending" }, pending: { DONE: "__RESOLVED" } },
+  initialState: "__INIT",
+  initialContext: { id: "" },
+});
+```
+
+Без hooks snapshot actor использует дефолтный payload `{ state, context }`. Кастомные actor snapshot hooks видят пользовательский data-slice `{ state, context }`, payload snapshot и hydrate meta `{ strategy }`. `actorId`, `groupId` и `groupTag` сохраняет и восстанавливает `MachineManager` рядом с actor snapshot entry.
 
 ## Middleware
 
-Источники: [`tests/core/createMachine.test.ts`](tests/core/createMachine.test.ts) (секция `addMiddleware`), [`tests/core/MachineManager.test.ts`](tests/core/MachineManager.test.ts) (секция `middleware`).
-
-Сигнатура:
-
 ```ts
-type Middleware = (api: MiddlewareApi) => (next) => (action) => result;
-```
-
-Типовая ремарка: `Middleware` по умолчанию больше не использует silent `any`; базовый default — `Middleware<unknown, AnyEvent>`. Для middleware, совместимого с любой парой `state/action`, используется `GenericMiddleware`.
-
-### `MiddlewareApi`
-
-| Ключ                             | Что доступно из middleware                                         |
-| -------------------------------- | ------------------------------------------------------------------ |
-| `getState()`                     | актуальный state до и после `next`                                 |
-| `transition(action)`             | redispatch — пройдёт **всю** цепочку middleware заново             |
-| `replaceReducer((prev) => next)` | подменить root reducer (применяется к `MachinesState`/`StateType`) |
-| `onTransition(cb)`               | подписка изнутри middleware                                        |
-| `condition(predicate)`           | дождаться action по предикату                                      |
-
-### Поведенческие правила
-
-- Порядок вызова middleware совпадает с порядком регистрации (`opts.middleware: [a, b]` или `addMiddleware(a, b)`): сначала `a`, затем `b`.
-- Middleware может **блокировать** action — не вызывая `next(action)`. Тогда state, подписчики и эффекты не запускаются.
-- Middleware может **модифицировать** action — `next({ ...action, payload: ... })`. Изменения видны reducer'у, подписчикам и wildcard-эффектам.
-- `api.transition` внутри middleware — это redispatch, проходящий через всю цепочку (не просто внутренний `_transition`).
-- Контракт возврата из `transition` — **тот action, который дошёл до конца цепочки** (после всех модификаций).
-
-### `addMiddleware` (для `createMachine`)
-
-- Накапливает middleware; каждый вызов перевычисляет обёртку.
-- Учитывает маркер `__liteFsmAllowVoidReducer` (см. `immerMiddleware`).
-
-> В `MachineManager` middleware задаются один раз через `opts.middleware`. Динамическое добавление — только на уровне отдельной машины через `createMachine` + `addMiddleware`.
-
-## `immerMiddleware`
-
-Источник: [`tests/middleware/immer.test.ts`](tests/middleware/immer.test.ts).
-
-| Поведение          | Детали                                                                                        |
-| ------------------ | --------------------------------------------------------------------------------------------- |
-| Маркер             | `immerMiddleware.__liteFsmAllowVoidReducer === true` — runtime разрешает reducer без `return` |
-| `replaceReducer`   | оборачивает root reducer в `produce(...)`: можно мутировать draft без return                  |
-| Top-level merge    | если reducer вернул объект — его top-level поля копируются в draft, `undefined` игнорируется  |
-| Pass-through       | сам `(next) => next` — actions проходят без изменения                                         |
-| Структурный шаринг | immer сохраняет ссылки у неизменённых вложенных объектов                                      |
-| Без middleware     | reducer без return → `VOID_REDUCER_ERROR`                                                     |
-
-Типичный паттерн:
-
-```ts
-reducer: (state, action, { nextState }) => {
-  state.state = nextState;
-  state.context.count += 1;
+const logger: Middleware<AppState, AppEvent> = (api) => (next) => (action) => {
+  const result = next(action);
+  console.log(api.getState(), action);
+  return result;
 };
 ```
 
-Без `immerMiddleware` такой reducer бросит `VOID_REDUCER_ERROR`.
+| `MiddlewareApi`            | Что даёт                       |
+| -------------------------- | ------------------------------ |
+| `getState()`               | текущий state                  |
+| `transition(action)`       | дёрнуть всю цепочку middleware |
+| `replaceReducer(enhancer)` | обернуть root reducer          |
+| `onTransition(cb)`         | подписка из middleware         |
+| `condition(predicate)`     | дождаться matching action      |
 
-## `devToolsMiddleware(options?)`
+Правила:
 
-Источники: [`tests/middleware/devTools.test.ts`](tests/middleware/devTools.test.ts), [`tests/middleware/devTools-node.test.ts`](tests/middleware/devTools-node.test.ts).
+- порядок pre-next = порядок регистрации, post-next — обратный (как в Redux);
+- код до `next(action)` видит prev state, код после — committed state и уже отработавших subscribers;
+- effects запускаются после возврата всей middleware-цепочки;
+- чтобы заблокировать action — не вызывать `next(action)`;
+- чтобы изменить — вызвать `next(modifiedAction)`;
+- `transition` возвращает action, дошедший до reducer-а.
 
-| Окружение                                   | Поведение                                                                                                                        |
-| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `typeof window === "undefined"` (SSR/Node)  | pass-through `(next) => (action) => next(action)`; ничего не подключает                                                          |
-| `window` без `__REDUX_DEVTOOLS_EXTENSION__` | pass-through; `replaceReducer` всё ещё подключается → `JUMP/ROLLBACK` через `@devtools/...` actions работают                     |
-| `window` + extension                        | подключение через `connect({...})` с фиксированным конфигом, `init(state)`, отправка обычных actions через `send(action, state)` |
-
-Конфиг при подключении: `features: { pause, export, test, jump, live: true, skip: false }`, `autoPause: false`, `latency: 500`.
-
-### Опции
-
-```ts
-devToolsMiddleware({ blacklistActions?: string[] })
-```
-
-- `blacklistActions` — типы действий, которые **не** отправляются в DevTools.
-- Действия с префиксом `@devtools/` тоже не отправляются обратно (защита от петли).
-- Без аргументов — `blacklistActions = []`.
-
-### Сообщения от DevTools (через `subscribe`)
-
-| `message`                                    | Эффект                                                                                                       |
-| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `type: "DISPATCH"` + `state` (валидный JSON) | менеджер получает action `@devtools/JUMP_TO_ACTION` или `@devtools/ROLLBACK` с `payload = JSON.parse(state)` |
-| `type: "DISPATCH"` без `state`               | игнорируется молча                                                                                           |
-| `type: "DISPATCH"` + невалидный JSON         | `console.error("[devToolsMiddleware]", err)`                                                                 |
-| Любое `type !== "DISPATCH"`                  | игнорируется                                                                                                 |
-
-### `replaceReducer` от devTools
-
-Внутри установлен reducer:
+### `immerMiddleware`
 
 ```ts
-case "@devtools/JUMP_TO_ACTION":
-case "@devtools/ROLLBACK":
-  return { ...state, ...action.payload };
-default:
-  return originalReducer(state, action);
+MachineManager({ counter }, { middleware: [immerMiddleware] });
 ```
 
-Можно вручную инициировать тот же эффект — `manager.transition({ type: "@devtools/JUMP_TO_ACTION", payload: ... })` работает и без extension в окне.
+Оборачивает root reducer в `produce(...)`: можно мутировать draft и не возвращать ничего. Если reducer всё-таки вернул объект, top-level поля копируются в draft, неизменённые вложенные объекты сохраняют ссылки. Несёт маркер `__liteFsmAllowVoidReducer === true` — core разрешает `void` reducer.
 
-> `devToolsMiddleware` **не** имеет маркера `__liteFsmAllowVoidReducer` — без `immerMiddleware` reducer без return по-прежнему упадёт.
-
-## React API
-
-### `FSMContext`, `FSMContextProvider`
-
-Источник: [`tests/react/FSMContext.test.tsx`](tests/react/FSMContext.test.tsx).
-
-- `FSMContext` — `React.Context<unknown>`. По умолчанию runtime-значение — `null`.
-- Типизированный manager стирается при записи в context, а нужный `FSMContextType<S, P>` восстанавливается в `useManager<S, P>()`.
-- `<FSMContextProvider machineManager={...}>` — мемоизирует переданный `machineManager` через `useMemo`. Меняется только при смене ссылки на `machineManager`.
-
-### `useManager<S, P>()`
-
-Источник: [`tests/react/hooks.test.tsx`](tests/react/hooks.test.tsx).
-
-| Сценарий                    | Результат                                                                            |
-| --------------------------- | ------------------------------------------------------------------------------------ |
-| Внутри `FSMContextProvider` | возвращает тот же `machineManager` по ссылке                                         |
-| Без provider'а              | бросает `Error("Hooks from lite-fsm/react must be used within FSMContextProvider.")` |
-
-Типовая ремарка: без generic-ов `useManager()` больше не возвращает `IMachineManager<any, any>`; default — безопасный `IMachineManager<MachineStore, AnyEvent>`. Для app-level строгости указывай `useManager<AppMachines, AppEvent>()`.
-
-### `useTransition<P>()`
-
-| Сценарий       | Результат                               |
-| -------------- | --------------------------------------- |
-| С provider'ом  | возвращает функцию `manager.transition` |
-| Без provider'а | бросает ту же ошибку, что `useManager`  |
-
-Возврат — **сам** `transition`, без обёрток. Можно сохранять в ref / пробрасывать как пропс.
-
-Типовая ремарка: без generic-ов `useTransition()` возвращает `(payload: AnyEvent) => AnyEvent`, а не `(payload: any) => any`. Для строгого dispatch используй `useTransition<AppEvent>()`.
-
-### `useSelector<S, R>(selector, equalityFn?)`
-
-Под капотом — `useSyncExternalStoreWithSelector` (через `use-sync-external-store/shim/with-selector`).
-
-| Поведение                | Детали                                                              |
-| ------------------------ | ------------------------------------------------------------------- |
-| Подписка                 | через `manager.onTransition`                                        |
-| Снимок                   | `manager.getState()`; внутри `FSMHydrationBoundary` временно overlay preview |
-| Селектор                 | `(state) => R` — изоляция нужного среза                             |
-| `equalityFn(prev, next)` | если возвращает `true` — компонент **не** ререндерится              |
-| Без `equalityFn`         | сравнение по `===` — стабильные ссылки в state не вызывают ререндер |
-| Без provider'а           | бросает ту же ошибку, что `useManager`                              |
-
-### `defineMachine<P, D>(opts?).create(cfg)` — react-вариант
-
-Источник: [`tests/react/defineMachine.test.tsx`](tests/react/defineMachine.test.tsx).
-
-Возвращает **функцию-хук** с прикреплённым API:
+### `devToolsMiddleware(options?)`
 
 ```ts
-const machine = defineMachine<Events, Deps>(opts).create(cfg);
-
-const Probe = () => {
-  const slice = machine((state) => state.context.n);  // хук
-  return <span>{slice}</span>;
-};
-
-machine.transition({ type: "GO" });  // тот же машинный transition
-machine.getState();
-machine.onTransition(cb);
-machine.addMiddleware(mw);
+MachineManager({ counter }, { middleware: [devToolsMiddleware({ blacklistActions: ["TICK"] })] });
 ```
 
-| Контракт                                                       | Поведение                                                  |
-| -------------------------------------------------------------- | ---------------------------------------------------------- |
-| `machine(selector, equalityFn?)`                               | то же, что `useSelector`, но привязан к этой машине        |
-| `machine.transition / getState / onTransition / addMiddleware` | те же методы, что у `createMachine`                        |
-| `addMiddleware`                                                | модифицирует поведение и итоговый slice, который видит хук |
-| `onError`                                                      | ловит ошибки эффектов, как в core-варианте                 |
-| `dependencies`                                                 | прокидываются в эффекты                                    |
+| Опция                         | Значение                                         |
+| ----------------------------- | ------------------------------------------------ |
+| `blacklistActions?: string[]` | action types, не отправляющиеся в Redux DevTools |
 
-Каждый вызов `defineMachine(...).create(cfg)` создаёт **независимую** машину. Несколько компонентов, использующих один и тот же `machine`, делят state.
+Без `window.__REDUX_DEVTOOLS_EXTENSION__` — pass-through. С extension: `connect` → `init` → `send` на каждый action; `JUMP_TO_ACTION` / `ROLLBACK` восстанавливают state через `replaceReducer`.
 
-## Тонкости и подводные камни
+## React
 
-1. **`VOID_REDUCER_ERROR`** — текст: `"Reducer returned undefined. Return the next state, or use immerMiddleware to mutate draft state without return."`. Бросается, если ни `immerMiddleware`, ни custom-middleware с маркером `__liteFsmAllowVoidReducer === true` не подключены.
-2. **DEV deepFreeze** — `process.env.NODE_ENV !== "production"`. Любая попытка мутации snapshot'а из `getState()` извне → `TypeError`. В prod — не замораживается ради скорости.
-3. **Self-transition `null`** — не меняет `state`, мержит payload в context (если без reducer'а), активирует только wildcard effect (но не state-effect текущего состояния).
-4. **Wildcard `"*"`** — приоритет: явный `state[event]` всегда выигрывает. Wildcard срабатывает только при отсутствии явного маппинга.
-5. **Каскад `transition` из эффектов** — синхронный стек, эффекты разворачиваются **LIFO**; внешние эффекты видят финальный snapshot, в котором отработали все вложенные.
-6. **Подписчики на момент эмита** — список подписчиков фиксируется на старте цикла. Отписка во время вызова отключает только следующий цикл.
-7. **`condition` reject** — попадает в `onError` (или просто Promise.reject, если `onError` не задан). Сам `condition` отписывается автоматически после resolve/reject.
-8. **`transition` возвращает action из middleware** — не исходный. Если middleware модифицирует payload, вернётся модифицированная версия.
-9. **`MachineManager({})`** — корректный, но у `transition` нет ни одного валидного события (тип события — `never`); `getState()` возвращает `{}`.
-10. **Маркер `__liteFsmAllowVoidReducer`** — runtime контракт между core и middleware. Чтобы написать своё middleware, разрешающее void-reducer, добавь свойство `mw.__liteFsmAllowVoidReducer = true` (см. `immerMiddleware` для примера).
-11. **`devToolsMiddleware`: window есть, extension нет** — всё ещё устанавливает кастомный reducer для `@devtools/*` actions; можно «вручную» восстанавливать state, диспатча `@devtools/JUMP_TO_ACTION`. В SSR (нет `window`) — чистый pass-through, никаких побочных эффектов.
-12. **`createMachine` в публичном API — identity** — для stateful-машины используй `Machine` или `defineMachine().create(...)`. Похожие имена внутри библиотеки решены через ре-экспорт `CreateMachine as Machine`.
+```tsx
+type Store = { counter: typeof counter };
+const manager = MachineManager({ counter });
+
+function App() {
+  return (
+    <FSMContextProvider machineManager={manager}>
+      <Counter />
+    </FSMContextProvider>
+  );
+}
+
+function Counter() {
+  const count = useSelector<Store, number>((s) => s.counter.context.count);
+  const transition = useTransition<AppEvent>();
+  return <button onClick={() => transition({ type: "INC" })}>{count}</button>;
+}
+```
+
+| API                                        | Назначение                                                           |
+| ------------------------------------------ | -------------------------------------------------------------------- |
+| `FSMContextProvider`                       | кладёт manager в context                                             |
+| `useManager<S, P>()`                       | manager из context                                                   |
+| `useTransition<P>()`                       | `manager.transition`                                                 |
+| `useSelector<S, R>(selector, equalityFn?)` | `useSyncExternalStoreWithSelector`-обёртка; default equality — `===` |
+| `FSMHydrationBoundary`                     | preview snapshot уже на render + apply в layout effect               |
+| `useHydrateSnapshot(snapshot, opts?)`      | apply snapshot в layout effect, без preview                          |
+| `defineMachine`                            | standalone machine как hook                                          |
+
+Внутри `FSMHydrationBoundary` selector читает overlay; `useManager().getState()` до layout effect — обычный state manager-а.
+
+### Hydration в React
+
+```tsx
+<FSMHydrationBoundary snapshot={snapshot} strategy="merge">
+  <Page />
+</FSMHydrationBoundary>
+```
+
+| Когда                                                                      | API                    |
+| -------------------------------------------------------------------------- | ---------------------- |
+| snapshot должен быть виден subtree уже на первом render (SSR/RSC/Suspense) | `FSMHydrationBoundary` |
+| только применить snapshot после mount                                      | `useHydrateSnapshot`   |
+
+Не вкладывайте boundaries с разным snapshot на один и тот же machine key: preview идёт parent → child, а layout effect — child → parent, поэтому parent перезапишет child.
+
+### React `defineMachine`
+
+```tsx
+const useCounter = defineMachine<AppEvent>().create(counter);
+
+function Counter() {
+  const count = useCounter((s) => s.context.count);
+  return <button onClick={() => useCounter.transition({ type: "INC" })}>{count}</button>;
+}
+```
+
+Hook-instance совмещает методы standalone machine (`transition`, `getState`, `onTransition`, `addMiddleware`). Несколько компонентов на один hook делят один state.
+
+## Runtime notes
+
+| Тонкость                 | Коротко                                                               |
+| ------------------------ | --------------------------------------------------------------------- |
+| DEV freeze               | snapshots из `getState()` deep-frozen при `NODE_ENV !== "production"` |
+| Subscribers              | sync после изменения state; unsubscribe виден на следующем dispatch   |
+| Effects                  | после subscribers; ошибки идут в `onError`, machine не падает         |
+| Reentrant `transition`   | разрешён из middleware/subscriber/effect, проходит обычный pipeline   |
+| Self-transition (`null`) | state не меняется; default reducer мержит payload в context           |
+| Wildcard                 | fallback для transitions и effects; явный state приоритетнее          |
+| Empty manager            | `MachineManager({})` валиден; state = `{}`                            |
+| Reserved actions         | `@@lite-fsm/*` — только для core                                      |
+
+## Команды
+
+| Проверка             | Команда                  |
+| -------------------- | ------------------------ |
+| Unit tests           | `npm run test`           |
+| Type tests           | `npm run test:types`     |
+| Typecheck            | `npm run check-types`    |
+| Lint                 | `npm run lint`           |
+| Release verification | `npm run verify:release` |

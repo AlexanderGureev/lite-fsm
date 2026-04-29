@@ -270,7 +270,9 @@ replaceReducer(
 ): void
 ```
 
-Заменяет редьюсер менеджера автоматов. Этот метод используется middleware для модификации поведения обработки состояний.
+Заменяет root reducer менеджера автоматов. Этот метод используется middleware для модификации обработки обычных transition, Immer-интеграции и DevTools-style restore.
+
+Если reducer возвращает trusted lite-fsm/devtools/dehydrate-compatible actor records, manager синхронизирует actor sidecar через replacement reconcile. Ручная сборка actor records не является гарантированным API: невалидные slices по-прежнему бросают `LITE_FSM_INVALID_ACTOR_SLICE`.
 
 **Параметры:**
 
@@ -299,6 +301,25 @@ const loggingMiddleware = (api) => {
 
 // Использование middleware
 const manager = MachineManager({ counter: counterMachine }, { middleware: [loggingMiddleware] });
+```
+
+**Пример DevTools-style restore через `replaceReducer`:**
+
+```ts showLineNumbers copy
+const restoreMiddleware = (api) => {
+  api.replaceReducer((reducer) => (state, action) => {
+    if (!action.type.startsWith("@devtools/")) {
+      return reducer(state, action);
+    }
+
+    return {
+      ...state,
+      ...(action.payload as Partial<typeof state>),
+    };
+  });
+
+  return (next) => (action) => next(action);
+};
 ```
 
 ##### condition

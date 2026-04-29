@@ -38,7 +38,7 @@ export const FSMHydrationBoundary = <S extends MachineStore>({
   useIsomorphicLayoutEffect(() => {
     if (!hasOverlay) return;
     const committed = committedRef.current;
-    /* v8 ignore next 3 -- Guards StrictMode effect replay for the same render snapshot. */
+    /* v8 ignore next 3 -- защита от StrictMode replay с тем же render snapshot. */
     if (committed?.baseState === baseState && committed.snapshot === snapshot && committed.strategy === hydrateStrategy) {
       return;
     }

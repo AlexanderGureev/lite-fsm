@@ -32,6 +32,11 @@ export default {
     title: "Примеры",
     type: "page",
   },
+  playground: {
+    title: "Playground",
+    type: "page",
+    href: "/playground/",
+  },
   releases: {
     title: "Релизы",
     type: "page",

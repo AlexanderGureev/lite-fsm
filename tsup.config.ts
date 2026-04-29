@@ -28,6 +28,7 @@ export default defineConfig({
   },
   sourcemap: false,
   splitting: false,
+  minify: true,
   target: "es2020",
   tsconfig: "./tsconfig.json",
 });

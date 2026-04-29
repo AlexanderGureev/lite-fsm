@@ -5,7 +5,7 @@ import { render, renderHook, act } from "@testing-library/react";
 
 import { FSMContextProvider, useManager, useSelector, useTransition } from "../../src/react";
 import { MachineManager } from "../../src/core/MachineManager";
-import { MachineReducer } from "../../src/core/types";
+import { FSMEvent, MachineConfig, MachineReducer } from "../../src/core/types";
 
 type CounterConfig = { readonly IDLE: { readonly INC: null; readonly GO: "ACTIVE" }; readonly ACTIVE: {} };
 type CounterAction = { type: "INC" } | { type: "GO" };
@@ -180,5 +180,71 @@ describe("useSelector", () => {
     expect(renderCount).toBe(initial);
     expect(getByTestId("v").textContent).toBe("0");
     expect(eq).toHaveBeenCalled();
+  });
+
+  it("сохраняет referential equality actor record для unrelated dispatch и empty collapse", () => {
+    type ActorEvent = FSMEvent<"SPAWN", { id: string }> | FSMEvent<"DONE">;
+    type Event = ActorEvent | CounterAction;
+    const actor: MachineConfig<{ __INIT: { SPAWN: "PENDING" }; PENDING: { DONE: "__RESOLVED" } }, { id: string }, Event> = {
+      config: { __INIT: { SPAWN: "PENDING" }, PENDING: { DONE: "__RESOLVED" } },
+      initialState: "__INIT",
+      initialContext: { id: "" },
+      reducer: (state, action, meta) => {
+        if (action.type === "SPAWN") return { state: meta.nextState, context: { id: action.payload.id } };
+        return { state: meta.nextState, context: state.context };
+      },
+    };
+    type Store = { counter: typeof machineSchema.counter; sync: typeof actor };
+    const manager = MachineManager<Store, Event>({
+      counter: machineSchema.counter,
+      sync: actor,
+    });
+    let renderCount = 0;
+    let selectedRecord: ReturnType<typeof manager.getState>["sync"] | null = null;
+
+    const Probe = () => {
+      renderCount++;
+      selectedRecord = useSelector<Store, ReturnType<typeof manager.getState>["sync"]>((s) => s.sync);
+      return <span>{Object.keys(selectedRecord).length}</span>;
+    };
+
+    render(
+      <FSMContextProvider machineManager={manager}>
+        <Probe />
+      </FSMContextProvider>,
+    );
+
+    const empty = selectedRecord;
+    const initialRenders = renderCount;
+
+    act(() => {
+      manager.transition({ type: "INC" });
+    });
+    expect(renderCount).toBe(initialRenders);
+    expect(selectedRecord).toBe(empty);
+
+    act(() => {
+      manager.transition({ type: "SPAWN", payload: { id: "a" } });
+    });
+    expect(renderCount).toBe(initialRenders + 1);
+    expect(selectedRecord).not.toBe(empty);
+    const busy = selectedRecord;
+
+    act(() => {
+      manager.transition({ type: "INC" });
+    });
+    expect(renderCount).toBe(initialRenders + 1);
+    expect(selectedRecord).toBe(busy);
+
+    act(() => {
+      manager.transition({ type: "DONE", meta: { actorId: "sync/0" } });
+    });
+    expect(selectedRecord).toBe(empty);
+
+    act(() => {
+      manager.transition({ type: "INC" });
+    });
+    expect(renderCount).toBe(initialRenders + 2);
+    expect(selectedRecord).toBe(empty);
   });
 });

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "tstyche";
 import {
   defineMachine,
+  type AnyEvent,
   type FSMEvent,
   type IMachine,
   type IMachineManager,
@@ -8,12 +9,14 @@ import {
   MachineManager,
   type MachineReducer,
   type MachineConfig,
+  type MachineManagerDehydratedSnapshot,
   type MachineManagerRuntimeSnapshot,
   type MachineManagerSnapshot,
   type Middleware,
   type MachineEvents,
   type MachineDependencies,
   type MachineStore,
+  type ManagerAction,
   type ManagerCommitAction,
   type StateType,
   type Subscriber,
@@ -229,7 +232,9 @@ describe("MachineManager(machines, opts?)", () => {
         opts?: { strategy?: "replace" | "merge"; baseState?: MachinesState<Machines> },
       ) => MachinesState<Machines>
     >();
-    expect(manager.dehydrate()).type.toBe<MachineManagerSnapshot<Machines>>();
+    expect(manager.dehydrate()).type.toBe<MachineManagerDehydratedSnapshot<Machines>>();
+    expect(manager.dehydrate({ machines: ["counter"] }).machines.counter).type.toBe<StateType<CounterCfg, CounterCtx>>();
+    expect(manager.dehydrate({}).machines.counter).type.toBe<StateType<CounterCfg, CounterCtx>>();
     expect(manager.hydrate).type.toBe<
       (snapshot: MachineManagerSnapshot<Machines>, opts?: { strategy?: "replace" | "merge" }) => void
     >();
@@ -244,7 +249,7 @@ describe("MachineManager(machines, opts?)", () => {
     const mw: Middleware<MachinesState<Machines>, CounterEvt> = (api) => (next) => (action) => {
       expect(api.getState()).type.toBe<MachinesState<Machines>>();
       api.onTransition((_prev, _current, committed) => {
-        expect(committed).type.toBe<ManagerCommitAction<MachineStore, CounterEvt>>();
+        expect(committed).type.toBe<ManagerCommitAction<MachineStore, AnyEvent>>();
       });
       return next(action);
     };
@@ -277,7 +282,10 @@ describe("MachineManager(machines, opts?)", () => {
 
   test("transition отклоняет events, которых нет в P", () => {
     const manager = MachineManager<Machines, CounterEvt>(machines);
+    expect(manager.transition).type.toBe<(payload: ManagerAction<CounterEvt>) => ManagerAction<CounterEvt>>();
     manager.transition({ type: "INC", payload: { amount: 1 } });
+    // @ts-expect-error!
+    manager.transition({ type: "START" }, {});
     // @ts-expect-error!
     manager.transition({ type: "UNKNOWN" });
   });

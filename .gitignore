@@ -25,6 +25,7 @@ dist-ssr
 
 docs/.next/
 docs/node_modules/
+.preview/
 
 # Pagefind индексы для поиска
 docs/public/_pagefind/
@@ -33,3 +34,4 @@ coverage/
 internal
 .cursor
 tsconfig.tsbuildinfo
+.agents

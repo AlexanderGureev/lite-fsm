@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 
 import { createEffect, createMachine, createReducer, createConfig } from "../../src/core";
+import type { ActorTransition } from "../../src/core/types";
 
 const makeDeps = (actionType: string) => ({
   transition: vi.fn(),
@@ -67,6 +68,54 @@ describe("createEffect", () => {
 
       expect(effect).toHaveBeenCalledTimes(2);
       expect(secondDeps.transition).not.toHaveBeenCalled();
+    });
+
+    it("cancelFn подавляет actor transition sugar так же, как callable transition", () => {
+      type Event = { type: "NEXT" };
+      type ActorConfig = { __INIT: { NEXT: "READY" }; READY: { NEXT: null } };
+      const actorTransition = Object.assign(vi.fn((action: Event) => action), {
+        unscoped: vi.fn((action: Event) => action),
+        actor: vi.fn((_id: string | string[], action: Event) => action),
+        group: vi.fn((_id: string | string[], action: Event) => action),
+        tag: vi.fn((_id: string | string[], action: Event) => action),
+      }) satisfies ActorTransition<Event>;
+      const deps = {
+        transition: actorTransition,
+        action: { type: "NEXT" } as Event,
+        condition: vi.fn(),
+        self: { actorId: "actor/0", groupId: "group/0", groupTag: "group" },
+      };
+      const callEveryTransition = ({ transition }: { transition: ActorTransition<Event> }) => {
+        transition({ type: "NEXT" });
+        transition.unscoped({ type: "NEXT" });
+        transition.actor("actor/0", { type: "NEXT" });
+        transition.group("group/0", { type: "NEXT" });
+        transition.tag("group", { type: "NEXT" });
+      };
+
+      createEffect<Event, {}, ActorConfig, "*">({
+        effect: callEveryTransition,
+        cancelFn: () => () => false,
+      })(deps);
+
+      expect(actorTransition).toHaveBeenCalledTimes(1);
+      expect(actorTransition.unscoped).toHaveBeenCalledTimes(1);
+      expect(actorTransition.actor).toHaveBeenCalledTimes(1);
+      expect(actorTransition.group).toHaveBeenCalledTimes(1);
+      expect(actorTransition.tag).toHaveBeenCalledTimes(1);
+
+      vi.clearAllMocks();
+
+      createEffect<Event, {}, ActorConfig, "*">({
+        effect: callEveryTransition,
+        cancelFn: () => () => true,
+      })(deps);
+
+      expect(actorTransition).not.toHaveBeenCalled();
+      expect(actorTransition.unscoped).not.toHaveBeenCalled();
+      expect(actorTransition.actor).not.toHaveBeenCalled();
+      expect(actorTransition.group).not.toHaveBeenCalled();
+      expect(actorTransition.tag).not.toHaveBeenCalled();
     });
   });
 
