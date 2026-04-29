@@ -2,7 +2,7 @@ name: Deploy Docs and Playground to GitHub Pages
 
 on:
   push:
-    branches: ["main"]
+    branches: ["main", "rc-2.0"]
     paths:
       - "src/**"
       - "docs/**"
