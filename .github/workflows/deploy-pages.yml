@@ -61,7 +61,8 @@ jobs:
 
       - name: Create Pagefind config for docs
         working-directory: ./docs
-        run: echo '{ "baseUrl": "/lite-fsm" }' > out/_pagefind-config.json
+        run: |
+          echo '{ "baseUrl": "/lite-fsm" }' > out/_pagefind-config.json
 
       - name: Create Pagefind entry for docs
         working-directory: ./docs
