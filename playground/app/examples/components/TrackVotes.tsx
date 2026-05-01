@@ -6,6 +6,7 @@ import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { publicAssetPath } from "@/lib/public-paths";
 import { cn } from "@/lib/utils";
 
 export type TrackVoteValue = "like" | "dislike" | null;
@@ -26,7 +27,7 @@ type TrackMeta = {
 };
 
 const numberFormatter = new Intl.NumberFormat("ru-RU");
-const posterSrc = "/examples/likes/track-poster-placeholder.png";
+const posterSrc = publicAssetPath("/examples/likes/track-poster-placeholder.png");
 
 const trackMetaById: Partial<Record<string, TrackMeta>> = {
   "item-1": {

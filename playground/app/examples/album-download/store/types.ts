@@ -1,4 +1,7 @@
 import type { FSMEvent } from "lite-fsm";
+
+import { publicAssetPath } from "@/lib/public-paths";
+
 import type { AppState } from ".";
 
 export const album = {
@@ -7,7 +10,7 @@ export const album = {
   label: "Kestrel Index",
   releaseType: "EP",
   year: "2026",
-  cover: "/examples/album-download/cover-00.png",
+  cover: publicAssetPath("/examples/album-download/cover-00.png"),
 } as const;
 
 export const tracks = [
@@ -17,7 +20,7 @@ export const tracks = [
     title: "Primer Glow",
     duration: "3:24",
     sizeMb: 8.4,
-    cover: "/examples/album-download/cover-01.png",
+    cover: publicAssetPath("/examples/album-download/cover-01.png"),
   },
   {
     id: "track-02",
@@ -25,7 +28,7 @@ export const tracks = [
     title: "Thin Signal",
     duration: "4:02",
     sizeMb: 10.1,
-    cover: "/examples/album-download/cover-02.png",
+    cover: publicAssetPath("/examples/album-download/cover-02.png"),
   },
   {
     id: "track-03",
@@ -33,7 +36,7 @@ export const tracks = [
     title: "Arc Minute",
     duration: "2:58",
     sizeMb: 7.2,
-    cover: "/examples/album-download/cover-03.png",
+    cover: publicAssetPath("/examples/album-download/cover-03.png"),
   },
   {
     id: "track-04",
@@ -41,7 +44,7 @@ export const tracks = [
     title: "Hollow Carrier",
     duration: "5:16",
     sizeMb: 12.8,
-    cover: "/examples/album-download/cover-04.png",
+    cover: publicAssetPath("/examples/album-download/cover-04.png"),
   },
   {
     id: "track-05",
@@ -49,7 +52,7 @@ export const tracks = [
     title: "Soft Reset",
     duration: "3:47",
     sizeMb: 9.5,
-    cover: "/examples/album-download/cover-05.png",
+    cover: publicAssetPath("/examples/album-download/cover-05.png"),
   },
   {
     id: "track-06",
@@ -57,7 +60,7 @@ export const tracks = [
     title: "Return Path",
     duration: "4:31",
     sizeMb: 11.4,
-    cover: "/examples/album-download/cover-06.png",
+    cover: publicAssetPath("/examples/album-download/cover-06.png"),
   },
 ] as const;
 

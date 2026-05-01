@@ -6,6 +6,9 @@ const config = {
   output: "export",
   basePath,
   assetPrefix: basePath,
+  env: {
+    NEXT_PUBLIC_PLAYGROUND_BASE_PATH: basePath,
+  },
   trailingSlash: true,
   images: {
     unoptimized: true,

@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import { publicAssetPath } from "@/lib/public-paths";
 import { cn } from "@/lib/utils";
 
 import { ENEMY_RADIUS, PLAYER_RADIUS, PROJECTILE_RADIUS, PROJECTILE_TTL, WORLD } from "../store/constants";
@@ -43,11 +44,11 @@ type CursorKeysLike = { left?: KeyLike; right?: KeyLike; up?: KeyLike; down?: Ke
 type WasdKeysLike = { W?: KeyLike; A?: KeyLike; S?: KeyLike; D?: KeyLike };
 type HitFeedbackEntry = { ring: PhaserArc; effect: PhaserImage };
 
-const START_SCREEN_IMAGE = "/examples/roguelite/start-screen.png";
+const START_SCREEN_IMAGE = publicAssetPath("/examples/roguelite/start-screen.png");
 const ROGUELITE_ASSETS = {
-  actors: "/examples/roguelite/assets/actors.png",
-  projectiles: "/examples/roguelite/assets/projectiles.png",
-  hitEffect: "/examples/roguelite/assets/hit-effect.png",
+  actors: publicAssetPath("/examples/roguelite/assets/actors.png"),
+  projectiles: publicAssetPath("/examples/roguelite/assets/projectiles.png"),
+  hitEffect: publicAssetPath("/examples/roguelite/assets/hit-effect.png"),
 } as const;
 const ROGUELITE_TEXTURES = {
   actors: "roguelite-actors",
