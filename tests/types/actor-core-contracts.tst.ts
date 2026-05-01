@@ -274,7 +274,7 @@ describe("публичные type-контракты actor core", () => {
     const domainEffect: MachineEffect<"busy", DomainCfg, Evt, UserDeps> = (deps) => {
       const { action, transition, condition, clock } = deps;
       expect(action).type.toBe<Spawn>();
-      expect(transition).type.toBe<(data: Evt) => Evt>();
+      expect(transition).type.toBe<(data: ManagerAction<Evt>) => ManagerAction<Evt>>();
       expect(condition).type.toBe<(predicate: (a: Evt) => boolean) => Promise<boolean>>();
       expect(clock()).type.toBe<number>();
       // @ts-expect-error!

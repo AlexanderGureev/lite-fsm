@@ -29,7 +29,7 @@ type MachineLike = {
   invokeEffect(prevState: string, currentState: string, deps: AnyRecord): Promise<void>;
 };
 type EffectsTargets = ActorRuntime[];
-type DomainTransition<P extends AnyEvent> = (action: P) => P;
+type DomainTransition<P extends AnyEvent> = (action: ManagerAction<P>) => ManagerAction<P>;
 type EffectSubscriber<P extends AnyEvent> = (
   prev: unknown,
   current: unknown,
@@ -143,7 +143,7 @@ export const createActorEffectsRuntime = <P extends AnyEvent>(
     currentState: RootStateView,
     action: ManagerAction<P>,
   ) => {
-    const transition: DomainTransition<P> = (nextAction) => refs.transition(nextAction) as P;
+    const transition: DomainTransition<P> = (nextAction) => refs.transition(nextAction);
     for (const name of domainKeys) {
       const machine = machines[name];
       const prev = prevState[name] as { state: string; context: AnyRecord };

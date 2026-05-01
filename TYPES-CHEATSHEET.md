@@ -133,7 +133,9 @@ const saveEffect: MachineEffect<"saving", SaveConfig, SaveEvent, { api: Api }> =
 | `EffectStateName<C>`        | domain: `StateName<C> \| "*"`; actor: `ActorPublicState<C> \| "*"`          |
 | `IncomingEventTypes<C, N>`  | event names, ведущие в state `N`                                            |
 | `ActionForState<C, N, P>`   | `Extract<P, { type: IncomingEventTypes<C, N> }>` (для `N = "*"` — весь `P`) |
-| `DefaultDeps<N, C, P>`      | `{ transition, action: ActionForState<C, N, P>, condition }`                |
+| `DefaultDeps<N, C, P>`      | `{ transition: (action: ManagerAction<P>) => ManagerAction<P>, action: ActionForState<C, N, P>, condition }` |
+
+`transition` в domain effects принимает `ManagerAction<P>`, поэтому новое событие может нести routing `meta`. `action` и `condition` остаются типизированы через исходный `P` и сохраняют сужение по state.
 
 ### Actor effects
 

@@ -178,7 +178,7 @@ export type DefaultDeps<
   C extends object = Record<string, never>,
   P extends AnyEvent = AnyEvent,
 > = {
-  transition: (data: P) => P;
+  transition: (data: ManagerAction<P>) => ManagerAction<P>;
   action: ActionForState<C, N, P>;
   condition: (predicate: (a: P) => boolean) => Promise<boolean>;
 };

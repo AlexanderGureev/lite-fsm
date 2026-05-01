@@ -274,7 +274,7 @@ describe("IMachine<C, T, P, D>", () => {
         prevState: "a" | "b",
         currentState: "a" | "b",
         deps: Deps & {
-          transition: (data: Evt) => Evt;
+          transition: (data: ManagerAction<Evt>) => ManagerAction<Evt>;
           action: Evt;
           condition: (predicate: (a: Evt) => boolean) => Promise<boolean>;
         },
@@ -285,7 +285,7 @@ describe("IMachine<C, T, P, D>", () => {
   test("пустые deps по умолчанию сводятся только к DefaultDeps", () => {
     type Bare = IMachine<Cfg, Ctx, Evt>;
     expect<Parameters<Bare["invokeEffect"]>[2]>().type.toBe<{
-      transition: (data: Evt) => Evt;
+      transition: (data: ManagerAction<Evt>) => ManagerAction<Evt>;
       action: Evt;
       condition: (predicate: (a: Evt) => boolean) => Promise<boolean>;
     }>();

@@ -21,3 +21,6 @@ export const PROJECTILE_SPEED = 360;
 export const PROJECTILE_DAMAGE = 18;
 export const PROJECTILE_TTL = 1.5;
 export const FIRE_COOLDOWN = 340;
+export const ENEMY_HIT_FEEDBACK_DURATION = 180;
+export const ENEMY_HIT_RECOIL = 9;
+export const ENEMY_HIT_EFFECT_FRAMES = 6;

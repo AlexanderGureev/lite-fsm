@@ -4,16 +4,25 @@ export type Vec2 = { x: number; y: number };
 
 type TickPayload = { now: number; delta: number };
 type PlayerSpawnPayload = Vec2 & { hp: number };
-type EnemySpawnPayload = Vec2 & { entityId: string; hp: number; maxHp: number; speed: number };
-type ProjectileSpawnPayload = Vec2 & { vx: number; vy: number; damage: number; ttl: number };
+type EnemySpawnPayload = Vec2 & { entityId: string; hp: number; maxHp: number; speed: number; spawnedAt: number };
+type ProjectileSpawnPayload = Vec2 & { vx: number; vy: number; damage: number; ttl: number; firedAt: number };
 type MovePayload = Vec2 & { vx: number; vy: number };
+type EnemyHitFeedbackStartPayload = Vec2 & {
+  entityId: string;
+  direction: Vec2;
+  now: number;
+};
 
 export type AppEvents =
   | FSMEvent<"GAME_BOOT", { now: number }>
+  | FSMEvent<"PAUSE_GAME">
+  | FSMEvent<"RESUME_GAME">
+  | FSMEvent<"PLAYER_INPUT", Vec2>
   | FSMEvent<"TICK", TickPayload>
   | FSMEvent<"BOOT_DONE">
   | FSMEvent<"SPAWN_SKIP">
   | FSMEvent<"MOVE_DONE">
+  | FSMEvent<"PROJECTILE_MOTION_DONE">
   | FSMEvent<"FIRE_SKIP">
   | FSMEvent<"COMBAT_DONE">
   | FSMEvent<"PLAYER_SPAWN", PlayerSpawnPayload>
@@ -25,6 +34,7 @@ export type AppEvents =
   | FSMEvent<"ENEMY_MOVE", MovePayload>
   | FSMEvent<"DAMAGE", { amount: number }>
   | FSMEvent<"ENEMY_KILLED">
+  | FSMEvent<"ENEMY_HIT_FEEDBACK_START", EnemyHitFeedbackStartPayload>
   | FSMEvent<"PROJECTILE_SPAWN", ProjectileSpawnPayload>
   | FSMEvent<"PROJECTILE_MOVE", Vec2 & { ttl: number }>
   | FSMEvent<"DESPAWN">
@@ -58,4 +68,19 @@ export type ProjectileBodyContext = Vec2 & {
   damage: number;
   ttl: number;
   radius: number;
+};
+
+export type EnemyHitFeedbackContext = Vec2 & {
+  entityId: string;
+  direction: Vec2;
+  startedAt: number;
+  phase: number;
+  recoil: Vec2;
+  spriteScale: number;
+  flash: boolean;
+  ringScale: number;
+  ringAlpha: number;
+  effectFrame: number;
+  effectScale: number;
+  effectAlpha: number;
 };

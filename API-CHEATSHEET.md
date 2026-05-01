@@ -116,7 +116,7 @@ Effect получает один объект:
 | Ключ                   | Что даёт                                                                |
 | ---------------------- | ----------------------------------------------------------------------- |
 | `action`               | action, прошедший middleware                                            |
-| `transition(action)`   | dispatch нового события                                                 |
+| `transition(action)`   | dispatch нового события; action может включать routing `meta`           |
 | `condition(predicate)` | promise, резолвится на ближайший matching action                        |
 | `self`                 | (actor only) `{ actorId, groupId, groupTag }`                           |
 | user deps              | из `defineMachine({ dependencies })` или `manager.setDependencies(...)` |

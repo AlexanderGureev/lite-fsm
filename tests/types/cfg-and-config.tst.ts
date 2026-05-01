@@ -255,9 +255,16 @@ describe("структурный контракт DefaultDeps", () => {
     type _Keys = Assert<Equal<keyof DefaultDeps<"running", Cfg, Evt>, "transition" | "action" | "condition">>;
   });
 
-  test("сигнатура transition возвращает тот же event type", () => {
-    expect<DefaultDeps<"running", Cfg, Evt>["transition"]>().type.toBe<(data: Evt) => Evt>();
-    expect<DefaultDeps<"*", Cfg, Evt>["transition"]>().type.toBe<(data: Evt) => Evt>();
+  test("сигнатура transition принимает routing meta", () => {
+    expect<DefaultDeps<"running", Cfg, Evt>["transition"]>().type.toBe<
+      (data: ManagerAction<Evt>) => ManagerAction<Evt>
+    >();
+    expect<DefaultDeps<"*", Cfg, Evt>["transition"]>().type.toBe<
+      (data: ManagerAction<Evt>) => ManagerAction<Evt>
+    >();
+
+    const transition: DefaultDeps<"running", Cfg, Evt>["transition"] = (action) => action;
+    transition({ type: "START", meta: { groupTag: "player" } });
   });
 
   test("сигнатура condition: predicate → Promise<boolean>", () => {
@@ -397,7 +404,7 @@ describe("return type у MachineEffect", () => {
     type Deps = { api: { load: () => Promise<void> } };
     const effect: MachineEffect<"done", Cfg, Evt, Deps> = ({ action, transition, condition, api }) => {
       expect(action).type.toBe<FSMEvent<"GO">>();
-      expect(transition).type.toBe<(data: Evt) => Evt>();
+      expect(transition).type.toBe<(data: ManagerAction<Evt>) => ManagerAction<Evt>>();
       expect(condition).type.toBe<(predicate: (a: Evt) => boolean) => Promise<boolean>>();
       expect(api.load).type.toBe<() => Promise<void>>();
     };
@@ -409,7 +416,7 @@ describe("return type у MachineEffect", () => {
     const effect: MachineEffect<"done", Cfg, Evt, Deps> = ({ api, clock, transition, action, condition }) => {
       expect(api).type.toBe<string>();
       expect(clock).type.toBe<() => number>();
-      expect(transition).type.toBe<(data: Evt) => Evt>();
+      expect(transition).type.toBe<(data: ManagerAction<Evt>) => ManagerAction<Evt>>();
       expect(action).type.toBe<FSMEvent<"GO">>();
       expect(condition).type.toBe<(predicate: (a: Evt) => boolean) => Promise<boolean>>();
     };
@@ -420,7 +427,7 @@ describe("return type у MachineEffect", () => {
     type E = MachineEffect<"done", Cfg, Evt>;
     const effect: E = ({ action, transition, condition }) => {
       expect(action).type.toBe<FSMEvent<"GO">>();
-      expect(transition).type.toBe<(data: Evt) => Evt>();
+      expect(transition).type.toBe<(data: ManagerAction<Evt>) => ManagerAction<Evt>>();
       expect(condition).type.toBe<(predicate: (a: Evt) => boolean) => Promise<boolean>>();
     };
     expect(effect).type.toBe<E>();
