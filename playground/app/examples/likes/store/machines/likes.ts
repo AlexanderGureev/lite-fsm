@@ -28,9 +28,9 @@ type LikesContext = {
 };
 
 const initialItems = [
-  { id: "item-1", title: "#1", likes: 24, dislikes: 2, committed: null },
-  { id: "item-2", title: "#2", likes: 17, dislikes: 1, committed: "like" as const },
-  { id: "item-3", title: "#3", likes: 31, dislikes: 4, committed: null },
+  { id: "item-1", title: "Late Checkout", likes: 284, dislikes: 12, committed: null },
+  { id: "item-2", title: "Neon Butter", likes: 517, dislikes: 23, committed: "like" as const },
+  { id: "item-3", title: "Velvet Metro", likes: 431, dislikes: 18, committed: null },
 ] as const;
 
 const WAIT_MIN_MS = 2500;
