@@ -60,7 +60,8 @@
   --color-accent-ssr-soft: var(--accent-ssr-soft);
 
   --font-sans: var(--font-sans);
-  --font-display: var(--font-sans);
+  --font-display: var(--font-display);
+  --font-mono: var(--font-mono);
 
   --radius-sm: 8px;
   --radius-md: 11px;
@@ -110,6 +111,12 @@
   --accent-actors-soft: #ece4ff;
   --accent-ssr: #c2620e;
   --accent-ssr-soft: #fbe7c8;
+
+  --lite-fsm-1: 332 88% 52%;
+  --lite-fsm-2: 270 78% 56%;
+  --lite-fsm-3: 215 95% 50%;
+  --lite-fsm-4: 185 88% 44%;
+  --lite-fsm-5: 38 96% 56%;
 }
 
 @utility text-hero-display {
@@ -137,10 +144,10 @@
 }
 
 @utility text-lead {
-  font-family: var(--font-display);
-  font-size: 28px;
-  line-height: 1.14;
-  letter-spacing: 0.196px;
+  font-family: var(--font-sans);
+  font-size: 22px;
+  line-height: 1.45;
+  letter-spacing: -0.2px;
   font-weight: 400;
 }
 
@@ -275,6 +282,43 @@
   }
 }
 
+@keyframes lite-fsm-shift {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+@utility lite-fsm-gradient-text {
+  background-image: linear-gradient(
+    100deg,
+    hsl(var(--lite-fsm-1)) 0%,
+    hsl(var(--lite-fsm-2)) 28%,
+    hsl(var(--lite-fsm-3)) 54%,
+    hsl(var(--lite-fsm-4)) 78%,
+    hsl(var(--lite-fsm-5)) 100%
+  );
+  background-size: 240% 240%;
+  background-position: 0% 50%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: lite-fsm-shift 16s ease-in-out infinite;
+  letter-spacing: -0.045em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lite-fsm-gradient-text {
+    animation: none;
+  }
+}
+
 @layer base {
   * {
     border-color: var(--hairline);
@@ -291,4 +335,57 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
+}
+
+[data-glow-card] {
+  --glow-h: 212;
+  --glow-s: 95;
+  --glow-l: 54;
+  --glow-size: 360px;
+  --glow-border: 1.5px;
+}
+
+[data-glow-card]::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  border-radius: inherit;
+  padding: var(--glow-border);
+  background-image: radial-gradient(var(--glow-size) circle at calc(var(--spot-x, -9999) * 1px) calc(var(--spot-y, -9999) * 1px), hsla(var(--glow-h), calc(var(--glow-s) * 1%), calc(var(--glow-l) * 1%), 1) 0%, hsla(var(--glow-h), calc(var(--glow-s) * 1%), calc(var(--glow-l) * 1%), 0) 80%);
+  background-attachment: fixed;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0.7;
+  transition: opacity 240ms ease;
+}
+
+[data-glow-card]:hover {
+  --glow-border: 2.5px;
+}
+
+[data-glow-card]:hover::before,
+[data-glow-card]:focus-visible::before {
+  opacity: 1;
+}
+
+[data-glow-card]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  border-radius: inherit;
+  background-image: radial-gradient(calc(var(--glow-size) * 0.7) circle at calc(var(--spot-x, -9999) * 1px) calc(var(--spot-y, -9999) * 1px), hsla(var(--glow-h), calc(var(--glow-s) * 1%), calc(var(--glow-l) * 1%), 0.06) 0%, transparent 55%);
+  background-attachment: fixed;
+  opacity: 0;
+  transition: opacity 280ms ease;
+}
+
+[data-glow-card]:hover::after,
+[data-glow-card]:focus-visible::after {
+  opacity: 1;
 }

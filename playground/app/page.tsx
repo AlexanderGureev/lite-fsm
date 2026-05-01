@@ -2,7 +2,9 @@ import { ArrowUpRight } from "lucide-react";
 
 import { ExampleCard } from "@/components/ExampleCard";
 import { HeroBackdrop } from "@/components/HeroBackdrop";
+import { SpotlightTracker } from "@/components/SpotlightTracker";
 import { TopBar, docsUrl, githubUrl, npmUrl } from "@/components/TopBar";
+import { GradientText } from "@/components/ui/gradient-text";
 import {
   categories,
   categoryStyle,
@@ -19,6 +21,7 @@ const HERO_STATS = [
 export default function HomePage() {
   return (
     <main className="min-h-screen bg-canvas-parchment text-ink">
+      <SpotlightTracker />
       <TopBar />
 
       <header className="relative isolate overflow-hidden border-b border-hairline bg-canvas">
@@ -27,7 +30,8 @@ export default function HomePage() {
         <div className="relative mx-auto flex max-w-6xl flex-col gap-7 px-6 py-20 md:py-28">
           <p className="text-caption-strong text-primary">lite-fsm · playground</p>
           <h1 className="text-display-md text-ink md:text-display-lg lg:text-hero-display">
-            Сборник примеров <span className="whitespace-nowrap text-primary">lite-fsm</span>
+            Сборник примеров{" "}
+            <GradientText className="whitespace-nowrap">lite-fsm</GradientText>
           </h1>
           <p className="max-w-2xl text-body text-ink-muted-80 md:text-lead">
             Технические демо: sync-машины, async-эффекты, actor-шаблоны и SSR-streaming. Каждый пример —
@@ -121,9 +125,13 @@ export default function HomePage() {
                   </p>
                 </div>
 
-                <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                   {list.map((example) => (
-                    <ExampleCard key={example.id} example={example} />
+                    <ExampleCard
+                      key={example.id}
+                      example={example}
+                      index={examples.findIndex((e) => e.id === example.id) + 1}
+                    />
                   ))}
                 </div>
               </div>

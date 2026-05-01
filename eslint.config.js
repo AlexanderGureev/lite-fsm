@@ -22,7 +22,9 @@ export default defineConfig([
     "tests/",
     "**/*.d.ts",
     "eslint.config.js",
-    ".preview"
+    ".preview",
+    ".agents",
+    ".cursor",
   ]),
   {
     files: ["**/*.{js,mjs,cjs,ts,tsx}"],

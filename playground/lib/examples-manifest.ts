@@ -156,41 +156,57 @@ export const examplePath = (id: string) => `/examples/${id}`;
 
 export const exampleSourcePath = (id: string) => `playground/app/examples/${id}`;
 
+type CategoryGlow = {
+  h: number;
+  s: number;
+  l: number;
+};
+
 type CategoryStyle = {
   text: string;
+  hoverText: string;
   bgSoft: string;
   border: string;
   accent: string;
   ring: string;
+  glow: CategoryGlow;
 };
 
 export const categoryStyle: Record<ExampleCategoryId, CategoryStyle> = {
   basics: {
     text: "text-accent-basics",
+    hoverText: "group-hover:text-accent-basics",
     bgSoft: "bg-accent-basics-soft",
     border: "border-accent-basics/30",
     accent: "bg-accent-basics",
     ring: "ring-accent-basics/40",
+    glow: { h: 215, s: 26, l: 52 },
   },
   effects: {
     text: "text-accent-effects",
+    hoverText: "group-hover:text-accent-effects",
     bgSoft: "bg-accent-effects-soft",
     border: "border-accent-effects/30",
     accent: "bg-accent-effects",
     ring: "ring-accent-effects/40",
+    glow: { h: 212, s: 100, l: 54 },
   },
   actors: {
     text: "text-accent-actors",
+    hoverText: "group-hover:text-accent-actors",
     bgSoft: "bg-accent-actors-soft",
     border: "border-accent-actors/30",
     accent: "bg-accent-actors",
     ring: "ring-accent-actors/40",
+    glow: { h: 268, s: 92, l: 66 },
   },
   ssr: {
     text: "text-accent-ssr",
+    hoverText: "group-hover:text-accent-ssr",
     bgSoft: "bg-accent-ssr-soft",
     border: "border-accent-ssr/30",
     accent: "bg-accent-ssr",
     ring: "ring-accent-ssr/40",
+    glow: { h: 30, s: 96, l: 54 },
   },
 };
