@@ -8,6 +8,7 @@ export type ExampleIconKey =
   | "actors"
   | "network"
   | "gamepad"
+  | "download"
   | "streaming"
   | "grid"
   | "snapshot";
@@ -106,6 +107,16 @@ export const examples = [
     tags: ["actors"],
     category: "actors",
     iconKey: "gamepad",
+  },
+  {
+    id: "album-download",
+    title: "Релиз: закачка альбома и треков",
+    kicker: "Actors для download-задач",
+    description:
+      "Каждый трек скачивается отдельным actor-инстансом: прогресс, пауза, resume и сброс собираются в общий прогресс релиза.",
+    tags: ["actors", "effects"],
+    category: "actors",
+    iconKey: "download",
   },
   {
     id: "ssr-demo",

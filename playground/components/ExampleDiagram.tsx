@@ -110,6 +110,34 @@ function DiagramContent({ variant }: { variant: ExampleIconKey }) {
     );
   }
 
+  if (variant === "download") {
+    return (
+      <g>
+        <rect x={12} y={19} width={22} height={18} rx={3} className={accentStroke} strokeWidth={1.2} />
+        <circle cx={23} cy={28} r={3.2} className={accentFill} opacity={0.22} />
+        <circle cx={23} cy={28} r={1.4} className={accentFill} />
+
+        <path d="M34 28 H43 V14 H52" className={inkStroke} strokeWidth={0.9} strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M34 28 H52" className={accentStroke} strokeWidth={1.1} strokeLinecap="round" />
+        <path d="M34 28 H43 V42 H52" className={inkStroke} strokeWidth={0.9} strokeLinecap="round" strokeLinejoin="round" />
+
+        <Node cx={56} cy={14} r={3.5} muted />
+        <Node cx={56} cy={28} r={3.8} active />
+        <Node cx={56} cy={42} r={3.5} muted />
+
+        <path d="M66 14 H102" className={inkStroke} strokeWidth={0.9} strokeLinecap="round" opacity={0.48} />
+        <path d="M66 28 H102" className={inkStroke} strokeWidth={0.9} strokeLinecap="round" opacity={0.48} />
+        <path d="M66 42 H102" className={inkStroke} strokeWidth={0.9} strokeLinecap="round" opacity={0.48} />
+        <path d="M66 14 H84" className={accentStroke} strokeWidth={2.2} strokeLinecap="round" />
+        <path d="M66 28 H94" className={accentStroke} strokeWidth={2.2} strokeLinecap="round" />
+        <path d="M66 42 H78" className={accentStroke} strokeWidth={2.2} strokeLinecap="round" />
+
+        <path d="M18 49 H102" className={inkStroke} strokeWidth={0.8} strokeLinecap="round" opacity={0.4} />
+        <path d="M18 49 H74" className={accentStroke} strokeWidth={1.6} strokeLinecap="round" />
+      </g>
+    );
+  }
+
   if (variant === "streaming") {
     return (
       <g>
