@@ -2,31 +2,67 @@ import { MachineManager } from "lite-fsm";
 import type { MachinesState } from "lite-fsm";
 import { immerMiddleware } from "lite-fsm/middleware/immer";
 
+import { createStrokeActorId, type CanvasPeerId } from "./constants";
+import { canvasBoard } from "./machines/canvasBoard";
+import { canvasNetwork, initialPeers } from "./machines/canvasNetwork";
 import { canvasStroke } from "./machines/canvasStroke";
-import type { CanvasPeerId } from "./constants";
-import type { AppEvents } from "./types";
+import type { AppDeps, AppEvents } from "./types";
 
-const machines = { canvasStroke };
+const machines = { canvasBoard, canvasNetwork, canvasStroke };
 
 export type FSMConfigType = typeof machines;
 export type AppState = MachinesState<FSMConfigType>;
 
-export const makeStore = (peerId: CanvasPeerId) =>
-  MachineManager<FSMConfigType, AppEvents>(machines, {
+type StoreNetworkDeps = Pick<AppDeps, "getPeerStore">;
+
+export const makeStore = (peerId: CanvasPeerId, networkDeps?: StoreNetworkDeps) => {
+  const manager = MachineManager<FSMConfigType, AppEvents>(machines, {
     onError: console.error,
     middleware: [immerMiddleware],
     schemaVersion: 1,
     originId: peerId,
+    generateActorId: ({ action, counter, originId, templateKey }) => {
+      const ownerId = originId ?? peerId;
+      if (action.type === "DRAW_BEGIN") return createStrokeActorId(ownerId, action.payload.strokeId);
+      return `${ownerId}#${templateKey}/${counter}`;
+    },
   });
+
+  manager.setDependencies({
+    getPeerId: () => peerId,
+    getState: manager.getState,
+    getPeerStore: networkDeps?.getPeerStore ?? ((targetPeerId) => (targetPeerId === peerId ? manager : null)),
+  });
+
+  return manager;
+};
 
 export type AppStore = ReturnType<typeof makeStore>;
 
-export const strokeEntries = (state: AppState) =>
-  Object.entries(state.canvasStroke).map(([actorId, slice]) => ({
-    actorId,
-    state: slice.state,
-    context: slice.context,
-  }));
+export type CanvasRuntime = {
+  primaryPeerId: CanvasPeerId;
+  getPeerStore: (peerId: CanvasPeerId) => AppStore;
+};
 
-export { useManager, useSelector, useTransition } from "./hooks";
-export type { AppEvents } from "./types";
+export const makeCanvasRuntime = (): CanvasRuntime => {
+  const peerStores: Record<CanvasPeerId, AppStore> = {};
+  const getOptionalPeerStore = (peerId: CanvasPeerId) => peerStores[peerId] ?? null;
+
+  for (const peer of initialPeers) {
+    peerStores[peer.id] = makeStore(peer.id, {
+      getPeerStore: getOptionalPeerStore,
+    });
+  }
+
+  return {
+    primaryPeerId: initialPeers[0].id,
+    getPeerStore: (peerId) => {
+      const store = peerStores[peerId];
+      if (!store) throw new Error(`Unknown canvas peer '${peerId}'.`);
+      return store;
+    },
+  };
+};
+
+export { useSelector, useTransition } from "./hooks";
+export type { AppEvents, CanvasNetworkContext, PeerView, SyncPacket } from "./types";

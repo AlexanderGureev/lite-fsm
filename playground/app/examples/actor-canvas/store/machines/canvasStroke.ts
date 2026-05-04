@@ -1,14 +1,5 @@
-import type { CanvasPeerId, CanvasPoint } from "../constants";
 import { createMachine } from "../create-machine";
-
-export type CanvasStrokeContext = {
-  strokeId: string;
-  authorId: CanvasPeerId;
-  color: string;
-  points: CanvasPoint[];
-  startedAt: number;
-  updatedAt: number;
-};
+import type { CanvasStrokeContext } from "../types";
 
 const initialContext: CanvasStrokeContext = {
   strokeId: "",
@@ -19,35 +10,23 @@ const initialContext: CanvasStrokeContext = {
   updatedAt: 0,
 };
 
-const copyPoint = (point: CanvasPoint): CanvasPoint => ({ x: point.x, y: point.y });
-
-const appendPoint = (points: CanvasPoint[], point: CanvasPoint) => {
-  const prev = points.at(-1);
-  if (prev && Math.hypot(prev.x - point.x, prev.y - point.y) < 1.5) return;
-  points.push(copyPoint(point));
-};
-
 export const canvasStroke = createMachine({
   groupTag: "stroke",
   persistence: "snapshot",
   config: {
-    __INIT: { STROKE_BEGIN: "DRAWING" },
+    __INIT: { DRAW_BEGIN: "DRAWING" },
     DRAWING: {
-      STROKE_APPEND: null,
-      STROKE_COMMIT: "COMMITTED",
-      STROKE_REMOVE: "__CANCELLED",
+      DRAW_MOVE: null,
+      DRAW_END: "COMMITTED",
     },
-    COMMITTED: {
-      STROKE_REMOVE: "__CANCELLED",
-    },
+    COMMITTED: {},
   },
   initialState: "__INIT",
   initialContext,
   reducer: (state, action, { nextState }) => {
-    state.state = nextState;
-
     switch (action.type) {
-      case "STROKE_BEGIN": {
+      case "DRAW_BEGIN": {
+        state.state = nextState;
         state.context.strokeId = action.payload.strokeId;
         state.context.authorId = action.payload.authorId;
         state.context.color = action.payload.color;
@@ -56,17 +35,18 @@ export const canvasStroke = createMachine({
         state.context.updatedAt = action.payload.now;
         break;
       }
-      case "STROKE_APPEND": {
-        appendPoint(state.context.points, action.payload.point);
+      case "DRAW_MOVE": {
+        const prev = state.context.points.at(-1);
+        if (prev && Math.hypot(prev.x - action.payload.point.x, prev.y - action.payload.point.y) < 1.5) return;
+
+        state.state = nextState;
+        state.context.points.push({ x: action.payload.point.x, y: action.payload.point.y });
         state.context.updatedAt = action.payload.now;
         break;
       }
-      case "STROKE_COMMIT": {
+      case "DRAW_END": {
+        state.state = nextState;
         state.context.updatedAt = action.payload.now;
-        break;
-      }
-      case "STROKE_REMOVE": {
-        state.state = "__CANCELLED";
         break;
       }
     }
