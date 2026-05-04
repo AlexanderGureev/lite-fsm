@@ -3,6 +3,7 @@ import nextra from "nextra";
 // Определение, находимся ли мы в production
 const isProduction = process.env.NODE_ENV === "production";
 const basePath = isProduction ? "/lite-fsm" : "";
+const playgroundBasePath = process.env.NEXT_PUBLIC_PLAYGROUND_BASE_PATH ?? `${basePath}/playground`;
 
 // Настраиваем Nextra с ее конфигурацией
 const withNextra = nextra({
@@ -22,6 +23,9 @@ export default withNextra({
   // Если проект размещен не в корне, нужно добавить basePath и assetPrefix
   basePath: basePath,
   assetPrefix: basePath,
+  env: {
+    NEXT_PUBLIC_PLAYGROUND_BASE_PATH: playgroundBasePath,
+  },
   turbopack: {
     root: import.meta.dirname,
     resolveAlias: {

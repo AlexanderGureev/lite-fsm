@@ -1,0 +1,397 @@
+export const playgroundBasePath = process.env.NEXT_PUBLIC_PLAYGROUND_BASE_PATH ?? "/playground";
+
+export const playgroundExamplePath = (id) => `${playgroundBasePath}/examples/${id}/`;
+
+# Акторы
+
+Акторы используют, когда один и тот же сценарий процесса может запускаться несколько раз параллельно, а каждый запуск должен иметь собственные состояние, контекст и жизненный цикл. Примеры: независимые загрузки, фоновые синхронизации и задачи.
+
+В `lite-fsm` актор - это обычная машина-шаблон, которую `MachineManager` умеет создавать, адресовать и удалять.
+
+Акторы особенно полезны, когда нужно управлять множеством однотипных, но независимых сущностей:
+
+- сетевые операции: загрузки файлов, отправка сообщений, повторные попытки запросов;
+- интерфейсные процессы: тосты, модальные окна, временные уведомления, drag-and-drop операции;
+- фоновые процессы: синхронизации, очереди задач, таймеры, отложенные проверки;
+- игры и симуляции: враги, NPC, эффекты, снаряды и другие объекты могут создаваться из шаблонов, жить независимо и адресоваться по одному экземпляру, группе или тегу. Например, одна волна врагов может быть создана как группа и затем остановлена, усилена или удалена общим событием.
+
+## Термины и определения
+
+- **Доменная машина** - обычная машина в `MachineManager`. Она описывает состояние приложения или доменной области: библиотеку, плеер, форму, корзину.
+- **Шаблон актора** - машина с состоянием `__INIT` в `config`. Из этого шаблона `MachineManager` создает рабочие экземпляры.
+- **Активный актор** - конкретный созданный экземпляр шаблона. У него есть собственные `state`, `context` и служебные поля `actorId`, `groupId`, `groupTag`.
+- **Создание актора** - запуск нового экземпляра шаблона. Это происходит, когда событие подходит под переход из `__INIT`.
+- **Терминальная цель** - специальная цель `__RESOLVED`, `__REJECTED` или `__CANCELLED`. Когда актор попадает в такую цель, `MachineManager` удаляет его из публичного объекта записей.
+- **Событие без адресации** (`unscoped`) - событие без `meta.actorId`, `meta.groupId` и `meta.groupTag`. Оно доставляется доменным машинам, активным акторам и шаблонам акторов; если есть подходящий переход из `__INIT`, `MachineManager` создает новый актор.
+- **Адресованное событие** (`scoped`) - событие с полями адресации в `action.meta`. Оно отправляется конкретному актору, группе или тегу.
+- **Поля адресации** (`routing meta`) - служебная часть события для выбора получателей среди акторов. Это не данные приложения и не `meta` редьюсера.
+
+## Минимальный пример
+
+Ниже пример параллельной загрузки альбомов по id. Доменная машина хранит массив загруженных id альбомов, а актор отвечает за один процесс загрузки. Если пользователь запускает две загрузки, `MachineManager` создаст два независимых актора из одного шаблона.
+
+В примере предполагается, что в приложении уже есть типизированная версия `createMachine`, а `store` создан из этих машин с `immerMiddleware`. Поэтому редьюсеры написаны в стиле Immer с прямым изменением черновика.
+
+```ts showLineNumbers copy
+import { createMachine } from "./fsm";
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const libraryContext: { albums: string[] } = {
+  albums: [],
+};
+
+const libraryMachine = createMachine({
+  config: {
+    READY: {
+      ALBUM_DOWNLOAD_DONE: null,
+    },
+  },
+  initialState: "READY",
+  initialContext: libraryContext,
+  reducer: (state, action, { nextState }) => {
+    state.state = nextState;
+    state.context.albums.push(action.payload.albumId);
+  },
+});
+
+const albumDownloadActor = createMachine({
+  config: {
+    __INIT: {
+      ALBUM_DOWNLOAD: "DOWNLOADING",
+    },
+    DOWNLOADING: {
+      ALBUM_DOWNLOAD_DONE: "__RESOLVED",
+    },
+  },
+  initialState: "__INIT",
+  initialContext: {
+    albumId: "",
+  },
+  effects: {
+    DOWNLOADING: async ({ action, transition }) => {
+      await delay(800);
+
+      transition({
+        type: "ALBUM_DOWNLOAD_DONE",
+        payload: { albumId: action.payload.albumId },
+      });
+    },
+  },
+});
+
+store.transition({
+  type: "ALBUM_DOWNLOAD",
+  payload: { albumId: "album-1" },
+});
+
+store.transition({
+  type: "ALBUM_DOWNLOAD",
+  payload: { albumId: "album-2" },
+});
+```
+
+Что здесь происходит:
+
+- `albumDownloadActor` получает `ALBUM_DOWNLOAD` через `__INIT`, создается в состоянии `DOWNLOADING` и сохраняет `albumId` в контексте;
+- каждый созданный актор запускает свой эффект `DOWNLOADING`;
+- имитация загрузки через `delay` показывает параллельные независимые процессы без деталей сети;
+- после завершения актор отправляет `ALBUM_DOWNLOAD_DONE` через обычный `transition`;
+- в эффекте актора обычный `transition` по умолчанию адресует событие в группу текущего актора;
+- каждая загрузка альбома создана событием без адресации, поэтому находится в отдельной группе;
+- это же зафиксированное событие видят доменные машины, поэтому `libraryMachine` добавляет id альбома в `albums`;
+- терминальная цель `__RESOLVED` удаляет актор из `store.getState().albumDownloads`.
+
+Эффект `DOWNLOADING` не проверяет `action.type`, потому что он запускается именно при входе в `DOWNLOADING`. В этом примере у состояния один входящий переход: `ALBUM_DOWNLOAD`.
+
+Пока обе загрузки идут, акторы видны в публичном объекте записей:
+
+```ts showLineNumbers copy
+store.getState().albumDownloads;
+// {
+//   "albumDownloads/0": {
+//     state: "DOWNLOADING",
+//     context: { albumId: "album-1" },
+//     meta: {
+//       actorId: "albumDownloads/0",
+//       groupId: "albumDownloads/0",
+//       groupTag: "albumDownloads"
+//     }
+//   },
+//   "albumDownloads/1": {
+//     state: "DOWNLOADING",
+//     context: { albumId: "album-2" },
+//     meta: {
+//       actorId: "albumDownloads/1",
+//       groupId: "albumDownloads/1",
+//       groupTag: "albumDownloads"
+//     }
+//   }
+// }
+```
+
+Когда акторы завершились через `__RESOLVED`, объект записей снова пуст:
+
+```ts showLineNumbers copy
+store.getState().albumDownloads; // {}
+store.getState().library.context.albums; // ["album-1", "album-2"]
+```
+
+## Примеры
+
+<div style={{ display: "grid", gap: "12px", marginTop: "16px" }}>
+  <a
+    href={playgroundExamplePath("actor-canvas")}
+    style={{
+      border: "1px solid rgba(148, 163, 184, 0.35)",
+      borderRadius: "8px",
+      display: "block",
+      padding: "14px 16px",
+      textDecoration: "none",
+    }}
+  >
+    <strong style={{ display: "block" }}>Совместный рисунок: Alice ↔ Bob →</strong>
+    <span style={{ display: "block", marginTop: "4px" }}>
+      Канвас-доска с обменом snapshot-ами через <code>hydrate</code> и <code>dehydrate</code>.
+    </span>
+  </a>
+  <a
+    href={playgroundExamplePath("album-download")}
+    style={{
+      border: "1px solid rgba(148, 163, 184, 0.35)",
+      borderRadius: "8px",
+      display: "block",
+      padding: "14px 16px",
+      textDecoration: "none",
+    }}
+  >
+    <strong style={{ display: "block" }}>Релиз: закачка альбома и треков →</strong>
+    <span style={{ display: "block", marginTop: "4px" }}>
+      Пример, где загрузка альбома запускает акторы для отдельных треков.
+    </span>
+  </a>
+</div>
+
+## Правила шаблона актора
+
+Машина считается шаблоном актора, если в `config` есть буквальное состояние `__INIT`.
+
+Для шаблона актора действуют дополнительные ограничения:
+
+- `initialState` должен быть `"__INIT"`;
+- новый актор создается только через явный переход из `__INIT`;
+- цель перехода из `__INIT` не может быть `null` или `"__INIT"`;
+- состояния `__RESOLVED`, `__REJECTED`, `__CANCELLED` зарезервированы как терминальные цели и не должны быть ключами в `config`;
+- глобальный переход `"*"` работает для публичных состояний актора, но не наследуется для `__INIT`;
+- публичные состояния актора - это обычные состояния без `__INIT` и терминальных состояний.
+
+Шаблоны акторов работают только внутри `MachineManager`. Отдельно созданные `Machine()` и `defineMachine().create()` отклоняют шаблон актора при `transition`.
+
+## Создание и доставка событий
+
+Событие без адресации доставляется доменным машинам, активным акторам и шаблонам акторов. Если событие совпало с переходом из `__INIT`, `MachineManager` создает новый актор.
+
+```ts showLineNumbers copy
+store.transition({
+  type: "ALBUM_DOWNLOAD",
+  payload: { albumId: "album-1" },
+});
+
+store.transition({
+  type: "ALBUM_DOWNLOAD",
+  payload: { albumId: "album-2" },
+});
+
+Object.keys(store.getState().albumDownloads);
+// ["albumDownloads/0", "albumDownloads/1"]
+```
+
+Если активный актор тоже имеет переход для того же события без адресации, он получит событие, и новый актор будет создан в той же отправке. В простых сценариях лучше разделять события запуска актора и события, которыми актор завершается.
+
+## Адресация событий
+
+Адресация акторов задается через `action.meta`. Поля адресации можно передать вручную:
+
+```ts showLineNumbers copy
+store.transition({
+  type: "ALBUM_DOWNLOAD_DONE",
+  payload: { albumId: "album-1" },
+  meta: { actorId: "albumDownloads/0" },
+});
+```
+
+В эффекте актора обычный `transition(action)` уже маршрутизирует событие в группу актора, который вызвал эффект:
+
+```ts showLineNumbers copy
+transition({
+  type: "ALBUM_DOWNLOAD_DONE",
+  payload: { albumId: "album-1" },
+});
+```
+
+Если нужна другая область доставки, используйте методы для явной адресации:
+
+```ts showLineNumbers copy
+transition.actor("albumDownloads/0", {
+  type: "ALBUM_DOWNLOAD_DONE",
+  payload: { albumId: "album-1" },
+});
+transition.group(self.groupId, {
+  type: "ALBUM_DOWNLOAD",
+  payload: { albumId: "bonus-disc" },
+});
+transition.tag(self.groupTag, {
+  type: "ALBUM_DOWNLOAD",
+  payload: { albumId: "bonus-disc" },
+});
+transition.unscoped({
+  type: "ALBUM_DOWNLOAD",
+  payload: { albumId: "bonus-disc" },
+});
+```
+
+Приоритет полей адресации: `actorId` > `groupId` > `groupTag`. Каждое поле принимает строку или массив строк. Дубликаты удаляются.
+
+| Область доставки | Что получает событие                                                                             |
+| ---------------- | ------------------------------------------------------------------------------------------------ |
+| `actorId`        | Только указанные `actorId`. Новые акторы не создаются.                                           |
+| `groupId`        | Акторы внутри указанных групп. Подходящий `__INIT` может создать новых акторов в этих группах.   |
+| `groupTag`       | Все активные группы с указанным тегом. Подходящий `__INIT` может создать акторов в этих группах. |
+| без адресации    | Доменные машины, активные акторы и новая группа для подходящего `__INIT`.                        |
+
+Неизвестный `actorId`, `groupId` или `groupTag` ничего не меняет в акторах, но доменные машины всё равно получают зафиксированное событие.
+
+## Группы
+
+Каждый актор получает неизменяемый `meta`:
+
+```ts showLineNumbers copy
+type ActorMeta = {
+  actorId: string;
+  groupId: string;
+  groupTag: string;
+};
+```
+
+При создании актора событием без адресации `actorId` и `groupId` обычно совпадают:
+
+```ts showLineNumbers copy
+store.transition({
+  type: "ALBUM_DOWNLOAD",
+  payload: { albumId: "album-1" },
+});
+
+store.getState().albumDownloads["albumDownloads/0"].meta;
+// {
+//   actorId: "albumDownloads/0",
+//   groupId: "albumDownloads/0",
+//   groupTag: "albumDownloads"
+// }
+```
+
+Если актор создается в существующей группе, он получает новый `actorId`, но сохраняет `groupId` группы:
+
+```ts showLineNumbers copy
+store.transition({
+  type: "ALBUM_DOWNLOAD",
+  payload: { albumId: "disc-2" },
+  meta: { groupId: "albumDownloads/0" },
+});
+
+Object.values(store.getState().albumDownloads).map((actor) => actor.meta);
+// [
+//   { actorId: "albumDownloads/0", groupId: "albumDownloads/0", groupTag: "albumDownloads" },
+//   { actorId: "albumDownloads/1", groupId: "albumDownloads/0", groupTag: "albumDownloads" }
+// ]
+```
+
+`groupTag` по умолчанию равен ключу шаблона в store. Его можно переопределить:
+
+```ts showLineNumbers copy
+const albumDownloadActor = createMachine({
+  groupTag: "downloads",
+  config: {
+    __INIT: { ALBUM_DOWNLOAD: "DOWNLOADING" },
+    DOWNLOADING: { ALBUM_DOWNLOAD_DONE: "__RESOLVED" },
+  },
+  initialState: "__INIT",
+  initialContext: { albumId: "" },
+});
+```
+
+Один `groupTag` можно использовать для нескольких шаблонов, если они должны попадать в одну группу адресации.
+
+## Эффекты акторов
+
+Эффекты шаблона актора работают для каждого активного актора отдельно. В параметры эффекта добавляются `self` и `transition` с поддержкой адресации акторов.
+
+Внутри эффекта актора:
+
+- `self` содержит `actorId`, `groupId` и `groupTag` текущего актора;
+- `transition(action)` по умолчанию отправляет событие в группу актора-отправителя;
+- `transition.unscoped(action)` снимает адресацию актора и отправляет обычное событие;
+- `transition.actor(id, action)`, `transition.group(id, action)` и `transition.tag(id, action)` задают явного получателя;
+- `MachineManager` добавляет `senderActorId`, `senderGroupId` и `senderGroupTag` в зафиксированное событие;
+- поздний `transition` из уже удаленного актора игнорируется системой.
+
+`createEffect({ type: "latest" })` изолирован на уровне экземпляра: отмена эффекта одного актора не отменяет эффекты другого актора того же шаблона.
+
+## Сохранение в snapshot
+
+По умолчанию акторы живут только во время работы приложения:
+
+- `manager.dehydrate()` пропускает шаблоны акторов, которые живут только во время работы приложения;
+- `manager.dehydrate({ machines: ["albumDownloads"] })` бросит ошибку для такого шаблона;
+- `manager.hydrate(snapshot)` пропускает записи акторов, которые живут только во время работы приложения.
+
+Если записи акторов должны попадать в транспортный snapshot, задайте `persistence: "snapshot"` и храните только данные для передачи. `actorId`, `groupId` и `groupTag` остаются под управлением `MachineManager`.
+
+Для `hydrate(..., { strategy: "replace" })` сохраняемый в snapshot шаблон актора удаляет акторов, которых нет во входящем snapshot. Для `merge` существующие акторы сохраняются, а записи из snapshot добавляются или обновляются.
+
+## `replaceReducer` и акторы
+
+`replaceReducer` - низкоуровневый инструмент для middleware. Его используют, например, Immer-интеграция и DevTools-восстановление состояния. В прикладном коде не используйте `replaceReducer` как способ создавать, удалять или переносить акторы: для этого есть `transition()` и `hydrate()`.
+
+Если middleware через `replaceReducer` возвращает новый объект записей актора, `MachineManager` считает это внешней заменой и пересобирает внутренние индексы адресации. Такая запись должна сохранять публичную форму объекта записей акторов:
+
+```ts showLineNumbers copy
+{
+  [actorId]: {
+    state: "PENDING",
+    context: {},
+    meta: {
+      actorId,
+      groupId: "downloads/0",
+      groupTag: "downloads",
+    },
+  },
+}
+```
+
+Ограничения:
+
+- объект записей шаблона должен быть обычным объектом;
+- ключ записи должен быть непустым `actorId`;
+- `state` должен быть публичным состоянием из `config` шаблона, не `__INIT` и не терминальным состоянием;
+- `context` должен быть объектом;
+- новый актор, которого еще нет во внутренних индексах менеджера, должен иметь `meta`;
+- `meta.actorId` должен совпадать с ключом записи;
+- `meta.groupId` должен быть непустой строкой;
+- `meta.groupTag` должен совпадать с `groupTag` шаблона;
+- один `actorId` не может одновременно находиться в записях разных шаблонов;
+- существующий актор нельзя переносить из одного шаблона в другой.
+
+Если актор нужно удалить через внешнюю замену состояния, удалите его запись из объекта. Не записывайте `__RESOLVED`, `__REJECTED` или `__CANCELLED` вручную: терминальные состояния обрабатываются только обычным переходом актора.
+
+Если запись нарушает эти ограничения, менеджер бросит `LITE_FSM_INVALID_ACTOR_SLICE` и не применит замену частично.
+
+Акторы, появившиеся только из внешней замены состояния, не считаются созданными обычным переходом текущего события. Для них менеджер синхронизирует публичные записи с внутренними индексами маршрутизации, но не запускает эффекты как событие входа в состояние. Поэтому такой путь подходит для восстановления состояния инструментами, но не для обычной бизнес-логики.
+
+## Практические рекомендации
+
+- Используйте акторы для множественных независимых экземпляров одного жизненного цикла, а не как замену обычным доменным машинам.
+- Делайте переход из `__INIT` явным и узким: это контракт создания актора.
+- Не злоупотребляйте глобальным переходом `"*"`: обычные состояния и переходы лучше описывать явно, а `"*"` оставлять для действительно общего поведения вроде отмены или очистки.
+- Адресуйте конкретного актора через `actorId`, группу связанных акторов через `groupId`, все группы одного типа через `groupTag`.
+- Завершайте актор через `__RESOLVED`, `__REJECTED` или `__CANCELLED`, чтобы объект записей не копил завершенные экземпляры.
+- В сохраняемых акторах включайте только транспортные данные в `dehydrate`; служебные поля идентичности пусть остаются за `MachineManager`.

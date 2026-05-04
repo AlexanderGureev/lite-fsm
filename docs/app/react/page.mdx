@@ -154,6 +154,26 @@ function DebugPanel() {
 }
 ```
 
+### FSMHydrationBoundary
+
+`FSMHydrationBoundary` применяет snapshot к React subtree так, чтобы `useSelector()` внутри boundary видел hydrated state уже на render, а сам manager догонял это состояние в layout effect.
+
+```tsx showLineNumbers copy
+import { FSMHydrationBoundary } from "lite-fsm/react";
+
+function App({ manager, snapshot }) {
+  return (
+    <FSMContextProvider machineManager={manager}>
+      <FSMHydrationBoundary snapshot={snapshot} strategy="merge">
+        <Page />
+      </FSMHydrationBoundary>
+    </FSMContextProvider>
+  );
+}
+```
+
+Подробное описание `hydrate`, `dehydrate`, `getHydratedState` и поведения boundary находится в разделе [Сохранение состояния](/guide/hydration).
+
 ## Практические примеры
 
 ### Авторизация пользователя

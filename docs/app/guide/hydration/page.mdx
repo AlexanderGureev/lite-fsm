@@ -1,0 +1,371 @@
+export const playgroundBasePath = process.env.NEXT_PUBLIC_PLAYGROUND_BASE_PATH ?? "/playground";
+
+export const playgroundExamplePath = (id) => `${playgroundBasePath}/examples/${id}/`;
+
+# Сохранение состояния (State Persistence)
+
+Эта страница описывает, как сохранить состояние `MachineManager` и восстановить его позже: на клиенте после ответа сервера, в другой вкладке, после перезагрузки страницы или из сохраненного черновика.
+
+В API за это отвечают два метода: `dehydrate()` собирает переносимый снимок состояния, а `hydrate()` применяет такой снимок обратно к менеджеру.
+
+```ts showLineNumbers copy
+type ManagerSnapshot = {
+  schemaVersion?: number;
+  machines: {
+    [machineKey: string]: unknown;
+  };
+};
+```
+
+## Термины и определения
+
+- **Менеджер** - экземпляр `MachineManager`, который хранит состояние машин и выполняет переходы.
+- **Снимок состояния** (`snapshot`) - объект с данными, по которым состояние можно восстановить позже.
+- **Переносимый снимок** - результат `dehydrate()`. Он предназначен для сохранения, передачи на клиент или импорта в другой экземпляр `MachineManager`.
+- **Текущий снимок** - результат `getSnapshot()`. Он отражает внутреннее состояние менеджера как есть и не вызывает обработчики `dehydrate`.
+- **Обертка снимка** - внешний объект `{ schemaVersion, machines }`. В `machines` лежат снимки отдельных машин по их ключам.
+- **Ключ машины** - имя машины в объекте, переданном в `MachineManager`, например `counter` в `MachineManager({ counter })`.
+- **Доменная машина** - обычная машина в `MachineManager`, которая хранит состояние приложения или отдельной предметной области.
+- **Шаблон актора** - машина с состоянием `__INIT`, из которой менеджер создает независимые экземпляры акторов.
+- **`persistence`** - настройка шаблона актора, которая говорит, должны ли активные акторы попадать в переносимый снимок.
+- **Выгрузка состояния** (`dehydrate`) - сбор переносимого снимка из текущего состояния менеджера.
+- **Восстановление состояния** (`hydrate`) - применение снимка к менеджеру.
+- **Обработчики `dehydrate` и `hydrate`** - функции в конфигурации машины, которые задают, какие данные попадут в снимок и как эти данные будут применены обратно.
+- **Промежуточные обработчики** (`middleware`) - функции, переданные в `MachineManager` через опцию `middleware`.
+- **Предварительный расчет** (`preview`) - расчет состояния после `hydrate()` без изменения менеджера. Его делает `getHydratedState()`.
+- **Наложение состояния** (`overlay`) - временное состояние внутри `FSMHydrationBoundary`. Компоненты читают его во время отрисовки, пока основной менеджер еще не изменен.
+- **Машины, участвующие в снимке** - доменные машины и шаблоны акторов с `persistence: "snapshot"`. Обычные акторы с `persistence: "runtime"` в `dehydrate()` не попадают.
+
+## Когда использовать
+
+Используйте выгрузку и восстановление, если состояние нужно сохранить, передать или получить извне. Не используйте `hydrate()` как обычный способ отправлять события: для пользовательских действий должен оставаться `transition()`.
+
+Типичные сценарии:
+
+- сохранить часть состояния перед перезагрузкой страницы;
+- восстановить состояние из снимка, полученного с сервера;
+- показать часть React-дерева уже с серверным состоянием;
+- импортировать заранее подготовленное состояние в тестах или на странице предпросмотра;
+- перенести только публичную часть контекста, не сохраняя временные служебные поля.
+
+## Методы менеджера
+
+У `MachineManager` есть четыре метода для работы со снимками состояния:
+
+| Метод                               | Что делает                                                                                                                |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `getSnapshot()`                     | Возвращает текущий снимок без обработчиков `dehydrate`. Включает состояние всех машин и активные записи акторов.          |
+| `dehydrate(opts?)`                  | Возвращает переносимый снимок. Вызывает обработчики `dehydrate` и по умолчанию включает все машины, участвующие в снимке. |
+| `getHydratedState(snapshot, opts?)` | Рассчитывает состояние после `hydrate()` без изменения менеджера, вызова middleware, эффектов и подписчиков.              |
+| `hydrate(snapshot, opts?)`          | Применяет снимок к менеджеру. Не вызывает middleware и не запускает эффекты.                                              |
+
+`MachineManager(machines, { snapshot })` применяет начальный снимок при создании менеджера со стратегией `replace`. Это удобно, когда состояние нужно восстановить до передачи менеджера в приложение.
+
+## Базовый пример
+
+По умолчанию снимок машины имеет форму `{ state, context }`. Если нужно сохранить только часть данных или поменять формат снимка, добавьте обработчики `hydrate` и `dehydrate` в конфигурацию машины.
+
+```ts showLineNumbers copy
+import { MachineManager, createMachine } from "lite-fsm";
+import { immerMiddleware } from "lite-fsm/middleware";
+
+type CounterEvent = { type: "INC" };
+type CounterSnapshot = { count: number };
+
+const counter = createMachine({
+  config: {
+    IDLE: {
+      INC: null,
+    },
+  },
+  initialState: "IDLE",
+  initialContext: {
+    count: 0,
+    lastError: null as string | null,
+  },
+  reducer: (state, action, { nextState }) => {
+    state.state = nextState;
+
+    switch (action.type) {
+      case "INC": {
+        state.context.count += 1;
+        break;
+      }
+    }
+  },
+  dehydrate: (slice): CounterSnapshot => ({
+    count: slice.context.count,
+  }),
+  hydrate: (prev, snapshot: CounterSnapshot) => {
+    if (prev.context.count === snapshot.count) return prev;
+
+    return {
+      state: prev.state,
+      context: {
+        ...prev.context,
+        count: snapshot.count,
+      },
+    };
+  },
+});
+
+const manager = MachineManager(
+  { counter },
+  {
+    schemaVersion: 1,
+    middleware: [immerMiddleware],
+  },
+);
+
+manager.transition({ type: "INC" });
+
+const snapshot = manager.dehydrate();
+// {
+//   schemaVersion: 1,
+//   machines: {
+//     counter: { count: 1 }
+//   }
+// }
+
+const restored = MachineManager(
+  { counter },
+  {
+    schemaVersion: 1,
+    snapshot,
+    middleware: [immerMiddleware],
+  },
+);
+```
+
+В обработчике `hydrate` полезно возвращать `prev`, если снимок ничего не меняет. Тогда `manager.hydrate()` не создаст новое общее состояние, не уведомит подписчиков и не вызовет лишнюю перерисовку в React.
+
+## Частичная выгрузка
+
+`dehydrate()` без аргументов выгружает все машины, которые участвуют в снимке: доменные машины и шаблоны акторов с `persistence: "snapshot"`. Можно явно выбрать только нужные ключи:
+
+```ts showLineNumbers copy
+const snapshot = manager.dehydrate({
+  machines: ["counter"],
+});
+```
+
+Если передать неизвестный ключ машины, `dehydrate()` бросит ошибку. Это защищает от опечаток в контрактах сохранения.
+
+## Стратегии восстановления
+
+`hydrate()` принимает стратегию:
+
+```ts showLineNumbers copy
+manager.hydrate(snapshot, { strategy: "merge" });
+manager.hydrate(snapshot, { strategy: "replace" });
+```
+
+`merge` используется по умолчанию. Машины, которых нет в `snapshot.machines`, остаются без изменений. Машины из снимка применяются через их обработчик `hydrate` или напрямую, если обработчик не задан.
+
+`replace` тоже применяет только ключи из `snapshot.machines`, но передает `meta.strategy === "replace"` в обработчики. Для акторов, сохраняемых в снимок, эта стратегия также удаляет активные акторы, которых нет во входящем снимке. Для доменных машин полное поведение `replace` обычно задает ваш обработчик `hydrate`.
+
+```ts showLineNumbers copy
+hydrate: (prev, snapshot, meta) => {
+  if (meta.strategy === "replace") {
+    return {
+      state: "READY",
+      context: {
+        ...prev.context,
+        user: snapshot.user,
+      },
+    };
+  }
+
+  return {
+    state: prev.state,
+    context: {
+      ...prev.context,
+      user: snapshot.user,
+    },
+  };
+},
+```
+
+## Предварительный расчет без изменения состояния
+
+`getHydratedState()` нужен, когда нужно заранее посчитать результат `hydrate()`, но пока не менять сам менеджер. Это важно для React: серверная отрисовка и первый клиентский рендер должны увидеть одно и то же состояние, иначе React может получить ошибку гидрации из-за разной разметки.
+
+```ts showLineNumbers copy
+const preview = manager.getHydratedState(snapshot);
+
+console.log(preview.counter.context.count);
+console.log(manager.getState().counter.context.count); // старое значение
+```
+
+Можно считать следующий предварительный результат поверх уже подготовленного базового состояния:
+
+```ts showLineNumbers copy
+const firstPreview = manager.getHydratedState(counterSnapshot);
+const secondPreview = manager.getHydratedState(flagSnapshot, {
+  baseState: firstPreview,
+});
+```
+
+Именно этот механизм использует `FSMHydrationBoundary`. Он дает компонентам состояние из снимка уже во время отрисовки, но откладывает изменение менеджера до безопасного момента в браузере.
+
+## Версия схемы и неизвестные ключи
+
+`schemaVersion` хранится на уровне обертки снимка:
+
+```ts showLineNumbers copy
+const manager = MachineManager(
+  { counter },
+  {
+    schemaVersion: 2,
+    onSchemaVersionMismatch: (incoming, current) => {
+      console.warn("Snapshot schema mismatch", { incoming, current });
+    },
+    onUnknownMachineKey: (key, context) => {
+      console.warn("Unknown machine in snapshot", { key, context });
+    },
+  },
+);
+```
+
+При `hydrate()` несовпадение версии вызывает `onSchemaVersionMismatch`, а неизвестные ключи машин пропускаются и передаются в `onUnknownMachineKey`. При `getHydratedState()` эти обработчики и предупреждения в режиме разработки не вызываются.
+
+## Интеграция с React
+
+Для React используйте `FSMHydrationBoundary` из `lite-fsm/react`, когда часть дерева должна сразу отрисоваться с состоянием из снимка. Это позволяет писать компоненты одинаково для сервера и клиента: внутри `FSMHydrationBoundary` они просто вызывают `useSelector()` и не проверяют, где выполняется код.
+
+`FSMHydrationBoundary` делает две вещи:
+
+- во время отрисовки строит временное наложение состояния через `getHydratedState()`, поэтому `useSelector()` внутри `FSMHydrationBoundary` сразу читает снимок;
+- в `useLayoutEffect` применяет `manager.hydrate()`, чтобы основной менеджер получил то же состояние.
+
+```tsx showLineNumbers copy
+import { MachineManager } from "lite-fsm";
+import { FSMContextProvider, FSMHydrationBoundary, useSelector } from "lite-fsm/react";
+
+const manager = MachineManager({ counter });
+
+function Counter() {
+  const count = useSelector((state) => state.counter.context.count);
+  return <span>{count}</span>;
+}
+
+export function App({ snapshot }) {
+  return (
+    <FSMContextProvider machineManager={manager}>
+      <FSMHydrationBoundary snapshot={snapshot} strategy="merge">
+        <Counter />
+      </FSMHydrationBoundary>
+    </FSMContextProvider>
+  );
+}
+```
+
+Важно: во время отрисовки `FSMHydrationBoundary` подменяет источник данных только для `useSelector()`. Поэтому UI внутри boundary должен читать состояние через `useSelector()`: на сервере и на первом клиентском рендере он увидит результат предварительного расчета. `useManager().getState()` обращается напрямую к менеджеру и до `useLayoutEffect` вернет его старое состояние.
+
+`FSMHydrationBoundary` можно вкладывать друг в друга. Вложенный `FSMHydrationBoundary` считает предварительное состояние поверх наложения родителя:
+
+```tsx showLineNumbers copy
+<FSMHydrationBoundary snapshot={counterSnapshot}>
+  <FSMHydrationBoundary snapshot={sessionSnapshot}>
+    <Page />
+  </FSMHydrationBoundary>
+</FSMHydrationBoundary>
+```
+
+На практике это решает две задачи:
+
+- серверная разметка и первый клиентский рендер строятся из одного и того же снимка;
+- после монтирования менеджер получает это состояние через `hydrate()`, поэтому дальнейшая клиентская навигация и обычные `transition()` работают уже с актуальным состоянием.
+
+## useHydrateSnapshot
+
+Если временное наложение состояния во время отрисовки не нужно, используйте `useHydrateSnapshot()`:
+
+```tsx showLineNumbers copy
+import { useHydrateSnapshot } from "lite-fsm/react";
+
+function Hydrator({ snapshot }) {
+  useHydrateSnapshot(snapshot, { strategy: "merge" });
+  return null;
+}
+```
+
+Этот хук применяет снимок в `useLayoutEffect`. Первая отрисовка дочерних компонентов увидит старое состояние менеджера, поэтому для серверной отрисовки, React Server Components или Suspense обычно подходит `FSMHydrationBoundary`, а для фонового восстановления или клиентской навигации может быть достаточно `useHydrateSnapshot()`.
+
+## Акторы и снимки состояния
+
+`persistence` нужен только шаблонам акторов. Он решает, считать ли активные акторы частью сохраняемого состояния.
+
+### Почему не один режим
+
+У акторов есть два режима, потому что акторы отличаются от доменных машин. Доменная машина всегда находится по стабильному ключу, например `session` или `cart`, и у нее ровно один фрагмент состояния. Акторы создаются и удаляются динамически: у каждого экземпляра есть `actorId`, `groupId`, `groupTag`, внутренние индексы адресации и возможные ожидающие эффекты.
+
+Если бы все акторы автоматически работали как обычные доменные машины, при `hydrate()` было бы непонятно, как объединять входящие записи с уже живыми локальными акторами:
+
+- входящий `actorId` может совпасть с локальным актором, созданным в этом запуске приложения;
+- локальный актор может быть временным процессом, который нельзя восстанавливать извне;
+- внешний снимок может описывать не весь текущий запуск приложения, а только часть объектов;
+- при конфликте нельзя угадать, кто владеет актором: клиент, сервер или другой пользователь.
+
+Поэтому режим выбирается явно.
+
+### Режимы
+
+По умолчанию используется `persistence: "runtime"`: акторы живут только в текущем запуске приложения, `dehydrate()` пропускает их, а `hydrate()` игнорирует записи акторов из входящего снимка. Это защищает от случайного восстановления временных процессов: запросов, таймеров, одноразовых уведомлений или эффектов, которые не должны оживать после перезагрузки страницы.
+
+Если активные акторы должны переживать сохранение и восстановление, задайте `persistence: "snapshot"` в шаблоне актора. Тогда `dehydrate()` включит их записи в переносимый снимок, а `hydrate()` сможет восстановить их вместе с `actorId`, `groupId` и `groupTag`.
+
+Практическое правило:
+
+- `runtime` - акторы принадлежат текущему клиенту и текущему запуску приложения;
+- `snapshot` - акторы описывают состояние, которое задает внешняя сторона: сервер, сохраненный документ, другая вкладка или другой пользователь.
+
+Например, в <a href={playgroundExamplePath("actor-canvas")} style={{ color: "#2563eb", textDecoration: "underline", textUnderlineOffset: "2px" }}>совместной canvas-доске</a> локальный черновик текущей линии можно хранить отдельно в состоянии интерфейса или доменной машине. А штрихи, которые пришли от сервера или других пользователей, удобно хранить как `snapshot`-акторы: каждый штрих имеет собственный жизненный цикл, может обновляться независимо и приходит в снимке от другого участника. При `merge` такие входящие штрихи добавятся или обновятся, не стирая локальный черновик.
+
+```ts showLineNumbers copy
+const requestActor = createMachine({
+  config: {
+    __INIT: {
+      REQUEST_START: "PENDING",
+    },
+    PENDING: {
+      REQUEST_DONE: "__RESOLVED",
+    },
+  },
+  initialState: "__INIT",
+  initialContext: {
+    id: "",
+  },
+  persistence: "snapshot",
+  reducer: (state, action, { nextState }) => {
+    state.state = nextState;
+
+    switch (action.type) {
+      case "REQUEST_START": {
+        state.context.id = action.payload.id;
+        break;
+      }
+    }
+  },
+  dehydrate: (slice) => ({
+    id: slice.context.id,
+    state: slice.state,
+  }),
+  hydrate: (_prev, snapshot: { id: string; state: "PENDING" }) => ({
+    state: snapshot.state,
+    context: {
+      id: snapshot.id,
+    },
+  }),
+});
+```
+
+В снимке актора менеджер сам сохраняет и восстанавливает `actorId`, `groupId` и `groupTag` рядом с пользовательскими данными снимка. Жизненный цикл и адресация описаны в разделе [Акторы](/guide/actors).
+
+## Ограничения
+
+- Снимок обязан быть объектом с полем `machines`, которое тоже является объектом.
+- `hydrate()` проверяет обертку снимка, но не проверяет пользовательские данные каждой доменной машины. Это ответственность обработчика `hydrate`.
+- `hydrate()` не вызывает middleware и не запускает эффекты.
+- Если `hydrate()` реально изменил состояние, подписчики получают одно служебное событие `@@lite-fsm/HYDRATE`.
+- Пользовательский `transition({ type: "@@lite-fsm/HYDRATE" })` запрещен.
