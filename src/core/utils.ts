@@ -44,7 +44,9 @@ export type LiteFsmErrorCode =
   | "LITE_FSM_ACTOR_DISPOSED"
   | "LITE_FSM_INVALID_ACTOR_CONFIG"
   | "LITE_FSM_INVALID_ACTOR_SLICE"
+  | "LITE_FSM_INVALID_GENERATED_ID"
   | "LITE_FSM_INVALID_HYDRATION_ENVELOPE"
+  | "LITE_FSM_INVALID_OPTIONS"
   | "LITE_FSM_STANDALONE_ACTOR_TEMPLATE";
 
 export class LiteFsmError extends Error {
@@ -56,6 +58,16 @@ export class LiteFsmError extends Error {
     this.name = "LiteFsmError";
   }
 }
+
+export const validateGeneratedId = (id: unknown, kind: "actor" | "group"): string => {
+  if (typeof id !== "string" || id.length === 0) {
+    throw new LiteFsmError(
+      "LITE_FSM_INVALID_GENERATED_ID",
+      `[lite-fsm] generate${kind === "actor" ? "Actor" : "Group"}Id must return a non-empty string.`,
+    );
+  }
+  return id;
+};
 
 export const isSystemAction = (action: { type?: unknown }): action is { type: `${typeof LITE_FSM_SYSTEM_ACTION_PREFIX}${string}` } =>
   typeof action.type === "string" && action.type.startsWith(LITE_FSM_SYSTEM_ACTION_PREFIX);

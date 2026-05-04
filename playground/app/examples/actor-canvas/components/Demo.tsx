@@ -42,7 +42,7 @@ const peers: PeerView[] = [
 
 const otherPeer = (peerId: CanvasPeerId): CanvasPeerId => (peerId === "alice" ? "bob" : "alice");
 
-const createStrokeId = (peerId: CanvasPeerId) => `${peerId}-${Date.now().toString(36)}-${crypto.randomUUID()}`;
+const createStrokeId = () => crypto.randomUUID();
 
 const formatTime = (value: number) =>
   new Intl.DateTimeFormat("ru-RU", {
@@ -234,8 +234,8 @@ function PeerBoundary({
 }
 
 const createPeerManagers = (): PeerManagers => ({
-  alice: makeStore(),
-  bob: makeStore(),
+  alice: makeStore("alice"),
+  bob: makeStore("bob"),
 });
 
 export function Demo() {
@@ -268,7 +268,7 @@ export function Demo() {
     event: React.PointerEvent<HTMLCanvasElement>,
   ) => {
     const manager = managers[peerId];
-    const strokeId = createStrokeId(peerId);
+    const strokeId = createStrokeId();
     manager.transition({
       type: "STROKE_BEGIN",
       payload: {

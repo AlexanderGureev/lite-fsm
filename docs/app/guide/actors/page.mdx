@@ -321,6 +321,69 @@ const albumDownloadActor = createMachine({
 
 Один `groupTag` можно использовать для нескольких шаблонов, если они должны попадать в одну группу адресации.
 
+## Распределенный спавн
+
+Когда один и тот же шаблон создает акторы в нескольких изолированных средах, дефолтные id вида `templateKey/0` могут совпасть и сломать `hydrate({ strategy: "merge" })`. Например:
+
+- два пира P2P-приложения создают объекты на своих доcках и обмениваются snapshot-ами;
+- разные вкладки одного приложения синхронизируются через `BroadcastChannel`;
+- сервер и клиент создают акторов и обмениваются snapshot-ами;
+- разные шарды или регионы независимо генерируют акторы с одинаковыми именами шаблонов.
+
+Для таких случаев `MachineManager` предоставляет три опции на уровне менеджера: `originId`, `generateActorId`, `generateGroupId`.
+
+### `originId`
+
+`originId` это короткий идентификатор владельца, который добавляется ко всем созданным менеджером id через разделитель `#`. С `originId: "alice"` менеджер выдает id вида `alice#likeSync/0`, `alice#likeSync/1`, и так далее.
+
+```ts showLineNumbers copy
+const alice = MachineManager({ likeSync }, { originId: "alice" });
+const bob = MachineManager({ likeSync }, { originId: "bob" });
+
+alice.transition({ type: "LIKE", payload: { id: "a" } });
+bob.transition({ type: "LIKE", payload: { id: "b" } });
+
+bob.hydrate(alice.dehydrate(), { strategy: "merge" });
+Object.keys(bob.getState().likeSync).sort();
+// ["alice#likeSync/0", "bob#likeSync/0"]
+```
+
+При `hydrate` Bob видит чужие id (`alice#likeSync/0`) и не двигает свой счетчик: следующий локальный спавн получит `bob#likeSync/1`. Чужие записи живут рядом со своими и адресуются как обычные акторы (`transition.actor("alice#likeSync/0", ...)`).
+
+`originId` это произвольная строка без `#`. Подходят имена пиров, идентификаторы вкладок, `urn:user:alice`, `shard/eu-1` и так далее. Пустая строка или строка с `#` отклоняется как `LITE_FSM_INVALID_OPTIONS`.
+
+Менеджер без `originId` сохраняет совместимость с предыдущими версиями: id выглядят как `templateKey/0`, и любой id с `#` считается чужим, его счетчик не двигается.
+
+### `generateActorId` и `generateGroupId`
+
+Опция `generateActorId` задает кастомный генератор `actorId`. Он вызывается на каждый спавн и получает контекст `{ templateKey, groupTag, counter, originId, action }`:
+
+```ts showLineNumbers copy
+const manager = MachineManager(
+  { player },
+  {
+    originId: "alice",
+    generateActorId: ({ originId, action }) => {
+      if (action.type !== "JOIN") throw new Error("expected JOIN");
+      return `${originId}#player/${action.payload.userId}`;
+    },
+  },
+);
+
+manager.transition({ type: "JOIN", payload: { userId: "userA" } });
+manager.transition({ type: "MOVE", meta: { actorId: "alice#player/userA" } });
+```
+
+Когда генератор возвращает доменный id вроде `alice#player/userA`, его удобно использовать как стабильный ключ к актору: знание `userId` достаточно для адресации без поиска по контексту.
+
+Если генератор вернет уже занятый id (или дубликат внутри одной отправки), менеджер бросит `LITE_FSM_INVALID_GENERATED_ID`. Тот же код летит, если генератор вернул не строку или пустую строку.
+
+`generateGroupId` устроен симметрично и применяется при создании новой группы для события без адресации.
+
+Counter в контексте инкрементируется всегда, даже если генератор вернул свой id. Это сохраняет монотонность счетчика и позволяет использовать его как fallback или часть кастомного id.
+
+Чтобы счетчик восстанавливался после `hydrate`, держите формат хвоста id как `.../N` (например, `alice#custom/0`). Если генератор использует UUID или иной непарсимый суффикс, counter после hydrate не восстанавливается, но collision-проверка через `isTaken` все равно защищает от пересечений.
+
 ## Эффекты акторов
 
 Эффекты шаблона актора работают для каждого активного актора отдельно. В параметры эффекта добавляются `self` и `transition` с поддержкой адресации акторов.

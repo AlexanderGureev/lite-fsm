@@ -211,14 +211,17 @@ manager.setDependencies({ api });
 manager.transition({ type: "INC" });
 ```
 
-| Опция                      | Назначение                                              |
-| -------------------------- | ------------------------------------------------------- |
-| `middleware?`              | цепочка middleware на все user actions                  |
-| `snapshot?`                | начальный snapshot, применяется со strategy `"replace"` |
-| `schemaVersion?`           | версия snapshot                                         |
-| `onError?`                 | ошибки effects / `condition`                            |
-| `onUnknownMachineKey?`     | unknown key в `hydrate` или initial snapshot            |
-| `onSchemaVersionMismatch?` | mismatch `snapshot.schemaVersion`                       |
+| Опция                      | Назначение                                                                                                                |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `middleware?`              | цепочка middleware на все user actions                                                                                    |
+| `snapshot?`                | начальный snapshot, применяется со strategy `"replace"`                                                                   |
+| `schemaVersion?`           | версия snapshot                                                                                                           |
+| `onError?`                 | ошибки effects / `condition`                                                                                              |
+| `onUnknownMachineKey?`     | unknown key в `hydrate` или initial snapshot                                                                              |
+| `onSchemaVersionMismatch?` | mismatch `snapshot.schemaVersion`                                                                                         |
+| `originId?`                | префикс владельца, добавляется ко всем created id (`originId#templateKey/counter`); строка без `#` (P2P / multi-tab / шарды) |
+| `generateActorId?`         | `(ctx: SpawnIdContext<P>) => string` — кастомный actor id; counter в ctx инкрементируется всегда                          |
+| `generateGroupId?`         | то же для groupId (применяется только при unscoped spawn)                                                                 |
 
 | Метод                               | Назначение                                                     |
 | ----------------------------------- | -------------------------------------------------------------- |
@@ -323,6 +326,30 @@ effects: {
 ```
 
 Action из actor effect без явного routing остаётся в своей группе. `transition.unscoped(...)` снимает routing.
+
+### Distributed spawn
+
+```ts
+const alice = MachineManager({ likeSync }, { originId: "alice" });
+const bob = MachineManager({ likeSync }, { originId: "bob" });
+
+bob.hydrate(alice.dehydrate(), { strategy: "merge" });
+// keys: ["alice#likeSync/0", "bob#likeSync/0"]
+```
+
+| Сценарий                   | Что задать                                                              |
+| -------------------------- | ----------------------------------------------------------------------- |
+| Дефолт                     | `templateKey/0` · `templateKey/1`                                       |
+| Один `originId`            | `originId#templateKey/0`                                                |
+| `generateActorId` задан    | возвращаемое значение генератора (collision → `LITE_FSM_INVALID_GENERATED_ID`) |
+| Доменный id из payload     | `generateActorId: ({ originId, action }) => `${originId}#user/${action.payload.id}`` |
+
+`generateActorId` получает `{ templateKey, groupTag, counter, originId, action }`. Чтобы counter после `hydrate` восстанавливался, держите хвост id как `.../N`; UUID-хвост — counter не двигается, collision все равно блокируется через `isTaken`.
+
+| Error code                       | Когда                                                              |
+| -------------------------------- | ------------------------------------------------------------------ |
+| `LITE_FSM_INVALID_OPTIONS`       | `originId` пустой или содержит `#`                                 |
+| `LITE_FSM_INVALID_GENERATED_ID`  | generator вернул не-строку, пустую строку или уже занятый id       |
 
 ### Persistence
 

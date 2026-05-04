@@ -27,6 +27,7 @@ import type {
   EffectType,
   FSMEvent,
   FSMEventMeta,
+  GenerateSpawnIdFn,
   GenericMiddleware,
   HydrateAction,
   HydrateMeta,
@@ -65,9 +66,10 @@ import type {
   Reducer,
   SType,
   Self,
-  SnapshotForMachine,
   SnapshotActorTemplateKey,
+  SnapshotForMachine,
   SnapshotMachineKey,
+  SpawnIdContext,
   State,
   StateName,
   StateType,
@@ -334,6 +336,21 @@ describe("canary поверхности экспорта core-типов", () =>
         ? true
         : false
     >;
+    type _SpawnIdContext = Assert<
+      Equal<
+        SpawnIdContext<Event>,
+        {
+          templateKey: string;
+          groupTag: string;
+          counter: number;
+          originId: string | undefined;
+          action: ManagerAction<Event>;
+        }
+      >
+    >;
+    type _GenerateSpawnIdFn = Assert<
+      Equal<GenerateSpawnIdFn<Event>, (ctx: SpawnIdContext<Event>) => string>
+    >;
   });
 
   test("экспортирует createActorMeta как public runtime helper", () => {
@@ -349,6 +366,13 @@ describe("canary поверхности экспорта core-типов", () =>
     expect<Event>().type.toBeAssignableTo<MachineEvents<Store>>();
     expect<MachineManagerOptions<Store, Event>["middleware"]>().type.toBe<
       Array<Middleware<MachinesState<Store>, Event>> | undefined
+    >();
+    expect<MachineManagerOptions<Store, Event>["originId"]>().type.toBe<string | undefined>();
+    expect<MachineManagerOptions<Store, Event>["generateActorId"]>().type.toBe<
+      GenerateSpawnIdFn<Event> | undefined
+    >();
+    expect<MachineManagerOptions<Store, Event>["generateGroupId"]>().type.toBe<
+      GenerateSpawnIdFn<Event> | undefined
     >();
     expect<IMachine<DomainCfg, Ctx, Event, Deps>["transition"]>().type.toBe<
       (state: StateType<DomainCfg, Ctx>, action: Event) => StateType<DomainCfg, Ctx>

@@ -2,6 +2,7 @@ import {
   AnyEvent,
   AnyRecord,
   DefaultDeps,
+  GenerateSpawnIdFn,
   MachineConfig,
   MachineManagerDehydrateFn,
   MachineManagerRuntimeSnapshot,
@@ -20,7 +21,9 @@ import {
   ManagerAction,
 } from "./types";
 
-type UnionToIntersection<U> = (U extends unknown ? (value: U) => void : never) extends (value: infer I) => void ? I : never;
+type UnionToIntersection<U> = (U extends unknown ? (value: U) => void : never) extends (value: infer I) => void
+  ? I
+  : never;
 
 type ConfigDependencies<E> = E extends MachineConfig<object, AnyRecord, AnyEvent, infer D> ? D : never;
 
@@ -52,11 +55,12 @@ type EventFromReducer<M> = M extends { reducer: MachineConfig<infer C, infer T, 
     : never
   : never;
 
-type EventFromMachineConfig<M> = M extends MachineConfig<infer C, infer T, infer P, infer D>
-  ? [C, T, D] extends [object, AnyRecord, AnyRecord]
-    ? P
-    : never
-  : never;
+type EventFromMachineConfig<M> =
+  M extends MachineConfig<infer C, infer T, infer P, infer D>
+    ? [C, T, D] extends [object, AnyRecord, AnyRecord]
+      ? P
+      : never
+    : never;
 
 export type MachineEvents<S extends MachineStore> = {
   [key in keyof S]: EventFromReducer<S[key]> extends never
@@ -73,6 +77,9 @@ export type MachineManagerOptions<S extends MachineStore, P extends AnyEvent = M
   schemaVersion?: number;
   onUnknownMachineKey?: (key: string, context: UnknownMachineKeyContext) => void;
   onSchemaVersionMismatch?: (incoming: number | undefined, current: number | undefined) => void;
+  originId?: string;
+  generateActorId?: GenerateSpawnIdFn<P>;
+  generateGroupId?: GenerateSpawnIdFn<P>;
 };
 
 export type IMachine<
@@ -98,6 +105,8 @@ export type IMachineManager<S extends MachineStore, P extends AnyEvent = Machine
   hydrate: (snapshot: MachineManagerSnapshot<S>, opts?: HydrateOptions) => void;
   dehydrate: MachineManagerDehydrateFn<S>;
   onTransition: (cb: TransitionSubscriber<S, P>) => () => void;
-  replaceReducer: (cb: (reducer: Reducer<MachinesState<S>, ManagerAction<P>>) => Reducer<MachinesState<S>, ManagerAction<P>>) => void;
+  replaceReducer: (
+    cb: (reducer: Reducer<MachinesState<S>, ManagerAction<P>>) => Reducer<MachinesState<S>, ManagerAction<P>>,
+  ) => void;
   setDependencies: (d: MachineDependencies<S> | ((deps: MachineDependencies<S>) => MachineDependencies<S>)) => void;
 };

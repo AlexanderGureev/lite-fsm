@@ -1,7 +1,7 @@
 // Routing-резолвер: куда спавнить (ФАЗА 5) и какие identities reduce'ить (ФАЗА 6) для scope/targetSet.
 
 import type { ActorIdentity, RoutingScope } from "./actor";
-import { type DispatchContext, reserveGroupId } from "./dispatchContext";
+import { type DispatchContext, reserveGroupId, type SpawnIdConfig } from "./dispatchContext";
 import type { SidecarState } from "./sidecar";
 import type { AnyEvent, ManagerAction, MachineStore } from "./types";
 
@@ -72,8 +72,9 @@ export const createRoutingResolver = <S extends MachineStore, P extends AnyEvent
   actorTemplateKeys: readonly string[];
   actorSpawnIndex: Map<string, Map<string, string[]>>;
   actorReduceIndex: Map<string, string[]>;
+  spawnIdConfig: SpawnIdConfig<P>;
 }): RoutingResolver<S, P> => {
-  const { sidecar, actorTemplateKeys, actorSpawnIndex, actorReduceIndex } = deps;
+  const { sidecar, actorTemplateKeys, actorSpawnIndex, actorReduceIndex, spawnIdConfig } = deps;
 
   const resolveSpawnGroups: RoutingResolver<S, P>["resolveSpawnGroups"] = (scope, targetSet, ctx, action) => {
     if (scope === "group") {
@@ -96,10 +97,15 @@ export const createRoutingResolver = <S extends MachineStore, P extends AnyEvent
     }
 
     // unscoped: новая группа на каждый groupTag с matching __INIT.
+    // collected — pending в текущем resolveSpawnGroups, чтобы isGroupIdTaken видел свои же id.
     const groups: Array<{ groupId: string; groupTag: string }> = [];
+    const collected = new Set<string>();
+    const isGroupIdTaken = (id: string) => sidecar.groupById.has(id) || collected.has(id);
     /* v8 ignore next -- spawnActors делает early-return когда action.type отсутствует в actorSpawnIndex. */
     for (const groupTag of actorSpawnIndex.get(action.type)?.keys() ?? []) {
-      groups.push({ groupId: reserveGroupId(ctx, groupTag), groupTag });
+      const groupId = reserveGroupId(ctx, groupTag, action, spawnIdConfig, isGroupIdTaken);
+      collected.add(groupId);
+      groups.push({ groupId, groupTag });
     }
     return groups;
   };

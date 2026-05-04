@@ -47,6 +47,7 @@ export type SidecarValidationDeps = {
   actorTemplateKeys: readonly string[];
   groupTagForTemplate: (templateKey: string) => string;
   isPublicActorState: (templateKey: string, state: string) => boolean;
+  originId: string | undefined;
 };
 
 type RootStateView = Record<string, unknown>;
@@ -251,9 +252,10 @@ export const buildReplacementReconcilePlan = (
   const indexes = rebuildSidecarIndexes(nextActorById);
 
   // (5) Bump counters поверх restored ids — иначе новые spawn'ы после JUMP назад collid'нут.
+  // Чужие id (originId-mismatch) пропускаются: они не двигают local counter.
   const nextCounters = cloneCounters(sidecar.counters);
   for (const [actorId, identity] of newActorIdentities) {
-    bumpCountersFromId(nextCounters, actorId, identity.meta.groupId);
+    bumpCountersFromId(nextCounters, actorId, identity.meta.groupId, deps.originId);
   }
 
   return {

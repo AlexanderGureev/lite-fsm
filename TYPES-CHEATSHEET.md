@@ -255,11 +255,15 @@ type AppDeps = MachineDependencies<Store>;
 
 ### Manager options и subscribers
 
-| Тип                           | Форма                                                                                                           |
-| ----------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `MachineManagerOptions<S, P>` | `{ onError?, middleware?, snapshot?, schemaVersion?, onUnknownMachineKey?, onSchemaVersionMismatch? }`          |
-| `Subscriber<C, T, P>`         | `(prev: StateType<C, T>, current: StateType<C, T>, action: P) => void`                                          |
-| `TransitionSubscriber<S, P>`  | `(prev: MachinesState<S>, current: MachinesState<S>, action: ManagerCommitAction<S, ManagerAction<P>>) => void` |
+| Тип                           | Форма                                                                                                                                            |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `MachineManagerOptions<S, P>` | `{ onError?, middleware?, snapshot?, schemaVersion?, onUnknownMachineKey?, onSchemaVersionMismatch?, originId?, generateActorId?, generateGroupId? }` |
+| `SpawnIdContext<P>`           | `{ templateKey: string; groupTag: string; counter: number; originId: string \| undefined; action: ManagerAction<P> }`                            |
+| `GenerateSpawnIdFn<P>`        | `(ctx: SpawnIdContext<P>) => string`                                                                                                             |
+| `Subscriber<C, T, P>`         | `(prev: StateType<C, T>, current: StateType<C, T>, action: P) => void`                                                                           |
+| `TransitionSubscriber<S, P>`  | `(prev: MachinesState<S>, current: MachinesState<S>, action: ManagerCommitAction<S, ManagerAction<P>>) => void`                                  |
+
+`originId?: string` (без `#`) и кастомные `generateActorId` / `generateGroupId` обеспечивают изоляцию id между менеджерами в P2P / multi-tab / шарды-сценариях. Подробнее — в гайде [Распределенный спавн](/guide/actors#распределенный-спавн).
 
 ## Typed factory aliases
 

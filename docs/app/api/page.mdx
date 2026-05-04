@@ -160,14 +160,21 @@ manager.transition({ type: "INC" });
 
 ### Опции
 
-| Опция                       | Назначение                                                                  |
-| --------------------------- | --------------------------------------------------------------------------- |
-| `middleware?`               | Цепочка middleware на все user actions.                                     |
-| `snapshot?`                 | Начальный snapshot, применяется со стратегией `"replace"` при создании.     |
-| `schemaVersion?`            | Версия snapshot.                                                            |
-| `onError?`                  | Ошибки эффектов и `condition`.                                              |
-| `onUnknownMachineKey?`      | Вызывается при unknown key в `hydrate` или начальном snapshot.              |
-| `onSchemaVersionMismatch?`  | Вызывается при несовпадении `snapshot.schemaVersion`.                       |
+| Опция                       | Назначение                                                                                       |
+| --------------------------- | ------------------------------------------------------------------------------------------------ |
+| `middleware?`               | Цепочка middleware на все user actions.                                                          |
+| `snapshot?`                 | Начальный snapshot, применяется со стратегией `"replace"` при создании.                          |
+| `schemaVersion?`            | Версия snapshot.                                                                                 |
+| `onError?`                  | Ошибки эффектов и `condition`.                                                                   |
+| `onUnknownMachineKey?`      | Вызывается при unknown key в `hydrate` или начальном snapshot.                                   |
+| `onSchemaVersionMismatch?`  | Вызывается при несовпадении `snapshot.schemaVersion`.                                            |
+| `originId?`                 | Префикс владельца для всех созданных id. Owned id принимают форму `${originId}#${templateKey}/${counter}`. Не должен содержать `#`. |
+| `generateActorId?`          | Кастомный генератор `actorId`. Получает `{ templateKey, groupTag, counter, originId, action }` и возвращает строку.                |
+| `generateGroupId?`          | Кастомный генератор `groupId` для unscoped спавна. Контракт совпадает с `generateActorId`.       |
+
+`originId` нужен для P2P, multi-tab, server↔client и других распределенных сценариев, где независимые менеджеры должны мерджить snapshot-ы без коллизий ключей. Подробнее — в разделе [Распределенный спавн](/guide/actors#распределенный-спавн).
+
+`generateActorId` подходит для стабильных доменных id (`${originId}#player/${userId}`); рекомендуется держать хвост id в формате `.../N`, чтобы counter восстанавливался после `hydrate`. Если генератор вернет уже занятый id или не-строку, менеджер бросит `LITE_FSM_INVALID_GENERATED_ID`; пустой или содержащий `#` `originId` бросает `LITE_FSM_INVALID_OPTIONS`.
 
 ### Методы
 

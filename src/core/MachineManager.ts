@@ -9,11 +9,18 @@ import {
   resolveRouting,
   RoutingScope,
   RuntimeActorSlice,
+  SPAWN_ID_SEP,
   validateActorReducerOutput,
   validateActorTemplateConfig,
 } from "./actor";
 import { createActorEffectsRuntime } from "./actorEffects";
-import { createDispatchContext, type DispatchContext, ensureRecord, reserveActorId } from "./dispatchContext";
+import {
+  createDispatchContext,
+  type DispatchContext,
+  ensureRecord,
+  reserveActorId,
+  type SpawnIdConfig,
+} from "./dispatchContext";
 import {
   applySnapshot as applySnapshotPure,
   type ApplySnapshotDeps,
@@ -87,6 +94,20 @@ export const MachineManager = <S extends MachineStore, P extends AnyEvent = Mach
   type Action = ManagerAction<P>;
   type RootState = MachinesState<S>;
   type ActorRecord = Record<string, RuntimeActorSlice>;
+
+  const originId = opts?.originId;
+  if (originId !== undefined && (originId.length === 0 || originId.includes(SPAWN_ID_SEP))) {
+    throw new LiteFsmError(
+      "LITE_FSM_INVALID_OPTIONS",
+      `[lite-fsm] originId must be a non-empty string without '${SPAWN_ID_SEP}'.`,
+    );
+  }
+
+  const spawnIdConfig: SpawnIdConfig<P> = {
+    originId,
+    generateActorId: opts?.generateActorId,
+    generateGroupId: opts?.generateGroupId,
+  };
 
   const machineKeys = Object.keys(config) as Array<MachineKey<S>>;
   const getActorRecord = (root: RootState, templateKey: string): ActorRecord => root[templateKey] as ActorRecord;
@@ -170,6 +191,7 @@ export const MachineManager = <S extends MachineStore, P extends AnyEvent = Mach
     actorTemplateKeys,
     actorSpawnIndex,
     actorReduceIndex,
+    spawnIdConfig,
   });
 
   // === Фазы core reducer (ФАЗА 4-7) ==========================================
@@ -203,11 +225,15 @@ export const MachineManager = <S extends MachineStore, P extends AnyEvent = Mach
     const spawnTemplatesByGroup = actorSpawnIndex.get(action.type);
     if (!spawnTemplatesByGroup) return next;
 
+    // sidecar + pending этого dispatch: оба покрывают «уже занят».
+    const isActorIdTaken = (id: string): boolean =>
+      sidecar.actorById.has(id) || ctx.pendingSpawned.some((a) => a.meta.actorId === id);
+
     for (const groupCtx of resolveSpawnGroups(scope, targetSet, ctx, action)) {
       for (const templateKey of spawnTemplatesByGroup.get(groupCtx.groupTag) ?? []) {
         const cfg = config[templateKey as MachineKey<S>] as RuntimeConfig;
         const meta = createActorMeta({
-          actorId: reserveActorId(ctx, templateKey),
+          actorId: reserveActorId(ctx, templateKey, groupCtx.groupTag, action, spawnIdConfig, isActorIdTaken),
           groupId: groupCtx.groupId,
           groupTag: groupCtx.groupTag,
         });
@@ -301,6 +327,7 @@ export const MachineManager = <S extends MachineStore, P extends AnyEvent = Mach
     actorTemplateKeys,
     groupTagForTemplate,
     isPublicActorState,
+    originId,
   };
 
   // ФАЗА 10: live ActorRuntime для ФАЗЫ 12 effects. Terminal-collapsed уже отсутствуют в sidecar.

@@ -8,7 +8,7 @@ import { HYDRATE_ACTION_TYPE, LiteFsmError } from "../../src/core/utils";
 import {
   createLikeSync,
   createReplacingMiddleware,
-  type LikeConfig,
+  createSnapshotLikeSync,
   type LikeEvent,
   type LikeSyncContext,
 } from "./MachineManager.actors.fixtures";
@@ -23,30 +23,6 @@ type SnapshotEntry = {
   snapshot: SnapshotData;
   meta: SnapshotSlice["meta"];
 };
-
-type SnapshotLikeSyncTemplate = MachineConfig<LikeConfig, LikeSyncContext, LikeEvent, {}, any> & {
-  persistence: "snapshot";
-};
-
-const createSnapshotLikeSync = (overrides: Partial<SnapshotLikeSyncTemplate> = {}): SnapshotLikeSyncTemplate =>
-  ({
-    config: {
-      __INIT: { LIKE: "PENDING" },
-      PENDING: { BUMP: null, OK: "__RESOLVED" },
-      "*": { CANCEL: "__CANCELLED" },
-    },
-    initialState: "__INIT",
-    initialContext: { id: "", count: 0 },
-    persistence: "snapshot",
-    reducer: (state, action, meta) => {
-      if (action.type === "LIKE") return { state: meta.nextState, context: { id: action.payload.id, count: 1 } };
-      if (action.type === "BUMP") {
-        return { state: meta.nextState, context: { ...state.context, count: state.context.count + 1 } };
-      }
-      return { state: meta.nextState, context: state.context };
-    },
-    ...overrides,
-  }) as SnapshotLikeSyncTemplate;
 
 const actorSlice = (
   actorId: string,
@@ -640,5 +616,22 @@ describe("MachineManager actors — snapshot hydration", () => {
     expect(manager.getState().likeSync["server:actor"].context.count).toBe(6);
     expect(manager.getState().likeSync["likeSync/6"].context.id).toBe("next");
     expect(manager.getState().likeSync["likeSync/6"].meta.groupId).toBe("likeSync/8");
+  });
+
+  it("originId-aware: чужие id (alice#) не двигают local counter Bob'а", () => {
+    const bob = MachineManager({ likeSync: createSnapshotLikeSync() }, { originId: "bob" });
+
+    bob.hydrate({
+      machines: {
+        likeSync: {
+          "alice#likeSync/5": actorEntry("alice#likeSync/5", "alice", 1, "alice#likeSync/5"),
+        },
+      },
+    });
+    bob.transition({ type: "LIKE", payload: { id: "fresh" } });
+
+    expect(bob.getState().likeSync["bob#likeSync/0"]).toBeDefined();
+    expect(bob.getState().likeSync["bob#likeSync/0"].context.id).toBe("fresh");
+    expect(bob.getState().likeSync["bob#likeSync/0"].meta.groupId).toBe("bob#likeSync/0");
   });
 });

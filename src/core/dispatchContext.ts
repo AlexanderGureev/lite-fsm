@@ -9,8 +9,18 @@ import {
   EMPTY_ACTOR_RECORD,
   type NormalizeOptions,
   type RuntimeActorSlice,
+  SPAWN_ID_SEP,
 } from "./actor";
-import type { AnyEvent, ManagerAction, MachineStore, MachinesState } from "./types";
+import type { AnyEvent, GenerateSpawnIdFn, ManagerAction, MachineStore, MachinesState } from "./types";
+import { LiteFsmError, validateGeneratedId } from "./utils";
+
+// Per-manager wiring для генерации actor/group id. Собирается один раз в конструкторе
+// MachineManager и передаётся в reserveActorId/reserveGroupId на каждом dispatch.
+export type SpawnIdConfig<P extends AnyEvent> = {
+  originId: string | undefined;
+  generateActorId: GenerateSpawnIdFn<P> | undefined;
+  generateGroupId: GenerateSpawnIdFn<P> | undefined;
+};
 
 // Defaults S/P позволяют sidecar.ts читать DispatchContext как structural тип без generic-параметров.
 export type DispatchContext<S extends MachineStore = MachineStore, P extends AnyEvent = AnyEvent> = {
@@ -55,19 +65,55 @@ const ensureCountersDraft = (ctx: DispatchContext): Counters => {
   return ctx.countersDraft;
 };
 
+const buildDefaultId = (originId: string | undefined, prefix: string, counter: number): string =>
+  originId ? `${originId}${SPAWN_ID_SEP}${prefix}/${counter}` : `${prefix}/${counter}`;
+
 // Резервирует groupId/actorId в draft counters (live counters обновятся на commit).
-export const reserveGroupId = (ctx: DispatchContext, groupTag: string): string => {
+// Counter инкрементируется ВСЕГДА — даже если custom generator возвращает свой id —
+// чтобы fallback после изменения generator оставался monotonic в пределах manager'а.
+export const reserveGroupId = <P extends AnyEvent>(
+  ctx: DispatchContext,
+  groupTag: string,
+  action: ManagerAction<P>,
+  cfg: SpawnIdConfig<P>,
+  isTaken: (id: string) => boolean,
+): string => {
   const countersDraft = ensureCountersDraft(ctx);
   const counter = countersDraft.groupByTag.get(groupTag) ?? 0;
   countersDraft.groupByTag.set(groupTag, counter + 1);
-  return `${groupTag}/${counter}`;
+  const id = cfg.generateGroupId
+    ? validateGeneratedId(
+        cfg.generateGroupId({ templateKey: groupTag, groupTag, counter, originId: cfg.originId, action }),
+        "group",
+      )
+    : buildDefaultId(cfg.originId, groupTag, counter);
+  if (isTaken(id)) {
+    throw new LiteFsmError("LITE_FSM_INVALID_GENERATED_ID", `[lite-fsm] groupId '${id}' is already in use.`);
+  }
+  return id;
 };
 
-export const reserveActorId = (ctx: DispatchContext, templateKey: string): string => {
+export const reserveActorId = <P extends AnyEvent>(
+  ctx: DispatchContext,
+  templateKey: string,
+  groupTag: string,
+  action: ManagerAction<P>,
+  cfg: SpawnIdConfig<P>,
+  isTaken: (id: string) => boolean,
+): string => {
   const countersDraft = ensureCountersDraft(ctx);
   const counter = countersDraft.actor;
   countersDraft.actor = counter + 1;
-  return `${templateKey}/${counter}`;
+  const id = cfg.generateActorId
+    ? validateGeneratedId(
+        cfg.generateActorId({ templateKey, groupTag, counter, originId: cfg.originId, action }),
+        "actor",
+      )
+    : buildDefaultId(cfg.originId, templateKey, counter);
+  if (isTaken(id)) {
+    throw new LiteFsmError("LITE_FSM_INVALID_GENERATED_ID", `[lite-fsm] actorId '${id}' is already in use.`);
+  }
+  return id;
 };
 
 // CoW для actor-template record: spawn/reduce/collapse в одном dispatch видят одну ссылку.

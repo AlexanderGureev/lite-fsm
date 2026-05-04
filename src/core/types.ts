@@ -26,6 +26,16 @@ export type ActorMeta = {
 
 export type Self = ActorMeta;
 
+export type SpawnIdContext<P extends AnyEvent> = {
+  templateKey: string;
+  groupTag: string;
+  counter: number;
+  originId: string | undefined;
+  action: ManagerAction<P>;
+};
+
+export type GenerateSpawnIdFn<P extends AnyEvent> = (ctx: SpawnIdContext<P>) => string;
+
 export type ActorTerminalState = "__RESOLVED" | "__REJECTED" | "__CANCELLED";
 export type ActorSystemState = "__INIT" | ActorTerminalState;
 export type ActorPublicState<C extends object> = Exclude<StateName<C>, ActorSystemState>;

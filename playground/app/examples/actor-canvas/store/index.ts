@@ -3,6 +3,7 @@ import type { MachinesState } from "lite-fsm";
 import { immerMiddleware } from "lite-fsm/middleware/immer";
 
 import { canvasStroke } from "./machines/canvasStroke";
+import type { CanvasPeerId } from "./constants";
 import type { AppEvents } from "./types";
 
 const machines = { canvasStroke };
@@ -10,11 +11,12 @@ const machines = { canvasStroke };
 export type FSMConfigType = typeof machines;
 export type AppState = MachinesState<FSMConfigType>;
 
-export const makeStore = () =>
+export const makeStore = (peerId: CanvasPeerId) =>
   MachineManager<FSMConfigType, AppEvents>(machines, {
     onError: console.error,
     middleware: [immerMiddleware],
     schemaVersion: 1,
+    originId: peerId,
   });
 
 export type AppStore = ReturnType<typeof makeStore>;

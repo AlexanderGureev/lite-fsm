@@ -2,7 +2,7 @@
 
 История релизов `lite-fsm`. Этот файл является единственным источником для страницы документации `/releases`.
 
-## 2.0.0 - 26 апреля 2026
+## 2.0.0
 
 Крупный релиз с flat actors: actor templates остаются обычными машинами, а `MachineManager` умеет запускать их как плоские runtime actors с маршрутизацией, lifecycle-состояниями и совместимостью с middleware.
 
@@ -21,6 +21,14 @@
 - Domain-only machines сохраняют прежнюю форму `{ state, context }` и runtime-поведение.
 
 Migration для persisted actor records: пересоздать snapshot после обновления или добавить `meta` вручную через `createActorMeta({ actorId: recordKey, groupId, groupTag })`.
+
+### Spawn id customization
+
+- Добавлены опции `MachineManagerOptions.originId`, `generateActorId`, `generateGroupId` для P2P, multi-tab, server↔client и шард-сценариев распределенного спавна.
+- `originId` (строка без `#`) добавляется ко всем созданным менеджером id в формате `${originId}#${templateKey}/${counter}`; чужие id (с другим owner-префиксом или без него) при `hydrate` не двигают локальные счетчики.
+- `generateActorId` и `generateGroupId` принимают `SpawnIdContext<P>` (`{ templateKey, groupTag, counter, originId, action }`) и возвращают доменный id, например `${originId}#player/${userId}`. Counter инкрементируется всегда; collision-check блокирует duplicate id через новый код `LITE_FSM_INVALID_GENERATED_ID`.
+- Невалидный `originId` (пустой или содержащий `#`) бросает `LITE_FSM_INVALID_OPTIONS`.
+- Изменение обратно совместимое: менеджер без новых опций продолжает выдавать `templateKey/0` и принимать любые opaque external id в `hydrate`.
 
 ## 1.2.0
 

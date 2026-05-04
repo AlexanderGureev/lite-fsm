@@ -208,6 +208,22 @@ export const resolveRouting = (
 // === Counters / id parsing ====================================================
 // SSR-safe monotonic counters: только инкремент, никаких Math.random/Date.now. Старт с 0.
 
+export const SPAWN_ID_SEP = "#";
+
+// Парсит spawn id вида `${owner}#${tail}`. Без `#` — owner === null, tail === id.
+export const parseSpawnId = (id: string): { owner: string | null; tail: string } => {
+  const sep = id.indexOf(SPAWN_ID_SEP);
+  if (sep === -1) return { owner: null, tail: id };
+  return { owner: id.slice(0, sep), tail: id.slice(sep + 1) };
+};
+
+// id принадлежит этому manager'у, если owner-префикс совпадает с originId.
+// undefined originId требует id без `#`-префикса (legacy формат).
+export const isOwnedId = (id: string, originId: string | undefined): boolean => {
+  const { owner } = parseSpawnId(id);
+  return originId === undefined ? owner === null : owner === originId;
+};
+
 export const cloneCounters = (counters: Counters): Counters => ({
   actor: counters.actor,
   groupByTag: new Map(counters.groupByTag),
@@ -233,16 +249,27 @@ const parseTrailingCounter = (value: string): number | null => {
   return Number.isInteger(counter) && counter >= 0 ? counter : null;
 };
 
-// Mutates counters in-place: bump'ит счётчики поверх restored ids. Opaque ids skip'аются —
-// non-collision гарантируется ownership-контрактом (server/client id-prefix), а не парсингом.
-export const bumpCountersFromId = (counters: Counters, actorId: string, groupId: string): void => {
-  const actorCounter = parseTrailingCounter(actorId);
-  if (actorCounter !== null) counters.actor = Math.max(counters.actor, actorCounter + 1);
+// Mutates counters in-place: bump'ит счётчики поверх restored ids. Учитывает ownership через
+// originId — id чужого owner'а пропускается (counter не двигается). Owned id парсятся из tail
+// (часть после `#`), opaque tail без trailing /N skip'ается — non-collision гарантируется
+// ownership-контрактом, а не парсингом.
+export const bumpCountersFromId = (
+  counters: Counters,
+  actorId: string,
+  groupId: string,
+  originId: string | undefined,
+): void => {
+  if (isOwnedId(actorId, originId)) {
+    const actorCounter = parseTrailingCounter(parseSpawnId(actorId).tail);
+    if (actorCounter !== null) counters.actor = Math.max(counters.actor, actorCounter + 1);
+  }
 
-  const slash = groupId.lastIndexOf("/");
-  const groupCounter = parseTrailingCounter(groupId);
-  if (groupCounter === null) return;
-
-  const tag = groupId.slice(0, slash);
-  counters.groupByTag.set(tag, Math.max(counters.groupByTag.get(tag) ?? 0, groupCounter + 1));
+  if (isOwnedId(groupId, originId)) {
+    const tail = parseSpawnId(groupId).tail;
+    const slash = tail.lastIndexOf("/");
+    const groupCounter = parseTrailingCounter(tail);
+    if (groupCounter === null) return;
+    const tag = tail.slice(0, slash);
+    counters.groupByTag.set(tag, Math.max(counters.groupByTag.get(tag) ?? 0, groupCounter + 1));
+  }
 };

@@ -20,6 +20,16 @@ export type LikeEvent =
 export type LikeSyncContext = { id: string; count: number };
 export type LikeSyncTemplate = MachineConfig<LikeConfig, LikeSyncContext, LikeEvent>;
 
+const likeReducer: LikeSyncTemplate["reducer"] = (state, action, meta) => {
+  if (action.type === "LIKE") {
+    return { state: meta.nextState, context: { id: action.payload.id, count: 1 } };
+  }
+  if (action.type === "BUMP") {
+    return { state: meta.nextState, context: { ...state.context, count: state.context.count + 1 } };
+  }
+  return { state: meta.nextState, context: state.context };
+};
+
 export const createLikeSync = (): LikeSyncTemplate => ({
   config: {
     __INIT: { LIKE: "PENDING" },
@@ -28,16 +38,28 @@ export const createLikeSync = (): LikeSyncTemplate => ({
   },
   initialState: "__INIT",
   initialContext: { id: "", count: 0 },
-  reducer: (state, action, meta) => {
-    if (action.type === "LIKE") {
-      return { state: meta.nextState, context: { id: action.payload.id, count: 1 } };
-    }
-    if (action.type === "BUMP") {
-      return { state: meta.nextState, context: { ...state.context, count: state.context.count + 1 } };
-    }
-    return { state: meta.nextState, context: state.context };
-  },
+  reducer: likeReducer,
 });
+
+export type SnapshotLikeSyncTemplate = MachineConfig<LikeConfig, LikeSyncContext, LikeEvent, {}, any> & {
+  persistence: "snapshot";
+};
+
+export const createSnapshotLikeSync = (
+  overrides: Partial<SnapshotLikeSyncTemplate> = {},
+): SnapshotLikeSyncTemplate =>
+  ({
+    config: {
+      __INIT: { LIKE: "PENDING" },
+      PENDING: { BUMP: null, OK: "__RESOLVED" },
+      "*": { CANCEL: "__CANCELLED" },
+    },
+    initialState: "__INIT",
+    initialContext: { id: "", count: 0 },
+    persistence: "snapshot",
+    reducer: likeReducer,
+    ...overrides,
+  }) as SnapshotLikeSyncTemplate;
 
 // Общая фабрика middleware, используемая тестами replacement-reconcile.
 // Делает trusted root replacement через replaceReducer + transition.
