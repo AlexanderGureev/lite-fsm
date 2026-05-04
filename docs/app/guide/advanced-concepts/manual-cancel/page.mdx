@@ -11,6 +11,8 @@
 В следующем примере показано, как реализовать ручную отмену эффекта на основе изменения значения в контексте:
 
 ```ts showLineNumbers copy
+import { createEffect, createMachine } from "lite-fsm";
+
 export const streams = createMachine({
   config: {
     IDLE: {
@@ -23,36 +25,28 @@ export const streams = createMachine({
     },
   },
   initialState: "IDLE",
-  initialContext,
+  initialContext: {},
   effects: {
     LOAD_STREAMS_PENDING: createEffect({
       type: "latest",
       // Функция отмены, которая проверяет условие перед каждым вызовом transition
       cancelFn: ({ getState }) => {
-        let prevState = getState().player.context.session.sessionId;
-        
-        // Функция, которая проверяет изменилась ли сессия
+        const startSession = getState().player.context.session.sessionId;
+
         return () => {
           const currentSession = getState().player.context.session.sessionId;
-          return prevState !== currentSession; // Если сессия изменилась, transition вызовы будут игнорироваться
+          // Если сессия изменилась — transition-вызовы будут игнорироваться
+          return startSession !== currentSession;
         };
       },
-      effect: async ({ transition, services, getState }) => {
-        // Этот вызов transition может быть проигнорирован, если сессия изменилась
-        transition({
-          type: "LOAD_STREAMS_STARTED",
-        });
-        
-        try {
-          // Эта операция будет выполнена в любом случае, независимо от отмены
-          await services.api.loadStreams();
+      effect: async ({ transition, api }) => {
+        transition({ type: "LOAD_STREAMS_STARTED" });
 
-          // Этот вызов transition может быть проигнорирован, если сессия изменилась
-          transition({
-            type: "LOAD_STREAMS_RESOLVE",
-          });
+        try {
+          // Сетевой запрос в любом случае выполнится до конца
+          await api.loadStreams();
+          transition({ type: "LOAD_STREAMS_RESOLVE" });
         } catch (error) {
-          // Этот вызов transition может быть проигнорирован, если сессия изменилась
           transition({
             type: "LOAD_STREAMS_REJECT",
             payload: { error },
@@ -80,157 +74,98 @@ export const streams = createMachine({
 ### Отмена по внешнему сигналу
 
 ```ts showLineNumbers copy
-// Создаем контроллер для отмены поисковых запросов
-const createSearchController = () => {
-  return {
-    controller: new AbortController(),
-    reset() {
-      // Отменяем предыдущий контроллер и создаем новый
-      this.controller.abort();
-      this.controller = new AbortController();
-      return this.controller;
-    }
-  };
-};
+import { MachineManager, createEffect, createMachine } from "lite-fsm";
+import { immerMiddleware } from "lite-fsm/middleware/immer";
 
-// Создаем машину состояний для поиска
-export const searchMachine = createMachine({
+const createSearchController = () => ({
+  controller: new AbortController(),
+  reset() {
+    this.controller.abort();
+    this.controller = new AbortController();
+    return this.controller;
+  },
+});
+
+export const search = createMachine({
   config: {
     IDLE: {
-      SEARCH: "SEARCH_PENDING", // Начинаем поиск через промежуточное состояние
+      SEARCH: "SEARCH_PENDING",
     },
-    // Промежуточное состояние, которое запускает эффект и сразу переходит в состояние поиска
     SEARCH_PENDING: {
       SEARCH_STARTED: "SEARCHING",
     },
     SEARCHING: {
-      SEARCH: "SEARCH_PENDING", // Новый поиск снова проходит через промежуточное состояние
-      SEARCH_SUCCESS: "RESULTS",
-      SEARCH_ERROR: "ERROR",
+      SEARCH: "SEARCH_PENDING",
+      SEARCH_RESOLVE: "RESULTS",
+      SEARCH_REJECT: "ERROR",
     },
     RESULTS: {
-      SEARCH: "SEARCH_PENDING", // Новый поиск из состояния результатов
+      SEARCH: "SEARCH_PENDING",
     },
     ERROR: {
-      SEARCH: "SEARCH_PENDING", // Новый поиск из состояния ошибки
+      SEARCH: "SEARCH_PENDING",
     },
   },
   initialState: "IDLE",
   initialContext: {
-    results: null,
-    error: null,
     query: "",
+    results: null as unknown[] | null,
+    error: null as Error | null,
   },
-  reducer: (s, action, { nextState }) => {
-    s.state = nextState;
+  reducer: (state, action, { nextState }) => {
+    state.state = nextState;
 
-    // Сохраняем запрос при начале поиска
-    if (action.type === "SEARCH") {
-      s.context = {
-        ...s.context,
-        query: action.payload.query,
-      };
-    }
-    
-    // Обновляем контекст при успешном поиске
-    if (action.type === "SEARCH_SUCCESS") {
-      s.context = {
-        ...s.context,
-        results: action.payload.results,
-        error: null,
-      };
-    }
-    
-    // Обновляем контекст при ошибке поиска
-    if (action.type === "SEARCH_ERROR") {
-      s.context = {
-        ...s.context,
-        error: action.payload.error,
-        results: null,
-      };
+    switch (action.type) {
+      case "SEARCH":
+        state.context.query = action.payload.query;
+        break;
+      case "SEARCH_RESOLVE":
+        state.context.results = action.payload.results;
+        state.context.error = null;
+        break;
+      case "SEARCH_REJECT":
+        state.context.error = action.payload.error;
+        state.context.results = null;
+        break;
     }
   },
   effects: {
-    // Эффект в промежуточном состоянии просто запускает переход в следующее состояние
     SEARCH_PENDING: ({ transition }) => {
-      transition({
-        type: "SEARCH_STARTED",
-      });
+      transition({ type: "SEARCH_STARTED" });
     },
-    
-    // Основной эффект поиска
+
     SEARCHING: createEffect({
-      effect: async ({ transition, services, getState }) => {
-        try {
-          // Получаем запрос из контекста
-          const { query } = getState().search.context;
-          
-          // Сбрасываем и получаем новый контроллер для этого поиска
-          const controller = services.searchController.reset();
-          
-          // Выполняем запрос с новым контроллером
-          const results = await services.api.search(query, {
-            signal: controller.signal,
-          });
-          
-          // Этот вызов transition будет игнорироваться, если запрос был отменен
-          transition({
-            type: "SEARCH_SUCCESS",
-            payload: { results },
-          });
-        } catch (err) {
-          if (err.name === "AbortError") {
-            // Запрос был отменен, просто выходим
-            return;
-          }
-          
-          // Этот вызов transition будет игнорироваться, если запрос был отменен
-          transition({
-            type: "SEARCH_ERROR",
-            payload: { error: err },
-          });
-        }
+      cancelFn: ({ searchController }) => {
+        const controller = searchController.controller;
+        return () => controller.signal.aborted;
       },
-      // Функция проверки отмены
-      cancelFn: ({ services }) => {
-        // Проверяем, был ли отменен текущий поисковый запрос
-        const controller = services.searchController.controller;
-        
-        return () => {
-          return controller.signal.aborted;
-        };
+      effect: async ({ transition, api, searchController, getState }) => {
+        const { query } = getState().search.context;
+        const controller = searchController.reset();
+
+        try {
+          const results = await api.search(query, { signal: controller.signal });
+          transition({ type: "SEARCH_RESOLVE", payload: { results } });
+        } catch (err) {
+          if (err instanceof Error && err.name === "AbortError") return;
+          transition({ type: "SEARCH_REJECT", payload: { error: err as Error } });
+        }
       },
     }),
   },
 });
 
-// Инициализируем менеджер
-const manager = MachineManager({
-  search: searchMachine,
-});
+const manager = MachineManager({ search }, { middleware: [immerMiddleware] });
 
-// Регистрируем зависимости, доступные в эффектах
 manager.setDependencies({
-  services: {
-    api: apiService,
-    searchController: createSearchController(),
-  },
+  api: apiService,
+  searchController: createSearchController(),
+  getState: manager.getState,
 });
 
-// Примеры использования
-
-// Первый поиск
-manager.transition({
-  type: "SEARCH",
-  payload: { query: "первый" },
-});
-
-// Пользователь не дождался результата и ввел новый запрос
-// Предыдущий запрос будет автоматически отменен
-manager.transition({
-  type: "SEARCH",
-  payload: { query: "второй" },
-});
+manager.transition({ type: "SEARCH", payload: { query: "первый" } });
+// Предыдущий запрос будет автоматически отменён через AbortController
+manager.transition({ type: "SEARCH", payload: { query: "второй" } });
 ```
 
 ## Лучшие практики

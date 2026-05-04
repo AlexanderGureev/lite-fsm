@@ -194,43 +194,42 @@ export const feedbackMachine = setup({
 
 #### lite-fsm
 
-```js showLineNumbers copy
-const feedbackMachine = createMachine({
+```ts showLineNumbers copy
+const feedback = createMachine({
   config: {
     "*": {
-      close: "closed",
+      CLOSE: "CLOSED",
     },
-    prompt: {
-      "feedback.good": "thanks",
-      "feedback.bad": "form",
+    PROMPT: {
+      FEEDBACK_GOOD: "THANKS",
+      FEEDBACK_BAD: "FORM",
     },
-    thanks: {},
-    form: {
-      "feedback.update": null,
-      back: "prompt",
-      submit: "thanks",
+    THANKS: {},
+    FORM: {
+      FEEDBACK_UPDATE: null,
+      BACK: "PROMPT",
+      SUBMIT: "THANKS",
     },
-    closed: {
-      restart: "prompt",
-    }
+    CLOSED: {
+      RESTART: "PROMPT",
+    },
   },
+  initialState: "PROMPT",
   initialContext: {
     feedback: "",
   },
-  initialState: "prompt",
-  reducer: (s, action, { nextState }) => {
-    s.state = nextState;
-    
+  reducer: (state, action, { nextState }) => {
+    state.state = nextState;
+
     switch (action.type) {
-      case "restart":
-        s.context.feedback = "";
+      case "RESTART":
+        state.context.feedback = "";
         break;
-      case "feedback.update":
-        s.context.feedback = action.payload.value;
+      case "FEEDBACK_UPDATE":
+        state.context.feedback = action.payload.value;
         break;
     }
   },
-  effects: {},
 });
 ```
 
@@ -312,72 +311,67 @@ lite-fsm является отличным выбором в следующих 
 2. **Регистрация в MachineManager**: Зарегистрируйте автоматы в MachineManager
 3. **Прямое использование**: Получайте доступ к состоянию любого автомата и отправляйте события между ними
 
-```js showLineNumbers copy
-// Простая регистрация всех автоматов
-const manager = MachineManager({
-  user: userMachine,
-  cart: cartMachine,
-  products: productsMachine,
-  checkout: checkoutMachine
-});
-
-// Пример автомата с доступом к состоянию других автоматов через эффекты
-const checkoutMachine = createMachine({
+```ts showLineNumbers copy
+const checkout = createMachine({
   config: {
-    idle: {
-      CHECKOUT: "processing"
+    IDLE: {
+      CHECKOUT: "PROCESSING",
     },
-    processing: {
-      PAYMENT_SUCCESS: "success",
-      PAYMENT_ERROR: "error"
+    PROCESSING: {
+      PAYMENT_RESOLVE: "SUCCESS",
+      PAYMENT_REJECT: "ERROR",
     },
-    success: {},
-    error: {
-      RETRY: "idle"
-    }
+    SUCCESS: {},
+    ERROR: {
+      RETRY: "IDLE",
+    },
   },
-  initialState: "idle",
+  initialState: "IDLE",
   initialContext: {},
   effects: {
-    // В эффектах доступна функция getState() для чтения любого автомата
-    processing: async ({ transition, services, getState }) => {
+    PROCESSING: async ({ transition, paymentService, getState }) => {
       try {
-        // Получаем актуальные данные корзины из другого автомата
+        // Читаем данные из других автоматов
         const { items, total } = getState().cart.context;
-        
-        // Получаем адрес доставки из профиля пользователя из другого автомата
         const { address, paymentMethods } = getState().user.context;
-        
-        // Используем данные из других автоматов для оформления заказа
-        const payment = await services.paymentService.processPayment({
+
+        const payment = await paymentService.processPayment({
           items,
           total,
           address,
-          paymentMethod: paymentMethods[0]
+          paymentMethod: paymentMethods[0],
         });
-        
-        transition({ 
-          type: "PAYMENT_SUCCESS", 
-          payload: { orderId: payment.orderId } 
+
+        transition({
+          type: "PAYMENT_RESOLVE",
+          payload: { orderId: payment.orderId },
         });
       } catch (error) {
-        transition({ 
-          type: "PAYMENT_ERROR", 
-          payload: { errorCode: error.code } 
+        transition({
+          type: "PAYMENT_REJECT",
+          payload: { errorCode: error.code },
         });
       }
-    }
-  }
+    },
+  },
 });
 
-// Доступ к состоянию любого автомата где угодно
-const cartItems = manager.getState('cart').context.items;
+const manager = MachineManager({
+  user,
+  cart,
+  products,
+  checkout,
+});
 
-// Отправка событий между автоматами
-manager.transition({ type: 'ADD_ITEM', payload: { productId: 123 } });
+manager.setDependencies({
+  paymentService,
+  getState: manager.getState,
+});
 
-manager.transition({ type: 'CHECKOUT' });
+const cartItems = manager.getState().cart.context.items;
 
+manager.transition({ type: "ADD_ITEM", payload: { productId: 123 } });
+manager.transition({ type: "CHECKOUT" });
 ```
 
 В отличие от XState, где бы вам потребовалось разработать дополнительные слои абстракции для такого взаимодействия, lite-fsm позволяет сосредоточиться на бизнес-логике, а не на инфраструктурном коде.

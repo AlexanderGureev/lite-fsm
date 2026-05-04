@@ -13,7 +13,8 @@
 <Tabs items={['JavaScript', 'TypeScript']}>
   <Tabs.Tab>
 ```js showLineNumbers copy
-// Конфигурация состояний и переходов
+import { createConfig, createMachine } from "lite-fsm";
+
 const config = createConfig({
   IDLE: {
     CHANGE_TRACK: "LOAD_TRACK_META_PENDING",
@@ -30,25 +31,22 @@ const config = createConfig({
   SET_STREAM_PENDING: {},
 });
 
-// Начальное состояние и контекст
 const initialState = "IDLE";
 const initialContext = {
-  // начальные данные
+  trackId: null,
 };
 
-// Определение редьюсера
-const reducer = (s, action, { nextState }) => {
-  s.state = nextState;
-  // логика обновления контекста
-  return s;
+const reducer = (state, action, { nextState }) => {
+  state.state = nextState;
+  if (action.type === "CHANGE_TRACK") {
+    state.context.trackId = action.payload.trackId;
+  }
 };
 
-// Определение эффектов
 const effects = {
   // эффекты для разных состояний
 };
 
-// Создание автомата из компонентов
 export const player = createMachine({
   config,
   initialState,
@@ -60,47 +58,44 @@ export const player = createMachine({
   </Tabs.Tab>
   <Tabs.Tab>
 ```ts showLineNumbers copy
-import { FSMEvent } from "lite-fsm";
-import {
-  createEffect,
-  createConfig,
-  createMachine,
-  createReducer,
-} from "../create-machine";
+import type { FSMEvent } from "lite-fsm";
 
-export type Events = FSMEvent<"DO_INIT">;
+import { createConfig, createEffect, createMachine, createReducer } from "../create-machine";
 
-type Context = {
+export type AuthEvent = FSMEvent<"DO_INIT"> | FSMEvent<"DO_READY">;
+
+type AuthContext = {
   sessionId: string;
 };
 
-const initialContext: Context = {
+const initialContext: AuthContext = {
   sessionId: "",
 };
 
 const config = createConfig({
   IDLE: {
-    DO_INIT: "READY",
+    DO_INIT: "PENDING",
+  },
+  PENDING: {
+    DO_READY: "READY",
   },
   READY: {},
 });
 
-const reducer = createReducer<typeof config, Context>(
-  (s, action, { nextState }) => {
-    s.state = nextState;
-    
-    switch (action.type) {
-      case "DO_INIT": {
-      }
-    }
-    
-    return s;
-  }
-);
+const reducer = createReducer<typeof config, AuthContext>((state, action, { nextState }) => {
+  state.state = nextState;
 
-const READY = createEffect<typeof config, "READY">({
-  type: "every",
-  effect: async ({ action, services, getState, transition, condition }) => {},
+  if (action.type === "DO_INIT") {
+    state.context.sessionId = action.payload.sessionId;
+  }
+});
+
+const PENDING = createEffect<typeof config, "PENDING">({
+  type: "latest",
+  effect: async ({ transition }) => {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    transition({ type: "DO_READY" });
+  },
 });
 
 export const auth = createMachine({
@@ -109,12 +104,14 @@ export const auth = createMachine({
   initialContext,
   reducer,
   effects: {
-    READY,
+    PENDING,
   },
 });
 ```
   </Tabs.Tab>
 </Tabs>
+
+> Здесь `createMachine`, `createConfig`, `createReducer`, `createEffect` — это **типизированные обёртки** из `../create-machine`, которые фиксируют union событий и зависимостей всего приложения. Подробнее — в разделе [Работа с TypeScript](/usage/typescript).
 
 ## Преимущества композиции
 

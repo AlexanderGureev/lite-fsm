@@ -17,7 +17,9 @@
 Рассмотрим пример медиаплеера с параллельными автоматами, где каждый автомат обрабатывает свою часть функциональности:
 
 ```ts showLineNumbers copy
-// Автомат для работы с данными трека
+import { createMachine } from "lite-fsm";
+
+// Автомат-координатор: ждёт завершения двух соседей
 export const player = createMachine({
   config: {
     IDLE: {
@@ -32,26 +34,22 @@ export const player = createMachine({
     SET_STREAM_PENDING: {},
   },
   initialState: "IDLE",
-  initialContext,
-  reducer: (s, action, { nextState }) => {
-    s.state = nextState;
-    return s;
+  initialContext: {},
+  reducer: (state, action, { nextState }) => {
+    state.state = nextState;
   },
   effects: {
     LOAD_TRACK_DATA_PENDING: async ({ condition, transition }) => {
       await Promise.all([
-        condition(e => e.type === "LOAD_TRACK_META_RESOLVE"),
-        condition(e => e.type === "LOAD_STREAMS_RESOLVE"),
+        condition((e) => e.type === "LOAD_TRACK_META_RESOLVE"),
+        condition((e) => e.type === "LOAD_STREAMS_RESOLVE"),
       ]);
-      
-      transition({
-        type: "LOAD_TRACK_DATA_RESOLVE",
-      });
+
+      transition({ type: "LOAD_TRACK_DATA_RESOLVE" });
     },
   },
 });
 
-// Автомат для работы с метаданными
 export const trackMeta = createMachine({
   config: {
     IDLE: {
@@ -62,19 +60,17 @@ export const trackMeta = createMachine({
     },
   },
   initialState: "IDLE",
-  initialContext,
-  reducer: (s, action, { nextState }) => {
-    s.state = nextState;
-    return s;
+  initialContext: {},
+  reducer: (state, action, { nextState }) => {
+    state.state = nextState;
   },
   effects: {
-    LOAD_TRACK_META_PENDING: async ({ services, transition }) => {
+    LOAD_TRACK_META_PENDING: async ({ transition }) => {
       transition({ type: "LOAD_TRACK_META_RESOLVE" });
     },
   },
 });
 
-// Автомат для управления потоками
 export const streams = createMachine({
   config: {
     IDLE: {
@@ -85,19 +81,18 @@ export const streams = createMachine({
     },
   },
   initialState: "IDLE",
-  initialContext,
-  reducer: (s, action, { nextState }) => {
-    s.state = nextState;
-    return s;
+  initialContext: {},
+  reducer: (state, action, { nextState }) => {
+    state.state = nextState;
   },
   effects: {
-    LOAD_STREAMS_PENDING: async ({ services, transition }) => {
+    LOAD_STREAMS_PENDING: async ({ transition }) => {
       transition({ type: "LOAD_STREAMS_RESOLVE" });
     },
   },
 });
 
-// События распространяются между всеми автоматами
+// Событие распространяется во все автоматы, зарегистрированные в manager
 manager.transition({ type: "CHANGE_TRACK", payload: { trackId: "123" } });
 ```
 
@@ -119,46 +114,46 @@ manager.transition({ type: "CHANGE_TRACK", payload: { trackId: "123" } });
 Каждый автомат должен отвечать за конкретную и хорошо определенную область функциональности:
 
 ```ts showLineNumbers copy
-// Автомат для аутентификации
-const authMachine = createMachine({
+const auth = createMachine({
   config: {
     UNAUTHENTICATED: {
       LOGIN: "AUTHENTICATING",
     },
     AUTHENTICATING: {
-      LOGIN_SUCCESS: "AUTHENTICATED",
-      LOGIN_FAILURE: "UNAUTHENTICATED",
+      LOGIN_RESOLVE: "AUTHENTICATED",
+      LOGIN_REJECT: "UNAUTHENTICATED",
     },
     AUTHENTICATED: {
       LOGOUT: "UNAUTHENTICATED",
     },
   },
-  // ...
+  initialState: "UNAUTHENTICATED",
+  initialContext: {},
 });
 
-// Автомат для управления профилем пользователя
-const profileMachine = createMachine({
+const profile = createMachine({
   config: {
     IDLE: {
-      LOGIN_SUCCESS: "LOADING_PROFILE",
+      LOGIN_RESOLVE: "LOADING_PROFILE",
       UPDATE_PROFILE: "UPDATING_PROFILE",
     },
     LOADING_PROFILE: {
       PROFILE_LOADED: "READY",
-      PROFILE_LOAD_ERROR: "ERROR",
+      PROFILE_LOAD_REJECT: "ERROR",
     },
     READY: {
       UPDATE_PROFILE: "UPDATING_PROFILE",
     },
     UPDATING_PROFILE: {
       PROFILE_UPDATED: "READY",
-      PROFILE_UPDATE_ERROR: "ERROR",
+      PROFILE_UPDATE_REJECT: "ERROR",
     },
     ERROR: {
       RETRY: "LOADING_PROFILE",
     },
   },
-  // ...
+  initialState: "IDLE",
+  initialContext: {},
 });
 ```
 
@@ -167,19 +162,19 @@ const profileMachine = createMachine({
 Используйте согласованные имена событий, чтобы обеспечить понятное взаимодействие между автоматами:
 
 ```ts showLineNumbers copy
-// В authMachine
+// В auth
 effects: {
-  AUTHENTICATING: async ({ transition, services }) => {
+  AUTHENTICATING: async ({ transition, api }) => {
     try {
-      const user = await services.api.login(credentials);
+      const user = await api.login(credentials);
       transition({
-        type: "LOGIN_SUCCESS", // Это событие также обрабатывается profileMachine
-        payload: { user }
+        type: "LOGIN_RESOLVE", // Это событие также обрабатывается profile
+        payload: { user },
       });
     } catch (error) {
-      transition({ type: "LOGIN_FAILURE", payload: { error } });
+      transition({ type: "LOGIN_REJECT", payload: { error } });
     }
-  }
+  },
 }
 ```
 
@@ -188,28 +183,25 @@ effects: {
 В сложных системах полезно устанавливать иерархические отношения между автоматами:
 
 ```ts showLineNumbers copy
-// Родительский автомат
-const appMachine = createMachine({
+const app = createMachine({
   config: {
     INITIALIZING: {
       APP_READY: "RUNNING",
     },
-    RUNNING: { },
+    RUNNING: {},
   },
-  // ...
+  initialState: "INITIALIZING",
+  initialContext: {},
   effects: {
     INITIALIZING: async ({ transition }) => {
-      // Инициализация приложения
       transition({ type: "APP_READY" });
     },
   },
 });
 
-// Автомат для аутентификации
-const authMachine = createMachine({
+const auth = createMachine({
   config: {
     IDLE: {
-      // Реагирует на события от родительского автомата
       APP_READY: "WAITING_FOR_AUTH",
       FATAL_ERROR: "DISABLED",
     },
@@ -217,54 +209,47 @@ const authMachine = createMachine({
       LOGIN: "AUTHENTICATING",
     },
     AUTHENTICATING: {
-      LOGIN_SUCCESS: "AUTHENTICATED",
-      LOGIN_FAILURE: "WAITING_FOR_AUTH",
+      LOGIN_RESOLVE: "AUTHENTICATED",
+      LOGIN_REJECT: "WAITING_FOR_AUTH",
     },
     AUTHENTICATED: {
       LOGOUT: "WAITING_FOR_AUTH",
     },
+    DISABLED: {},
   },
   initialState: "IDLE",
-  // ... остальная часть определения
+  initialContext: {},
 });
 
-// Автомат для управления профилем пользователя
-const profileMachine = createMachine({
+const profile = createMachine({
   config: {
     IDLE: {
-      // Реагирует на события от родительского автомата
       APP_READY: "WAITING_FOR_LOGIN",
       FATAL_ERROR: "DISABLED",
     },
     WAITING_FOR_LOGIN: {
-      // Реагирует на события от другого автомата
-      LOGIN_SUCCESS: "LOADING_PROFILE",
+      LOGIN_RESOLVE: "LOADING_PROFILE",
     },
     LOADING_PROFILE: {
       PROFILE_LOADED: "READY",
-      PROFILE_LOAD_ERROR: "ERROR",
+      PROFILE_LOAD_REJECT: "ERROR",
     },
-    READY: { },
+    READY: {},
+    ERROR: {},
+    DISABLED: {},
   },
   initialState: "IDLE",
-  // ... остальная часть определения
+  initialContext: {},
 });
 
-// Объединение автоматов в менеджере
-const manager = MachineManager({
-  app: appMachine,
-  auth: authMachine,
-  profile: profileMachine,
-});
+const manager = MachineManager({ app, auth, profile });
 
-// Инициализация приложения
+// Это событие обработают и auth, и profile
 manager.transition({ type: "APP_READY" });
-// Это событие автоматически обработается и auth, и profile автоматами
 
-// Пользователь логинится
 manager.transition({ type: "LOGIN" });
-// При успешном логине authMachine отправит LOGIN_SUCCESS
-// Это событие будет обработано profileMachine автоматически
+// При успешном логине auth отправит LOGIN_RESOLVE,
+// и profile автоматически перейдёт в LOADING_PROFILE
 ```
 
 В этом примере:

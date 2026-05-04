@@ -18,26 +18,16 @@ export const player = createMachine({
     "*": {
       CHANGE_TRACK: "LOAD_TRACK_DATA_PENDING",
     },
-    IDLE: {
-      // Обычные переходы
-    },
-    LOAD_TRACK_DATA_PENDING: {
-      // Обычные переходы
-    },
-    SELECT_STREAM_PENDING: {
-      // Обычные переходы
-    },
-    SET_STREAM_PENDING: {
-      // Обычные переходы
-    },
+    IDLE: {},
+    LOAD_TRACK_DATA_PENDING: {},
+    SELECT_STREAM_PENDING: {},
+    SET_STREAM_PENDING: {},
   },
   initialState: "IDLE",
-  initialContext,
-  reducer: (s, action, { nextState }) => {
-    s.state = nextState;
-    return s;
+  initialContext: {},
+  reducer: (state, action, { nextState }) => {
+    state.state = nextState;
   },
-  effects: {},
 });
 ```
 
@@ -67,7 +57,7 @@ config: {
 ### 1. Общие действия, доступные в любом состоянии
 
 ```ts showLineNumbers copy
-const playerMachine = createMachine({
+const player = createMachine({
   config: {
     "*": {
       CHANGE_TRACK: "PAUSED",
@@ -78,16 +68,16 @@ const playerMachine = createMachine({
     PLAYING: {
       PAUSE: "PAUSED",
     },
-    // Другие состояния...
   },
-  // ...
+  initialState: "PAUSED",
+  initialContext: {},
 });
 ```
 
 ### 2. Обработка ошибок на глобальном уровне
 
 ```ts showLineNumbers copy
-const appMachine = createMachine({
+const app = createMachine({
   config: {
     "*": {
       NETWORK_ERROR: "ERROR",
@@ -102,16 +92,19 @@ const appMachine = createMachine({
     DATA_READY: {
       PROCESS_DATA: "PROCESSING",
     },
-    PROCESSING: { },
+    PROCESSING: {},
+    ERROR: {},
+    CRASHED: {},
   },
-  // ...
+  initialState: "IDLE",
+  initialContext: {},
 });
 ```
 
 ### 3. Сброс состояния
 
 ```ts showLineNumbers copy
-const formMachine = createMachine({
+const form = createMachine({
   config: {
     "*": {
       RESET_FORM: "INITIAL", // Сброс формы из любого состояния
@@ -138,7 +131,8 @@ const formMachine = createMachine({
       RETRY: "SUBMITTING",
     },
   },
-  // ...
+  initialState: "INITIAL",
+  initialContext: {},
 });
 ```
 

@@ -1,37 +1,44 @@
 # Интеграция с React
 
-Библиотека `lite-fsm` предоставляет готовые компоненты и хуки для простой интеграции с React приложениями.
+`lite-fsm/react` предоставляет минимальный набор хуков и компонентов для подключения автоматов к React. Модуль помечен `"use client"`: его можно импортировать в SSR/RSC, но провайдер и хуки работают только в client tree.
 
 ## Установка
 
-Для использования модуля React с `lite-fsm` вам не нужно устанавливать дополнительные пакеты, так как он уже включен в основную библиотеку:
+Дополнительные пакеты не нужны — модуль входит в основную библиотеку:
 
 ```bash showLineNumbers copy
 npm install lite-fsm
 ```
 
-## Доступ к модулю React
+## Импорт
 
 ```ts showLineNumbers copy
-import { FSMContextProvider, useSelector, useTransition } from "lite-fsm/react";
+import {
+  FSMContextProvider,
+  FSMHydrationBoundary,
+  defineMachine,
+  useHydrateSnapshot,
+  useManager,
+  useSelector,
+  useTransition,
+} from "lite-fsm/react";
 ```
 
-> **Совет:** Если вы используете TypeScript, рекомендуется создать строготипизированные версии хуков, как показано в разделе [TypeScript](/usage/typescript). Это обеспечит автодополнение и проверку типов во время компиляции, что значительно снизит количество потенциальных ошибок.
+> **Совет:** в TypeScript-проектах создайте строго типизированные версии хуков (`useSelector`, `useTransition`, `useManager`). Это включит автодополнение и проверку типов на этапе компиляции. Подробности — в разделе [Работа с TypeScript](/usage/typescript).
 
-## Основные компоненты и хуки
-
-### FSMContextProvider
-
-`FSMContextProvider` — компонент-провайдер, который предоставляет доступ к менеджеру автоматов для всех дочерних компонентов через React Context.
+## Базовый пример
 
 ```tsx showLineNumbers copy
 import { createMachine, MachineManager, type FSMEvent } from "lite-fsm";
-import { FSMContextProvider } from "lite-fsm/react";
+import { immerMiddleware } from "lite-fsm/middleware/immer";
+import { FSMContextProvider, useSelector, useTransition } from "lite-fsm/react";
 
-export type Events = FSMEvent<"INCREMENT"> | FSMEvent<"DECREMENT"> | FSMEvent<"RESET">;
+type CounterEvent =
+  | FSMEvent<"INCREMENT">
+  | FSMEvent<"DECREMENT">
+  | FSMEvent<"RESET">;
 
-// Создаем автомат
-const counterMachine = createMachine({
+const counter = createMachine({
   config: {
     IDLE: {
       INCREMENT: null,
@@ -46,10 +53,10 @@ const counterMachine = createMachine({
   reducer: (state, action) => {
     switch (action.type) {
       case "INCREMENT":
-        state.context.count++;
+        state.context.count += 1;
         break;
       case "DECREMENT":
-        state.context.count--;
+        state.context.count -= 1;
         break;
       case "RESET":
         state.context.count = 0;
@@ -58,12 +65,8 @@ const counterMachine = createMachine({
   },
 });
 
-// Создаем менеджер
-const manager = MachineManager({
-  counter: counterMachine,
-});
+const manager = MachineManager({ counter }, { middleware: [immerMiddleware] });
 
-// Использование в корне приложения
 function App() {
   return (
     <FSMContextProvider machineManager={manager}>
@@ -71,97 +74,106 @@ function App() {
     </FSMContextProvider>
   );
 }
-```
-
-### useSelector
-
-Хук `useSelector` позволяет выбирать и подписываться на состояние из менеджера автоматов:
-
-```tsx showLineNumbers copy
-import { useSelector, useTransition } from "lite-fsm/react";
 
 function Counter() {
-  // Получаем значение count из контекста автомата counter
-  const count = useSelector((state) => state.counter.context.count);
-
-  // Альтернативный способ: получить всё состояние автомата
-  const { state, context } = useSelector((state) => state.counter);
-
-  // Получить состояние нескольких автоматов
-  const { counterValue, authState } = useSelector((state) => ({
-    counterValue: state.counter.context.count,
-    authState: state.auth.state,
-  }));
+  const count = useSelector((s) => s.counter.context.count);
+  const transition = useTransition<CounterEvent>();
 
   return (
     <div>
-      <h2>Счетчик: {count}</h2>
-      {/* ... */}
+      <h2>Счётчик: {count}</h2>
+      <button onClick={() => transition({ type: "INCREMENT" })}>+</button>
+      <button onClick={() => transition({ type: "DECREMENT" })}>-</button>
+      <button onClick={() => transition({ type: "RESET" })}>Сброс</button>
     </div>
   );
 }
 ```
 
-### useTransition
+## Хуки и компоненты
 
-Хук `useTransition` предоставляет функцию для отправки событий автоматам:
+### `FSMContextProvider`
+
+Провайдер, который кладёт `MachineManager` в React-контекст и делает его доступным дочерним хукам.
 
 ```tsx showLineNumbers copy
-import { useSelector, useTransition } from "lite-fsm/react";
+<FSMContextProvider machineManager={manager}>
+  <App />
+</FSMContextProvider>
+```
 
+| Свойство          | Назначение                                 |
+| ----------------- | ------------------------------------------ |
+| `machineManager`  | Объект менеджера, созданный `MachineManager` |
+| `children`        | Дочерние компоненты                        |
+
+### `useSelector`
+
+Подписка на часть состояния. Реализован поверх `useSyncExternalStoreWithSelector`. Default equality — `===`.
+
+```tsx showLineNumbers copy
 function Counter() {
-  const count = useSelector((state) => state.counter.context.count);
+  const count = useSelector((s) => s.counter.context.count);
+
+  // Несколько значений — обернуть в объект и передать кастомный equalityFn
+  const view = useSelector(
+    (s) => ({
+      count: s.counter.context.count,
+      isResettable: s.counter.context.count > 0,
+    }),
+    (a, b) => a.count === b.count && a.isResettable === b.isResettable,
+  );
+
+  return <p>Count: {count}</p>;
+}
+```
+
+### `useTransition`
+
+Возвращает функцию `transition`, эквивалентную `manager.transition`.
+
+```tsx showLineNumbers copy
+function Controls() {
   const transition = useTransition();
 
   return (
-    <div>
-      <h2>Счетчик: {count}</h2>
-      <button onClick={() => transition({ type: "INCREMENT" })}>Увеличить</button>
-      <button onClick={() => transition({ type: "DECREMENT" })}>Уменьшить</button>
-      <button onClick={() => transition({ type: "RESET" })}>Сбросить</button>
-    </div>
+    <>
+      <button onClick={() => transition({ type: "INCREMENT" })}>+</button>
+      <button onClick={() => transition({ type: "RESET" })}>Сброс</button>
+    </>
   );
 }
 ```
 
-### useManager
+### `useManager`
 
-Хук `useManager` даёт прямой доступ к объекту менеджера автоматов:
+Прямой доступ к `MachineManager` из контекста. Полезно для отладки, дебаг-панелей или когда нужно вызвать менее частые методы (например, `setDependencies`, `dehydrate`).
 
 ```tsx showLineNumbers copy
-import { useManager } from "lite-fsm/react";
+import { useEffect } from "react";
 
 function DebugPanel() {
   const manager = useManager();
-
-  // Получаем полное состояние всех автоматов
   const state = manager.getState();
 
-  // Можем также подписаться на изменения
   useEffect(() => {
-    const unsubscribe = manager.onTransition((prevState, nextState, action) => {
-      console.log("Transition:", { prevState, nextState, action });
+    return manager.onTransition((prev, next, action) => {
+      console.log("[transition]", action.type, { prev, next });
     });
-
-    return unsubscribe;
   }, [manager]);
 
-  return (
-    <div className="debug-panel">
-      <pre>{JSON.stringify(state, null, 2)}</pre>
-    </div>
-  );
+  return <pre>{JSON.stringify(state, null, 2)}</pre>;
 }
 ```
 
-### FSMHydrationBoundary
+### `FSMHydrationBoundary`
 
-`FSMHydrationBoundary` применяет snapshot к React subtree так, чтобы `useSelector()` внутри boundary видел hydrated state уже на render, а сам manager догонял это состояние в layout effect.
+Применяет snapshot к React-subtree так, чтобы `useSelector()` внутри boundary видел hydrated state уже на render, а сам manager догонял это состояние в layout effect.
 
 ```tsx showLineNumbers copy
 import { FSMHydrationBoundary } from "lite-fsm/react";
 
-function App({ manager, snapshot }) {
+function App({ snapshot }) {
   return (
     <FSMContextProvider machineManager={manager}>
       <FSMHydrationBoundary snapshot={snapshot} strategy="merge">
@@ -172,30 +184,76 @@ function App({ manager, snapshot }) {
 }
 ```
 
-Подробное описание `hydrate`, `dehydrate`, `getHydratedState` и поведения boundary находится в разделе [Сохранение состояния](/guide/hydration).
+`useManager().getState()` до layout effect вернёт ещё не обновлённый state; для одинаковой разметки на сервере и клиенте читайте состояние через `useSelector()`.
 
-## Практические примеры
+### `useHydrateSnapshot`
 
-### Авторизация пользователя
+Применяет snapshot в `useLayoutEffect` без preview. Подходит для фоновой гидратации после mount, когда временное наложение состояния не нужно.
 
 ```tsx showLineNumbers copy
+import { useHydrateSnapshot } from "lite-fsm/react";
+
+function Hydrator({ snapshot }: { snapshot: AppSnapshot }) {
+  useHydrateSnapshot(snapshot, { strategy: "merge" });
+  return null;
+}
+```
+
+Подробности — в разделе [Сохранение состояния](/guide/hydration).
+
+### `defineMachine` (React)
+
+Standalone-машина в виде хука. Возвращает hook + методы standalone machine (`transition`, `getState`, `onTransition`, `addMiddleware`).
+
+```tsx showLineNumbers copy
+import { defineMachine } from "lite-fsm/react";
+
+const useCounter = defineMachine<CounterEvent>().create(counter);
+
+function Counter() {
+  const count = useCounter((s) => s.context.count);
+
+  return (
+    <button onClick={() => useCounter.transition({ type: "INCREMENT" })}>
+      {count}
+    </button>
+  );
+}
+```
+
+Несколько компонентов с одним и тем же `useCounter` делят общий state. `defineMachine` не поддерживает actor templates — для актёров используйте `MachineManager` + `FSMContextProvider`.
+
+## Практический пример: форма авторизации
+
+Бизнес-логика живёт в автомате `auth`, компонент только рендерит и отправляет события.
+
+```tsx showLineNumbers copy
+import { createMachine, type FSMEvent } from "lite-fsm";
+
+type AuthEvent =
+  | FSMEvent<"UPDATE_CREDENTIALS", { username?: string; password?: string }>
+  | FSMEvent<"LOGIN">
+  | FSMEvent<"LOGIN_RESOLVE", { user: { id: string } }>
+  | FSMEvent<"LOGIN_REJECT", { error: string }>
+  | FSMEvent<"LOGOUT">
+  | FSMEvent<"RESET">;
+
 const initialContext = {
-  user: null,
-  error: null,
+  user: null as null | { id: string },
+  error: null as null | string,
   username: "",
   password: "",
 };
 
-// Создание автомата
-const authMachine = createMachine({
+export const auth = createMachine({
   config: {
     LOGGED_OUT: {
       LOGIN: "LOGGING_IN",
-      UPDATE_CREDENTIALS: null, // Обновление username/password остается в том же состоянии
+      UPDATE_CREDENTIALS: null,
     },
     LOGGING_IN: {
-      LOGIN_SUCCESS: "LOGGED_IN",
-      LOGIN_ERROR: "LOGIN_ERROR",
+      LOGIN_RESOLVE: "LOGGED_IN",
+      LOGIN_REJECT: "LOGIN_ERROR",
     },
     LOGGED_IN: {
       LOGOUT: "LOGGED_OUT",
@@ -203,84 +261,93 @@ const authMachine = createMachine({
     LOGIN_ERROR: {
       LOGIN: "LOGGING_IN",
       RESET: "LOGGED_OUT",
-      UPDATE_CREDENTIALS: null, // Обновление данных в состоянии ошибки
+      UPDATE_CREDENTIALS: null,
     },
   },
   initialState: "LOGGED_OUT",
   initialContext,
-  reducer: (state, action) => {
+  reducer: (state, action, { nextState }) => {
+    state.state = nextState;
+
     switch (action.type) {
       case "UPDATE_CREDENTIALS":
-        state.context = {
-          ...state.context,
-          ...action.payload,
-        };
+        Object.assign(state.context, action.payload);
+        break;
+      case "LOGIN_RESOLVE":
+        state.context.user = action.payload.user;
+        state.context.error = null;
+        break;
+      case "LOGIN_REJECT":
+        state.context.error = action.payload.error;
         break;
       case "LOGOUT":
       case "RESET":
-        state.context = initialContext;
+        Object.assign(state.context, initialContext);
         break;
     }
   },
   effects: {
-    LOGGING_IN: async ({ transition, services, getState }) => {
+    LOGGING_IN: async ({ transition, authService, getState }) => {
       try {
-        // Получаем данные из контекста автомата вместо payload
         const { username, password } = getState().auth.context;
-        const user = await services.authService.login(username, password);
-        transition({ type: "LOGIN_SUCCESS", payload: { user } });
+        const user = await authService.login(username, password);
+        transition({ type: "LOGIN_RESOLVE", payload: { user } });
       } catch (error) {
         transition({
-          type: "LOGIN_ERROR",
-          payload: { error: error.message },
+          type: "LOGIN_REJECT",
+          payload: { error: error instanceof Error ? error.message : "unknown" },
         });
       }
     },
-    LOGGED_IN: ({ services }) => {
-      services.analyticsService.trackEvent("user_login");
-    },
   },
 });
+```
 
-// Компонент формы входа
+> `getState` и `authService` — это пользовательские зависимости, которые мы передаём в `manager.setDependencies({ getState: manager.getState, authService })`.
+
+```tsx showLineNumbers copy
 function LoginForm() {
-  const { state, context } = useSelector((state) => state.auth);
-  const transition = useTransition();
+  const { state, context } = useSelector((s) => s.auth);
+  const transition = useTransition<AuthEvent>();
 
-  // Получаем данные из контекста автомата вместо локального состояния
   const { username, password, error } = context;
 
-  // Обработчики изменения полей ввода
-  const handleUsernameChange = (e) => {
-    transition({
-      type: "UPDATE_CREDENTIALS",
-      payload: { username: e.target.value },
-    });
-  };
-
-  const handlePasswordChange = (e) => {
-    transition({
-      type: "UPDATE_CREDENTIALS",
-      payload: { password: e.target.value },
-    });
-  };
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    transition({ type: "LOGIN" });
-  };
-
   return (
-    <form onSubmit={handleSubmit}>
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        transition({ type: "LOGIN" });
+      }}
+    >
       {error && <div className="error">{error}</div>}
-      <div>
-        <label>Имя пользователя:</label>
-        <input type="text" value={username} onChange={handleUsernameChange} />
-      </div>
-      <div>
-        <label>Пароль:</label>
-        <input type="password" value={password} onChange={handlePasswordChange} />
-      </div>
+
+      <label>
+        Имя пользователя
+        <input
+          value={username}
+          onChange={(e) =>
+            transition({
+              type: "UPDATE_CREDENTIALS",
+              payload: { username: e.target.value },
+            })
+          }
+        />
+      </label>
+
+      <label>
+        Пароль
+        <input
+          type="password"
+          value={password}
+          onChange={(e) =>
+            transition({
+              type: "UPDATE_CREDENTIALS",
+              payload: { password: e.target.value },
+            })
+          }
+        />
+      </label>
+
       <button type="submit" disabled={state === "LOGGING_IN"}>
         {state === "LOGGING_IN" ? "Вход..." : "Войти"}
       </button>
@@ -289,6 +356,4 @@ function LoginForm() {
 }
 ```
 
-## Заключение
-
-Интеграция `lite-fsm` с React предоставляет удобный и предсказуемый способ управления состоянием приложения. Используя хуки и компоненты из модуля `lite-fsm/react`, вы можете легко подключить конечные автоматы к вашим React компонентам и получить все преимущества управления состоянием на основе конечных автоматов.
+Логика валидации, авторизации и обработки ошибок — в автомате; компонент только описывает разметку и отправляет события.

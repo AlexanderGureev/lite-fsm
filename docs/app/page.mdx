@@ -81,56 +81,49 @@ npm install lite-fsm
 
 ```ts showLineNumbers copy
 import { createMachine, MachineManager } from "lite-fsm";
+import { immerMiddleware } from "lite-fsm/middleware/immer";
 
-const playback = createMachine({
+const lamp = createMachine({
   config: {
-    IDLE: {
-      DO_INIT: "PAUSED",
+    OFF: {
+      TURN_ON: "ON",
+      RESET: "OFF",
     },
-    PAUSED: {
-      DO_PLAY: "PLAYING",
+    ON: {
+      TURN_OFF: "OFF",
+      RESET: "OFF",
     },
-    PLAYING: {
-      DO_PAUSE: "PAUSED",
-      TIME_UPDATE: null,
-    },
-    END: {},
   },
-  initialState: "IDLE",
+  initialState: "OFF",
   initialContext: {
-    currentTime: null,
-    duration: null,
-    remainingTime: null,
+    toggleCount: 0,
   },
-  effects: {
-    PLAYING: ({ services }) => services.playerService.play(),
-    PAUSED: ({ services }) => services.playerService.pause(),
-  },
-});
+  reducer: (state, action, { nextState }) => {
+    state.state = nextState;
 
-const manager = MachineManager({ playback });
-manager.setDependencies({
-  services: {
-    playerService: {
-      play: () => Promise.resolve(),
-      pause: () => Promise.resolve(),
-    },
+    if (action.type === "RESET") {
+      state.context.toggleCount = 0;
+      return;
+    }
+
+    state.context.toggleCount += 1;
   },
 });
 
-manager.onTransition((prevState, nextState) => {
-  console.log("[onTransition]", { prevState, nextState });
+const manager = MachineManager({ lamp }, { middleware: [immerMiddleware] });
+
+manager.onTransition((prev, next, action) => {
+  console.log("[onTransition]", action.type, next.lamp);
 });
 
-manager.transition({ type: "DO_INIT" });
-manager.transition({ type: "DO_PLAY" });
-manager.transition({
-  type: "TIME_UPDATE",
-  payload: { currentTime: 0, duration: 60, remainingTime: 60 },
-});
+manager.transition({ type: "TURN_ON" });
+manager.transition({ type: "TURN_OFF" });
+manager.transition({ type: "RESET" });
 
-const { state, context } = manager.getState().playback;
+const { state, context } = manager.getState().lamp;
 ```
+
+> Состояния и события рекомендуем писать в `UPPER_SNAKE_CASE`. Reducer выше использует `immerMiddleware` — это позволяет мутировать `state` напрямую без `return`. Без middleware reducer должен возвращать новый объект `{ state, context }`.
 
 > **React**: Для интеграции lite-fsm с React используйте специализированные хуки и компоненты, описанные в разделе [Использование с React](/react).
 
@@ -143,6 +136,8 @@ const { state, context } = manager.getState().playback;
 После ознакомления с основами, вы можете изучить другие разделы документации:
 
 - [Конечные автоматы](/guide/state-machines): Подробное описание концепций FSM и statecharts
+- [Акторы](/guide/actors): Динамические шаблоны автоматов для параллельных процессов и задач
+- [Сохранение состояния](/guide/hydration): SSR, snapshot, hydrate/dehydrate и `FSMHydrationBoundary`
 - [Продвинутые концепции](/guide/advanced-concepts): Углубленное изучение возможностей библиотеки
 - [Лучшие практики](/guide/best-practices): Рекомендации по эффективному использованию
 - [Использование с React](/react): Руководство по интеграции с React-приложениями

@@ -53,47 +53,40 @@ package.json
 
 Вместо определения `store` как глобальной переменной, мы создаем функцию `makeStore`, которая возвращает новый экземпляр хранилища для каждого запроса:
 
-```tsx showLineNumbers copy
+```ts showLineNumbers copy
 // src/store/index.ts
-import { MachineManager } from "lite-fsm";
-import { root } from "./machines/root";
+import { MachineManager, type MachinesState } from "lite-fsm";
+import { devToolsMiddleware } from "lite-fsm/middleware/devTools";
+import { immerMiddleware } from "lite-fsm/middleware/immer";
+
 import { counter } from "./machines/counter";
 import { profile } from "./machines/profile";
-import { devToolsMiddleware, immerMiddleware } from "lite-fsm/middleware";
+import { root } from "./machines/root";
 import type { AppEvents, Dependencies } from "./types";
 
-// Создаем функцию для создания хранилища
+const cfg = { root, counter, profile };
+
+export type FSMConfigType = typeof cfg;
+export type AppState = MachinesState<FSMConfigType>;
+
 export const makeStore = () => {
-  const cfg = { root, counter, profile };
-
-  const middleware = [
-    immerMiddleware,
-    devToolsMiddleware({
-      blacklistActions: [],
-    }),
-  ];
-
-  const manager = MachineManager(cfg, {
-    middleware,
+  const manager = MachineManager<FSMConfigType, AppEvents>(cfg, {
+    middleware: [immerMiddleware, devToolsMiddleware({ blacklistActions: [] })],
     onError: console.error,
   });
 
-  manager.setDependencies({
+  manager.setDependencies<Dependencies>({
     getState: manager.getState,
-    services: {
-      playerService: {
-        play: () => undefined,
-        pause: () => undefined,
-      },
+    playerService: {
+      play: () => undefined,
+      pause: () => undefined,
     },
   });
 
   return manager;
 };
 
-// Выводим типы из хранилища
 export type AppStore = ReturnType<typeof makeStore>;
-export type AppState = ReturnType<AppStore["getState"]>;
 ```
 
 ## Предоставление хранилища компонентам
@@ -123,22 +116,21 @@ export default function StoreProvider({ children }: { children: ReactNode }) {
 
 Создаем типизированные версии хуков для удобного использования:
 
-```tsx showLineNumbers copy
+```ts showLineNumbers copy
 // src/store/hooks.ts
-import type { TypedUseMachineHook, TypedUseSelectorHook, TypedUseTransitionHook } from "lite-fsm/react";
+import type { TypedUseManagerHook, TypedUseSelectorHook, TypedUseTransitionHook } from "lite-fsm/react";
 import {
   useManager as _useManager,
   useSelector as _useSelector,
   useTransition as _useTransition,
 } from "lite-fsm/react";
 
+import type { FSMConfigType } from ".";
 import type { AppEvents } from "./types";
-import type { AppState, AppStore } from ".";
 
-// Создаем типизированные версии хуков
 export const useTransition: TypedUseTransitionHook<AppEvents> = _useTransition;
-export const useSelector: TypedUseSelectorHook<AppState> = _useSelector;
-export const useManager: TypedUseMachineHook<AppStore, AppEvents> = _useManager;
+export const useSelector: TypedUseSelectorHook<FSMConfigType> = _useSelector;
+export const useManager: TypedUseManagerHook<FSMConfigType, AppEvents> = _useManager;
 ```
 
 ## Интеграция с приложением
@@ -157,6 +149,53 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </body>
     </html>
   );
+}
+```
+
+## Гидратация состояния с сервера
+
+Когда серверу нужно подготовить состояние и доставить его клиенту, используйте пару `manager.dehydrate()` / `useHydrateSnapshot` — клиент применит снапшот синхронно при первом рендере, без ошибок гидратации. Подробности — в разделе [Сохранение состояния](/guide/hydration).
+
+```tsx showLineNumbers copy
+// app/page.tsx — Server Component
+import { makeStore } from "../src/store";
+import StoreProvider from "./StoreProvider";
+
+export default async function Page() {
+  const manager = makeStore();
+  manager.transition({ type: "BOOTSTRAP", payload: await loadInitialData() });
+
+  return (
+    <StoreProvider snapshot={manager.dehydrate()}>
+      <PageContent />
+    </StoreProvider>
+  );
+}
+```
+
+```tsx showLineNumbers copy
+// app/StoreProvider.tsx
+"use client";
+
+import { useRef, type ReactNode } from "react";
+import { FSMContextProvider, useHydrateSnapshot } from "lite-fsm/react";
+import type { Snapshot } from "lite-fsm";
+
+import { makeStore } from "../src/store";
+import type { AppStore } from "../src/store";
+
+type Props = {
+  children: ReactNode;
+  snapshot?: Snapshot;
+};
+
+export default function StoreProvider({ children, snapshot }: Props) {
+  const storeRef = useRef<AppStore | null>(null);
+  if (!storeRef.current) storeRef.current = makeStore();
+
+  useHydrateSnapshot(storeRef.current, snapshot);
+
+  return <FSMContextProvider machineManager={storeRef.current}>{children}</FSMContextProvider>;
 }
 ```
 

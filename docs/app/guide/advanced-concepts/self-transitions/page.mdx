@@ -21,16 +21,15 @@ export const player = createMachine({
   },
   initialState: "IDLE",
   initialContext: {
-    started: false
+    started: false,
   },
-  reducer: (s, action, { nextState }) => {
-    s.state = nextState;
-    
-    // Обрабатываем событие START_PLAYBACK в редьюсере
-    if (action.type === "START_PLAYBACK") s.context.started = true;
-  
+  reducer: (state, action, { nextState }) => {
+    state.state = nextState;
+
+    if (action.type === "START_PLAYBACK") {
+      state.context.started = true;
+    }
   },
-  effects: {},
 });
 ```
 

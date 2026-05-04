@@ -28,17 +28,15 @@ src/
 
 ```ts showLineNumbers copy filename="src/store/types.ts"
 import type { AppState } from ".";
-import * as counter from "./machines/counter";
+import type * as counter from "./machines/counter";
 
 // Объединяем все типы событий из всех автоматов
 export type AppEvents = counter.Events;
 
 // Определяем тип зависимостей, которые будут доступны в эффектах
 export type Dependencies = {
-  services: {
-    logger: {
-      log: () => void;
-    };
+  logger: {
+    log: (message: string) => void;
   };
   getState: () => AppState;
 };
@@ -71,20 +69,22 @@ export const createEffect: TypedCreateEffectFn<AppEvents, Dependencies> = _creat
 Аналогичным образом, создайте типизированные версии React-хуков:
 
 ```ts showLineNumbers copy filename="src/store/hooks.ts"
-import type { TypedUseMachineHook, TypedUseSelectorHook, TypedUseTransitionHook } from "lite-fsm/react";
+import type { TypedUseManagerHook, TypedUseSelectorHook, TypedUseTransitionHook } from "lite-fsm/react";
 import {
   useManager as _useManager,
   useSelector as _useSelector,
   useTransition as _useTransition,
 } from "lite-fsm/react";
 
+import type { FSMConfigType } from ".";
 import type { AppEvents } from "./types";
-import type { AppState, FSMConfigType } from ".";
 
-// Создаем типизированные версии хуков
+// Создаем типизированные версии хуков.
+// TypedUseSelectorHook принимает store config (FSMConfigType), не computed AppState —
+// internal `MachinesState<S>` будет вычислен автоматически.
 export const useTransition: TypedUseTransitionHook<AppEvents> = _useTransition;
-export const useSelector: TypedUseSelectorHook<AppState> = _useSelector;
-export const useManager: TypedUseMachineHook<FSMConfigType, AppEvents> = _useManager;
+export const useSelector: TypedUseSelectorHook<FSMConfigType> = _useSelector;
+export const useManager: TypedUseManagerHook<FSMConfigType, AppEvents> = _useManager;
 ```
 
 ### Шаг 4: Создание store
@@ -92,43 +92,32 @@ export const useManager: TypedUseMachineHook<FSMConfigType, AppEvents> = _useMan
 Теперь нужно объединить все автоматы в единый store и экспортировать типы:
 
 ```ts showLineNumbers copy filename="src/store/index.ts"
-import { counter } from "./machines/counter";
 import { MachineManager, type MachinesState } from "lite-fsm";
-import { devToolsMiddleware, immerMiddleware } from "lite-fsm/middleware";
+import { devToolsMiddleware } from "lite-fsm/middleware/devTools";
+import { immerMiddleware } from "lite-fsm/middleware/immer";
+
+import { counter } from "./machines/counter";
 import type { AppEvents, Dependencies } from "./types";
 
-// Конфигурация всех автоматов
 const cfg = { counter };
 
-// Тип конфигурации, нужен для типизации менеджера
 export type FSMConfigType = typeof cfg;
+export type AppState = MachinesState<FSMConfigType>;
 
-// Функция создания store
 export const makeStore = () => {
-  const middleware = [
-    immerMiddleware,
-    devToolsMiddleware({
-      blacklistActions: [],
-    }),
-  ];
-
   const manager = MachineManager<FSMConfigType, AppEvents>(cfg, {
-    middleware,
+    middleware: [immerMiddleware, devToolsMiddleware({ blacklistActions: [] })],
     onError: console.error,
   });
 
   manager.setDependencies<Dependencies>({
     getState: manager.getState,
-    services: {
-      logger: console,
-    },
+    logger: console,
   });
 
   return manager;
 };
 
-// Экспортируем типы для использования в приложении
-export type AppState = MachinesState<FSMConfigType>;
 export type AppStore = ReturnType<typeof makeStore>;
 ```
 
@@ -147,8 +136,8 @@ export const counter = createMachine({
     },
     READY: {},
   },
-  initialContext: {},
   initialState: "IDLE",
+  initialContext: {},
 });
 ```
 
@@ -157,9 +146,8 @@ export const counter = createMachine({
 При использовании типизированных функций, TypeScript может автоматически выводить доступные состояния и события из конфигурации автомата. Это позволяет избежать дублирования кода и ошибок синхронизации между константами и типами.
 
 ```ts showLineNumbers copy filename="src/store/machines/counter.ts"
-import { createMachine, createConfig } from "../create-machine";
+import { createConfig, createMachine } from "../create-machine";
 
-// Создаем типизированную конфигурацию
 const config = createConfig({
   IDLE: {
     INCREMENT: "COUNTING",
@@ -176,16 +164,14 @@ const config = createConfig({
 export type State = keyof typeof config;
 // => "IDLE" | "COUNTING"
 
-// Определяем полный тип событий с payload
 export type Events =
   | { type: "INCREMENT"; payload: { step: number } }
   | { type: "DECREMENT"; payload: { step: number } }
   | { type: "RESET" };
 
-// Используем выведенные типы
 export const counter = createMachine({
   config,
-  initialState: "IDLE", // TypeScript проверяет, что это одно из состояний
+  initialState: "IDLE",
   initialContext: {
     count: 0,
   },
@@ -201,9 +187,8 @@ export const counter = createMachine({
 
 ```ts showLineNumbers copy
 import type { FSMEvent } from "lite-fsm";
-import { createMachine, createConfig } from "../create-machine";
+import { createConfig, createMachine } from "../create-machine";
 
-// Создаем типизированную конфигурацию
 const config = createConfig({
   IDLE: {
     INCREMENT: "COUNTING",
@@ -218,12 +203,12 @@ const config = createConfig({
   },
 });
 
-// Используем FSMEvent для типизации событий с различными payload
+// FSMEvent — короткая запись для action-типов с payload и без
 export type Events =
-  | FSMEvent<"INCREMENT"> // Без payload
-  | FSMEvent<"DECREMENT"> // Без payload
-  | FSMEvent<"RESET"> // Без payload
-  | FSMEvent<"SET_VALUE", { value: number }>; // С payload
+  | FSMEvent<"INCREMENT">
+  | FSMEvent<"DECREMENT">
+  | FSMEvent<"RESET">
+  | FSMEvent<"SET_VALUE", { value: number }>;
 
 export const counter = createMachine({
   config,
@@ -232,44 +217,20 @@ export const counter = createMachine({
     count: 0,
   },
   reducer: (state, action) => {
-    const { state: currentState, context } = state;
-
     switch (action.type) {
       case "INCREMENT":
-        return {
-          state: currentState,
-          context: {
-            ...context,
-            count: context.count + 1,
-          },
-        };
+        state.context.count += 1;
+        return;
       case "DECREMENT":
-        return {
-          state: currentState,
-          context: {
-            ...context,
-            count: Math.max(0, context.count - 1),
-          },
-        };
+        state.context.count = Math.max(0, state.context.count - 1);
+        return;
       case "RESET":
-        return {
-          state: currentState,
-          context: {
-            ...context,
-            count: 0,
-          },
-        };
+        state.context.count = 0;
+        return;
       case "SET_VALUE":
-        // TypeScript знает, что у action.payload есть свойство value
-        return {
-          state: currentState,
-          context: {
-            ...context,
-            count: action.payload.value,
-          },
-        };
-      default:
-        return state;
+        // TypeScript знает, что action.payload содержит value: number
+        state.context.count = action.payload.value;
+        return;
     }
   },
 });

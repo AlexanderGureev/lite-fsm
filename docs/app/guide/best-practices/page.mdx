@@ -203,18 +203,26 @@ const machine = createMachine({
   config: {
     IDLE: { FETCH: "LOADING" },
     LOADING: {
-      FETCH_SUCCESS: "SUCCESS",
-      FETCH_ERROR: "ERROR",
+      FETCH_RESOLVE: "READY",
+      FETCH_REJECT: "ERROR",
     },
-    // ...
+    READY: {},
+    ERROR: {
+      RETRY: "LOADING",
+    },
   },
+  initialState: "IDLE",
+  initialContext: { items: [] as string[] },
   effects: {
-    LOADING: async ({ transition, services }) => {
+    LOADING: async ({ transition, api }) => {
       try {
-        const data = await services.api.fetchData();
-        transition({ type: "FETCH_SUCCESS", payload: { data } });
+        const items = await api.fetchData();
+        transition({ type: "FETCH_RESOLVE", payload: { items } });
       } catch (error) {
-        transition({ type: "FETCH_ERROR", payload: { error: error.message } });
+        transition({
+          type: "FETCH_REJECT",
+          payload: { error: error instanceof Error ? error.message : "unknown" },
+        });
       }
     },
   },
@@ -229,14 +237,13 @@ const fetchData = async () => {
   manager.transition({ type: "FETCH" });
 
   try {
-    const data = await api.fetchData();
-    manager.transition({ type: "FETCH_SUCCESS", payload: { data } });
+    const items = await api.fetchData();
+    manager.transition({ type: "FETCH_RESOLVE", payload: { items } });
   } catch (error) {
-    manager.transition({ type: "FETCH_ERROR", payload: { error: error.message } });
+    manager.transition({ type: "FETCH_REJECT", payload: { error: error.message } });
   }
 };
 
-// Использование
 button.addEventListener("click", fetchData);
 ```
 
@@ -245,86 +252,80 @@ button.addEventListener("click", fetchData);
 Выносите сложную бизнес-логику в сервисы и внедряйте их через `setDependencies`:
 
 ```ts showLineNumbers copy
-// Определение сервисов
-const services = {
-  api: {
-    fetchData: async () => {
-      // Реализация API запроса
-    },
-    saveData: async (data) => {
-      // Реализация сохранения данных
-    },
+const api = {
+  fetchData: async () => {
+    /* реализация API запроса */
   },
-  validation: {
-    validateForm: (data) => {
-      // Проверка формы
-      const errors = {};
-
-      if (!data.name) {
-        errors.name = "Имя обязательно";
-      }
-
-      if (!data.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) {
-        errors.email = "Некорректный email";
-      }
-
-      return {
-        isValid: Object.keys(errors).length === 0,
-        errors,
-      };
-    },
-  },
-  storage: {
-    saveToLocalStorage: (key, value) => {
-      localStorage.setItem(key, JSON.stringify(value));
-    },
-    getFromLocalStorage: (key) => {
-      try {
-        return JSON.parse(localStorage.getItem(key) || "null");
-      } catch {
-        return null;
-      }
-    },
+  saveData: async (data) => {
+    /* реализация сохранения данных */
   },
 };
 
-// Установка сервисов
-manager.setDependencies({ services });
+const validation = {
+  validateForm: (data) => {
+    const errors: Record<string, string> = {};
 
-// Использование в эффектах
-const formMachine = createMachine({
+    if (!data.name) errors.name = "Имя обязательно";
+    if (!data.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) {
+      errors.email = "Некорректный email";
+    }
+
+    return {
+      isValid: Object.keys(errors).length === 0,
+      errors,
+    };
+  },
+};
+
+const storage = {
+  set: (key: string, value: unknown) => localStorage.setItem(key, JSON.stringify(value)),
+  get: (key: string) => {
+    try {
+      return JSON.parse(localStorage.getItem(key) ?? "null");
+    } catch {
+      return null;
+    }
+  },
+};
+
+manager.setDependencies({ api, validation, storage });
+
+const form = createMachine({
   config: {
     IDLE: { SUBMIT: "VALIDATING" },
     VALIDATING: {
       VALID: "SUBMITTING",
       INVALID: "VALIDATION_ERROR",
     },
-    // ...
+    SUBMITTING: {
+      SUBMIT_RESOLVE: "SUCCESS",
+      SUBMIT_REJECT: "SUBMIT_ERROR",
+    },
+    SUCCESS: {},
+    VALIDATION_ERROR: {},
+    SUBMIT_ERROR: {},
   },
+  initialState: "IDLE",
+  initialContext: {},
   effects: {
-    VALIDATING: ({ transition, services }, event) => {
-      const { data } = event.payload;
-      const validationResult = services.validation.validateForm(data);
+    VALIDATING: ({ action, transition, validation }) => {
+      const result = validation.validateForm(action.payload.data);
 
-      if (validationResult.isValid) {
-        transition({ type: "VALID", payload: { data } });
+      if (result.isValid) {
+        transition({ type: "VALID", payload: { data: action.payload.data } });
       } else {
-        transition({
-          type: "INVALID",
-          payload: { errors: validationResult.errors },
-        });
+        transition({ type: "INVALID", payload: { errors: result.errors } });
       }
     },
-    SUBMITTING: async ({ transition, services }, event) => {
+    SUBMITTING: async ({ action, transition, api, storage }) => {
       try {
-        const { data } = event.payload;
-        await services.api.saveData(data);
-        services.storage.saveToLocalStorage("lastSuccessfulSubmit", event.payload.timestamp || Date.now());
-        transition({ type: "SUBMIT_SUCCESS" });
+        await api.saveData(action.payload.data);
+        storage.set("lastSuccessfulSubmit", Date.now());
+        transition({ type: "SUBMIT_RESOLVE" });
       } catch (error) {
         transition({
-          type: "SUBMIT_ERROR",
-          payload: { error: error.message },
+          type: "SUBMIT_REJECT",
+          payload: { error: error instanceof Error ? error.message : "unknown" },
         });
       }
     },
@@ -376,7 +377,7 @@ const formMachine = createMachine({
 Держите всю логику по обновлению контекста в редьюсерах, когда это возможно. Редьюсеры идеально подходят для любой логики, которая может быть реализована как чистая функция и не нуждается в доступе к сервисам или состоянию других автоматов.
 
 ```ts showLineNumbers copy
-const todoMachine = createMachine({
+const todo = createMachine({
   config: {
     IDLE: {
       ADD_TODO: null,
@@ -386,76 +387,46 @@ const todoMachine = createMachine({
       FILTER: null,
     },
   },
+  initialState: "IDLE",
   initialContext: {
-    todos: [],
-    filter: "all",
+    todos: [] as { id: string; text: string; completed: boolean; createdAt: string }[],
+    filter: "all" as "all" | "active" | "completed",
     stats: {
       total: 0,
       completed: 0,
       active: 0,
     },
   },
-  reducer: (state, action, options) => {
-    // Текущее состояние и контекст
-    const { state: currentState, context } = state;
-    const nextState = options.nextState;
-
-    // Новый контекст в зависимости от действия
-    let nextContext;
+  reducer: (state, action, { nextState }) => {
+    state.state = nextState;
 
     switch (action.type) {
-      case "ADD_TODO":
-        const newTodo = {
+      case "ADD_TODO": {
+        state.context.todos.push({
           id: action.payload.id,
           text: action.payload.text,
-          completed: false,
           createdAt: action.payload.createdAt,
-        };
+          completed: false,
+        });
+        state.context.stats.total += 1;
+        state.context.stats.active += 1;
+        return;
+      }
 
-        nextContext = {
-          ...context,
-          todos: [...context.todos, newTodo],
-          stats: {
-            ...context.stats,
-            total: context.stats.total + 1,
-            active: context.stats.active + 1,
-          },
-        };
-        break;
+      case "TOGGLE_TODO": {
+        const todo = state.context.todos.find((t) => t.id === action.payload.id);
+        if (!todo) return;
+        todo.completed = !todo.completed;
+        state.context.stats.completed = state.context.todos.filter((t) => t.completed).length;
+        state.context.stats.active = state.context.todos.length - state.context.stats.completed;
+        return;
+      }
 
-      case "TOGGLE_TODO":
-        const updatedTodos = context.todos.map((todo) =>
-          todo.id === action.payload.id ? { ...todo, completed: !todo.completed } : todo,
-        );
-
-        // Подсчитываем новую статистику
-        const completedCount = updatedTodos.filter((t) => t.completed).length;
-
-        nextContext = {
-          ...context,
-          todos: updatedTodos,
-          stats: {
-            total: updatedTodos.length,
-            completed: completedCount,
-            active: updatedTodos.length - completedCount,
-          },
-        };
-        break;
-
-      // Другие обработчики...
-
-      default:
-        // Стандартное обновление для необработанных типов
-        nextContext = {
-          ...context,
-          ...(action.payload || {}),
-        };
+      case "FILTER": {
+        state.context.filter = action.payload.filter;
+        return;
+      }
     }
-
-    return {
-      state: nextState,
-      context: nextContext,
-    };
   },
 });
 ```
@@ -509,15 +480,14 @@ const todoMachine = createMachine({
 Параллельные автоматы позволяют разделить сложную систему на несколько независимых автоматов, которые могут реагировать на одни и те же события одновременно:
 
 ```ts showLineNumbers copy
-// Автомат для управления процессом заказа
-const orderMachine = createMachine({
+const order = createMachine({
   config: {
     IDLE: {
       START_CHECKOUT: "PROCESSING",
     },
     PROCESSING: {
-      PAYMENT_SUCCESS: "COMPLETED",
-      PAYMENT_ERROR: "ERROR",
+      PAYMENT_RESOLVE: "COMPLETED",
+      PAYMENT_REJECT: "ERROR",
     },
     ERROR: {
       RETRY_PAYMENT: "PROCESSING",
@@ -525,35 +495,31 @@ const orderMachine = createMachine({
     },
     COMPLETED: {},
   },
-  // ...
+  initialState: "IDLE",
+  initialContext: {},
   effects: {
-    PROCESSING: async ({ transition, services }) => {
+    PROCESSING: async ({ transition, payment }) => {
       try {
-        await services.payment.process();
-        transition({ type: "PAYMENT_SUCCESS" });
+        await payment.process();
+        transition({ type: "PAYMENT_RESOLVE" });
       } catch (error) {
-        transition({ type: "PAYMENT_ERROR", payload: { error } });
+        transition({ type: "PAYMENT_REJECT", payload: { error } });
       }
     },
   },
 });
 
-// Параллельный автомат для управления уведомлениями
-// Реагирует на те же события, что и orderMachine
-const notificationsMachine = createMachine({
+const notifications = createMachine({
   config: {
     IDLE: {
-      // Тот же тип события, что и у orderMachine
       START_CHECKOUT: "SHOWING_PROGRESS",
-      // Обрабатывает те же события успеха/ошибки
-      PAYMENT_SUCCESS: "SHOWING_SUCCESS",
-      PAYMENT_ERROR: "SHOWING_ERROR",
+      PAYMENT_RESOLVE: "SHOWING_SUCCESS",
+      PAYMENT_REJECT: "SHOWING_ERROR",
     },
     SHOWING_PROGRESS: {
       HIDE: "IDLE",
-      // Также реагирует на результаты платежа
-      PAYMENT_SUCCESS: "SHOWING_SUCCESS",
-      PAYMENT_ERROR: "SHOWING_ERROR",
+      PAYMENT_RESOLVE: "SHOWING_SUCCESS",
+      PAYMENT_REJECT: "SHOWING_ERROR",
     },
     SHOWING_SUCCESS: {
       HIDE: "IDLE",
@@ -563,44 +529,37 @@ const notificationsMachine = createMachine({
       RETRY_PAYMENT: "SHOWING_PROGRESS",
     },
   },
-  // ...
+  initialState: "IDLE",
+  initialContext: {},
   effects: {
-    SHOWING_SUCCESS: ({ services, transition }) => {
-      // Автоматически скрыть уведомление через 3 секунды
+    SHOWING_SUCCESS: ({ transition }) => {
       setTimeout(() => transition({ type: "HIDE" }), 3000);
     },
   },
 });
 
-// Параллельный автомат для отслеживания аналитики
-// Также реагирует на те же события процесса оформления заказа
-const analyticsMachine = createMachine({
+// Аналитика реагирует на те же события через wildcard
+const analytics = createMachine({
   config: {
     TRACKING: {
-      // Отслеживает все те же события
-      START_CHECKOUT: null, // null = остаемся в том же состоянии
-      PAYMENT_SUCCESS: null,
-      PAYMENT_ERROR: null,
+      START_CHECKOUT: null,
+      PAYMENT_RESOLVE: null,
+      PAYMENT_REJECT: null,
       RETRY_PAYMENT: null,
     },
   },
-  // ...
+  initialState: "TRACKING",
+  initialContext: {},
   effects: {
-    TRACKING: ({ action, services }) => {
-      // Отправляем аналитику при каждом событии
-      services.analytics.trackEvent(action.type, action.payload);
+    TRACKING: ({ action, analytics }) => {
+      analytics.trackEvent(action.type, action.payload);
     },
   },
 });
 
-// Управление через общий менеджер
-const manager = MachineManager({
-  order: orderMachine,
-  notifications: notificationsMachine,
-  analytics: analyticsMachine,
-});
+const manager = MachineManager({ order, notifications, analytics });
 
-// Одно событие вызывает параллельную работу всех трех автоматов
+// Одно событие — три параллельных реакции
 manager.transition({ type: "START_CHECKOUT", payload: { orderId: "12345" } });
 ```
 
@@ -611,8 +570,7 @@ manager.transition({ type: "START_CHECKOUT", payload: { orderId: "12345" } });
 Вложенные автоматы позволяют моделировать иерархию состояний, где состояние одного автомата влияет на поведение других автоматов:
 
 ```ts showLineNumbers copy
-// Моделирование вложенности через композицию автоматов
-const authMachine = createMachine({
+const auth = createMachine({
   config: {
     IDLE: {
       INIT: "CHECKING_AUTH",
@@ -628,73 +586,66 @@ const authMachine = createMachine({
       LOGIN: "LOGIN_PENDING",
     },
     LOGIN_PENDING: {
-      LOGIN_SUCCESS: "AUTHENTICATED",
-      LOGIN_ERROR: "LOGIN_ERROR",
+      LOGIN_RESOLVE: "AUTHENTICATED",
+      LOGIN_REJECT: "LOGIN_ERROR",
     },
     LOGIN_ERROR: {
       RETRY: "LOGIN_PENDING",
       RESET: "UNAUTHENTICATED",
     },
   },
-  // ...
+  initialState: "IDLE",
+  initialContext: {},
 });
 
-// Автомат для управления профилем, который напрямую реагирует на события аутентификации
-const profileMachine = createMachine({
+const profile = createMachine({
   config: {
     INACTIVE: {
-      // Прямая реакция на те же события аутентификации
       HAS_SESSION: "LOADING",
-      LOGIN_SUCCESS: "LOADING",
+      LOGIN_RESOLVE: "LOADING",
     },
     LOADING: {
-      LOAD_SUCCESS: "LOADED",
-      LOAD_ERROR: "ERROR",
+      LOAD_RESOLVE: "LOADED",
+      LOAD_REJECT: "ERROR",
     },
     LOADED: {
       UPDATE: "UPDATING",
-      // Профиль возвращается в неактивное состояние при выходе
       LOGOUT: "INACTIVE",
     },
     UPDATING: {
-      UPDATE_SUCCESS: "LOADED",
-      UPDATE_ERROR: "ERROR",
-      // Также реагируем на выход из системы
+      UPDATE_RESOLVE: "LOADED",
+      UPDATE_REJECT: "ERROR",
       LOGOUT: "INACTIVE",
     },
     ERROR: {
       RETRY: "LOADING",
-      // Также реагируем на выход из системы
       LOGOUT: "INACTIVE",
     },
   },
-  // ...
+  initialState: "INACTIVE",
+  initialContext: {},
   effects: {
-    LOADING: async ({ services, transition }) => {
+    LOADING: async ({ api, transition }) => {
       try {
-        const profileData = await services.api.fetchProfile();
-        transition({ type: "LOAD_SUCCESS", payload: { profile: profileData } });
+        const profile = await api.fetchProfile();
+        transition({ type: "LOAD_RESOLVE", payload: { profile } });
       } catch (error) {
-        transition({ type: "LOAD_ERROR", payload: { error } });
+        transition({ type: "LOAD_REJECT", payload: { error } });
       }
     },
   },
 });
 
-// Управление через общий менеджер
-const manager = MachineManager({
-  auth: authMachine,
-  profile: profileMachine,
-});
+const manager = MachineManager({ auth, profile });
 
 manager.transition({ type: "INIT" });
-// Когда обнаружена сессия, событие активирует оба автомата:
+// При обнаружении сессии событие активирует оба автомата:
 // - auth переходит в AUTHENTICATED
-// - profile переходит из INACTIVE в LOADING и начинает загрузку данных
+// - profile из INACTIVE → LOADING и стартует загрузку профиля
 manager.transition({ type: "HAS_SESSION" });
 ```
 
-В этом примере оба автомата напрямую реагируют на одни и те же события (`HAS_SESSION`, `LOGIN_SUCCESS`, `LOGOUT`), что позволяет создать иерархию без использования эффектов для координации. Профиль пользователя автоматически начинает загружаться, когда обнаружена сессия пользователя, и переходит в неактивное состояние при выходе.
+В этом примере оба автомата напрямую реагируют на одни и те же события (`HAS_SESSION`, `LOGIN_RESOLVE`, `LOGOUT`), что позволяет создать иерархию без использования эффектов для координации. Профиль пользователя автоматически начинает загружаться, когда обнаружена сессия пользователя, и переходит в неактивное состояние при выходе.
 
 ### Преимущества использования вложенных и параллельных автоматов
 
@@ -713,56 +664,35 @@ manager.transition({ type: "HAS_SESSION" });
 Для упрощения тестирования создавайте мок-версии сервисов:
 
 ```ts showLineNumbers copy
-// Реальные сервисы
-const realServices = {
-  api: {
-    fetchData: async () => {
-      // Реальная реализация API
-    },
+const realApi = {
+  fetchData: async () => {
+    /* реальная реализация */
   },
 };
 
-// Мок-сервисы для тестирования
-const mockServices = {
-  api: {
-    fetchData: async () => {
-      // Имитация успешного ответа
-      return { data: [{ id: 1, name: "Test" }] };
-    },
+const mockApi = {
+  fetchData: async () => ({ items: [{ id: 1, name: "Test" }] }),
+};
+
+const errorMockApi = {
+  fetchData: async () => {
+    throw new Error("Network error");
   },
 };
 
-// Мок-сервисы для тестирования ошибок
-const errorMockServices = {
-  api: {
-    fetchData: async () => {
-      throw new Error("Network error");
-    },
-  },
-};
-
-// В тестах
 test("should handle successful data fetch", async () => {
-  const manager = MachineManager({
-    data: dataMachine,
-  });
+  const manager = MachineManager({ data });
 
-  // Установка мок-сервисов
-  manager.setDependencies({ services: mockServices });
-
-  // Вызываем действие
+  manager.setDependencies({ api: mockApi });
   manager.transition({ type: "FETCH" });
 
-  // Ждем завершения асинхронных операций
   await vi.waitFor(() => {
-    const { state } = manager.getState().data;
-    return state === "SUCCESS";
+    return manager.getState().data.state === "READY";
   });
 
-  // Проверяем результат
   const { state, context } = manager.getState().data;
-  expect(state).toBe("SUCCESS");
-  expect(context.data).toEqual([{ id: 1, name: "Test" }]);
+  expect(state).toBe("READY");
+  expect(context.items).toEqual([{ id: 1, name: "Test" }]);
 });
 ```
 

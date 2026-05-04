@@ -1,36 +1,35 @@
 # Руководство по использованию
 
-В этом разделе вы узнаете, как использовать `lite-fsm` для создания и управления конечными автоматами в ваших приложениях.
+В этом разделе показано, как описать и запустить конечные автоматы с `lite-fsm`.
 
 ## Основные концепции
 
-Библиотека `lite-fsm` построена вокруг нескольких ключевых концепций:
+Библиотека построена вокруг нескольких ключевых концепций.
 
 ### Состояния и переходы
 
-Конечный автомат всегда находится в определенном состоянии. Переход между состояниями происходит в результате обработки событий (actions).
+Автомат всегда находится в одном из явно описанных состояний. Переход в другое состояние происходит при обработке события (action).
 
 ### Контекст
 
-Контекст представляет собой объект с данными, связанными с автоматом. При переходе между состояниями контекст может обновляться.
+Контекст — это объект с данными автомата. Его можно обновлять при каждом переходе в reducer-е.
 
 ### Эффекты
 
-Эффекты - это функции, которые выполняются при переходе в определенное состояние. Они могут использоваться для выполнения побочных действий, таких как вызов API или обновление UI.
+Эффекты — функции, которые выполняются при входе в указанное состояние. В них живут все побочные действия: запросы, таймеры, вызовы сервисов.
 
 ### Менеджер автоматов
 
-`MachineManager` управляет всеми автоматами, обрабатывает переходы состояний и запускает соответствующие эффекты.
+`MachineManager` объединяет несколько автоматов, маршрутизирует события и запускает эффекты.
 
 ## Создание автомата
 
-Автомат создается с помощью функции `createMachine`:
+Автомат описывается через `createMachine`:
 
 ```ts showLineNumbers copy
 import { createMachine } from "lite-fsm";
 
-const toggleMachine = createMachine({
-  // Конфигурация состояний и переходов
+const toggle = createMachine({
   config: {
     INACTIVE: {
       TOGGLE: "ACTIVE",
@@ -39,96 +38,75 @@ const toggleMachine = createMachine({
       TOGGLE: "INACTIVE",
     },
   },
-  // Начальное состояние
   initialState: "INACTIVE",
-  // Начальный контекст
   initialContext: {
-    lastToggled: null,
+    lastToggledAt: null as number | null,
   },
-  // Эффекты при переходе в состояния
+  reducer: (state, action, { nextState }) => {
+    state.state = nextState;
+    if (action.type === "TOGGLE") {
+      state.context.lastToggledAt = action.payload.now;
+    }
+  },
   effects: {
-    ACTIVE: ({ transition }) => {
-      console.log("Активировано!");
-      // Здесь можно выполнить побочные эффекты
-    },
-    INACTIVE: ({ transition }) => {
-      console.log("Деактивировано!");
-      // Здесь можно выполнить побочные эффекты
-    },
-  },
-  // Пользовательский reducer для обработки переходов (опционально)
-  reducer: (state, action, options) => {
-    // По умолчанию используется стандартный reducer
-    // Здесь можно изменить логику обновления состояния и контекста
-    return {
-      state: options.nextState,
-      context: {
-        ...state.context,
-      },
-    };
+    ACTIVE: () => console.log("Активировано"),
+    INACTIVE: () => console.log("Деактивировано"),
   },
 });
 ```
 
-## Управление автоматом через MachineManager
+Reducer выше написан в стиле Immer — он мутирует draft и ничего не возвращает. Чтобы это работало, нужно подключить `immerMiddleware` (см. ниже). Без него reducer должен возвращать новый объект `{ state, context }`.
 
-После создания автомата, нужно инициализировать менеджер:
+> Имена состояний и событий рекомендуем писать в `UPPER_SNAKE_CASE` (`IDLE`, `LOAD_DATA`, `RESOLVE`). Это делает граф переходов читаемым и хорошо отличает event types от обычных значений.
+
+## Запуск через MachineManager
 
 ```ts showLineNumbers copy
 import { MachineManager } from "lite-fsm";
+import { immerMiddleware } from "lite-fsm/middleware/immer";
 
-// Можно создать несколько автоматов и управлять ими через один менеджер
-const manager = MachineManager({
-  toggle: toggleMachine,
-  // другие автоматы ...
+const manager = MachineManager(
+  { toggle },
+  { middleware: [immerMiddleware] },
+);
+
+manager.onTransition((prev, next, action) => {
+  console.log("Состояние изменилось:", { prev, next, action });
 });
 
-// Подписка на изменения состояний
-manager.onTransition((prevState, nextState) => {
-  console.log("Состояние изменилось:", { prevState, nextState });
-});
+manager.transition({ type: "TOGGLE", payload: { now: Date.now() } });
 
-// Вызов перехода
-manager.transition({ type: "TOGGLE" });
-
-// Получение текущего состояния и контекста
 const { state, context } = manager.getState().toggle;
+```
+
+В `manager` можно передать сразу несколько автоматов — каждое событие пойдёт во все из них:
+
+```ts showLineNumbers copy
+const manager = MachineManager({ toggle, counter, profile });
 ```
 
 ## Внедрение зависимостей
 
-Менеджер позволяет внедрять зависимости, которые будут доступны в эффектах:
+Зависимости (сервисы, утилиты, доступ к manager-у) задаются через `setDependencies`. Они становятся доступны как поля параметра эффекта.
 
 ```ts showLineNumbers copy
-// Создание зависимостей
-const dependencies = {
-  services: {
-    api: {
-      fetchData: () => fetch("/api/data").then((r) => r.json()),
-    },
-    logger: {
-      log: (message) => console.log(`[LOG]: ${message}`),
-    },
+manager.setDependencies({
+  api: {
+    fetchData: () => fetch("/api/data").then((r) => r.json()),
   },
-  utils: {
-    formatDate: (date) => new Intl.DateTimeFormat().format(date),
-  },
-};
+  getState: manager.getState,
+});
 
-// Установка зависимостей
-manager.setDependencies(dependencies);
-
-// Автомат с использованием зависимостей
-const dataMachine = createMachine({
+const data = createMachine({
   config: {
     IDLE: {
       FETCH: "LOADING",
     },
     LOADING: {
-      FETCH_SUCCESS: "SUCCESS",
-      FETCH_ERROR: "ERROR",
+      FETCH_RESOLVE: "READY",
+      FETCH_REJECT: "ERROR",
     },
-    SUCCESS: {
+    READY: {
       RESET: "IDLE",
     },
     ERROR: {
@@ -138,28 +116,23 @@ const dataMachine = createMachine({
   },
   initialState: "IDLE",
   initialContext: {
-    data: null,
-    error: null,
-    lastUpdated: null,
+    items: [] as string[],
+    error: null as string | null,
+  },
+  reducer: (state, action, { nextState }) => {
+    state.state = nextState;
+    if (action.type === "FETCH_RESOLVE") state.context.items = action.payload.items;
+    if (action.type === "FETCH_REJECT") state.context.error = action.payload.error;
   },
   effects: {
-    // Зависимости доступны в параметрах эффекта
-    LOADING: async ({ transition, services, utils }) => {
+    LOADING: async ({ api, transition }) => {
       try {
-        const data = await services.api.fetchData();
-        services.logger.log("Данные успешно загружены");
-        transition({
-          type: "FETCH_SUCCESS",
-          payload: {
-            data,
-            lastUpdated: utils.formatDate(new Date()),
-          },
-        });
+        const items = await api.fetchData();
+        transition({ type: "FETCH_RESOLVE", payload: { items } });
       } catch (error) {
-        services.logger.log("Ошибка при загрузке данных");
         transition({
-          type: "FETCH_ERROR",
-          payload: { error: error.message },
+          type: "FETCH_REJECT",
+          payload: { error: error instanceof Error ? error.message : "unknown" },
         });
       }
     },
@@ -167,41 +140,35 @@ const dataMachine = createMachine({
 });
 ```
 
+Внутри эффекта `transition(...)` отправляет новое событие через тот же manager.
+
 ## Асинхронные эффекты
 
-Эффекты могут быть асинхронными, что позволяет легко интегрировать их с API и другими асинхронными операциями:
+Эффект может быть `async`. Любой `await` внутри отрабатывает в обычном режиме:
 
 ```ts showLineNumbers copy
 effects: {
-  LOADING: async ({ transition, services }) => {
+  LOADING: async ({ api, transition }) => {
     try {
-      // Асинхронная операция
-      const result = await services.api.fetchSomething();
-
-      // Передаем данные в контекст через payload
-      transition({
-        type: "FETCH_SUCCESS",
-        payload: { data: result },
-      });
+      const result = await api.fetchSomething();
+      transition({ type: "FETCH_RESOLVE", payload: { data: result } });
     } catch (error) {
       transition({
-        type: "FETCH_ERROR",
-        payload: { error: error.message },
+        type: "FETCH_REJECT",
+        payload: { error: error instanceof Error ? error.message : "unknown" },
       });
     }
-  };
+  },
 }
 ```
 
-## Дополнительные возможности
+> Если нужно отменять промежуточные `transition` при смене состояния, оборачивайте эффект в `createEffect({ type: "latest", ... })` или используйте собственный `cancelFn`. Подробнее — в разделе [Отмена эффектов](/guide/advanced-concepts/cancel-effects).
 
-### Обработка событий в любом состоянии
+## Обработка событий в любом состоянии
 
-Можно использовать специальный символ `"*"` для обработки любого состояния:
+Чтобы переход срабатывал из любого состояния, опишите его в специальном ключе `"*"`. Явный переход в конкретном состоянии всегда приоритетнее wildcard:
 
 ```ts showLineNumbers copy
-import { createMachine } from "lite-fsm";
-
 const machine = createMachine({
   config: {
     STATE_A: {
@@ -213,44 +180,21 @@ const machine = createMachine({
     STATE_C: {
       EVENT_3: "STATE_A",
     },
-    // Обработка событий в любом состоянии
     "*": {
       RESET: "STATE_A",
-      LOG: null, // null означает, что состояние не меняется
+      LOG: null,
     },
   },
-  // ...
+  initialState: "STATE_A",
+  initialContext: {},
 });
 ```
 
-### Создание эффектов с отменой
-
-Библиотека позволяет создавать эффекты с возможностью отмены:
-
-```ts showLineNumbers copy
-import { createEffect } from "lite-fsm";
-
-const fetchDataEffect = createEffect({
-  // Тип эффекта: "latest" выполняет только последний вызов
-  type: "latest",
-  effect: async ({ transition, services }) => {
-    // Реализация эффекта
-    const data = await services.api.fetchData();
-    transition({ type: "FETCH_SUCCESS", payload: { data } });
-  },
-  // Функция для проверки условий отмены
-  cancelFn: (deps) => {
-    let canceled = false;
-    return () => {
-      return canceled;
-    };
-  },
-});
-```
+Цель `null` — это self-transition: state не меняется, но action всё равно доходит до reducer-а и эффектов.
 
 ## Архитектура приложения на основе lite-fsm
 
-Следующая sequence диаграмма демонстрирует архитектуру типичного приложения, построенного с использованием lite-fsm:
+Следующая sequence-диаграмма демонстрирует архитектуру типичного приложения, построенного с использованием lite-fsm:
 
 ```mermaid
 sequenceDiagram
@@ -269,20 +213,20 @@ sequenceDiagram
 
     Note over UI,Services: Обработка события
     UI->>Manager: transition({type: "EVENT", payload: {...}})
-    Manager->>Machine1: transition(state, action)
+    Manager->>Machine1: reducer(state, action)
     Machine1-->>Manager: nextState
-    Manager->>Machine2: transition(state, action)
+    Manager->>Machine2: reducer(state, action)
     Machine2-->>Manager: nextState
-    Manager->>Manager: Обновление глобального состояния
+    Manager->>Manager: Обновление общего состояния
     Manager->>Manager: Вызов подписчиков onTransition
 
     Note over UI,Services: Выполнение эффектов
-    Manager->>Machine1: invokeEffect(prevState, currentState, deps)
+    Manager->>Machine1: effect(deps)
     Machine1->>Services: Вызов API/сервисов
     Services-->>Machine1: Результат операции
     Machine1->>Manager: transition({type: "NEXT_EVENT", ...})
 
-    Manager->>Machine2: invokeEffect(prevState, currentState, deps)
+    Manager->>Machine2: effect(deps)
     Machine2->>Services: Вызов API/сервисов
     Services-->>Machine2: Результат операции
 
@@ -295,11 +239,11 @@ sequenceDiagram
 
 2. **MachineManager**: Центральный координатор, который:
 
-   - Хранит глобальное состояние всех автоматов
+   - Хранит общее состояние всех автоматов
    - Передает события в зарегистрированные автоматы
    - Запускает эффекты при изменении состояний
    - Уведомляет подписчиков об изменениях состояния
-   - Внедряет зависимости (сервисы, утилиты) в автоматы
+   - Внедряет зависимости (сервисы, утилиты) в эффекты
 
 3. **Автоматы**: Определяют:
 
@@ -316,7 +260,7 @@ sequenceDiagram
 
 ## Преимущества выделения бизнес-логики в автоматы
 
-Один из ключевых архитектурных принципов при использовании lite-fsm — выделение всей бизнес-логики в автоматы (редьюсеры и эффекты) и сервисный слой, при этом компоненты пользовательского интерфейса только отображают данные и отправляют события. Этот подход имеет ряд существенных преимуществ по сравнению с традиционным написанием бизнес-логики непосредственно в React-компонентах:
+Один из ключевых архитектурных принципов при использовании lite-fsm — выделение всей бизнес-логики в автоматы (редьюсеры и эффекты) и сервисный слой. Компоненты пользовательского интерфейса при этом только отображают данные и отправляют события. Этот подход имеет ряд существенных преимуществ по сравнению с написанием бизнес-логики непосредственно в React-компонентах.
 
 ### 1. Разделение ответственности
 
@@ -335,29 +279,14 @@ function UserProfile() {
         const response = await fetch("/api/user");
         const data = await response.json();
         setUser(data);
-        setLoading(false);
       } catch (err) {
         setError(err.message);
+      } finally {
         setLoading(false);
       }
     }
     fetchUser();
   }, []);
-
-  const updateUser = async (userData) => {
-    try {
-      setLoading(true);
-      await fetch("/api/user", {
-        method: "PUT",
-        body: JSON.stringify(userData),
-      });
-      setUser({ ...user, ...userData });
-      setLoading(false);
-    } catch (err) {
-      setError(err.message);
-      setLoading(false);
-    }
-  };
 
   // JSX с обработкой разных состояний...
 }
@@ -366,22 +295,19 @@ function UserProfile() {
 **Подход с lite-fsm:**
 
 ```jsx showLineNumbers copy
-// Компонент - только отображение и отправка событий
 function UserProfile() {
-  const { state, context } = useSelector((state) => state.user);
+  const { state, context } = useSelector((s) => s.user);
   const transition = useTransition();
 
   useEffect(() => {
     transition({ type: "FETCH_USER" });
-  }, []);
-
-  const handleUpdate = (userData) => {
-    transition({ type: "UPDATE_USER", payload: userData });
-  };
+  }, [transition]);
 
   // JSX с обработкой разных состояний...
 }
 ```
+
+Бизнес-логика теперь живёт в автомате `user`: его состояние определяет UI, а эффекты выполняют все побочные действия.
 
 ### 2. Ключевые преимущества
 
@@ -432,106 +358,3 @@ function UserProfile() {
 - Переходы между состояниями контролируются автоматом
 - Эффекты привязаны к конкретным состояниям
 - Тестирование логики можно проводить без зависимости от React
-
-### 4. Конкретный пример улучшения
-
-**До (React компонент с логикой):**
-
-```jsx showLineNumbers copy
-function PaymentForm() {
-  const [paymentMethod, setPaymentMethod] = useState("card");
-  const [cardDetails, setCardDetails] = useState({});
-  const [processing, setProcessing] = useState(false);
-  const [error, setError] = useState(null);
-  const [success, setSuccess] = useState(false);
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setProcessing(true);
-    setError(null);
-
-    try {
-      if (paymentMethod === "card") {
-        // Валидация карты
-        if (!cardDetails.number) {
-          throw new Error("Card number is required");
-        }
-        // Обработка платежа
-        await processCardPayment(cardDetails);
-      } else if (paymentMethod === "paypal") {
-        // Обработка PayPal
-        await processPayPalPayment();
-      }
-
-      setSuccess(true);
-      setProcessing(false);
-    } catch (err) {
-      setError(err.message);
-      setProcessing(false);
-    }
-  };
-
-  // Многочисленные обработчики изменений форм...
-  // Условная логика отображения
-}
-```
-
-**После (с lite-fsm):**
-
-```jsx showLineNumbers copy
-// Компонент только для отображения
-function PaymentForm() {
-  const { state, context } = useSelector((state) => state.payment);
-  const transition = useTransition();
-
-  const handlePaymentMethodChange = (method) => {
-    transition({ type: "CHANGE_PAYMENT_METHOD", payload: { method } });
-  };
-
-  const handleCardDetailsChange = (details) => {
-    transition({ type: "UPDATE_CARD_DETAILS", payload: details });
-  };
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    transition({ type: "SUBMIT_PAYMENT" });
-  };
-
-  // Простая логика отображения на основе состояния
-  return <form onSubmit={handleSubmit}>{/* Форма на основе state и context */}</form>;
-}
-
-// Автомат с бизнес-логикой в отдельном файле
-const paymentMachine = createMachine({
-  config: {
-    IDLE: {
-      CHANGE_PAYMENT_METHOD: null,
-      UPDATE_CARD_DETAILS: null,
-      SUBMIT_PAYMENT: "VALIDATING",
-    },
-    VALIDATING: {
-      VALIDATION_SUCCESS: "PROCESSING",
-      VALIDATION_FAILURE: "VALIDATION_ERROR",
-    },
-    VALIDATION_ERROR: {
-      CHANGE_PAYMENT_METHOD: null,
-      UPDATE_CARD_DETAILS: null,
-      SUBMIT_PAYMENT: "VALIDATING",
-    },
-    PROCESSING: {
-      PAYMENT_SUCCESS: "SUCCESS",
-      PAYMENT_FAILURE: "PAYMENT_ERROR",
-    },
-    PAYMENT_ERROR: {
-      RETRY_PAYMENT: "PROCESSING",
-      CHANGE_PAYMENT_METHOD: "IDLE",
-    },
-    SUCCESS: {
-      NEW_PAYMENT: "IDLE",
-    },
-  },
-  // Остальная логика автомата...
-});
-```
-
-В результате такого подхода код становится более структурированным, тестируемым и масштабируемым, а поведение приложения — более предсказуемым и устойчивым к ошибкам.

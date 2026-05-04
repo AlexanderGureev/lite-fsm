@@ -9,34 +9,34 @@
 В `lite-fsm` guards реализуются через функцию `reducer`, которая предоставляет полный контроль над тем, как события преобразуются в изменения состояния автомата.
 
 ```ts showLineNumbers copy
-import { createMachine } from 'lite-fsm';
+import { createMachine } from "lite-fsm";
 
-const feedbackMachine = createMachine({
+const feedback = createMachine({
   config: {
-    form: {
-      'submit': 'submitting',
+    FORM: {
+      UPDATE: null,
+      SUBMIT: "SUBMITTING",
     },
-    submitting: {
+    SUBMITTING: {
       // другие переходы
     },
   },
-  initialState: 'form',
+  initialState: "FORM",
   initialContext: {
-    feedback: ''
+    text: "",
   },
-  reducer: (s, action, { nextState }) => {
-    // Guard: проверяем условие, что отзыв не пустой
-    if (action.type === 'submit' && s.context.feedback.length === 0) {
-      // Если условие не выполнено — не меняем состояние и выходим
+  reducer: (state, action, { nextState }) => {
+    if (action.type === "UPDATE") {
+      state.context.text = action.payload.text;
       return;
     }
 
-    // Условие выполнено — переходим в следующее состояние и обновляем контекст
-    s.state = nextState;
-    s.context = {
-      ...s.context,
-      ...action.payload
+    // Guard: пустой отзыв не отправляем
+    if (action.type === "SUBMIT" && state.context.text.length === 0) {
+      return;
     }
-  }
+
+    state.state = nextState;
+  },
 });
 ```

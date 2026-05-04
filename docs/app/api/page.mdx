@@ -1,596 +1,406 @@
 # API Справочник
 
-В этом разделе приведена документация по всем функциям и типам библиотеки `lite-fsm`.
+Эта страница описывает публичный runtime API библиотеки `lite-fsm`. Подробнее по типам — в [`TYPES-CHEATSHEET.md`](https://github.com/AlexanderGureev/lite-fsm/blob/main/TYPES-CHEATSHEET.md), краткая выжимка — в [`API-CHEATSHEET.md`](https://github.com/AlexanderGureev/lite-fsm/blob/main/API-CHEATSHEET.md).
 
-## Основной модуль
+## Точки входа
 
-Основной модуль предоставляет функции для создания и управления конечными автоматами.
+| Импорт                          | Что экспортируется                                                                                                                                |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lite-fsm`                      | `createMachine`, `createConfig`, `createReducer`, `createEffect`, `createActorMeta`, `Machine`, `defineMachine`, `MachineManager`, `LiteFsmError` |
+| `lite-fsm/middleware`           | `immerMiddleware`, `devToolsMiddleware`                                                                                                           |
+| `lite-fsm/middleware/immer`     | `immerMiddleware` (отдельная точка входа)                                                                                                         |
+| `lite-fsm/middleware/devTools`  | `devToolsMiddleware` (отдельная точка входа)                                                                                                      |
+| `lite-fsm/react`                | `FSMContext`, `FSMContextProvider`, `FSMHydrationBoundary`, `useHydrateSnapshot`, `useManager`, `useSelector`, `useTransition`, `defineMachine`   |
 
-### createMachine
+`lite-fsm/react` помечен `"use client"` — модуль можно импортировать из SSR/RSC, но хуки и провайдер работают только в client tree.
 
-```ts showLineNumbers copy
-createMachine<C, T, E, P = FSMEvent<E, any>, D = {}>(cfg: MachineConfig<C, T, P, D>): Machine<C, T, P, D>
-```
+## Описание автомата
 
-Функция для создания конечного автомата.
-
-**Параметры:**
-
-- `cfg`: Объект конфигурации автомата.
-
-**Возвращает:**
-
-Объект автомата.
-
-**Пример:**
+Автомат описывается через `createMachine` — typed identity helper, который ничего не создаёт в runtime, а только сужает типы. Возвращает тот же объект конфигурации.
 
 ```ts showLineNumbers copy
 import { createMachine } from "lite-fsm";
 
-const toggleMachine = createMachine({
+const counter = createMachine({
   config: {
-    INACTIVE: {
-      TOGGLE: "ACTIVE",
-    },
-    ACTIVE: {
-      TOGGLE: "INACTIVE",
-    },
+    IDLE: { INC: "IDLE", RESET: null },
+    "*": { BOOT: "IDLE" },
   },
-  initialState: "INACTIVE",
-  initialContext: {
-    lastToggled: null,
+  initialState: "IDLE",
+  initialContext: { count: 0 },
+  reducer: (state, action, { nextState }) => {
+    state.state = nextState;
+    if (action.type === "RESET") state.context.count = 0;
+    if (action.type === "INC") state.context.count += 1;
+  },
+  effects: {
+    IDLE: ({ action }) => console.log(action.type),
+    "*": ({ action }) => console.log("any", action.type),
   },
 });
 ```
 
-### MachineManager
+| Поле                                | Назначение                                                                  |
+| ----------------------------------- | --------------------------------------------------------------------------- |
+| `config`                            | Граф `{ [state]: { [eventType]: target } }`. Ключ `"*"` — fallback transitions. |
+| `initialState` · `initialContext`   | Стартовое `state` и `context`.                                              |
+| `reducer?`                          | Чистая функция, собирающая следующее `{ state, context }`.                  |
+| `effects?`                          | Sync/async side-effects по target state или `"*"`.                          |
+| `hydrate?` · `dehydrate?`           | Кастомная форма snapshot для `MachineManager.hydrate()` / `dehydrate()`.    |
+| `groupTag?`                         | Только для actor template — тег группы.                                     |
+| `persistence?`                      | Только для actor template — `"runtime"` (по умолчанию) или `"snapshot"`.    |
+
+### Targets
+
+| Target                                            | Поведение                                                                |
+| ------------------------------------------------- | ------------------------------------------------------------------------ |
+| `"NEXT_STATE"`                                    | Переход в `"NEXT_STATE"`.                                                |
+| `null`                                            | Self-transition: `state` не меняется, action всё равно дойдёт до reducer. |
+| `undefined` / нет ключа                           | Action игнорируется.                                                     |
+| `"__RESOLVED"` · `"__REJECTED"` · `"__CANCELLED"` | Терминальная цель для actor template — actor удаляется.                  |
+
+Явный `config[state][type]` приоритетнее `"*"`. У actor template `__INIT` не наследует `"*"`: spawn только через явный `__INIT` transition.
+
+### Reducer
+
+Reducer получает три аргумента: текущий slice `{ state, context }`, action и meta-объект `{ nextState, config }`. По умолчанию ему нужно вернуть новый slice. Если подключён `immerMiddleware` — можно мутировать draft и не возвращать ничего.
 
 ```ts showLineNumbers copy
-MachineManager<M extends Record<string, Machine<any, any, any, any>>>(
-  machines: M,
-  opts?: {
-    middleware?: Middleware<MachinesState<M>, any>[];
-    onError?: (err: any) => void;
+reducer: (state, action, { nextState }) => {
+  state.state = nextState;
+  if (action.type === "INC") {
+    state.context.count += 1;
   }
-): MachineManager<M>
+};
 ```
 
-Функция для создания менеджера автоматов.
+Без `reducer` runtime делает default merge: `{ state: target ?? current, context: { ...context, ...action.payload } }`.
 
-**Параметры:**
+`undefined` из reducer бросает `VOID_REDUCER_ERROR`, кроме случая, когда подключено middleware с маркером `__liteFsmAllowVoidReducer` (в первую очередь — `immerMiddleware`).
 
-- `machines`: Объект с автоматами, где ключи - имена автоматов, а значения - объекты автоматов.
-- `opts`: (Опционально) Объект с дополнительными опциями.
-  - `middleware`: Массив функций middleware для расширения функциональности.
-  - `onError`: Обработчик ошибок, возникающих при выполнении эффектов.
-
-**Возвращает:**
-
-Менеджер автоматов.
-
-**Пример:**
+### Effects
 
 ```ts showLineNumbers copy
-import { MachineManager, createMachine } from "lite-fsm";
-import { immerMiddleware } from "lite-fsm/middleware";
-
-const toggleMachine = createMachine({
-  // ...конфигурация
-});
-
-const counterMachine = createMachine({
-  // ...конфигурация
-});
-
-// Создание менеджера без дополнительных опций
-const simpleManager = MachineManager({
-  toggle: toggleMachine,
-  counter: counterMachine,
-});
-
-// Создание менеджера с middleware и обработчиком ошибок
-const advancedManager = MachineManager(
-  {
-    toggle: toggleMachine,
-    counter: counterMachine,
+effects: {
+  SAVING: async ({ action, transition, condition, api }) => {
+    await api.save(action.payload);
+    await condition((e) => e.type === "ACK");
+    transition({ type: "DONE" });
   },
+  "*": ({ action }) => console.log(action.type),
+}
+```
+
+Effect получает один объект:
+
+| Ключ                   | Что даёт                                                                |
+| ---------------------- | ----------------------------------------------------------------------- |
+| `action`               | Action, прошедший middleware. Тип сужен по incoming events.             |
+| `transition(action)`   | Dispatch нового события; action может включать routing `meta`.          |
+| `condition(predicate)` | Promise, резолвится на ближайший action, удовлетворяющий предикату.     |
+| `self`                 | (только для actor) `{ actorId, groupId, groupTag }`.                    |
+| user deps              | Из `defineMachine({ dependencies })` или `manager.setDependencies(...)`. |
+
+State-effect приоритетнее `"*"`. Wildcard срабатывает и на self-transition. Ошибки и reject из `condition` уходят в `onError` менеджера.
+
+## Фабрики
+
+Все фабрики — typed identity helpers. Они ничего не создают в runtime, только сужают типы.
+
+| Factory                                      | Назначение                                                          |
+| -------------------------------------------- | ------------------------------------------------------------------- |
+| `createMachine(cfg)`                         | Полный machine config.                                              |
+| `createConfig(cfg)`                          | Только граф переходов (для разделения).                             |
+| `createReducer(fn)`                          | Reducer с фиксированным action union.                               |
+| `createEffect({ effect, type?, cancelFn? })` | Оборачивает effect политикой запуска.                               |
+| `createActorMeta(meta)`                      | Frozen `Readonly<ActorMeta>` для replacement / time-travel input.   |
+
+### `createEffect`
+
+```ts showLineNumbers copy
+import { createEffect } from "lite-fsm";
+
+const load = createEffect({
+  type: "latest",
+  cancelFn: ({ signal }) => () => signal.aborted,
+  effect: async ({ transition }) => transition({ type: "DONE" }),
+});
+```
+
+| Опция                     | Поведение                                                                            |
+| ------------------------- | ------------------------------------------------------------------------------------ |
+| `type: "every"` (default) | Каждый запуск может dispatch-ить независимо.                                         |
+| `type: "latest"`          | Старый запуск продолжает работать, но его `transition` подавляется после нового запуска. |
+| `cancelFn(deps)`          | Возвращает `cancel(): boolean`. Если вернуло `true` — `transition` подавляется.       |
+
+В actor effect guard покрывает и `transition.unscoped/actor/group/tag`.
+
+## `MachineManager(machines, opts?)`
+
+Менеджер объединяет несколько автоматов, маршрутизирует события и запускает эффекты.
+
+```ts showLineNumbers copy
+import { MachineManager } from "lite-fsm";
+import { immerMiddleware } from "lite-fsm/middleware/immer";
+import { devToolsMiddleware } from "lite-fsm/middleware/devTools";
+
+const manager = MachineManager(
+  { counter, todos, syncActor },
   {
-    middleware: [
-      immerMiddleware,
-      // Пользовательский middleware для логирования
-      (api) => (next) => (action) => {
-        console.log("Action:", action);
-        const result = next(action);
-        console.log("New state:", api.getState());
-        return result;
-      },
-    ],
-    onError: (error) => {
-      console.error("Error in machine effect:", error);
-      // Можно отправить ошибку в сервис мониторинга
-    },
+    middleware: [immerMiddleware, devToolsMiddleware()],
+    schemaVersion: 1,
+    snapshot: initialSnapshot,
+    onError: console.error,
   },
 );
+
+manager.setDependencies({ api });
+manager.transition({ type: "INC" });
 ```
 
-#### Методы MachineManager
+### Опции
 
-##### transition
+| Опция                       | Назначение                                                                  |
+| --------------------------- | --------------------------------------------------------------------------- |
+| `middleware?`               | Цепочка middleware на все user actions.                                     |
+| `snapshot?`                 | Начальный snapshot, применяется со стратегией `"replace"` при создании.     |
+| `schemaVersion?`            | Версия snapshot.                                                            |
+| `onError?`                  | Ошибки эффектов и `condition`.                                              |
+| `onUnknownMachineKey?`      | Вызывается при unknown key в `hydrate` или начальном snapshot.              |
+| `onSchemaVersionMismatch?`  | Вызывается при несовпадении `snapshot.schemaVersion`.                       |
+
+### Методы
+
+| Метод                                | Что делает                                                                                  |
+| ------------------------------------ | ------------------------------------------------------------------------------------------- |
+| `getState()`                         | Текущий manager state.                                                                      |
+| `transition(action)`                 | Dispatch user action. Возвращает фактически применённый `ManagerAction<P>`.                 |
+| `onTransition(cb)`                   | Подписка `(prev, current, action) => void`. Возвращает unsubscribe.                         |
+| `setDependencies(deps \| updater)`   | Задаёт user-deps, которые попадают в эффекты.                                               |
+| `replaceReducer(enhancer)`           | Подменяет root reducer (используется middleware: Immer, DevTools restore).                  |
+| `getSnapshot()`                      | Runtime snapshot `{ schemaVersion, machines }` без вызова `dehydrate` hooks.                 |
+| `dehydrate(opts?)`                   | Переносимый snapshot с вызовом `dehydrate` hooks.                                           |
+| `hydrate(snapshot, opts?)`           | Применяет snapshot, минуя middleware и эффекты.                                             |
+| `getHydratedState(snapshot, opts?)`  | Preview результата `hydrate` без мутации manager-а.                                         |
+
+Action идёт во все domain machines; машина без подходящего перехода остаётся без изменений (селекторы не дёргаются). Префикс `@@lite-fsm/*` зарезервирован — отправлять такие события через `transition` нельзя.
+
+#### `transition(action)`
+
+Принимает `{ type, payload?, meta? }`. Поле `meta` содержит routing для акторов (`actorId`, `groupId`, `groupTag`).
 
 ```ts showLineNumbers copy
-transition<E extends string, P extends Record<string, any>>(
-  action: { type: E; payload?: P }
-): void
-```
+manager.transition({ type: "INC" });
 
-Выполняет переход состояния для всех автоматов.
-
-**Параметры:**
-
-- `action`: Объект действия.
-  - `type`: Тип события.
-  - `payload`: (Опционально) Полезная нагрузка, которая будет доступна в редьюсерах и эффектах.
-
-**Пример:**
-
-```ts showLineNumbers copy
-// Отправить событие с payload
 manager.transition({
-  type: "TOGGLE",
-  payload: { lastToggled: new Date() },
+  type: "RESOLVE",
+  meta: { actorId: "request/0" },
 });
-
-// Отправить событие без payload
-manager.transition({ type: "RESET" });
 ```
 
-##### getState
+#### `getState()`
 
-```ts showLineNumbers copy
-getState(): { [K in keyof M]: { state: State<C>; context: T } }
-```
-
-Возвращает текущее состояние и контекст всех автоматов.
-
-**Возвращает:**
-
-Объект, в котором ключи - имена автоматов, а значения - объекты с состоянием и контекстом.
-
-**Пример:**
+Возвращает текущее состояние всех зарегистрированных автоматов.
 
 ```ts showLineNumbers copy
 const state = manager.getState();
-console.log(state.toggle.state); // Текущее состояние автомата toggle
-console.log(state.counter.context); // Текущий контекст автомата counter
+state.counter.context.count;
 ```
 
-##### onTransition
+В DEV (`NODE_ENV !== "production"`) snapshot из `getState()` глубоко заморожен.
+
+#### `onTransition(cb)`
+
+Подписка на каждое успешное событие.
 
 ```ts showLineNumbers copy
-onTransition(
-  callback: (
-    prevState: { [K in keyof M]: { state: State<C>; context: T } },
-    nextState: { [K in keyof M]: { state: State<C>; context: T } },
-    action: { type: string; payload?: any }
-  ) => void
-): () => void
-```
-
-Подписывает функцию на события перехода состояний.
-
-**Параметры:**
-
-- `callback`: Функция обратного вызова, которая будет вызываться при каждом переходе состояния.
-
-**Возвращает:**
-
-Функция для отмены подписки.
-
-**Пример:**
-
-```ts showLineNumbers copy
-const unsubscribe = manager.onTransition((prevState, nextState, action) => {
-  console.log("Предыдущее состояние:", prevState);
-  console.log("Новое состояние:", nextState);
-  console.log("Действие:", action);
+const unsubscribe = manager.onTransition((prev, next, action) => {
+  console.log(action.type, prev, next);
 });
 
-// Позже, когда подписка больше не нужна
 unsubscribe();
 ```
 
-##### setDependencies
+Подписка синхронная — она вызывается сразу после обновления state, до запуска эффектов.
+
+#### `setDependencies(deps | updater)`
+
+Передаёт пользовательские зависимости в эффекты. Принимает либо объект, либо updater-функцию.
 
 ```ts showLineNumbers copy
-setDependencies<D extends Record<string, any> = {}>(dependencies: D | ((deps: D) => D)): void
-```
-
-Устанавливает зависимости, которые будут доступны в эффектах. Можно передать либо объект с зависимостями, либо функцию обновления, которая получает текущие зависимости и возвращает новые.
-
-**Параметры:**
-
-- `dependencies`: Объект с зависимостями или функция, принимающая текущие зависимости и возвращающая новые.
-
-**Пример объекта:**
-
-```ts showLineNumbers copy
-// Установка зависимостей напрямую через объект
 manager.setDependencies({
-  services: {
-    api: {
-      fetchData: async () => {
-        const response = await fetch("/api/data");
-        return response.json();
-      },
-    },
-    storage: {
-      saveItem: (key, value) => localStorage.setItem(key, JSON.stringify(value)),
-      getItem: (key) => JSON.parse(localStorage.getItem(key) || "null"),
-    },
-  },
-  utils: {
-    formatDate: (date) => new Intl.DateTimeFormat().format(date),
-    generateId: () => Math.random().toString(36).substring(2),
-  },
+  api,
+  getState: manager.getState,
 });
-```
 
-**Пример функции обновления:**
-
-```ts showLineNumbers copy
-// Обновление существующих зависимостей с сохранением предыдущих значений
-manager.setDependencies((prevDeps) => ({
-  ...prevDeps,
-  services: {
-    ...prevDeps.services,
-    analytics: {
-      trackEvent: (eventName, params) => {
-        console.log(`Analytics event: ${eventName}`, params);
-        // Отправка события в аналитику
-      },
-    },
-  },
-  // Добавление новых зависимостей
-  env: {
-    isDevelopment: process.env.NODE_ENV === "development",
-    apiUrl: process.env.API_URL,
-  },
+manager.setDependencies((prev) => ({
+  ...prev,
+  analytics,
 }));
 ```
 
-Функциональный подход особенно полезен для поэтапного обновления зависимостей или для добавления новых зависимостей без потери существующих.
+#### `replaceReducer(enhancer)`
 
-##### replaceReducer
+Низкоуровневый метод для middleware. Принимает enhancer `(reducer) => reducer`. В прикладном коде использовать не нужно.
+
+#### `condition(predicate)` (через middleware API)
+
+В среднем коде `condition` доступен внутри эффекта и middleware:
 
 ```ts showLineNumbers copy
-replaceReducer(
-  callback: (
-    reducer: (state: MachinesState<M>, action: A) => MachinesState<M>
-  ) => (state: MachinesState<M>, action: A) => MachinesState<M>
-): void
+effects: {
+  PROCESSING: async ({ transition, condition }) => {
+    await condition((action) => action.type === "ACK");
+    transition({ type: "DONE" });
+  },
+}
 ```
 
-Заменяет root reducer менеджера автоматов. Этот метод используется middleware для модификации обработки обычных transition, Immer-интеграции и DevTools-style restore.
+`condition` возвращает promise, который резолвится на первый matching action.
 
-Если reducer возвращает trusted lite-fsm/devtools/dehydrate-compatible actor records, manager синхронизирует actor sidecar через replacement reconcile. Ручная сборка actor records не является гарантированным API: невалидные slices по-прежнему бросают `LITE_FSM_INVALID_ACTOR_SLICE`.
-
-**Параметры:**
-
-- `callback`: Функция, которая принимает текущий редьюсер и возвращает новый редьюсер.
-
-**Пример:**
+## Hydration
 
 ```ts showLineNumbers copy
-// Пример создания middleware с использованием replaceReducer
-const loggingMiddleware = (api) => {
-  // Заменяем редьюсер, добавляя логирование
-  api.replaceReducer((reducer) => {
-    return (state, action) => {
-      console.log("Предыдущее состояние:", state);
-      console.log("Действие:", action);
+const snapshot = manager.dehydrate({ machines: ["counter"] });
 
-      const result = reducer(state, action);
+manager.hydrate(snapshot, { strategy: "merge" });
 
-      console.log("Новое состояние:", result);
-      return result;
-    };
-  });
-
-  return (next) => (action) => next(action);
-};
-
-// Использование middleware
-const manager = MachineManager({ counter: counterMachine }, { middleware: [loggingMiddleware] });
+const preview = manager.getHydratedState(snapshot, {
+  strategy: "replace",
+  baseState: manager.getState(),
+});
 ```
 
-**Пример DevTools-style restore через `replaceReducer`:**
+| API                  | Hooks       | Изменяет state | Subscribers          | Effects |
+| -------------------- | ----------- | -------------- | -------------------- | ------- |
+| `getSnapshot()`      | —           | —              | —                    | —       |
+| `dehydrate()`        | `dehydrate` | —              | —                    | —       |
+| `getHydratedState()` | `hydrate`   | —              | —                    | —       |
+| `hydrate()`          | `hydrate`   | да             | `@@lite-fsm/HYDRATE` | —       |
+
+| Strategy    | Поведение                                                                                                                |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `"merge"`   | Применяет только keys из snapshot, остальные машины без изменений.                                                       |
+| `"replace"` | Для actor templates сбрасывает acторов, отсутствующих в snapshot. Для domain машин полную форму `replace` определяет ваш `hydrate` hook. |
+
+Подробное описание — в разделе [Сохранение состояния](/guide/hydration).
+
+### Domain hooks
 
 ```ts showLineNumbers copy
-const restoreMiddleware = (api) => {
-  api.replaceReducer((reducer) => (state, action) => {
-    if (!action.type.startsWith("@devtools/")) {
-      return reducer(state, action);
-    }
-
-    return {
-      ...state,
-      ...(action.payload as Partial<typeof state>),
-    };
-  });
-
-  return (next) => (action) => next(action);
-};
+const profile = createMachine({
+  config: { READY: {} },
+  initialState: "READY",
+  initialContext: { user: null },
+  dehydrate: (slice) => slice.context.user,
+  hydrate: (prev, user) =>
+    prev.context.user === user ? prev : { state: prev.state, context: { user } },
+});
 ```
 
-##### condition
+Возвращайте `prev`, если данные не изменились — это позволит `manager.hydrate()` не уведомлять подписчиков и не вызывать ререндер.
+
+## Actor templates
+
+Машина становится actor template, если в `config` есть literal `__INIT`.
 
 ```ts showLineNumbers copy
-condition(
-  predicate: (action: A) => boolean
-): Promise<boolean>
-```
-
-Создает промис, который резолвится, когда переход, удовлетворяющий предикату, происходит в системе. Полезно для создания последовательностей асинхронных операций с ожиданием определенных состояний.
-
-**Параметры:**
-
-- `predicate`: Функция, которая принимает действие и возвращает булево значение.
-
-**Возвращает:**
-
-Промис, который резолвится со значением `true`, когда предикат возвращает `true` для какого-либо действия.
-
-**Пример:**
-
-```ts showLineNumbers copy
-// Использование condition в эффекте
-const machine = createMachine({
+const request = createMachine({
+  groupTag: "request",
   config: {
-    IDLE: {
-      START: "PROCESSING",
-    },
-    PROCESSING: {
-      SUCCESS: "SUCCESS",
-      ERROR: "ERROR",
-    },
-    SUCCESS: {
-      RESET: "IDLE",
-    },
-    ERROR: {
-      RETRY: "PROCESSING",
-      RESET: "IDLE",
-    },
+    __INIT: { START: "PENDING" },
+    PENDING: { RESOLVE: "__RESOLVED", FAIL: "__REJECTED" },
   },
-  effects: {
-    PROCESSING: async ({ transition, condition }) => {
-      try {
-        // Запуск асинхронной операции
-        const processPromise = startLongProcess();
-
-        // Ожидание действия CANCEL до завершения операции
-        const raceResult = await Promise.race([
-          processPromise,
-          condition((action) => action.type === "CANCEL").then(() => ({ cancelled: true })),
-        ]);
-
-        // Если операция была отменена
-        if (raceResult?.cancelled) {
-          transition({ type: "ERROR", payload: { error: "Operation cancelled" } });
-          return;
-        }
-
-        // Если операция завершилась успешно
-        transition({ type: "SUCCESS", payload: { result: raceResult } });
-      } catch (error) {
-        transition({ type: "ERROR", payload: { error: error.message } });
-      }
-    },
-  },
+  initialState: "__INIT",
+  initialContext: { id: "" },
 });
 ```
 
-### createConfig
+| Правило            | Значение                                                       |
+| ------------------ | -------------------------------------------------------------- |
+| `initialState`     | Всегда `"__INIT"`.                                             |
+| Spawn              | Action должен match-ить `__INIT` transition.                   |
+| Public record      | `state.requests[actorId] = { state, context, meta }`           |
+| Terminal targets   | `__RESOLVED` · `__REJECTED` · `__CANCELLED` удаляют actor.     |
+| Domain machines    | Получают action независимо от actor routing.                   |
+| Standalone runtime | Actor templates работают только внутри `MachineManager`.       |
+
+### Routing
 
 ```ts showLineNumbers copy
-createConfig<C extends Record<string, Record<string, string | null>>>(
-  config: C
-): C
+manager.transition({ type: "RESOLVE", meta: { actorId: "request/0" } });
+manager.transition({ type: "FAIL",    meta: { groupId: "request/0" } });
+manager.transition({ type: "CANCEL",  meta: { groupTag: "request" } });
 ```
 
-Функция для создания и типизации конфигурации автомата.
+Приоритет: `actorId > groupId > groupTag > unscoped`. Все три принимают `string | string[]`.
 
-**Параметры:**
-
-- `config`: Объект конфигурации автомата.
-
-**Возвращает:**
-
-Тот же объект конфигурации, но с правильной типизацией.
-
-**Пример:**
+Внутри actor effect доступны `self` и actor-aware dispatch:
 
 ```ts showLineNumbers copy
-import { createConfig, createMachine } from "lite-fsm";
-
-const config = createConfig({
-  IDLE: {
-    START: "RUNNING",
+effects: {
+  PENDING: ({ self, transition }) => {
+    transition.actor(self.actorId, { type: "RESOLVE" });
+    transition.group(self.groupId, { type: "PING" });
+    transition.tag(self.groupTag,  { type: "BROADCAST" });
+    transition.unscoped({ type: "GLOBAL_DONE" });
   },
-  RUNNING: {
-    PAUSE: "PAUSED",
-    STOP: "IDLE",
-  },
-  PAUSED: {
-    RESUME: "RUNNING",
-    STOP: "IDLE",
-  },
-});
-
-const machine = createMachine({
-  config,
-  initialState: "IDLE",
-  // ...
-});
+}
 ```
 
-### createReducer
+Подробнее — в разделе [Акторы](/guide/actors).
+
+## `defineMachine(opts?).create(cfg)` — standalone
+
+`defineMachine` фиксирует events, deps и опции один раз и затем создаёт независимые stateful-автоматы без manager-а.
 
 ```ts showLineNumbers copy
-createReducer<C, T, P>(
-  reducer: (
-    state: { state: State<C>; context: T },
-    action: P,
-    options: { nextState: State<C> | null; config: C }
-  ) => { state: State<C>; context: T }
-): typeof reducer
+import { defineMachine } from "lite-fsm";
+
+const machine = defineMachine<AppEvent, Deps>({ dependencies, onError }).create(counter);
+
+machine.transition({ type: "INC" });
+machine.getState();
+
+const off = machine.onTransition((prev, next, action) => {});
+machine.addMiddleware(immerMiddleware);
 ```
 
-Функция для создания и типизации пользовательского редьюсера.
+| Метод                  | Что делает                                                                  |
+| ---------------------- | --------------------------------------------------------------------------- |
+| `getState()`           | Текущее `{ state, context }`.                                               |
+| `transition(action)`   | Middleware → reducer → subscribers → effects.                               |
+| `onTransition(cb)`     | Подписка `(prev, current, action) => void`; возвращает unsubscribe.         |
+| `addMiddleware(...mw)` | Добавляет middleware в конец цепочки.                                       |
 
-**Параметры:**
+Каждый `.create(cfg)` возвращает независимую машину. `defineMachine` не поддерживает actor templates.
 
-- `reducer`: Функция редьюсера.
+## `Machine(cfg)` — pure machine
 
-**Возвращает:**
-
-Тот же редьюсер, но с правильной типизацией.
-
-**Пример:**
+Низкоуровневая фабрика без state, middleware, подписок. Полезна для тестирования reducer и effect в изоляции.
 
 ```ts showLineNumbers copy
-import { createReducer, createMachine } from "lite-fsm";
+import { Machine } from "lite-fsm";
 
-const reducer = createReducer((state, action, options) => {
-  const { state: currentState, context } = state;
-  const nextState = options.nextState || currentState;
-
-  switch (action.type) {
-    case "INCREMENT":
-      return {
-        state: nextState,
-        context: {
-          ...context,
-          count: context.count + 1,
-        },
-      };
-    case "DECREMENT":
-      return {
-        state: nextState,
-        context: {
-          ...context,
-          count: context.count - 1,
-        },
-      };
-    default:
-      return {
-        state: nextState,
-        context: {
-          ...context,
-          ...(action.payload || {}),
-        },
-      };
-  }
-});
-
-const machine = createMachine({
-  config: {
-    // ...
-  },
-  reducer,
-  // ...
-});
+const machine = Machine(counter);
+const next = machine.transition(
+  { state: "IDLE", context: { count: 0 } },
+  { type: "INC" },
+);
+await machine.invokeEffect("IDLE", next.state, deps);
 ```
 
-### createEffect
-
-```ts showLineNumbers copy
-createEffect<D extends DefaultDeps<any, any, any>, P extends Record<string, any> = {}>(
-  opts: {
-    type?: EffectType;
-    effect: MachineEffect<D, P>;
-    cancelFn?: (deps: D) => () => boolean;
-  }
-): (deps: D, payload: P) => any
-```
-
-Функция для создания эффекта с возможностью отмены.
-
-**Параметры:**
-
-- `opts`: Объект с опциями.
-  - `type`: (Опционально) Тип эффекта. Может принимать следующие значения:
-    - `"every"`: (по умолчанию) Выполняет каждый вызов эффекта независимо от других вызовов.
-    - `"latest"`: Игнорирует вызовы `transition` из предыдущих вызовов эффекта при новом вызове. Важно понимать, что код эффекта продолжает выполняться, но вызовы `transition` из устаревших эффектов будут проигнорированы. Это позволяет избежать состояния гонки (race condition) в асинхронных операциях, например, при поиске или загрузке данных, когда важно обрабатывать только результат последнего запроса.
-  - `effect`: Функция эффекта.
-  - `cancelFn`: (Опционально) Функция, которая возвращает функцию проверки условия отмены. Позволяет реализовать пользовательскую логику отмены эффекта.
-
-**Возвращает:**
-
-Функция эффекта с обработкой отмены.
-
-**Пример:**
-
-```ts showLineNumbers copy
-import { createEffect, createMachine } from "lite-fsm";
-
-const searchMachine = createMachine({
-  config: {
-    IDLE: {
-      SEARCH: "SEARCHING",
-    },
-    SEARCHING: {
-      SEARCH_SUCCESS: "RESULTS",
-      SEARCH_ERROR: "ERROR",
-    },
-    RESULTS: {
-      SEARCH: "SEARCHING",
-    },
-    ERROR: {
-      SEARCH: "SEARCHING",
-    },
-  },
-  initialState: "IDLE",
-  initialContext: {
-    query: "",
-    results: [],
-    error: null,
-    isLoading: false,
-  },
-  effects: {
-    SEARCHING: createEffect({
-      type: "latest", // Обрабатывать только результаты последнего поискового запроса
-      effect: async ({ transition, services, action }) => {
-        try {
-          const query = action.payload?.query || "";
-          const results = await services.api.search(query);
-
-          // Этот transition будет проигнорирован, если был сделан более новый запрос
-          transition({
-            type: "SEARCH_SUCCESS",
-            payload: { results },
-          });
-        } catch (error) {
-          // Этот transition тоже будет проигнорирован для устаревших запросов
-          transition({
-            type: "SEARCH_ERROR",
-            payload: { error: error.message },
-          });
-        }
-      },
-    }),
-  },
-});
-```
+| Метод                               | Что делает                       |
+| ----------------------------------- | -------------------------------- |
+| `config`                            | Ссылка на `cfg.config`.          |
+| `transition(slice, action)`         | Следующее `{ state, context }`.  |
+| `invokeEffect(prev, current, deps)` | Вызывает state effect или `"*"`. |
 
 ## Wildcard
 
-Специальный символ `"*"` используется для обозначения состояния или события, которое должно соответствовать любому значению.
-
-**Пример:**
+Специальный символ `"*"` в `config` означает fallback transition для любого состояния, в `effects` — fallback effect, который срабатывает на каждый dispatch (включая self-transition).
 
 ```ts showLineNumbers copy
-import { createMachine } from "lite-fsm";
-
 const machine = createMachine({
   config: {
     IDLE: {
@@ -599,187 +409,93 @@ const machine = createMachine({
     RUNNING: {
       STOP: "IDLE",
     },
-    // Обработка RESET из любого состояния
     "*": {
       RESET: "IDLE",
     },
   },
-  // ...
+  initialState: "IDLE",
+  initialContext: {},
+  effects: {
+    "*": ({ action }) => console.log("любое событие", action.type),
+  },
 });
 ```
 
 ## React API
 
-Библиотека `lite-fsm` предоставляет интеграцию с React через набор компонентов и хуков.
+Полное описание React-интеграции — в разделе [Использование с React](/react). Здесь — краткий справочник.
 
-### FSMContextProvider
+### `FSMContextProvider`
 
-```tsx showLineNumbers copy
-<FSMContextProvider machineManager={manager}>{children}</FSMContextProvider>
-```
-
-Компонент-провайдер, который делает менеджер автоматов доступным для всех дочерних компонентов через React Context.
-
-**Свойства:**
-
-- `machineManager`: Объект менеджера автоматов, созданный с помощью `MachineManager`.
-- `children`: Дочерние компоненты.
-
-**Пример:**
+Кладёт manager в context, делая его доступным `useManager`/`useSelector`/`useTransition`.
 
 ```tsx showLineNumbers copy
 import { FSMContextProvider } from "lite-fsm/react";
-import { MachineManager, createMachine } from "lite-fsm";
 
-// Создание автомата
-const counterMachine = createMachine({
-  config: {
-    IDLE: { INCREMENT: null, DECREMENT: null, RESET: null },
-  },
-  initialState: "IDLE",
-  initialContext: { count: 0 },
-  // ...
-});
-
-// Создание менеджера
-const manager = MachineManager({
-  counter: counterMachine,
-});
-
-// Использование в приложении
 function App() {
   return (
     <FSMContextProvider machineManager={manager}>
       <Counter />
-      <Controls />
     </FSMContextProvider>
   );
 }
 ```
 
-### useSelector
+### `useSelector(selector, equalityFn?)`
 
-```ts showLineNumbers copy
-useSelector<R>(
-  selector: (state: MachinesState<S>) => R,
-  equalityFn?: (oldValue: R, newValue: R) => boolean
-): R
-```
-
-Хук для выбора и подписки на часть состояния из менеджера автоматов.
-
-**Параметры:**
-
-- `selector`: Функция, которая принимает состояние всех автоматов и возвращает производную часть этого состояния.
-- `equalityFn`: (Опционально) Функция сравнения для определения, изменилось ли выбранное состояние.
-
-**Возвращает:**
-Выбранную часть состояния.
-
-**Пример:**
+`useSyncExternalStoreWithSelector`-обёртка. Default equality — `===`.
 
 ```tsx showLineNumbers copy
-import { useSelector } from "lite-fsm/react";
+const count = useSelector((state) => state.counter.context.count);
+```
+
+### `useTransition()`
+
+Возвращает `manager.transition`.
+
+```tsx showLineNumbers copy
+const transition = useTransition();
+transition({ type: "INC" });
+```
+
+### `useManager()`
+
+Прямой доступ к `MachineManager` из контекста.
+
+```tsx showLineNumbers copy
+const manager = useManager();
+const state = manager.getState();
+```
+
+### `FSMHydrationBoundary`
+
+Применяет snapshot к React-subtree так, чтобы `useSelector()` внутри boundary видел hydrated state уже на render, а manager догонял его в layout effect.
+
+```tsx showLineNumbers copy
+import { FSMHydrationBoundary } from "lite-fsm/react";
+
+<FSMHydrationBoundary snapshot={snapshot} strategy="merge">
+  <Page />
+</FSMHydrationBoundary>;
+```
+
+### `useHydrateSnapshot(snapshot, opts?)`
+
+Применяет snapshot в layout effect без preview. Подходит для фоновой синхронизации после mount, когда временное наложение состояния во время отрисовки не нужно.
+
+### `defineMachine` (React)
+
+Standalone-машина в виде хука. Возвращает hook + методы standalone machine.
+
+```tsx showLineNumbers copy
+import { defineMachine } from "lite-fsm/react";
+
+const useCounter = defineMachine<AppEvent>().create(counter);
 
 function Counter() {
-  // Получение значения счетчика
-  const count = useSelector((state) => state.counter.context.count);
-
-  // Получение нескольких значений с мемоизацией
-  const { isResettable, isDecrementable } = useSelector((state) => {
-    const count = state.counter.context.count;
-    return {
-      isResettable: count > 0,
-      isDecrementable: count > 0,
-    };
-  });
-
-  return (
-    <div>
-      <h2>Count: {count}</h2>
-      <p>Can reset: {isResettable ? "Yes" : "No"}</p>
-      <p>Can decrement: {isDecrementable ? "Yes" : "No"}</p>
-    </div>
-  );
+  const count = useCounter((slice) => slice.context.count);
+  return <button onClick={() => useCounter.transition({ type: "INC" })}>{count}</button>;
 }
 ```
 
-### useTransition
-
-```ts showLineNumbers copy
-useTransition<P extends FSMEvent<any, any> = any>(): (action: P) => void
-```
-
-Хук, который возвращает функцию для отправки действий менеджеру автоматов.
-
-**Возвращает:**
-Функция для отправки действий.
-
-**Пример:**
-
-```tsx showLineNumbers copy
-import { useSelector, useTransition } from "lite-fsm/react";
-
-function CounterControls() {
-  const count = useSelector((state) => state.counter.context.count);
-  const transition = useTransition();
-
-  return (
-    <div>
-      <button onClick={() => transition({ type: "INCREMENT" })}>Increment</button>
-
-      <button onClick={() => transition({ type: "DECREMENT" })} disabled={count <= 0}>
-        Decrement
-      </button>
-
-      <button onClick={() => transition({ type: "RESET" })} disabled={count === 0}>
-        Reset
-      </button>
-    </div>
-  );
-}
-```
-
-### useManager
-
-```ts showLineNumbers copy
-useManager<S extends Record<string, MachineConfig<any, any, any, any>>>(): MachineManager<S>
-```
-
-Хук для получения прямого доступа к объекту менеджера автоматов.
-
-**Возвращает:**
-Объект менеджера автоматов.
-
-**Пример:**
-
-```tsx showLineNumbers copy
-import { useManager } from "lite-fsm/react";
-import { useEffect } from "react";
-
-function Debug() {
-  const manager = useManager();
-
-  // Получение полного состояния всех автоматов
-  const state = manager.getState();
-
-  useEffect(() => {
-    // Подписка на все изменения состояния
-    const unsubscribe = manager.onTransition((prevState, nextState, action) => {
-      console.log("Действие:", action);
-      console.log("Предыдущее состояние:", prevState);
-      console.log("Новое состояние:", nextState);
-    });
-
-    return unsubscribe;
-  }, [manager]);
-
-  return (
-    <div>
-      <h3>Текущее состояние:</h3>
-      <pre>{JSON.stringify(state, null, 2)}</pre>
-      <button onClick={() => manager.transition({ type: "RESET_ALL" })}>Сбросить все</button>
-    </div>
-  );
-}
-```
+Несколько компонентов с одним и тем же hook делят один общий state.
