@@ -3,6 +3,8 @@ const assert = require("node:assert/strict");
 const core = require("lite-fsm");
 const devTools = require("lite-fsm/middleware/devTools");
 const immer = require("lite-fsm/middleware/immer");
+const persist = require("lite-fsm/persist");
+const persistReact = require("lite-fsm/persist/react");
 const react = require("lite-fsm/react");
 const middleware = require("lite-fsm/middleware");
 
@@ -15,6 +17,10 @@ assert.equal(typeof core.createMachine, "function");
 assert.equal(typeof core.createReducer, "function");
 assert.equal(typeof core.defineMachine, "function");
 assert.equal(typeof core.LiteFsmError, "function");
+assert.equal(typeof persist.createJsonStorage, "function");
+assert.equal(typeof persist.persistManager, "function");
+assert.equal(typeof persistReact.useIsPersistRestoring, "function");
+assert.equal(typeof persistReact.usePersistStatus, "function");
 
 assert.equal(typeof react.FSMContext, "object");
 assert.equal(typeof react.FSMContextProvider, "function");
@@ -56,7 +62,8 @@ const actor = {
   initialContext: { id: "", count: 0 },
   reducer: (state, action, meta) => {
     if (action.type === "START") return { state: meta.nextState, context: { id: action.payload.id, count: 1 } };
-    if (action.type === "BUMP") return { state: state.state, context: { ...state.context, count: state.context.count + 1 } };
+    if (action.type === "BUMP")
+      return { state: state.state, context: { ...state.context, count: state.context.count + 1 } };
     return state;
   },
 };

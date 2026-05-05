@@ -7,6 +7,8 @@
 | Импорт                                                       | Runtime exports                                                                                                                                   |
 | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `lite-fsm`                                                   | `createMachine`, `createConfig`, `createReducer`, `createEffect`, `createActorMeta`, `Machine`, `defineMachine`, `MachineManager`, `LiteFsmError` |
+| `lite-fsm/persist`                                           | `persistManager`, `createJsonStorage`                                                                                                             |
+| `lite-fsm/persist/react`                                     | `usePersistStatus`, `useIsPersistRestoring`                                                                                                       |
 | `lite-fsm/middleware`                                        | `immerMiddleware`, `devToolsMiddleware`                                                                                                           |
 | `lite-fsm/middleware/immer` · `lite-fsm/middleware/devTools` | per-feature entry points                                                                                                                          |
 | `lite-fsm/react`                                             | `FSMContext`, `FSMContextProvider`, `FSMHydrationBoundary`, `useHydrateSnapshot`, `useManager`, `useSelector`, `useTransition`, `defineMachine`   |
@@ -127,13 +129,13 @@ State effect приоритетнее `"*"`. Wildcard срабатывает и 
 
 Все фабрики — typed identity helpers. Runtime ничего не создают, только сужают типы.
 
-| Factory                                      | Назначение                                       |
-| -------------------------------------------- | ------------------------------------------------ |
-| `createMachine(cfg)`                         | полный machine config                            |
-| `createConfig(cfg)`                          | только граф переходов                            |
-| `createReducer(fn)`                          | reducer с фиксированным action union             |
+| Factory                                      | Назначение                                                     |
+| -------------------------------------------- | -------------------------------------------------------------- |
+| `createMachine(cfg)`                         | полный machine config                                          |
+| `createConfig(cfg)`                          | только граф переходов                                          |
+| `createReducer(fn)`                          | reducer с фиксированным action union                           |
 | `createActorMeta(meta)`                      | frozen `Readonly<ActorMeta>` для replacement/time-travel input |
-| `createEffect({ effect, type?, cancelFn? })` | оборачивает effect политикой запуска             |
+| `createEffect({ effect, type?, cancelFn? })` | оборачивает effect политикой запуска                           |
 
 ### `createEffect`
 
@@ -211,17 +213,17 @@ manager.setDependencies({ api });
 manager.transition({ type: "INC" });
 ```
 
-| Опция                      | Назначение                                                                                                                |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `middleware?`              | цепочка middleware на все user actions                                                                                    |
-| `snapshot?`                | начальный snapshot, применяется со strategy `"replace"`                                                                   |
-| `schemaVersion?`           | версия snapshot                                                                                                           |
-| `onError?`                 | ошибки effects / `condition`                                                                                              |
-| `onUnknownMachineKey?`     | unknown key в `hydrate` или initial snapshot                                                                              |
-| `onSchemaVersionMismatch?` | mismatch `snapshot.schemaVersion`                                                                                         |
+| Опция                      | Назначение                                                                                                                   |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `middleware?`              | цепочка middleware на все user actions                                                                                       |
+| `snapshot?`                | начальный snapshot, применяется со strategy `"replace"`                                                                      |
+| `schemaVersion?`           | версия snapshot                                                                                                              |
+| `onError?`                 | ошибки effects / `condition`                                                                                                 |
+| `onUnknownMachineKey?`     | unknown key в `hydrate` или initial snapshot                                                                                 |
+| `onSchemaVersionMismatch?` | mismatch `snapshot.schemaVersion`                                                                                            |
 | `originId?`                | префикс владельца, добавляется ко всем created id (`originId#templateKey/counter`); строка без `#` (P2P / multi-tab / шарды) |
-| `generateActorId?`         | `(ctx: SpawnIdContext<P>) => string` — кастомный actor id; counter в ctx инкрементируется всегда                          |
-| `generateGroupId?`         | то же для groupId (применяется только при unscoped spawn)                                                                 |
+| `generateActorId?`         | `(ctx: SpawnIdContext<P>) => string` — кастомный actor id; counter в ctx инкрементируется всегда                             |
+| `generateGroupId?`         | то же для groupId (применяется только при unscoped spawn)                                                                    |
 
 | Метод                               | Назначение                                                     |
 | ----------------------------------- | -------------------------------------------------------------- |
@@ -276,6 +278,62 @@ const profile = createMachine({
 ```
 
 Unknown machine keys пропускаются: в DEV — warning + `onUnknownMachineKey`. `schemaVersion` миграцию не делает, только триггерит `onSchemaVersionMismatch`. Snapshot объекты считайте immutable; hooks делайте идемпотентными и возвращайте `prev`, если данные те же.
+
+## Persist
+
+`lite-fsm/persist` — опциональный слой поверх `MachineManager.dehydrate()`, `hydrate()` и `onTransition()`. Core entrypoint его не импортирует.
+
+```ts
+const storage = createJsonStorage<AppStore>({
+  key: "app:fsm",
+  storage: window.localStorage,
+});
+
+const persist = persistManager(manager, {
+  storage,
+  storageVersion: 1,
+  machines: ["profile"],
+  throttleMs: 500,
+  migrate: (record) => migrateSnapshot(record),
+  onRestoreSettled: (result) => {
+    // result.phase === "ready" | "error"
+  },
+  onError: console.error,
+});
+
+const stop = persist.start();
+await persist.flush();
+stop();
+```
+
+| API                                   | Что делает                                                                   |
+| ------------------------------------- | ---------------------------------------------------------------------------- |
+| `persistManager(manager, opts)`       | создаёт controller для restore/save/clear и подписки на manager/storage      |
+| `createJsonStorage({ key, storage })` | адаптер для `localStorage` / `sessionStorage`-совместимых JSON-хранилищ      |
+| `controller.start()`                  | ref-counted start; запускает background restore и подписки                   |
+| `controller.restore()`                | читает запись, валидирует envelope persist-слоя и вызывает `manager.hydrate` |
+| `controller.save()`                   | сразу пишет `manager.dehydrate({ machines })`                                |
+| `controller.flush()`                  | немедленно пишет отложенный throttled save                                   |
+| `controller.clear()`                  | отменяет pending save, удаляет storage record и сбрасывает status            |
+| `controller.getStatus()`              | текущий `{ phase }` snapshot                                                 |
+| `controller.subscribeStatus(cb)`      | подписка на смену status                                                     |
+
+`start()` не блокирует SSR/hydration. Пока restore в процессе, user transitions не пишутся сразу; если live state изменился во время restore, controller после restore сохраняет финальное состояние. `@@lite-fsm/HYDRATE` сам по себе save не планирует, а restore из `storage.subscribe()` не делает echo-save без live изменений.
+
+| Опция             | Назначение                                                               |
+| ----------------- | ------------------------------------------------------------------------ |
+| `storage`         | `{ get, set, remove, subscribe? }`                                       |
+| `machines?`       | те же snapshot-eligible keys, что в `dehydrate({ machines })`            |
+| `strategy?`       | strategy для `hydrate`, default `"merge"`                                |
+| `storageVersion?` | версия persist record; mismatch без `migrate` удаляет record. `undefined` vs определённое значение тоже считается mismatch |
+| `maxAge?`         | TTL в миллисекундах; expired record удаляется                            |
+| `throttleMs?`     | coalescing для saves; default `0`, для browser storage обычно `300-1000` |
+| `shouldSave?`     | фильтр manager transitions перед save                                    |
+| `migrate?`        | конвертация старого `PersistedRecord` в текущий `MachineManagerSnapshot` |
+| `onRestoreSettled?` | вызывается из restore-пути с `{ phase: "ready"; restored }` или `{ phase: "error"; error }` |
+| `onError?`        | `(err, "restore" \| "save" \| "clear") => void`                          |
+
+`restore()` удаляет invalid, expired и несовместимые records. `onRestoreSettled` вызывается и при успешном завершении restore, и при restore error; `clear()` его не вызывает. Background restore/save из `start()` проглатывают ошибки после `onError` и status update; прямые `await restore/save/flush/clear` пробрасывают ошибки.
 
 ## Actor templates
 
@@ -337,19 +395,19 @@ bob.hydrate(alice.dehydrate(), { strategy: "merge" });
 // keys: ["alice#likeSync/0", "bob#likeSync/0"]
 ```
 
-| Сценарий                   | Что задать                                                              |
-| -------------------------- | ----------------------------------------------------------------------- |
-| Дефолт                     | `templateKey/0` · `templateKey/1`                                       |
-| Один `originId`            | `originId#templateKey/0`                                                |
-| `generateActorId` задан    | возвращаемое значение генератора (collision → `LITE_FSM_INVALID_GENERATED_ID`) |
-| Доменный id из payload     | `generateActorId: ({ originId, action }) => `${originId}#user/${action.payload.id}`` |
+| Сценарий                | Что задать                                                                           |
+| ----------------------- | ------------------------------------------------------------------------------------ |
+| Дефолт                  | `templateKey/0` · `templateKey/1`                                                    |
+| Один `originId`         | `originId#templateKey/0`                                                             |
+| `generateActorId` задан | возвращаемое значение генератора (collision → `LITE_FSM_INVALID_GENERATED_ID`)       |
+| Доменный id из payload  | `generateActorId: ({ originId, action }) => `${originId}#user/${action.payload.id}`` |
 
 `generateActorId` получает `{ templateKey, groupTag, counter, originId, action }`. Чтобы counter после `hydrate` восстанавливался, держите хвост id как `.../N`; UUID-хвост — counter не двигается, collision все равно блокируется через `isTaken`.
 
-| Error code                       | Когда                                                              |
-| -------------------------------- | ------------------------------------------------------------------ |
-| `LITE_FSM_INVALID_OPTIONS`       | `originId` пустой или содержит `#`                                 |
-| `LITE_FSM_INVALID_GENERATED_ID`  | generator вернул не-строку, пустую строку или уже занятый id       |
+| Error code                      | Когда                                                        |
+| ------------------------------- | ------------------------------------------------------------ |
+| `LITE_FSM_INVALID_OPTIONS`      | `originId` пустой или содержит `#`                           |
+| `LITE_FSM_INVALID_GENERATED_ID` | generator вернул не-строку, пустую строку или уже занятый id |
 
 ### Persistence
 
@@ -435,17 +493,30 @@ function Counter() {
 }
 ```
 
-| API                                        | Назначение                                                           |
-| ------------------------------------------ | -------------------------------------------------------------------- |
+| API                                        | Назначение                                                                |
+| ------------------------------------------ | ------------------------------------------------------------------------- |
 | `FSMContextProvider`                       | кладёт manager в context; фиксирует `getServerSnapshot` для SSR/hydration |
-| `useManager<S, P>()`                       | manager из context                                                   |
-| `useTransition<P>()`                       | `manager.transition`                                                 |
-| `useSelector<S, R>(selector, equalityFn?)` | `useSyncExternalStoreWithSelector`-обёртка; default equality — `===` |
-| `FSMHydrationBoundary`                     | preview snapshot уже на render + apply в layout effect               |
-| `useHydrateSnapshot(snapshot, opts?)`      | apply snapshot в layout effect, без preview                          |
-| `defineMachine`                            | standalone machine как hook                                          |
+| `useManager<S, P>()`                       | manager из context                                                        |
+| `useTransition<P>()`                       | `manager.transition`                                                      |
+| `useSelector<S, R>(selector, equalityFn?)` | `useSyncExternalStoreWithSelector`-обёртка; default equality — `===`      |
+| `FSMHydrationBoundary`                     | preview snapshot уже на render + apply в layout effect                    |
+| `useHydrateSnapshot(snapshot, opts?)`      | apply snapshot в layout effect, без preview                               |
+| `defineMachine`                            | standalone machine как hook                                               |
 
-`FSMContextProvider` принимает `getServerSnapshot?: () => MachinesState<S>`. Без prop он кеширует `machineManager.getState()` для текущего manager-а на первом render-е. Это root state для React `useSyncExternalStore`, не `MachineManagerSnapshot` envelope.
+`FSMContextProvider` принимает `getServerSnapshot?: () => MachinesState<S>` и `persist?: { start(): () => void } | readonly { start(): () => void }[]`. Без `getServerSnapshot` он кеширует `machineManager.getState()` для текущего manager-а на первом render-е. Это root state для React `useSyncExternalStore`, не `MachineManagerSnapshot` envelope.
+
+`persist` — structural lifecycle prop: provider вызывает `start()` в `useEffect`, а cleanup вызывает возвращённые stop-функции. `lite-fsm/react` не зависит от `lite-fsm/persist`, поэтому туда можно передать любой совместимый controller.
+
+```tsx
+import type { PersistController } from "lite-fsm/persist";
+import { useIsPersistRestoring, usePersistStatus } from "lite-fsm/persist/react";
+
+function PersistBadge({ persist }: { persist: PersistController }) {
+  const status = usePersistStatus(persist);
+  const restoring = useIsPersistRestoring(persist);
+  return <span>{restoring ? "restoring" : status.phase}</span>;
+}
+```
 
 Внутри `FSMHydrationBoundary` selector читает render overlay; для SSR/hydration ближайший boundary server snapshot имеет приоритет над Provider snapshot. `useManager().getState()` в render всегда читает live manager и не участвует в SSR-safe overlay contract.
 

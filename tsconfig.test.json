@@ -8,6 +8,8 @@
     "paths": {
       "lite-fsm": ["src/core/index.ts"],
       "lite-fsm/react": ["src/react/index.ts"],
+      "lite-fsm/persist": ["src/persist/index.ts"],
+      "lite-fsm/persist/react": ["src/persist/react.ts"],
       "lite-fsm/middleware/immer": ["src/middleware/immer.ts"]
     }
   },

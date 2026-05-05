@@ -31,6 +31,26 @@
         "default": "./dist/react.cjs"
       }
     },
+    "./persist": {
+      "import": {
+        "types": "./dist/persist.d.ts",
+        "default": "./dist/persist.js"
+      },
+      "require": {
+        "types": "./dist/persist.d.cts",
+        "default": "./dist/persist.cjs"
+      }
+    },
+    "./persist/react": {
+      "import": {
+        "types": "./dist/persist/react.d.ts",
+        "default": "./dist/persist/react.js"
+      },
+      "require": {
+        "types": "./dist/persist/react.d.cts",
+        "default": "./dist/persist/react.cjs"
+      }
+    },
     "./middleware": {
       "import": {
         "types": "./dist/middleware.d.ts",
@@ -69,6 +89,12 @@
       ],
       "react": [
         "dist/react.d.ts"
+      ],
+      "persist": [
+        "dist/persist.d.ts"
+      ],
+      "persist/react": [
+        "dist/persist/react.d.ts"
       ],
       "middleware": [
         "dist/middleware.d.ts"

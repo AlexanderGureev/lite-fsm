@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import * as core from "lite-fsm";
 import * as devTools from "lite-fsm/middleware/devTools";
 import * as immer from "lite-fsm/middleware/immer";
+import * as persist from "lite-fsm/persist";
+import * as persistReact from "lite-fsm/persist/react";
 import * as react from "lite-fsm/react";
 import * as middleware from "lite-fsm/middleware";
 
@@ -15,6 +17,10 @@ assert.equal(typeof core.createMachine, "function");
 assert.equal(typeof core.createReducer, "function");
 assert.equal(typeof core.defineMachine, "function");
 assert.equal(typeof core.LiteFsmError, "function");
+assert.equal(typeof persist.createJsonStorage, "function");
+assert.equal(typeof persist.persistManager, "function");
+assert.equal(typeof persistReact.useIsPersistRestoring, "function");
+assert.equal(typeof persistReact.usePersistStatus, "function");
 
 assert.equal(typeof react.FSMContext, "object");
 assert.equal(typeof react.FSMContextProvider, "function");
@@ -56,7 +62,8 @@ const actor = {
   initialContext: { id: "", count: 0 },
   reducer: (state, action, meta) => {
     if (action.type === "START") return { state: meta.nextState, context: { id: action.payload.id, count: 1 } };
-    if (action.type === "BUMP") return { state: state.state, context: { ...state.context, count: state.context.count + 1 } };
+    if (action.type === "BUMP")
+      return { state: state.state, context: { ...state.context, count: state.context.count + 1 } };
     return state;
   },
 };

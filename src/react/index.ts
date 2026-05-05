@@ -2,7 +2,7 @@ export type { FSMContextType } from "./FSMContext";
 export { FSMContext } from "./FSMContext";
 export type { FSMHydrationBoundaryProps } from "./FSMHydrationBoundary";
 export { FSMHydrationBoundary } from "./FSMHydrationBoundary";
-export type { FSMContextProviderProps } from "./FSMProvider";
+export type { FSMContextProviderProps, FSMPersistLifecycle } from "./FSMProvider";
 export { FSMContextProvider } from "./FSMProvider";
 export type { TypedUseMachineHook, TypedUseManagerHook, TypedUseSelectorHook, TypedUseTransitionHook } from "./types";
 export { useHydrateSnapshot } from "./useHydrateSnapshot";

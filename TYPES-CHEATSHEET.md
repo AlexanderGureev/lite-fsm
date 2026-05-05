@@ -4,11 +4,13 @@
 
 ## Точки входа
 
-| Импорт                | Типы                                                                                                                                                                                                                                                               |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `lite-fsm`            | весь `types.ts` + `interfaces.ts`: `FSMEvent`, `MachineConfig`, `CFG`, `MachineReducer`, `MachineEffect`, `MachineManagerSnapshot`, `MachinesState`, `MachineEvents`, `MachineDependencies`, `IMachineManager`, `Middleware`, actor types, snapshot types, helpers |
-| `lite-fsm/react`      | `FSMContextType`, `FSMHydrationBoundaryProps`, `TypedUseManagerHook`, `TypedUseMachineHook`, `TypedUseSelectorHook`, `TypedUseTransitionHook`                                                                                                                      |
-| `lite-fsm/middleware` | только runtime middleware                                                                                                                                                                                                                                          |
+| Импорт                   | Типы                                                                                                                                                                                                                                                               |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `lite-fsm`               | весь `types.ts` + `interfaces.ts`: `FSMEvent`, `MachineConfig`, `CFG`, `MachineReducer`, `MachineEffect`, `MachineManagerSnapshot`, `MachinesState`, `MachineEvents`, `MachineDependencies`, `IMachineManager`, `Middleware`, actor types, snapshot types, helpers |
+| `lite-fsm/react`         | `FSMContextType`, `FSMContextProviderProps`, `FSMPersistLifecycle`, `FSMHydrationBoundaryProps`, typed hook aliases                                                                                                                                                |
+| `lite-fsm/persist`       | `MaybePromise`, `PersistedRecord`, `PersistStorage`, `PersistStatus`, `PersistRestoreSettledResult`, `PersistManagerOptions`, `PersistController`                                                                                                                   |
+| `lite-fsm/persist/react` | runtime hooks only: `usePersistStatus`, `useIsPersistRestoring`                                                                                                                                                                                                    |
+| `lite-fsm/middleware`    | только runtime middleware                                                                                                                                                                                                                                          |
 
 ## Generics
 
@@ -127,12 +129,12 @@ const saveEffect: MachineEffect<"saving", SaveConfig, SaveEvent, { api: Api }> =
 };
 ```
 
-| Тип                         | Назначение                                                                  |
-| --------------------------- | --------------------------------------------------------------------------- |
-| `MachineEffect<N, C, P, D>` | `(deps: D & DefaultDeps...) => void \| Promise<void>`                       |
-| `EffectStateName<C>`        | domain: `StateName<C> \| "*"`; actor: `ActorPublicState<C> \| "*"`          |
-| `IncomingEventTypes<C, N>`  | event names, ведущие в state `N`                                            |
-| `ActionForState<C, N, P>`   | `Extract<P, { type: IncomingEventTypes<C, N> }>` (для `N = "*"` — весь `P`) |
+| Тип                         | Назначение                                                                                                   |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `MachineEffect<N, C, P, D>` | `(deps: D & DefaultDeps...) => void \| Promise<void>`                                                        |
+| `EffectStateName<C>`        | domain: `StateName<C> \| "*"`; actor: `ActorPublicState<C> \| "*"`                                           |
+| `IncomingEventTypes<C, N>`  | event names, ведущие в state `N`                                                                             |
+| `ActionForState<C, N, P>`   | `Extract<P, { type: IncomingEventTypes<C, N> }>` (для `N = "*"` — весь `P`)                                  |
 | `DefaultDeps<N, C, P>`      | `{ transition: (action: ManagerAction<P>) => ManagerAction<P>, action: ActionForState<C, N, P>, condition }` |
 
 `transition` в domain effects принимает `ManagerAction<P>`, поэтому новое событие может нести routing `meta`. `action` и `condition` остаются типизированы через исходный `P` и сохраняют сужение по state.
@@ -216,6 +218,37 @@ type AppDeps = MachineDependencies<Store>;
 | `HydrateAction<S>`         | `{ type: "@@lite-fsm/HYDRATE"; payload: { strategy; snapshot } }` |
 | `UnknownMachineKeyContext` | `"hydrate" \| "opts.snapshot"`                                    |
 
+## Persist
+
+`lite-fsm/persist` типизируется от того же `S extends MachineStore`, что и `MachineManager`.
+
+| Тип                        | Форма / назначение                                                                                         |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `MaybePromise<T>`          | `T \| Promise<T>`                                                                                          |
+| `PersistedRecord<S>`       | `{ timestamp: number; storageVersion?: string \| number; snapshot: MachineManagerSnapshot<S> }`            |
+| `PersistStorage<S>`        | `{ get, set, remove, subscribe? }`, где value — typed `PersistedRecord<S>`                                 |
+| `PersistStatus`            | `{ phase: "idle" } \| { phase: "restoring" } \| { phase: "ready"; restored } \| { phase: "error"; error }` |
+| `PersistRestoreSettledResult` | `{ phase: "ready"; restored } \| { phase: "error"; error }`                                             |
+| `PersistManagerOptions<S>` | storage, `machines`, hydrate strategy, version/TTL/throttle, `shouldSave`, `migrate`, `onRestoreSettled`, `onError` |
+| `PersistController`        | `start`, `restore`, `save`, `flush`, `clear`, `getStatus`, `subscribeStatus`                               |
+
+```ts
+type Store = typeof machines;
+type Record = PersistedRecord<Store>;
+type Storage = PersistStorage<Store>;
+
+const persist = persistManager(manager, {
+  storage,
+  machines: ["profile"],
+  shouldSave: ({ prevState, currentState, action }) => action.type !== "NOOP",
+  onRestoreSettled: (result) => {
+    if (result.phase === "error") console.error(result.error);
+  },
+});
+```
+
+`PersistManagerOptions<S>["machines"]` использует `DehydrateOptions<S>["machines"]`: runtime actor templates без `persistence: "snapshot"` на уровне типов не принимаются. `migrate(record)` возвращает `MachineManagerSnapshot<S> | undefined`, поэтому старый transport record можно конвертировать без расширения core snapshot API.
+
 ### Actor snapshot hooks
 
 | Тип                                  | Сигнатура                                                        |
@@ -255,13 +288,13 @@ type AppDeps = MachineDependencies<Store>;
 
 ### Manager options и subscribers
 
-| Тип                           | Форма                                                                                                                                            |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Тип                           | Форма                                                                                                                                                 |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `MachineManagerOptions<S, P>` | `{ onError?, middleware?, snapshot?, schemaVersion?, onUnknownMachineKey?, onSchemaVersionMismatch?, originId?, generateActorId?, generateGroupId? }` |
-| `SpawnIdContext<P>`           | `{ templateKey: string; groupTag: string; counter: number; originId: string \| undefined; action: ManagerAction<P> }`                            |
-| `GenerateSpawnIdFn<P>`        | `(ctx: SpawnIdContext<P>) => string`                                                                                                             |
-| `Subscriber<C, T, P>`         | `(prev: StateType<C, T>, current: StateType<C, T>, action: P) => void`                                                                           |
-| `TransitionSubscriber<S, P>`  | `(prev: MachinesState<S>, current: MachinesState<S>, action: ManagerCommitAction<S, ManagerAction<P>>) => void`                                  |
+| `SpawnIdContext<P>`           | `{ templateKey: string; groupTag: string; counter: number; originId: string \| undefined; action: ManagerAction<P> }`                                 |
+| `GenerateSpawnIdFn<P>`        | `(ctx: SpawnIdContext<P>) => string`                                                                                                                  |
+| `Subscriber<C, T, P>`         | `(prev: StateType<C, T>, current: StateType<C, T>, action: P) => void`                                                                                |
+| `TransitionSubscriber<S, P>`  | `(prev: MachinesState<S>, current: MachinesState<S>, action: ManagerCommitAction<S, ManagerAction<P>>) => void`                                       |
 
 `originId?: string` (без `#`) и кастомные `generateActorId` / `generateGroupId` обеспечивают изоляцию id между менеджерами в P2P / multi-tab / шарды-сценариях. Подробнее — в гайде [Распределенный спавн](/guide/actors#распределенный-спавн).
 
@@ -303,7 +336,8 @@ const logger: Middleware<AppState, AppEvent> = (api) => (next) => (action) => ne
 | Тип                                                       | Форма                                                                                    |
 | --------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | `FSMContextType<S = MachineStore, P = AnyEvent>`          | `IMachineManager<S, P>`                                                                  |
-| `FSMContextProviderProps<S, P>`                           | `PropsWithChildren<{ machineManager: IMachineManager<S, P>; getServerSnapshot?: () => MachinesState<S> }>` |
+| `FSMPersistLifecycle`                                     | `{ start(): () => void }`                                                                |
+| `FSMContextProviderProps<S, P>`                           | `PropsWithChildren<{ machineManager; getServerSnapshot?; persist? }>`                    |
 | `FSMHydrationBoundaryProps<S>`                            | `PropsWithChildren<{ snapshot: MachineManagerSnapshot<S>; strategy?: HydrateStrategy }>` |
 | `TypedUseManagerHook<S, P>` · `TypedUseMachineHook<S, P>` | `() => IMachineManager<S, P>`                                                            |
 | `TypedUseSelectorHook<S>`                                 | `<R>(selector: (state: MachinesState<S>) => R, equalityFn?) => R`                        |
@@ -320,7 +354,7 @@ export const useSelector: TypedUseSelectorHook<Store> = baseUseSelector;
 export const useTransition: TypedUseTransitionHook<Event> = baseUseTransition;
 ```
 
-`TypedUseSelectorHook<S>` принимает `MachineStore`, не computed `MachinesState<S>`. `getServerSnapshot` — root state shape `MachinesState<S>`, не dehydrated envelope; custom функция должна возвращать стабильный snapshot для SSR/hydration pass.
+`TypedUseSelectorHook<S>` принимает `MachineStore`, не computed `MachinesState<S>`. `getServerSnapshot` — root state shape `MachinesState<S>`, не dehydrated envelope; custom функция должна возвращать стабильный snapshot для SSR/hydration pass. `persist` принимает structural lifecycle или readonly array lifecycle controllers; `lite-fsm/react` не импортирует `lite-fsm/persist`.
 
 ### React `defineMachine`
 

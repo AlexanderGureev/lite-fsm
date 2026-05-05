@@ -6,6 +6,7 @@ const external = [
   "react/jsx-dev-runtime",
   "immer",
   "use-sync-external-store",
+  "use-sync-external-store/shim",
   "use-sync-external-store/shim/with-selector",
 ];
 
@@ -14,6 +15,8 @@ export default defineConfig({
   entry: {
     core: "src/core.ts",
     react: "src/react.ts",
+    persist: "src/persist.ts",
+    "persist/react": "src/persist/react.ts",
     middleware: "src/middleware.ts",
     "middleware/devTools": "src/middleware/devTools.ts",
     "middleware/immer": "src/middleware/immer.ts",
