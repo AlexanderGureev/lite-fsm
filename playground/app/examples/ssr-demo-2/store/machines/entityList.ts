@@ -1,4 +1,4 @@
-import type { FSMEvent } from "lite-fsm";
+import type { FSMEvent, StateType } from "lite-fsm";
 
 import { createMachine } from "../create-machine";
 import {
@@ -40,6 +40,15 @@ export type EntityListEvent =
   | FSMEvent<"FETCH_ENTITY_LIST", ListRequest>
   | FSMEvent<"ENTITY_LIST_FETCH_RESOLVED", { request: ListRequest; page: LoadedWidgetPage }>
   | FSMEvent<"ENTITY_LIST_FETCH_REJECTED", { request: ListRequest; error: string }>;
+type EntityListConfig = {
+  READY: {
+    INITIAL_ENTITY_LIST_DATA: "READY";
+    FETCH_ENTITY_LIST: "READY";
+    ENTITY_LIST_FETCH_RESOLVED: "READY";
+    ENTITY_LIST_FETCH_REJECTED: "READY";
+  };
+};
+type EntityListState = StateType<EntityListConfig, EntityListContext>;
 
 const initialContext: EntityListContext = { lists: {} };
 
@@ -78,6 +87,27 @@ const applyLoadedPage = (entry: EntityListEntry, page: LoadedWidgetPage): Entity
     : entry.pages,
 });
 
+const hydrateEntityList = (prev: EntityListState, snapshot: EntityListState): EntityListState => {
+  const snapshotEntries = Object.entries(snapshot.context.lists);
+  const isApplied =
+    prev.state === snapshot.state &&
+    snapshotEntries.every(([listId, entry]) => prev.context.lists[listId] === entry);
+
+  if (isApplied) return prev;
+
+  return {
+    state: snapshot.state,
+    context: {
+      ...prev.context,
+      ...snapshot.context,
+      lists: {
+        ...prev.context.lists,
+        ...snapshot.context.lists,
+      },
+    },
+  };
+};
+
 const activeFetchesByStore = new WeakMap<() => unknown, Set<string>>();
 
 const getActiveFetches = (getState: () => unknown) => {
@@ -97,6 +127,7 @@ export const entityList = createMachine({
   },
   initialState: "READY",
   initialContext,
+  hydrate: hydrateEntityList,
   reducer: (state, action, { nextState }) => {
     state.state = nextState;
 

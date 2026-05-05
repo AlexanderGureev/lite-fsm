@@ -1,3 +1,7 @@
+import type { MachineManagerSnapshot } from "lite-fsm";
+
+import type { FSMConfigType } from ".";
+
 export const PAGE_SIZE = 4;
 
 export type DemoContentType = "mock_feed";
@@ -126,5 +130,28 @@ export const loadDemoProfile = async (): Promise<DemoProfile> => {
     id: "profile_demo_001",
     displayName: "Ada Prototype",
     handle: "@ada.prototype",
+  };
+};
+
+export const createWidgetFeedSnapshot = (seed: WidgetSeed): MachineManagerSnapshot<FSMConfigType> => {
+  const feedId = getWidgetFeedId(seed.request);
+
+  return {
+    machines: {
+      widgetFeed: {
+        state: "READY",
+        context: {
+          feeds: {
+            [feedId]: {
+              feedId,
+              request: seed.request,
+              pages: seed.data.length ? [{ data: seed.data, pagination: seed.pagination }] : [],
+              status: "idle",
+              hasNext: seed.hasNext,
+            },
+          },
+        },
+      },
+    },
   };
 };

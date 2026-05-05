@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 import React from "react";
-import { act, render } from "@testing-library/react";
+import { act, render, waitFor } from "@testing-library/react";
+import { hydrateRoot } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import { MachineManager } from "../../src/core/MachineManager";
 import type { HydrateStrategy, MachineConfig, MachineManagerSnapshot } from "../../src/core/types";
-import { FSMContextProvider, FSMHydrationBoundary, useHydrateSnapshot, useManager, useSelector } from "../../src/react";
+import { FSMContext, FSMContextProvider, FSMHydrationBoundary, useHydrateSnapshot, useManager, useSelector } from "../../src/react";
 
 type Config = { IDLE: {} };
 type Action = { type: "NOOP" };
@@ -15,6 +16,8 @@ type Snapshot = { count: number };
 type FlagConfig = { READY: {} };
 type FlagContext = { enabled: boolean };
 type FlagSnapshot = { enabled: boolean };
+type ListsConfig = { READY: {} };
+type ListsContext = { lists: Record<string, string> };
 
 const counter = {
   config: { IDLE: {} },
@@ -42,6 +45,27 @@ const flag = {
 const nestedStore = { counter, flag };
 type NestedStore = typeof nestedStore;
 
+const listsMachine = {
+  config: { READY: {} },
+  initialState: "READY",
+  initialContext: { lists: {} },
+  hydrate: (prev, snapshot) => {
+    const snapshotEntries = Object.entries(snapshot.context.lists);
+    const isApplied =
+      prev.state === snapshot.state &&
+      snapshotEntries.every(([id, title]) => prev.context.lists[id] === title);
+
+    if (isApplied) return prev;
+
+    return {
+      state: snapshot.state,
+      context: { lists: { ...prev.context.lists, ...snapshot.context.lists } },
+    };
+  },
+} satisfies MachineConfig<ListsConfig, ListsContext, Action>;
+const listsStore = { lists: listsMachine };
+type ListsStore = typeof listsStore;
+
 const createManager = () => MachineManager(store);
 const createSnapshot = (count: number): MachineManagerSnapshot<Store> => ({
   machines: {
@@ -61,6 +85,26 @@ const createFlagSnapshot = (enabled: boolean): MachineManagerSnapshot<NestedStor
   },
 });
 
+const createNestedSnapshot = (count: number, enabled: boolean): MachineManagerSnapshot<NestedStore> => ({
+  machines: {
+    counter: { count },
+    flag: { enabled },
+  },
+});
+
+const createListsSnapshot = (id: string, title: string): MachineManagerSnapshot<ListsStore> => ({
+  machines: {
+    lists: {
+      state: "READY",
+      context: {
+        lists: {
+          [id]: title,
+        },
+      },
+    },
+  },
+});
+
 const Counter = ({ realReads, renders }: { realReads?: number[]; renders?: number[] }) => {
   const manager = useManager<Store>();
   const count = useSelector<Store, number>((state) => state.counter.context.count);
@@ -75,6 +119,13 @@ const NestedReadout = (): React.ReactElement => {
   return React.createElement("span", { "data-testid": "nested" }, `${count}:${enabled ? "on" : "off"}`);
 };
 
+const ListsReadout = (): React.ReactElement => {
+  const titles = useSelector<ListsStore, string>((state) =>
+    Object.values(state.lists.context.lists).sort().join(","),
+  );
+  return React.createElement("span", { "data-testid": "lists" }, titles);
+};
+
 const CommitOnlyHydrator = ({
   snapshot,
   strategy,
@@ -85,6 +136,38 @@ const CommitOnlyHydrator = ({
   useHydrateSnapshot(snapshot, { strategy });
   return null;
 };
+
+const createClientHydrationGate = () => {
+  let blocked = false;
+  let releasePromise: (() => void) | null = null;
+  let promise = Promise.resolve();
+
+  const Gate = ({ children }: React.PropsWithChildren): React.ReactElement => {
+    if (blocked) throw promise;
+    return <>{children}</>;
+  };
+
+  return {
+    Gate,
+    block: () => {
+      blocked = true;
+      promise = new Promise<void>((resolve) => {
+        releasePromise = () => {
+          blocked = false;
+          resolve();
+        };
+      });
+    },
+    release: () => {
+      releasePromise?.();
+    },
+  };
+};
+
+const getHydrationErrors = (calls: unknown[][]): string[] =>
+  calls
+    .map((call) => call.map((item) => (item instanceof Error ? item.message : String(item))).join(" "))
+    .filter((message) => /hydration|hydrated|server rendered html/i.test(message));
 
 describe("FSMHydrationBoundary", () => {
   it("применяет snapshot до рендера children для ещё не смонтированного manager", () => {
@@ -126,6 +209,32 @@ describe("FSMHydrationBoundary", () => {
 
     expect(hydrateCallsDuringRender[0]).toBe(0);
     expect(hydrate).toHaveBeenCalledOnce();
+  });
+
+  it("useSelector fallback работает с raw FSMContext.Provider без server snapshot context", () => {
+    const manager = createManager();
+
+    const { getByTestId } = render(
+      <FSMContext.Provider value={manager}>
+        <Counter />
+      </FSMContext.Provider>,
+    );
+
+    expect(getByTestId("count").textContent).toBe("0");
+  });
+
+  it("FSMHydrationBoundary fallback считает server preview без родительского server snapshot context", () => {
+    const manager = createManager();
+
+    const { getByTestId } = render(
+      <FSMContext.Provider value={manager}>
+        <FSMHydrationBoundary snapshot={createSnapshot(3)}>
+          <Counter />
+        </FSMHydrationBoundary>
+      </FSMContext.Provider>,
+    );
+
+    expect(getByTestId("count").textContent).toBe("3");
   });
 
   it("не запускает hydrate повторно для той же ссылки snapshot и той же strategy", () => {
@@ -362,6 +471,27 @@ describe("FSMHydrationBoundary", () => {
     expect(manager.getState().flag.context.enabled).toBe(true);
   });
 
+  it("не стирает sibling boundary snapshots одной machine, когда hydrate сливает вложенный record", () => {
+    const manager = MachineManager(listsStore);
+
+    const { getAllByTestId } = render(
+      <FSMContextProvider machineManager={manager}>
+        <FSMHydrationBoundary snapshot={createListsSnapshot("fresh", "Fresh arrivals")}>
+          <ListsReadout />
+        </FSMHydrationBoundary>
+        <FSMHydrationBoundary snapshot={createListsSnapshot("slow", "Slow streaming widget")}>
+          <ListsReadout />
+        </FSMHydrationBoundary>
+      </FSMContextProvider>,
+    );
+
+    expect(getAllByTestId("lists").map((node) => node.textContent)).toEqual([
+      "Fresh arrivals,Slow streaming widget",
+      "Fresh arrivals,Slow streaming widget",
+    ]);
+    expect(Object.keys(manager.getState().lists.context.lists).sort()).toEqual(["fresh", "slow"]);
+  });
+
   it("useHydrateSnapshot commit-ит в layout effect без render overlay", () => {
     const manager = createManager();
     const renders: number[] = [];
@@ -539,5 +669,368 @@ describe("FSMHydrationBoundary", () => {
 
     expect(subscriber).not.toHaveBeenCalled();
     expect(renders).toBe(initial);
+  });
+
+  it("Provider server snapshot защищает delayed subtree, если live manager обновился до hydration", async () => {
+    const serverManager = createManager();
+    const clientManager = createManager();
+    const gate = createClientHydrationGate();
+    const renders: number[] = [];
+    const onRecoverableError = vi.fn();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const App = ({ manager }: { manager: ReturnType<typeof createManager> }) => (
+      <FSMContextProvider machineManager={manager}>
+        <React.Suspense fallback={<span>loading</span>}>
+          <gate.Gate>
+            <Counter renders={renders} />
+          </gate.Gate>
+        </React.Suspense>
+      </FSMContextProvider>
+    );
+
+    const container = document.createElement("div");
+    container.innerHTML = renderToString(<App manager={serverManager} />);
+    document.body.appendChild(container);
+    expect(container.textContent).toBe("0");
+    renders.length = 0;
+
+    gate.block();
+    const root = hydrateRoot(container, <App manager={clientManager} />, { onRecoverableError });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    act(() => {
+      clientManager.hydrate(createSnapshot(9));
+    });
+    expect(clientManager.getState().counter.context.count).toBe(9);
+
+    await act(async () => {
+      gate.release();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(container.textContent).toBe("9"));
+    expect(renders[0]).toBe(0);
+    expect(renders[renders.length - 1]).toBe(9);
+    expect(onRecoverableError).not.toHaveBeenCalled();
+    expect(getHydrationErrors(consoleError.mock.calls)).toEqual([]);
+
+    await act(async () => {
+      root.unmount();
+    });
+    document.body.removeChild(container);
+    consoleError.mockRestore();
+  });
+
+  it("custom getServerSnapshot имеет приоритет над default initial snapshot во время delayed hydration", async () => {
+    const serverManager = createManager();
+    const clientManager = createManager();
+    const explicitServerState = serverManager.getHydratedState(createSnapshot(4));
+    const gate = createClientHydrationGate();
+    const renders: number[] = [];
+    const onRecoverableError = vi.fn();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const App = ({ manager }: { manager: ReturnType<typeof createManager> }) => (
+      <FSMContextProvider machineManager={manager} getServerSnapshot={() => explicitServerState}>
+        <React.Suspense fallback={<span>loading</span>}>
+          <gate.Gate>
+            <Counter renders={renders} />
+          </gate.Gate>
+        </React.Suspense>
+      </FSMContextProvider>
+    );
+
+    const container = document.createElement("div");
+    container.innerHTML = renderToString(<App manager={serverManager} />);
+    document.body.appendChild(container);
+    expect(container.textContent).toBe("4");
+    expect(serverManager.getState().counter.context.count).toBe(0);
+    renders.length = 0;
+
+    gate.block();
+    const root = hydrateRoot(container, <App manager={clientManager} />, { onRecoverableError });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    act(() => {
+      clientManager.hydrate(createSnapshot(9));
+    });
+
+    await act(async () => {
+      gate.release();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(container.textContent).toBe("9"));
+    expect(renders[0]).toBe(4);
+    expect(renders[renders.length - 1]).toBe(9);
+    expect(onRecoverableError).not.toHaveBeenCalled();
+    expect(getHydrationErrors(consoleError.mock.calls)).toEqual([]);
+
+    await act(async () => {
+      root.unmount();
+    });
+    document.body.removeChild(container);
+    consoleError.mockRestore();
+  });
+
+  it("Provider default server snapshot фиксирует manager, подготовленный до Provider render", async () => {
+    const serverManager = createManager();
+    const clientManager = createManager();
+    serverManager.hydrate(createSnapshot(4));
+    clientManager.hydrate(createSnapshot(4));
+    const gate = createClientHydrationGate();
+    const renders: number[] = [];
+    const onRecoverableError = vi.fn();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const App = ({ manager }: { manager: ReturnType<typeof createManager> }) => (
+      <FSMContextProvider machineManager={manager}>
+        <React.Suspense fallback={<span>loading</span>}>
+          <gate.Gate>
+            <Counter renders={renders} />
+          </gate.Gate>
+        </React.Suspense>
+      </FSMContextProvider>
+    );
+
+    const container = document.createElement("div");
+    container.innerHTML = renderToString(<App manager={serverManager} />);
+    document.body.appendChild(container);
+    expect(container.textContent).toBe("4");
+    renders.length = 0;
+
+    gate.block();
+    const root = hydrateRoot(container, <App manager={clientManager} />, { onRecoverableError });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    act(() => {
+      clientManager.hydrate(createSnapshot(9));
+    });
+
+    await act(async () => {
+      gate.release();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(container.textContent).toBe("9"));
+    expect(renders[0]).toBe(4);
+    expect(renders[renders.length - 1]).toBe(9);
+    expect(onRecoverableError).not.toHaveBeenCalled();
+    expect(getHydrationErrors(consoleError.mock.calls)).toEqual([]);
+
+    await act(async () => {
+      root.unmount();
+    });
+    document.body.removeChild(container);
+    consoleError.mockRestore();
+  });
+
+  it("Boundary server snapshot используется на первом hydrateRoot render", async () => {
+    const serverManager = createManager();
+    const clientManager = createManager();
+    clientManager.hydrate(createSnapshot(9));
+    const renders: number[] = [];
+    const onRecoverableError = vi.fn();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const App = ({ manager }: { manager: ReturnType<typeof createManager> }) => (
+      <FSMContextProvider machineManager={manager}>
+        <FSMHydrationBoundary snapshot={createSnapshot(5)}>
+          <Counter renders={renders} />
+        </FSMHydrationBoundary>
+      </FSMContextProvider>
+    );
+
+    const container = document.createElement("div");
+    container.innerHTML = renderToString(<App manager={serverManager} />);
+    document.body.appendChild(container);
+    expect(container.textContent).toBe("5");
+    renders.length = 0;
+
+    const root = hydrateRoot(container, <App manager={clientManager} />, { onRecoverableError });
+    await waitFor(() => expect(renders.length).toBeGreaterThan(0));
+
+    expect(renders[0]).toBe(5);
+    expect(onRecoverableError).not.toHaveBeenCalled();
+    expect(getHydrationErrors(consoleError.mock.calls)).toEqual([]);
+
+    await act(async () => {
+      root.unmount();
+    });
+    document.body.removeChild(container);
+    consoleError.mockRestore();
+  });
+
+  it("Boundary server snapshot остаётся для delayed descendants после layout-effect commit", async () => {
+    const serverManager = createManager();
+    const clientManager = createManager();
+    const gate = createClientHydrationGate();
+    const renders: number[] = [];
+    const onRecoverableError = vi.fn();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const hydrate = vi.spyOn(clientManager, "hydrate");
+
+    const App = ({ manager }: { manager: ReturnType<typeof createManager> }) => (
+      <FSMContextProvider machineManager={manager}>
+        <FSMHydrationBoundary snapshot={createSnapshot(5)}>
+          <React.Suspense fallback={<span>loading</span>}>
+            <gate.Gate>
+              <Counter renders={renders} />
+            </gate.Gate>
+          </React.Suspense>
+        </FSMHydrationBoundary>
+      </FSMContextProvider>
+    );
+
+    const container = document.createElement("div");
+    container.innerHTML = renderToString(<App manager={serverManager} />);
+    document.body.appendChild(container);
+    expect(container.textContent).toBe("5");
+    renders.length = 0;
+
+    gate.block();
+    const root = hydrateRoot(container, <App manager={clientManager} />, { onRecoverableError });
+    await waitFor(() => expect(hydrate).toHaveBeenCalledOnce());
+    expect(clientManager.getState().counter.context.count).toBe(5);
+
+    act(() => {
+      clientManager.hydrate(createSnapshot(9));
+    });
+    expect(clientManager.getState().counter.context.count).toBe(9);
+
+    await act(async () => {
+      gate.release();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(container.textContent).toBe("9"));
+    expect(renders[renders.length - 1]).toBe(9);
+    expect(onRecoverableError).not.toHaveBeenCalled();
+    expect(getHydrationErrors(consoleError.mock.calls)).toEqual([]);
+
+    await act(async () => {
+      root.unmount();
+    });
+    document.body.removeChild(container);
+    consoleError.mockRestore();
+  });
+
+  it("nested boundaries используют composed server snapshot на первом hydrateRoot render", async () => {
+    const serverManager = MachineManager(nestedStore);
+    const clientManager = MachineManager(nestedStore);
+    clientManager.hydrate(createNestedSnapshot(9, false));
+    const renders: string[] = [];
+    const onRecoverableError = vi.fn();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const Probe = () => {
+      const count = useSelector<NestedStore, number>((state) => state.counter.context.count);
+      const enabled = useSelector<NestedStore, boolean>((state) => state.flag.context.enabled);
+      const label = `${count}:${enabled ? "on" : "off"}`;
+      renders.push(label);
+      return <span data-testid="nested">{label}</span>;
+    };
+
+    const App = ({ manager }: { manager: typeof clientManager }) => (
+      <FSMContextProvider machineManager={manager}>
+        <FSMHydrationBoundary snapshot={createNestedCounterSnapshot(5)}>
+          <FSMHydrationBoundary snapshot={createFlagSnapshot(true)}>
+            <Probe />
+          </FSMHydrationBoundary>
+        </FSMHydrationBoundary>
+      </FSMContextProvider>
+    );
+
+    const container = document.createElement("div");
+    container.innerHTML = renderToString(<App manager={serverManager} />);
+    document.body.appendChild(container);
+    expect(container.textContent).toBe("5:on");
+    renders.length = 0;
+
+    const root = hydrateRoot(container, <App manager={clientManager} />, { onRecoverableError });
+    await waitFor(() => expect(renders.length).toBeGreaterThan(0));
+
+    expect(renders[0]).toBe("5:on");
+    expect(onRecoverableError).not.toHaveBeenCalled();
+    expect(getHydrationErrors(consoleError.mock.calls)).toEqual([]);
+
+    await act(async () => {
+      root.unmount();
+    });
+    document.body.removeChild(container);
+    consoleError.mockRestore();
+  });
+
+  it("nested boundaries сохраняют composed server snapshot для delayed hydration после live race", async () => {
+    const serverManager = MachineManager(nestedStore);
+    const clientManager = MachineManager(nestedStore);
+    const gate = createClientHydrationGate();
+    const renders: string[] = [];
+    const onRecoverableError = vi.fn();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const hydrate = vi.spyOn(clientManager, "hydrate");
+
+    const Probe = () => {
+      const count = useSelector<NestedStore, number>((state) => state.counter.context.count);
+      const enabled = useSelector<NestedStore, boolean>((state) => state.flag.context.enabled);
+      const label = `${count}:${enabled ? "on" : "off"}`;
+      renders.push(label);
+      return <span data-testid="nested">{label}</span>;
+    };
+
+    const App = ({ manager }: { manager: typeof clientManager }) => (
+      <FSMContextProvider machineManager={manager}>
+        <FSMHydrationBoundary snapshot={createNestedCounterSnapshot(5)}>
+          <FSMHydrationBoundary snapshot={createFlagSnapshot(true)}>
+            <React.Suspense fallback={<span>loading</span>}>
+              <gate.Gate>
+                <Probe />
+              </gate.Gate>
+            </React.Suspense>
+          </FSMHydrationBoundary>
+        </FSMHydrationBoundary>
+      </FSMContextProvider>
+    );
+
+    const container = document.createElement("div");
+    container.innerHTML = renderToString(<App manager={serverManager} />);
+    document.body.appendChild(container);
+    expect(container.textContent).toBe("5:on");
+    renders.length = 0;
+
+    gate.block();
+    const root = hydrateRoot(container, <App manager={clientManager} />, { onRecoverableError });
+    await waitFor(() => expect(hydrate).toHaveBeenCalledTimes(2));
+    expect(clientManager.getState().counter.context.count).toBe(5);
+    expect(clientManager.getState().flag.context.enabled).toBe(true);
+
+    act(() => {
+      clientManager.hydrate(createNestedSnapshot(9, false));
+    });
+    expect(clientManager.getState().counter.context.count).toBe(9);
+    expect(clientManager.getState().flag.context.enabled).toBe(false);
+
+    await act(async () => {
+      gate.release();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(container.textContent).toBe("9:off"));
+    expect(renders[renders.length - 1]).toBe("9:off");
+    expect(onRecoverableError).not.toHaveBeenCalled();
+    expect(getHydrationErrors(consoleError.mock.calls)).toEqual([]);
+
+    await act(async () => {
+      root.unmount();
+    });
+    document.body.removeChild(container);
+    consoleError.mockRestore();
   });
 });

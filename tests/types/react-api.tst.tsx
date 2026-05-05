@@ -21,6 +21,7 @@ import {
   FSMContext,
   type FSMContextType,
   FSMContextProvider,
+  type FSMContextProviderProps,
   FSMHydrationBoundary,
   type TypedUseMachineHook,
   type TypedUseManagerHook,
@@ -105,6 +106,36 @@ describe("FSMContextProvider", () => {
       </FSMContextProvider>
     );
     expect(el).type.toBeAssignableTo<React.JSX.Element>();
+  });
+
+  test("принимает getServerSnapshot с root state shape", () => {
+    const manager = MachineManager<Store, Evt>(store);
+    const props: FSMContextProviderProps<Store, Evt> = {
+      machineManager: manager,
+      getServerSnapshot: manager.getState,
+    };
+    expect(props.getServerSnapshot!()).type.toBe<ReturnType<typeof manager.getState>>();
+
+    const el = (
+      <FSMContextProvider<Store, Evt> machineManager={manager} getServerSnapshot={manager.getState}>
+        <span>child</span>
+      </FSMContextProvider>
+    );
+    expect(el).type.toBeAssignableTo<React.JSX.Element>();
+  });
+
+  test("getServerSnapshot отклоняет dehydrated envelope вместо root state", () => {
+    const manager = MachineManager<Store, Evt>(store);
+    const el = (
+      <FSMContextProvider<Store, Evt>
+        machineManager={manager}
+        // @ts-expect-error!
+        getServerSnapshot={() => manager.dehydrate()}
+      >
+        <span>invalid</span>
+      </FSMContextProvider>
+    );
+    void el;
   });
 
   test("отклоняет неправильную форму machineManager", () => {

@@ -83,39 +83,25 @@ export const applyLoadedPage = (entry: EntityListEntry, page: LoadedWidgetPage):
     : entry.pages,
 });
 
-const sameEntry = (a: EntityListEntry | undefined, b: EntityListEntry | undefined) => {
-  if (a === b) return true;
-  if (!a || !b) return false;
-
-  const page = a.pages[a.pages.length - 1];
-  const otherPage = b.pages[b.pages.length - 1];
-  const item = page?.data[page.data.length - 1];
-  const otherItem = otherPage?.data[otherPage.data.length - 1];
-
-  return (
-    a.listId === b.listId &&
-    a.status === b.status &&
-    a.hasNext === b.hasNext &&
-    a.error === b.error &&
-    a.pages.length === b.pages.length &&
-    page?.nextCursor === otherPage?.nextCursor &&
-    page?.data.length === otherPage?.data.length &&
-    item?.id === otherItem?.id
-  );
-};
-
 const hydrateEntityList = (prev: EntityListState, snapshot: EntityListState): EntityListState => {
-  let changed = prev.state !== snapshot.state;
-  const lists = { ...prev.context.lists };
+  const snapshotEntries = Object.entries(snapshot.context.lists);
+  const isApplied =
+    prev.state === snapshot.state &&
+    snapshotEntries.every(([listId, entry]) => prev.context.lists[listId] === entry);
 
-  for (const listId of Object.keys(snapshot.context.lists)) {
-    const nextEntry = snapshot.context.lists[listId];
-    if (sameEntry(lists[listId], nextEntry)) continue;
-    lists[listId] = nextEntry;
-    changed = true;
-  }
+  if (isApplied) return prev;
 
-  return changed ? { state: snapshot.state, context: { lists } } : prev;
+  return {
+    state: snapshot.state,
+    context: {
+      ...prev.context,
+      ...snapshot.context,
+      lists: {
+        ...prev.context.lists,
+        ...snapshot.context.lists,
+      },
+    },
+  };
 };
 
 const activeFetchesByStore = new WeakMap<() => unknown, Set<string>>();

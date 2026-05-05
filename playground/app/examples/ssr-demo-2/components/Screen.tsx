@@ -1,9 +1,9 @@
 import { Suspense } from "react";
+import { FSMHydrationBoundary } from "lite-fsm/react";
 
-import { loadGridPage, type ScreenConfig } from "../store/ssr";
+import { createGridSnapshot, loadGridPage, type ScreenConfig } from "../store/ssr";
 
 import { GridAppend } from "./GridAppend";
-import { GridInitialize } from "./GridInitialize";
 import { WidgetSeedLoader } from "./WidgetSeedLoader";
 import { WidgetSkeleton } from "./Skeleton";
 
@@ -18,7 +18,7 @@ export async function Screen({ screen }: { screen: ScreenConfig }) {
         <p className="text-body text-ink-muted-80">{screen.description}</p>
       </header>
 
-      <GridInitialize screenId={screen.id} page={page}>
+      <FSMHydrationBoundary snapshot={createGridSnapshot(screen.id, page)}>
         <div className="flex flex-col gap-6">
           {page.items.map((item) => (
             <Suspense key={item.slotId} fallback={<WidgetSkeleton />}>
@@ -28,7 +28,7 @@ export async function Screen({ screen }: { screen: ScreenConfig }) {
 
           <GridAppend screenId={screen.id} initialItemCount={page.items.length} />
         </div>
-      </GridInitialize>
+      </FSMHydrationBoundary>
     </section>
   );
 }

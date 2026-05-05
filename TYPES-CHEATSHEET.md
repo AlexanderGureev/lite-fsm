@@ -303,6 +303,7 @@ const logger: Middleware<AppState, AppEvent> = (api) => (next) => (action) => ne
 | Тип                                                       | Форма                                                                                    |
 | --------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | `FSMContextType<S = MachineStore, P = AnyEvent>`          | `IMachineManager<S, P>`                                                                  |
+| `FSMContextProviderProps<S, P>`                           | `PropsWithChildren<{ machineManager: IMachineManager<S, P>; getServerSnapshot?: () => MachinesState<S> }>` |
 | `FSMHydrationBoundaryProps<S>`                            | `PropsWithChildren<{ snapshot: MachineManagerSnapshot<S>; strategy?: HydrateStrategy }>` |
 | `TypedUseManagerHook<S, P>` · `TypedUseMachineHook<S, P>` | `() => IMachineManager<S, P>`                                                            |
 | `TypedUseSelectorHook<S>`                                 | `<R>(selector: (state: MachinesState<S>) => R, equalityFn?) => R`                        |
@@ -319,7 +320,7 @@ export const useSelector: TypedUseSelectorHook<Store> = baseUseSelector;
 export const useTransition: TypedUseTransitionHook<Event> = baseUseTransition;
 ```
 
-`TypedUseSelectorHook<S>` принимает `MachineStore`, не computed `MachinesState<S>`.
+`TypedUseSelectorHook<S>` принимает `MachineStore`, не computed `MachinesState<S>`. `getServerSnapshot` — root state shape `MachinesState<S>`, не dehydrated envelope; custom функция должна возвращать стабильный snapshot для SSR/hydration pass.
 
 ### React `defineMachine`
 

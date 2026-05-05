@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { devToolsMiddleware } from "../../src/middleware/devTools";
 import { immerMiddleware } from "../../src/middleware/immer";
 import { MachineManager } from "../../src/core/MachineManager";
+import { HYDRATE_ACTION_TYPE } from "../../src/core/utils";
 import type { AnyEvent, FSMEvent, MachineConfig, MachineReducer } from "../../src/core/types";
 
 type DevtoolsMessage = {
@@ -93,6 +94,58 @@ describe("devToolsMiddleware — с window и extension", () => {
     const [sentAction, sentState] = fake.send.mock.calls[0];
     expect(sentAction).toEqual({ type: "GO" });
     expect(sentState.m.state).toBe("ACTIVE");
+  });
+
+  it("send вызывается для hydrate system action с hydrated state", () => {
+    const manager = MachineManager(
+      {
+        m: {
+          config: { IDLE: {}, ACTIVE: {} },
+          initialState: "IDLE",
+          initialContext: { n: 0 },
+        },
+      },
+      { middleware: [devToolsMiddleware({ blacklistActions: [] })] },
+    );
+    const snapshot = {
+      machines: {
+        m: { state: "ACTIVE", context: { n: 2 } },
+      },
+    } as const;
+
+    manager.hydrate(snapshot);
+
+    expect(fake.send).toHaveBeenCalledOnce();
+    expect(fake.send).toHaveBeenCalledWith(
+      {
+        type: HYDRATE_ACTION_TYPE,
+        payload: { strategy: "merge", snapshot },
+      },
+      {
+        m: { state: "ACTIVE", context: { n: 2 } },
+      },
+    );
+  });
+
+  it("не отправляет hydrate system action из blacklistActions", () => {
+    const manager = MachineManager(
+      {
+        m: {
+          config: { IDLE: {}, ACTIVE: {} },
+          initialState: "IDLE",
+          initialContext: { n: 0 },
+        },
+      },
+      { middleware: [devToolsMiddleware({ blacklistActions: [HYDRATE_ACTION_TYPE] })] },
+    );
+
+    manager.hydrate({
+      machines: {
+        m: { state: "ACTIVE", context: { n: 2 } },
+      },
+    });
+
+    expect(fake.send).not.toHaveBeenCalled();
   });
 
   it("send снимает точный state до effects, а JUMP через transition доигрывает transient state", () => {

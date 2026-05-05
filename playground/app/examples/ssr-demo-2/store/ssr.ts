@@ -1,3 +1,7 @@
+import type { MachineManagerSnapshot } from "lite-fsm";
+
+import type { FSMConfigType } from ".";
+
 export const GRID_PAGE_SIZE = 2;
 export const WIDGET_PAGE_SIZE = 3;
 
@@ -187,3 +191,50 @@ export const loadWidgetSeed = async (manifestItem: GridManifestItem): Promise<Wi
   const page = await loadWidgetPage(manifestItem.widgetRequest);
   return { request: manifestItem.widgetRequest, ...page };
 };
+
+export const createGridSnapshot = (
+  screenId: ScreenId,
+  page: GridPage,
+): MachineManagerSnapshot<FSMConfigType> => ({
+  machines: {
+    grid: {
+      state: "READY",
+      context: {
+        screens: {
+          featured: undefined,
+          night: undefined,
+          [screenId]: {
+            screenId,
+            items: page.items,
+            nextCursor: page.nextCursor,
+            hasNext: page.hasNext,
+            status: "idle",
+          },
+        },
+      },
+    },
+  },
+});
+
+export const createEntityListSnapshot = (seed: WidgetSeed): MachineManagerSnapshot<FSMConfigType> => ({
+  machines: {
+    entityList: {
+      state: "READY",
+      context: {
+        lists: {
+          [`${seed.request.type}:${seed.request.key}`]: {
+            listId: `${seed.request.type}:${seed.request.key}`,
+            type: seed.request.type,
+            key: seed.request.key,
+            request: seed.request,
+            pages: seed.data.length
+              ? [{ data: seed.data, pagination: seed.pagination, nextCursor: seed.nextCursor }]
+              : [],
+            status: "idle",
+            hasNext: seed.hasNext,
+          },
+        },
+      },
+    },
+  },
+});

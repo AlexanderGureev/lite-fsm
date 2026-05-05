@@ -290,6 +290,8 @@ const preview = manager.getHydratedState(snapshot, {
 | `"merge"`   | Применяет только keys из snapshot, остальные машины без изменений.                                                       |
 | `"replace"` | Для actor templates сбрасывает acторов, отсутствующих в snapshot. Для domain машин полную форму `replace` определяет ваш `hydrate` hook. |
 
+Если подключён `devToolsMiddleware`, `hydrate()` отправляется в Redux DevTools как `@@lite-fsm/HYDRATE`, но по-прежнему не проходит через middleware и не запускает эффекты.
+
 Подробное описание — в разделе [Сохранение состояния](/guide/hydration).
 
 ### Domain hooks

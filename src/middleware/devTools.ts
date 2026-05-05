@@ -1,4 +1,5 @@
 import type { AnyEvent, GenericMiddleware, MiddlewareApi } from "../core/types";
+import { HYDRATE_ACTION_TYPE } from "../core/utils";
 
 type DevToolsOptions = {
   blacklistActions?: string[];
@@ -54,6 +55,11 @@ export const devToolsMiddleware = ({ blacklistActions = [] }: DevToolsOptions = 
             return reducer(state, action);
         }
       };
+    });
+
+    api.onTransition((_prevState, currentState, action) => {
+      if (action.type !== HYDRATE_ACTION_TYPE || blacklistActions.includes(action.type)) return;
+      devTools.send(action, currentState as S);
     });
 
     devTools.subscribe((message) => {

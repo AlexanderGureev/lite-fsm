@@ -412,7 +412,7 @@ MachineManager({ counter }, { middleware: [devToolsMiddleware({ blacklistActions
 | ----------------------------- | ------------------------------------------------ |
 | `blacklistActions?: string[]` | action types, не отправляющиеся в Redux DevTools |
 
-Без `window.__REDUX_DEVTOOLS_EXTENSION__` — pass-through. С extension: `connect` → `init` → `send` на каждый action; `JUMP_TO_ACTION` / `ROLLBACK` восстанавливают state через `replaceReducer`.
+Без `window.__REDUX_DEVTOOLS_EXTENSION__` — pass-through. С extension: `connect` → `init` → `send` на каждый user action и `@@lite-fsm/HYDRATE`; `JUMP_TO_ACTION` / `ROLLBACK` восстанавливают state через `replaceReducer`.
 
 ## React
 
@@ -437,7 +437,7 @@ function Counter() {
 
 | API                                        | Назначение                                                           |
 | ------------------------------------------ | -------------------------------------------------------------------- |
-| `FSMContextProvider`                       | кладёт manager в context                                             |
+| `FSMContextProvider`                       | кладёт manager в context; фиксирует `getServerSnapshot` для SSR/hydration |
 | `useManager<S, P>()`                       | manager из context                                                   |
 | `useTransition<P>()`                       | `manager.transition`                                                 |
 | `useSelector<S, R>(selector, equalityFn?)` | `useSyncExternalStoreWithSelector`-обёртка; default equality — `===` |
@@ -445,7 +445,9 @@ function Counter() {
 | `useHydrateSnapshot(snapshot, opts?)`      | apply snapshot в layout effect, без preview                          |
 | `defineMachine`                            | standalone machine как hook                                          |
 
-Внутри `FSMHydrationBoundary` selector читает overlay; `useManager().getState()` до layout effect — обычный state manager-а.
+`FSMContextProvider` принимает `getServerSnapshot?: () => MachinesState<S>`. Без prop он кеширует `machineManager.getState()` для текущего manager-а на первом render-е. Это root state для React `useSyncExternalStore`, не `MachineManagerSnapshot` envelope.
+
+Внутри `FSMHydrationBoundary` selector читает render overlay; для SSR/hydration ближайший boundary server snapshot имеет приоритет над Provider snapshot. `useManager().getState()` в render всегда читает live manager и не участвует в SSR-safe overlay contract.
 
 ### Hydration в React
 
@@ -460,7 +462,9 @@ function Counter() {
 | snapshot должен быть виден subtree уже на первом render (SSR/RSC/Suspense) | `FSMHydrationBoundary` |
 | только применить snapshot после mount                                      | `useHydrateSnapshot`   |
 
-Не вкладывайте boundaries с разным snapshot на один и тот же machine key: preview идёт parent → child, а layout effect — child → parent, поэтому parent перезапишет child.
+`FSMHydrationBoundary` держит отдельный server snapshot overlay, поэтому delayed RSC/Suspense descendants во время hydration видят тот же snapshot даже если boundary уже сделал layout-effect commit, а live manager успел измениться.
+
+Не вкладывайте boundaries с разным snapshot на один и тот же machine key: preview идёт parent → child, а layout effect — child → parent, поэтому parent перезапишет child. Server data, загруженные ниже root layout-а, передавайте через boundary snapshot, а не через render-phase `transition()` ниже Provider-а.
 
 ### React `defineMachine`
 

@@ -6,12 +6,11 @@ export type Event = FSMEvent<"FETCH_PROFILE_RESOLVE", { id: string }>;
 
 export const profile = createMachine({
   config: {
+    "*": { FETCH_PROFILE_RESOLVE: "READY" },
     IDLE: {
       DO_INIT: "FETCH_PROFILE_PENDING",
     },
-    FETCH_PROFILE_PENDING: {
-      FETCH_PROFILE_RESOLVE: "READY",
-    },
+    FETCH_PROFILE_PENDING: {},
     READY: {},
   },
   initialState: "IDLE",
@@ -29,12 +28,12 @@ export const profile = createMachine({
   },
   effects: {
     FETCH_PROFILE_PENDING: async ({ transition }) => {
-      // данные появляются раньше чем загрузится server component ServerLoad и при первом рендере Demo.tsx будет ошибка гидрации
-      await new Promise((res) => setTimeout(res, 2000));
+      // Данные появляются раньше, чем загрузится ServerLoad; useSelector должен гидрировать Demo по server snapshot.
+      await new Promise((res) => setTimeout(res, 3000));
       transition({
         type: "FETCH_PROFILE_RESOLVE",
         payload: {
-          id: "user",
+          id: "user-client",
         },
       });
     },
