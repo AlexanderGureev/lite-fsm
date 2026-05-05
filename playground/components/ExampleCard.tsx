@@ -14,6 +14,7 @@ const tagLabel: Record<ExampleTag, string> = {
   basics: "basics",
   effects: "effects",
   actors: "actors",
+  persist: "persist",
   ssr: "ssr",
 };
 

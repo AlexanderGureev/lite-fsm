@@ -34,7 +34,7 @@ export default function HomePage() {
             <GradientText className="whitespace-nowrap">lite-fsm</GradientText>
           </h1>
           <p className="max-w-2xl text-body text-ink-muted-80 md:text-lead">
-            Технические демо: sync-машины, async-эффекты, actor-шаблоны и SSR-streaming. Каждый пример —
+            Технические демо: sync-машины, async-эффекты, actor-шаблоны, persist и SSR-streaming. Каждый пример —
             самодостаточная папка со своим{" "}
             <code className="rounded-sm bg-canvas-parchment px-1.5 py-0.5 text-[0.92em] text-ink">store</code>,{" "}
             <code className="rounded-sm bg-canvas-parchment px-1.5 py-0.5 text-[0.92em] text-ink">machines</code> и

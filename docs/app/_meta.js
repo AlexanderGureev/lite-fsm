@@ -24,6 +24,10 @@ export default {
     title: "Middleware",
     type: "page",
   },
+  persist: {
+    title: "Persist",
+    type: "page",
+  },
   comparison: {
     title: "Сравнение",
     type: "page",

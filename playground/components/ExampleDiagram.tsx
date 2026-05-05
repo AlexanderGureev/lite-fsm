@@ -138,6 +138,33 @@ function DiagramContent({ variant }: { variant: ExampleIconKey }) {
     );
   }
 
+  if (variant === "persist") {
+    return (
+      <g>
+        <rect x={9} y={9} width={28} height={26} rx={3} className={inkStroke} strokeWidth={0.8} />
+        <rect x={83} y={9} width={28} height={26} rx={3} className={inkStroke} strokeWidth={0.8} />
+
+        <rect x={48} y={15} width={24} height={22} rx={3} className={accentStroke} strokeWidth={1.1} />
+        <path d="M53 23 H67" className={accentStroke} strokeWidth={1.3} strokeLinecap="round" />
+        <path d="M53 29 H63" className={inkStroke} strokeWidth={1} strokeLinecap="round" />
+
+        <path d="M38.5 19 H43.5" className={accentStroke} strokeWidth={1.1} strokeLinecap="round" />
+        <path d="M73.5 19 H78.5" className={accentStroke} strokeWidth={1.1} strokeLinecap="round" />
+        <path d="M81.5 30 H76.5" className={inkStroke} strokeWidth={1} strokeLinecap="round" />
+        <path d="M46.5 30 H41.5" className={inkStroke} strokeWidth={1} strokeLinecap="round" />
+        <polygon points="43.5,16 43.5,22 47.5,19" className={accentFill} />
+        <polygon points="78.5,16 78.5,22 82.5,19" className={accentFill} />
+        <polygon points="76.5,27 76.5,33 72.5,30" className={inkFill} />
+        <polygon points="41.5,27 41.5,33 37.5,30" className={inkFill} />
+
+        <Node cx={23} cy={22} r={3.5} active />
+        <Node cx={97} cy={22} r={3.5} muted />
+        <circle cx={60} cy={46} r={3.4} className={accentStroke} strokeWidth={1.1} />
+        <circle cx={60} cy={46} r={1.2} className={accentFill} />
+      </g>
+    );
+  }
+
   if (variant === "streaming") {
     return (
       <g>

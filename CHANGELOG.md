@@ -30,6 +30,18 @@ Migration для persisted actor records: пересоздать snapshot пос
 - Невалидный `originId` (пустой или содержащий `#`) бросает `LITE_FSM_INVALID_OPTIONS`.
 - Изменение обратно совместимое: менеджер без новых опций продолжает выдавать `templateKey/0` и принимать любые opaque external id в `hydrate`.
 
+### Persist
+
+- Добавлены новые entrypoints `lite-fsm/persist` и `lite-fsm/persist/react`; core entrypoint и `lite-fsm/react` не импортируют persist-слой.
+- `persistManager(manager, opts)` создаёт typed controller для `restore`, `save`, `flush`, `clear`, status snapshots и подписок на manager/storage поверх `MachineManager.dehydrate()` и `hydrate()`.
+- Добавлен `createJsonStorage({ key, storage })` для `localStorage`/`sessionStorage`-совместимых JSON-хранилищ и публичный `PersistStorage<S>` для custom async storage.
+- `start()` стал ref-counted lifecycle API: он запускает background restore и подписки, не блокирует SSR/hydration, а cleanup останавливает подписки и отложенные saves.
+- Restore валидирует envelope persist-слоя, применяет snapshot через `hydrate` со strategy по умолчанию `"merge"` и удаляет invalid, expired или несовместимые records.
+- Persist options покрывают выбор `machines`, `strategy`, `storageVersion`, `maxAge`, `throttleMs`, `shouldSave`, `migrate`, `onRestoreSettled` и `onError`.
+- `storageVersion` mismatch без `migrate` удаляет запись; успешный `migrate(record)` возвращает новый `MachineManagerSnapshot` и сразу переписывает storage record в актуальном формате.
+- `throttleMs` склеивает частые saves, `flush()` принудительно дописывает pending save, а `clear()` отменяет pending save, удаляет record и сбрасывает status.
+- Добавлены React hooks `usePersistStatus(controller)` и `useIsPersistRestoring(controller)` для UI поверх `PersistController`; `FSMContextProvider` принимает structural `persist` lifecycle controller или массив controllers.
+
 ## 1.2.0
 
 В этой версии добавлен snapshot/SSR hydration API, а типовая система стала строже и проще для сопровождения.

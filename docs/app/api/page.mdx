@@ -10,6 +10,8 @@
 | `lite-fsm/middleware`           | `immerMiddleware`, `devToolsMiddleware`                                                                                                           |
 | `lite-fsm/middleware/immer`     | `immerMiddleware` (отдельная точка входа)                                                                                                         |
 | `lite-fsm/middleware/devTools`  | `devToolsMiddleware` (отдельная точка входа)                                                                                                      |
+| `lite-fsm/persist`              | `persistManager`, `createJsonStorage`                                                                                                             |
+| `lite-fsm/persist/react`        | `usePersistStatus`, `useIsPersistRestoring`                                                                                                       |
 | `lite-fsm/react`                | `FSMContext`, `FSMContextProvider`, `FSMHydrationBoundary`, `useHydrateSnapshot`, `useManager`, `useSelector`, `useTransition`, `defineMachine`   |
 
 `lite-fsm/react` помечен `"use client"` — модуль можно импортировать из SSR/RSC, но хуки и провайдер работают только в client tree.
@@ -308,6 +310,39 @@ const profile = createMachine({
 ```
 
 Возвращайте `prev`, если данные не изменились — это позволит `manager.hydrate()` не уведомлять подписчиков и не вызывать ререндер.
+
+## Persist
+
+`lite-fsm/persist` — отдельный модуль для сохранения состояния менеджера в произвольное хранилище. Опирается на `manager.dehydrate()`, `manager.hydrate()` и `manager.onTransition()`. Модуль `lite-fsm/react` от него не зависит.
+
+```ts showLineNumbers copy
+import { persistManager, createJsonStorage } from "lite-fsm/persist";
+
+const persist = persistManager(manager, {
+  storage: createJsonStorage({ key: "app:state:v1", storage: window.localStorage }),
+  storageVersion: 1,
+  machines: ["counter"],
+  throttleMs: 500,
+});
+
+const stop = persist.start();
+await persist.flush();
+stop();
+```
+
+| Метод                 | Что делает                                                                                                |
+| --------------------- | --------------------------------------------------------------------------------------------------------- |
+| `start()`             | Запускает работу контроллера: подписки и фоновое восстановление. Возвращает функцию остановки.            |
+| `restore()`           | Читает запись и применяет её через `manager.hydrate()`. Возвращает финальный `PersistStatus`.             |
+| `save()`              | Сразу записывает `manager.dehydrate({ machines })` в хранилище.                                           |
+| `flush()`             | Дописывает отложенное сохранение или дожидается уже идущей записи.                                        |
+| `clear()`             | Удаляет запись из хранилища и сбрасывает статус.                                                          |
+| `getStatus()`         | Возвращает текущий `PersistStatus`.                                                                        |
+| `subscribeStatus(cb)` | Подписывает на смену `PersistStatus`.                                                                      |
+
+`FSMContextProvider` принимает свойство `persist` — один контроллер или массив. React-хуки `usePersistStatus` и `useIsPersistRestoring` живут в `lite-fsm/persist/react`.
+
+Полное описание — в разделе [Persist](/persist).
 
 ## Actor templates
 

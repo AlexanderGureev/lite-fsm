@@ -1,6 +1,6 @@
-export type ExampleTag = "basics" | "effects" | "actors" | "ssr";
+export type ExampleTag = "basics" | "effects" | "actors" | "persist" | "ssr";
 
-export type ExampleCategoryId = "basics" | "effects" | "actors" | "ssr";
+export type ExampleCategoryId = "basics" | "effects" | "actors" | "persist" | "ssr";
 
 export type ExampleIconKey =
   | "lamp"
@@ -9,6 +9,7 @@ export type ExampleIconKey =
   | "network"
   | "gamepad"
   | "download"
+  | "persist"
   | "streaming"
   | "grid"
   | "snapshot";
@@ -48,6 +49,12 @@ export const categories = [
     label: "Actors",
     short: "Actors",
     description: "Live actor-инстансы, actor-группы, hydration между store.",
+  },
+  {
+    id: "persist",
+    label: "Persist",
+    short: "Persist",
+    description: "Сохранение MachineManager snapshot-а, restore и синхронизация вкладок через storage adapter.",
   },
   {
     id: "ssr",
@@ -119,6 +126,16 @@ export const examples = [
     iconKey: "download",
   },
   {
+    id: "persist",
+    title: "Persist: мини-чат в localStorage",
+    kicker: "Storage adapter",
+    description:
+      "История чата сохраняется через persistManager, а соседние вкладки подтягивают snapshot через localStorage event.",
+    tags: ["persist"],
+    category: "persist",
+    iconKey: "persist",
+  },
+  {
     id: "ssr-demo",
     title: "SSR: streaming-виджеты + кеш",
     kicker: "Long-lived store",
@@ -155,6 +172,7 @@ export const examplesByCategory = (() => {
     basics: [],
     effects: [],
     actors: [],
+    persist: [],
     ssr: [],
   };
   for (const example of examples) map[example.category].push(example);
@@ -210,6 +228,15 @@ export const categoryStyle: Record<ExampleCategoryId, CategoryStyle> = {
     accent: "bg-accent-actors",
     ring: "ring-accent-actors/40",
     glow: { h: 268, s: 92, l: 66 },
+  },
+  persist: {
+    text: "text-accent-persist",
+    hoverText: "group-hover:text-accent-persist",
+    bgSoft: "bg-accent-persist-soft",
+    border: "border-accent-persist/30",
+    accent: "bg-accent-persist",
+    ring: "ring-accent-persist/40",
+    glow: { h: 174, s: 70, l: 34 },
   },
   ssr: {
     text: "text-accent-ssr",
