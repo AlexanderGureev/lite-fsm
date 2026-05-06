@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { MachineManager } from "../../src/core/MachineManager";
 import type { HydrateStrategy, MachineConfig, MachineManagerSnapshot } from "../../src/core/types";
+import { HYDRATE_ACTION_TYPE } from "../../src/core/utils";
 import { FSMContext, FSMContextProvider, FSMHydrationBoundary, useHydrateSnapshot, useManager, useSelector } from "../../src/react";
 
 type Config = { IDLE: {} };
@@ -66,6 +67,92 @@ const listsMachine = {
 const listsStore = { lists: listsMachine };
 type ListsStore = typeof listsStore;
 
+type Subscription = { id: string };
+type ProfileConfig = { IDLE: {}; READY: {} };
+type ProfileContext = { subscription: Subscription | null };
+type ProfileSnapshot = { subscription: Subscription | null };
+type OnboardingConfig = {
+  IDLE: { CHECK_ONBOARDING: "CHECKING" };
+  CHECKING: {
+    CHECK_ONBOARDING_RESOLVE: "VISIBLE";
+    CHECK_ONBOARDING_REJECT: "DISABLED";
+  };
+  VISIBLE: {};
+  DISABLED: {};
+};
+type OnboardingContext = { checks: number };
+type OnboardingAction =
+  | { type: "CHECK_ONBOARDING" }
+  | { type: "CHECK_ONBOARDING_RESOLVE" }
+  | { type: "CHECK_ONBOARDING_REJECT" };
+type OnboardingDeps = { getState: () => { profile: { context: ProfileContext } } };
+
+const profileMachine = {
+  config: { IDLE: {}, READY: {} },
+  initialState: "IDLE",
+  initialContext: { subscription: null as ProfileContext["subscription"] },
+  hydrate: (prev, snapshot: ProfileSnapshot) => {
+    if (prev.state === "READY" && prev.context.subscription?.id === snapshot.subscription?.id) return prev;
+    return { state: "READY", context: { subscription: snapshot.subscription } };
+  },
+} satisfies MachineConfig<ProfileConfig, ProfileContext, OnboardingAction, {}, ProfileSnapshot>;
+
+const onboardingMachine = {
+  config: {
+    IDLE: { CHECK_ONBOARDING: "CHECKING" },
+    CHECKING: {
+      CHECK_ONBOARDING_RESOLVE: "VISIBLE",
+      CHECK_ONBOARDING_REJECT: "DISABLED",
+    },
+    VISIBLE: {},
+    DISABLED: {},
+  },
+  initialState: "IDLE",
+  initialContext: { checks: 0 },
+  reducer: (state, action, { nextState }) => ({
+    state: nextState,
+    context: { checks: state.context.checks + (action.type === "CHECK_ONBOARDING" ? 1 : 0) },
+  }),
+  effects: {
+    CHECKING: ({ getState, transition }) => {
+      if (getState().profile.context.subscription?.id === "premium") {
+        transition({ type: "CHECK_ONBOARDING_RESOLVE" });
+      } else {
+        transition({ type: "CHECK_ONBOARDING_REJECT" });
+      }
+    },
+  },
+} satisfies MachineConfig<OnboardingConfig, OnboardingContext, OnboardingAction, OnboardingDeps>;
+
+const onboardingStore = { profile: profileMachine, onboarding: onboardingMachine };
+type OnboardingStore = typeof onboardingStore;
+
+type SequenceConfig = {
+  IDLE: { FIRST: "FIRST" };
+  FIRST: { SECOND: "SECOND" };
+  SECOND: {};
+};
+type SequenceContext = { log: string[] };
+type SequenceAction = { type: "FIRST" } | { type: "SECOND" };
+type SequenceSnapshot = { log: string[] };
+
+const sequenceMachine = {
+  config: { IDLE: { FIRST: "FIRST" }, FIRST: { SECOND: "SECOND" }, SECOND: {} },
+  initialState: "IDLE",
+  initialContext: { log: [] },
+  hydrate: (prev, snapshot: SequenceSnapshot) => {
+    if (prev.context.log === snapshot.log) return prev;
+    return { state: prev.state, context: { log: snapshot.log } };
+  },
+  reducer: (state, action, { nextState }) => ({
+    state: nextState,
+    context: { log: [...state.context.log, action.type] },
+  }),
+} satisfies MachineConfig<SequenceConfig, SequenceContext, SequenceAction, {}, SequenceSnapshot>;
+
+const sequenceStore = { sequence: sequenceMachine };
+type SequenceStore = typeof sequenceStore;
+
 const createManager = () => MachineManager(store);
 const createSnapshot = (count: number): MachineManagerSnapshot<Store> => ({
   machines: {
@@ -105,6 +192,24 @@ const createListsSnapshot = (id: string, title: string): MachineManagerSnapshot<
   },
 });
 
+const createOnboardingManager = () => {
+  const manager = MachineManager<OnboardingStore, OnboardingAction>(onboardingStore);
+  manager.setDependencies({ getState: manager.getState });
+  return manager;
+};
+
+const createProfileSnapshot = (id: string | null): MachineManagerSnapshot<OnboardingStore> => ({
+  machines: {
+    profile: { subscription: id ? { id } : null },
+  },
+});
+
+const createSequenceSnapshot = (log: string[]): MachineManagerSnapshot<SequenceStore> => ({
+  machines: {
+    sequence: { log },
+  },
+});
+
 const Counter = ({ realReads, renders }: { realReads?: number[]; renders?: number[] }) => {
   const manager = useManager<Store>();
   const count = useSelector<Store, number>((state) => state.counter.context.count);
@@ -124,6 +229,18 @@ const ListsReadout = (): React.ReactElement => {
     Object.values(state.lists.context.lists).sort().join(","),
   );
   return React.createElement("span", { "data-testid": "lists" }, titles);
+};
+
+const OnboardingReadout = (): React.ReactElement => {
+  const state = useSelector<OnboardingStore, string>((root) => root.onboarding.state);
+  return React.createElement("span", { "data-testid": "onboarding" }, state);
+};
+
+const SequenceReadout = (): React.ReactElement => {
+  const label = useSelector<SequenceStore, string>(
+    (root) => `${root.sequence.state}:${root.sequence.context.log.join(",")}`,
+  );
+  return React.createElement("span", { "data-testid": "sequence" }, label);
 };
 
 const CommitOnlyHydrator = ({
@@ -290,6 +407,28 @@ describe("FSMHydrationBoundary", () => {
 
     expect(hydrate).toHaveBeenCalledOnce();
     expect(manager.getState().counter.context.count).toBe(2);
+  });
+
+  it("гидратирует заново при смене ссылки snapshot, даже если предыдущий уже применён", () => {
+    const manager = createManager();
+    const hydrate = vi.spyOn(manager, "hydrate");
+
+    const App = ({ snapshot }: { snapshot: MachineManagerSnapshot<Store> }) => (
+      <FSMContextProvider machineManager={manager}>
+        <FSMHydrationBoundary snapshot={snapshot}>
+          <Counter />
+        </FSMHydrationBoundary>
+      </FSMContextProvider>
+    );
+
+    const { rerender, getByTestId } = render(<App snapshot={createSnapshot(2)} />);
+    expect(hydrate).toHaveBeenCalledOnce();
+    expect(getByTestId("count").textContent).toBe("2");
+
+    rerender(<App snapshot={createSnapshot(7)} />);
+    expect(hydrate).toHaveBeenCalledTimes(2);
+    expect(getByTestId("count").textContent).toBe("7");
+    expect(manager.getState().counter.context.count).toBe(7);
   });
 
   it("гидратирует смонтированный manager в layout effect при клиентской навигации", () => {
@@ -567,6 +706,181 @@ describe("FSMHydrationBoundary", () => {
     expect(manager.getState().counter.context.count).toBe(0);
   });
 
+  it("renderToString не вызывает transitionAfterHydrate", () => {
+    const manager = createOnboardingManager();
+
+    const html = renderToString(
+      <FSMContextProvider machineManager={manager}>
+        <FSMHydrationBoundary<OnboardingStore, OnboardingAction>
+          snapshot={createProfileSnapshot("premium")}
+          transitionAfterHydrate={{ type: "CHECK_ONBOARDING" }}
+        >
+          <OnboardingReadout />
+        </FSMHydrationBoundary>
+      </FSMContextProvider>,
+    );
+
+    expect(html).toContain(">IDLE<");
+    expect(manager.getState().profile.state).toBe("IDLE");
+    expect(manager.getState().onboarding.state).toBe("IDLE");
+  });
+
+  it("transitionAfterHydrate диспатчит событие после применения snapshot", async () => {
+    const manager = createOnboardingManager();
+    const actions: string[] = [];
+    manager.onTransition((_prev, _current, action) => actions.push(action.type));
+
+    render(
+      <FSMContextProvider machineManager={manager}>
+        <FSMHydrationBoundary<OnboardingStore, OnboardingAction>
+          snapshot={createProfileSnapshot("premium")}
+          transitionAfterHydrate={{ type: "CHECK_ONBOARDING" }}
+        >
+          <OnboardingReadout />
+        </FSMHydrationBoundary>
+      </FSMContextProvider>,
+    );
+
+    await waitFor(() => expect(manager.getState().onboarding.state).toBe("VISIBLE"));
+    expect(manager.getState().profile.context.subscription?.id).toBe("premium");
+    expect(manager.getState().onboarding.context.checks).toBe(1);
+    expect(actions).toEqual([HYDRATE_ACTION_TYPE, "CHECK_ONBOARDING", "CHECK_ONBOARDING_RESOLVE"]);
+  });
+
+  it("transitionAfterHydrate работает даже если snapshot уже применён", async () => {
+    const manager = createOnboardingManager();
+    manager.hydrate(createProfileSnapshot("premium"));
+    const actions: string[] = [];
+    manager.onTransition((_prev, _current, action) => actions.push(action.type));
+
+    render(
+      <FSMContextProvider machineManager={manager}>
+        <FSMHydrationBoundary<OnboardingStore, OnboardingAction>
+          snapshot={createProfileSnapshot("premium")}
+          transitionAfterHydrate={{ type: "CHECK_ONBOARDING" }}
+        >
+          <OnboardingReadout />
+        </FSMHydrationBoundary>
+      </FSMContextProvider>,
+    );
+
+    await waitFor(() => expect(manager.getState().onboarding.state).toBe("VISIBLE"));
+    expect(actions).toEqual(["CHECK_ONBOARDING", "CHECK_ONBOARDING_RESOLVE"]);
+  });
+
+  it("transitionAfterHydrate диспатчит массив событий по порядку", () => {
+    const manager = MachineManager<SequenceStore, SequenceAction>(sequenceStore);
+    const log = ["hydrated"];
+
+    const { getByTestId } = render(
+      <FSMContextProvider machineManager={manager}>
+        <FSMHydrationBoundary<SequenceStore, SequenceAction>
+          snapshot={createSequenceSnapshot(log)}
+          transitionAfterHydrate={[{ type: "FIRST" }, { type: "SECOND" }]}
+        >
+          <SequenceReadout />
+        </FSMHydrationBoundary>
+      </FSMContextProvider>,
+    );
+
+    expect(manager.getState().sequence.state).toBe("SECOND");
+    expect(manager.getState().sequence.context.log).toEqual(["hydrated", "FIRST", "SECOND"]);
+    expect(getByTestId("sequence").textContent).toBe("SECOND:hydrated,FIRST,SECOND");
+  });
+
+  it("transitionAfterHydrate с пустым массивом не диспатчит post actions", () => {
+    const manager = createManager();
+    const transition = vi.spyOn(manager, "transition");
+
+    render(
+      <FSMContextProvider machineManager={manager}>
+        <FSMHydrationBoundary<Store, Action> snapshot={createSnapshot(3)} transitionAfterHydrate={[]}>
+          <Counter />
+        </FSMHydrationBoundary>
+      </FSMContextProvider>,
+    );
+
+    expect(manager.getState().counter.context.count).toBe(3);
+    expect(transition).not.toHaveBeenCalled();
+  });
+
+  it("transitionAfterHydrate не повторяет dispatch при rerender с теми же ссылками", () => {
+    const manager = createManager();
+    const transition = vi.spyOn(manager, "transition");
+    const snapshot = createSnapshot(4);
+    const action: Action = { type: "NOOP" };
+
+    const App = () => (
+      <FSMContextProvider machineManager={manager}>
+        <FSMHydrationBoundary<Store, Action> snapshot={snapshot} transitionAfterHydrate={action}>
+          <Counter />
+        </FSMHydrationBoundary>
+      </FSMContextProvider>
+    );
+
+    const { rerender } = render(<App />);
+    expect(transition).toHaveBeenCalledOnce();
+
+    rerender(<App />);
+    expect(transition).toHaveBeenCalledOnce();
+  });
+
+  it("transitionAfterHydrate повторяет dispatch при смене strategy", () => {
+    const manager = createManager();
+    const hydrate = vi.spyOn(manager, "hydrate");
+    const transition = vi.spyOn(manager, "transition");
+    const snapshot = createSnapshot(6);
+    const action: Action = { type: "NOOP" };
+
+    const App = ({ strategy }: { strategy: HydrateStrategy }) => (
+      <FSMContextProvider machineManager={manager}>
+        <FSMHydrationBoundary<Store, Action>
+          snapshot={snapshot}
+          strategy={strategy}
+          transitionAfterHydrate={action}
+        >
+          <Counter />
+        </FSMHydrationBoundary>
+      </FSMContextProvider>
+    );
+
+    const { rerender } = render(<App strategy="merge" />);
+    expect(hydrate).toHaveBeenCalledOnce();
+    expect(transition).toHaveBeenCalledOnce();
+
+    rerender(<App strategy="replace" />);
+    // Idempotent hydrate: previewState === baseState после первого commit, поэтому re-hydrate не запускается.
+    expect(hydrate).toHaveBeenCalledOnce();
+    expect(transition).toHaveBeenCalledTimes(2);
+  });
+
+  it("transitionAfterHydrate повторяет dispatch при смене ссылки prop с теми же snapshot и strategy", () => {
+    const manager = createManager();
+    const hydrate = vi.spyOn(manager, "hydrate");
+    const transition = vi.spyOn(manager, "transition");
+    const snapshot = createSnapshot(8);
+
+    const App = ({ action }: { action: Action }) => (
+      <FSMContextProvider machineManager={manager}>
+        <FSMHydrationBoundary<Store, Action> snapshot={snapshot} transitionAfterHydrate={action}>
+          <Counter />
+        </FSMHydrationBoundary>
+      </FSMContextProvider>
+    );
+
+    const firstAction: Action = { type: "NOOP" };
+    const { rerender } = render(<App action={firstAction} />);
+    expect(hydrate).toHaveBeenCalledOnce();
+    expect(transition).toHaveBeenCalledOnce();
+    expect(transition).toHaveBeenLastCalledWith(firstAction);
+
+    const secondAction: Action = { type: "NOOP" };
+    rerender(<App action={secondAction} />);
+    expect(hydrate).toHaveBeenCalledOnce();
+    expect(transition).toHaveBeenCalledTimes(2);
+    expect(transition).toHaveBeenLastCalledWith(secondAction);
+  });
+
   it("под React.StrictMode FSMHydrationBoundary вызывает manager.hydrate ровно один раз", () => {
     const manager = createManager();
     const hydrate = vi.spyOn(manager, "hydrate");
@@ -583,6 +897,30 @@ describe("FSMHydrationBoundary", () => {
 
     expect(hydrate).toHaveBeenCalledOnce();
     expect(manager.getState().counter.context.count).toBe(5);
+  });
+
+  it("под React.StrictMode transitionAfterHydrate диспатчит один раз", async () => {
+    const manager = createOnboardingManager();
+    const hydrate = vi.spyOn(manager, "hydrate");
+    const actions: string[] = [];
+    manager.onTransition((_prev, _current, action) => actions.push(action.type));
+
+    render(
+      <React.StrictMode>
+        <FSMContextProvider machineManager={manager}>
+          <FSMHydrationBoundary<OnboardingStore, OnboardingAction>
+            snapshot={createProfileSnapshot("premium")}
+            transitionAfterHydrate={{ type: "CHECK_ONBOARDING" }}
+          >
+            <OnboardingReadout />
+          </FSMHydrationBoundary>
+        </FSMContextProvider>
+      </React.StrictMode>,
+    );
+
+    await waitFor(() => expect(manager.getState().onboarding.state).toBe("VISIBLE"));
+    expect(hydrate).toHaveBeenCalledOnce();
+    expect(actions).toEqual([HYDRATE_ACTION_TYPE, "CHECK_ONBOARDING", "CHECK_ONBOARDING_RESOLVE"]);
   });
 
   it("под React.StrictMode useHydrateSnapshot вызывает manager.hydrate ровно один раз", () => {

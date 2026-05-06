@@ -131,7 +131,7 @@ const load = createEffect({
 
 | Опция                     | Поведение                                                                            |
 | ------------------------- | ------------------------------------------------------------------------------------ |
-| `type: "every"` (default) | Каждый запуск может dispatch-ить независимо.                                         |
+| `type: "every"` (default) | Каждый запуск может отправлять события независимо.                                   |
 | `type: "latest"`          | Старый запуск продолжает работать, но его `transition` подавляется после нового запуска. |
 | `cancelFn(deps)`          | Возвращает `cancel(): boolean`. Если вернуло `true` — `transition` подавляется.       |
 
@@ -379,7 +379,7 @@ manager.transition({ type: "CANCEL",  meta: { groupTag: "request" } });
 
 Приоритет: `actorId > groupId > groupTag > unscoped`. Все три принимают `string | string[]`.
 
-Внутри actor effect доступны `self` и actor-aware dispatch:
+Внутри actor effect доступны `self` и методы для отправки событий конкретному актору, группе или тегу:
 
 ```ts showLineNumbers copy
 effects: {
@@ -442,7 +442,7 @@ await machine.invokeEffect("IDLE", next.state, deps);
 
 ## Wildcard
 
-Специальный символ `"*"` в `config` означает fallback transition для любого состояния, в `effects` — fallback effect, который срабатывает на каждый dispatch (включая self-transition).
+Специальный символ `"*"` в `config` означает fallback transition для любого состояния, в `effects` — fallback effect, который срабатывает на каждое событие (включая self-transition).
 
 ```ts showLineNumbers copy
 const machine = createMachine({
@@ -519,6 +519,17 @@ const state = manager.getState();
 import { FSMHydrationBoundary } from "lite-fsm/react";
 
 <FSMHydrationBoundary snapshot={snapshot} strategy="merge">
+  <Page />
+</FSMHydrationBoundary>;
+```
+
+`transitionAfterHydrate?: ManagerAction<P> | readonly ManagerAction<P>[]` задаёт событие или массив событий, которые boundary отправит после применения snapshot на клиенте.
+
+```tsx showLineNumbers copy
+<FSMHydrationBoundary
+  snapshot={snapshot}
+  transitionAfterHydrate={{ type: "CHECK_ONBOARDING" }}
+>
   <Page />
 </FSMHydrationBoundary>;
 ```

@@ -338,7 +338,7 @@ const logger: Middleware<AppState, AppEvent> = (api) => (next) => (action) => ne
 | `FSMContextType<S = MachineStore, P = AnyEvent>`          | `IMachineManager<S, P>`                                                                  |
 | `FSMPersistLifecycle`                                     | `{ start(): () => void }`                                                                |
 | `FSMContextProviderProps<S, P>`                           | `PropsWithChildren<{ machineManager; getServerSnapshot?; persist? }>`                    |
-| `FSMHydrationBoundaryProps<S>`                            | `PropsWithChildren<{ snapshot: MachineManagerSnapshot<S>; strategy?: HydrateStrategy }>` |
+| `FSMHydrationBoundaryProps<S, P>`                         | `PropsWithChildren<{ snapshot: MachineManagerSnapshot<S>; strategy?: HydrateStrategy; transitionAfterHydrate?: ManagerAction<P> \| readonly ManagerAction<P>[] }>` |
 | `TypedUseManagerHook<S, P>` · `TypedUseMachineHook<S, P>` | `() => IMachineManager<S, P>`                                                            |
 | `TypedUseSelectorHook<S>`                                 | `<R>(selector: (state: MachinesState<S>) => R, equalityFn?) => R`                        |
 | `TypedUseTransitionHook<P>`                               | `() => (payload: ManagerAction<P>) => ManagerAction<P>`                                  |
@@ -354,7 +354,7 @@ export const useSelector: TypedUseSelectorHook<Store> = baseUseSelector;
 export const useTransition: TypedUseTransitionHook<Event> = baseUseTransition;
 ```
 
-`TypedUseSelectorHook<S>` принимает `MachineStore`, не computed `MachinesState<S>`. `getServerSnapshot` — root state shape `MachinesState<S>`, не dehydrated envelope; custom функция должна возвращать стабильный snapshot для SSR/hydration pass. `persist` принимает structural lifecycle или readonly array lifecycle controllers; `lite-fsm/react` не импортирует `lite-fsm/persist`.
+`TypedUseSelectorHook<S>` принимает `MachineStore`, не computed `MachinesState<S>`. `getServerSnapshot` — root state shape `MachinesState<S>`, не dehydrated envelope; custom функция должна возвращать стабильный snapshot для SSR/hydration pass. `transitionAfterHydrate` принимает plain manager action или readonly array actions и выполняется только на клиенте после boundary hydrate. `persist` принимает structural lifecycle или readonly array lifecycle controllers; `lite-fsm/react` не импортирует `lite-fsm/persist`.
 
 ### React `defineMachine`
 

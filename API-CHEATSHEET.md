@@ -499,7 +499,7 @@ function Counter() {
 | `useManager<S, P>()`                       | manager из context                                                        |
 | `useTransition<P>()`                       | `manager.transition`                                                      |
 | `useSelector<S, R>(selector, equalityFn?)` | `useSyncExternalStoreWithSelector`-обёртка; default equality — `===`      |
-| `FSMHydrationBoundary`                     | preview snapshot уже на render + apply в layout effect                    |
+| `FSMHydrationBoundary`                     | preview snapshot уже на render + apply в layout effect; может dispatch post-hydration actions |
 | `useHydrateSnapshot(snapshot, opts?)`      | apply snapshot в layout effect, без preview                               |
 | `defineMachine`                            | standalone machine как hook                                               |
 
@@ -526,6 +526,10 @@ function PersistBadge({ persist }: { persist: PersistController }) {
 <FSMHydrationBoundary snapshot={snapshot} strategy="merge">
   <Page />
 </FSMHydrationBoundary>
+
+<FSMHydrationBoundary snapshot={snapshot} transitionAfterHydrate={{ type: "CHECK_ONBOARDING" }}>
+  <Page />
+</FSMHydrationBoundary>
 ```
 
 | Когда                                                                      | API                    |
@@ -534,6 +538,8 @@ function PersistBadge({ persist }: { persist: PersistController }) {
 | только применить snapshot после mount                                      | `useHydrateSnapshot`   |
 
 `FSMHydrationBoundary` держит отдельный server snapshot overlay, поэтому delayed RSC/Suspense descendants во время hydration видят тот же snapshot даже если boundary уже сделал layout-effect commit, а live manager успел измениться.
+
+`transitionAfterHydrate?: ManagerAction<P> | readonly ManagerAction<P>[]` выполняется только на клиенте после commit snapshot-а в live manager. Plain actions сериализуются через RSC, поэтому их можно передавать из server component без client wrapper. Повтор с тем же `snapshot + strategy + transitionAfterHydrate` не dispatch-ится повторно под StrictMode.
 
 Не вкладывайте boundaries с разным snapshot на один и тот же machine key: preview идёт parent → child, а layout effect — child → parent, поэтому parent перезапишет child. Server data, загруженные ниже root layout-а, передавайте через boundary snapshot, а не через render-phase `transition()` ниже Provider-а.
 

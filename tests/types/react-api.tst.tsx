@@ -23,6 +23,7 @@ import {
   FSMContextProvider,
   type FSMContextProviderProps,
   FSMHydrationBoundary,
+  type FSMHydrationBoundaryProps,
   type TypedUseMachineHook,
   type TypedUseManagerHook,
   type TypedUseSelectorHook,
@@ -307,6 +308,50 @@ describe("API гидратации snapshot", () => {
       </FSMHydrationBoundary>
     );
     expect(el).type.toBeAssignableTo<React.JSX.Element>();
+  });
+
+  test("FSMHydrationBoundary типизирует transitionAfterHydrate как ManagerAction", () => {
+    const props: FSMHydrationBoundaryProps<Store, Evt> = {
+      snapshot,
+      transitionAfterHydrate: { type: "PING", meta: { groupTag: "profile" } },
+    };
+    expect(props.transitionAfterHydrate).type.toBe<
+      ManagerAction<Evt> | ReadonlyArray<ManagerAction<Evt>> | undefined
+    >();
+
+    const el = (
+      <FSMHydrationBoundary<Store>
+        snapshot={snapshot}
+        transitionAfterHydrate={[{ type: "PING" }, { type: "DONE", meta: { actorId: "actor/0" } }]}
+      >
+        <span>child</span>
+      </FSMHydrationBoundary>
+    );
+    expect(el).type.toBeAssignableTo<React.JSX.Element>();
+  });
+
+  test("FSMHydrationBoundary отклоняет неизвестный transitionAfterHydrate event", () => {
+    const single = (
+      <FSMHydrationBoundary<Store>
+        snapshot={snapshot}
+        // @ts-expect-error!
+        transitionAfterHydrate={{ type: "UNKNOWN" }}
+      >
+        <span>invalid</span>
+      </FSMHydrationBoundary>
+    );
+    void single;
+
+    const list = (
+      <FSMHydrationBoundary<Store>
+        snapshot={snapshot}
+        // @ts-expect-error!
+        transitionAfterHydrate={[{ type: "PING" }, { type: "UNKNOWN" }]}
+      >
+        <span>invalid</span>
+      </FSMHydrationBoundary>
+    );
+    void list;
   });
 
   test("FSMHydrationBoundary snapshot отклоняет actor keys", () => {

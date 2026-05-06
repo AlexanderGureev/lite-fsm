@@ -186,6 +186,19 @@ function App({ snapshot }) {
 
 `useManager().getState()` до layout effect вернёт ещё не обновлённый state; для одинаковой разметки на сервере и клиенте читайте состояние через `useSelector()`.
 
+Если после применения snapshot нужно отправить событие в manager, передайте `transitionAfterHydrate`. Это может быть одно событие или массив событий.
+
+```tsx showLineNumbers copy
+<FSMHydrationBoundary
+  snapshot={snapshot}
+  transitionAfterHydrate={{ type: "CHECK_ONBOARDING" }}
+>
+  <Page />
+</FSMHydrationBoundary>
+```
+
+`transitionAfterHydrate` выполняется только в браузере, после `manager.hydrate()`. Повторный mount в React StrictMode не отправляет те же события повторно для того же snapshot.
+
 ### `useHydrateSnapshot`
 
 Применяет snapshot в `useLayoutEffect` без preview. Подходит для фоновой гидратации после mount, когда временное наложение состояния не нужно.

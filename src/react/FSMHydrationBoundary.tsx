@@ -2,7 +2,15 @@
 
 import React from "react";
 
-import type { HydrateStrategy, MachineManagerSnapshot, MachinesState, MachineStore } from "../core/types";
+import type { MachineEvents } from "../core/interfaces";
+import type {
+  AnyEvent,
+  HydrateStrategy,
+  MachineManagerSnapshot,
+  MachinesState,
+  MachineStore,
+  ManagerAction,
+} from "../core/types";
 
 import {
   FSMHydrationOverlayProvider,
@@ -13,17 +21,42 @@ import {
 import { useManager } from "./useManager";
 import { useIsomorphicLayoutEffect } from "./utils";
 
-export type FSMHydrationBoundaryProps<S extends MachineStore> = React.PropsWithChildren<{
+type TransitionAfterHydrate<P extends AnyEvent> = ManagerAction<P> | ReadonlyArray<ManagerAction<P>>;
+
+type CompletedDispatch<P extends AnyEvent> = {
+  snapshot: unknown;
+  strategy: HydrateStrategy;
+  actions: ReadonlyArray<ManagerAction<P>>;
+};
+
+const matchesCompletedDispatch = <P extends AnyEvent>(
+  completed: CompletedDispatch<P> | null,
+  snapshot: unknown,
+  strategy: HydrateStrategy,
+  actions: ReadonlyArray<ManagerAction<P>> | null,
+) =>
+  actions !== null &&
+  completed !== null &&
+  completed.snapshot === snapshot &&
+  completed.strategy === strategy &&
+  completed.actions === actions;
+
+export type FSMHydrationBoundaryProps<
+  S extends MachineStore,
+  P extends AnyEvent = MachineEvents<S>,
+> = React.PropsWithChildren<{
   snapshot: MachineManagerSnapshot<S>;
   strategy?: HydrateStrategy;
+  transitionAfterHydrate?: TransitionAfterHydrate<P>;
 }>;
 
-export const FSMHydrationBoundary = <S extends MachineStore>({
+export const FSMHydrationBoundary = <S extends MachineStore, P extends AnyEvent = MachineEvents<S>>({
   snapshot,
   strategy,
+  transitionAfterHydrate,
   children,
-}: FSMHydrationBoundaryProps<S>) => {
-  const manager = useManager<S>();
+}: FSMHydrationBoundaryProps<S, P>) => {
+  const manager = useManager<S, P>();
   const parentOverlay = useHydrationOverlay<S>();
   const parentServerSnapshot = useServerSnapshot<S>();
   const hydrateStrategy = strategy ?? "merge";
@@ -32,14 +65,27 @@ export const FSMHydrationBoundary = <S extends MachineStore>({
     snapshot: MachineManagerSnapshot<S>;
     strategy: HydrateStrategy;
   } | null>(null);
+
+  // State убирает render overlay после post-hydration dispatch; ref гасит StrictMode replay до commit state.
+  const completedDispatchRef = React.useRef<CompletedDispatch<P> | null>(null);
+  const [completedDispatch, setCompletedDispatch] = React.useState<CompletedDispatch<P> | null>(null);
   const [, forceRender] = React.useReducer((version: number) => version + 1, 0);
+
+  const transitionActions = React.useMemo<ReadonlyArray<ManagerAction<P>> | null>(() => {
+    if (!transitionAfterHydrate) return null;
+    const actions = Array.isArray(transitionAfterHydrate) ? transitionAfterHydrate : [transitionAfterHydrate];
+    return actions.length > 0 ? actions : null;
+  }, [transitionAfterHydrate]);
 
   const baseState = parentOverlay?.getState() ?? manager.getState();
   const previewState = React.useMemo(
     () => manager.getHydratedState(snapshot, { baseState, strategy: hydrateStrategy }),
     [baseState, hydrateStrategy, manager, snapshot],
   );
-  const hasOverlay = previewState !== baseState;
+
+  const dispatchCompleted = matchesCompletedDispatch(completedDispatch, snapshot, hydrateStrategy, transitionActions);
+  const hasOverlay = previewState !== baseState && !dispatchCompleted;
+
   const serverBaseState = parentServerSnapshot?.getState() ?? baseState;
   const serverPreviewState = React.useMemo(
     () => manager.getHydratedState(snapshot, { baseState: serverBaseState, strategy: hydrateStrategy }),
@@ -47,29 +93,47 @@ export const FSMHydrationBoundary = <S extends MachineStore>({
   );
 
   useIsomorphicLayoutEffect(() => {
-    if (!hasOverlay) return;
+    const alreadyDispatched = matchesCompletedDispatch(
+      completedDispatchRef.current,
+      snapshot,
+      hydrateStrategy,
+      transitionActions,
+    );
+    const shouldDispatch = transitionActions !== null && !alreadyDispatched;
+    const shouldHydrate = hasOverlay && !alreadyDispatched;
+
+    if (!shouldHydrate && !shouldDispatch) return;
+
     const committed = committedRef.current;
+    let didHydrate = false;
     /* v8 ignore next 3 -- защита от StrictMode replay с тем же render snapshot. */
-    if (committed?.baseState === baseState && committed.snapshot === snapshot && committed.strategy === hydrateStrategy) {
-      return;
+    if (
+      shouldHydrate &&
+      !(committed?.baseState === baseState && committed.snapshot === snapshot && committed.strategy === hydrateStrategy)
+    ) {
+      manager.hydrate(snapshot, { strategy: hydrateStrategy });
+      committedRef.current = { baseState, snapshot, strategy: hydrateStrategy };
+      didHydrate = true;
     }
 
-    manager.hydrate(snapshot, { strategy: hydrateStrategy });
-    committedRef.current = { baseState, snapshot, strategy: hydrateStrategy };
-    forceRender();
-  }, [baseState, hasOverlay, hydrateStrategy, manager, snapshot]);
+    if (shouldDispatch && transitionActions !== null) {
+      for (const action of transitionActions) manager.transition(action);
+      const completed: CompletedDispatch<P> = { snapshot, strategy: hydrateStrategy, actions: transitionActions };
+      completedDispatchRef.current = completed;
+      setCompletedDispatch(completed);
+    }
+
+    if (didHydrate && !shouldDispatch) forceRender();
+  }, [baseState, hasOverlay, hydrateStrategy, manager, snapshot, transitionActions]);
 
   const overlay = React.useMemo(() => ({ getState: () => previewState }), [previewState]);
-  const serverSnapshotOverlay = React.useMemo(
-    () => ({ getState: () => serverPreviewState }),
-    [serverPreviewState],
-  );
+  const serverSnapshotOverlay = React.useMemo(() => ({ getState: () => serverPreviewState }), [serverPreviewState]);
 
-  const content = hasOverlay ? (
+  const inner = hasOverlay ? (
     <FSMHydrationOverlayProvider value={overlay}>{children}</FSMHydrationOverlayProvider>
   ) : (
-    <>{children}</>
+    children
   );
 
-  return <FSMServerSnapshotProvider value={serverSnapshotOverlay}>{content}</FSMServerSnapshotProvider>;
+  return <FSMServerSnapshotProvider value={serverSnapshotOverlay}>{inner}</FSMServerSnapshotProvider>;
 };

@@ -3,7 +3,7 @@ const basePath = isProduction ? "/lite-fsm/playground" : "";
 
 /** @type {import('next').NextConfig} */
 const config = {
-  output: "export",
+  ...(isProduction ? { output: "export" } : {}),
   basePath,
   assetPrefix: basePath,
   env: {

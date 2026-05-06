@@ -3,6 +3,7 @@ import { MachineManager } from "lite-fsm";
 import type {
   MachineManagerRuntimeSnapshot,
   MachineManagerSnapshot,
+  ManagerAction,
   SnapshotMachineKey,
   StateType,
 } from "lite-fsm";
@@ -45,6 +46,9 @@ describe("type performance snapshots для большой карты machines",
     manager.hydrate(snapshot, { strategy: "merge" });
     useHydrateSnapshot<AppMachines>(snapshot, { strategy: "replace" });
     expect<FSMHydrationBoundaryProps<AppMachines>["snapshot"]>().type.toBe<MachineManagerSnapshot<AppMachines>>();
+    expect<FSMHydrationBoundaryProps<AppMachines, PerfEvent>["transitionAfterHydrate"]>().type.toBe<
+      ManagerAction<PerfEvent> | ReadonlyArray<ManagerAction<PerfEvent>> | undefined
+    >();
   });
 
   test("actor snapshot API раскрывает 1000 actor templates", () => {

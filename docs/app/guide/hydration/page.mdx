@@ -239,6 +239,7 @@ const manager = MachineManager(
 
 - во время отрисовки строит временное наложение состояния через `getHydratedState()`, поэтому `useSelector()` внутри `FSMHydrationBoundary` сразу читает снимок;
 - в `useLayoutEffect` применяет `manager.hydrate()`, чтобы основной менеджер получил то же состояние.
+- если задан `transitionAfterHydrate`, после применения снимка отправляет указанные события в manager.
 
 ```tsx showLineNumbers copy
 import { MachineManager } from "lite-fsm";
@@ -263,6 +264,48 @@ export function App({ snapshot }) {
 ```
 
 Важно: во время отрисовки `FSMHydrationBoundary` подменяет источник данных только для `useSelector()`. Поэтому UI внутри boundary должен читать состояние через `useSelector()`: на сервере и на первом клиентском рендере он увидит результат предварительного расчета. `useManager().getState()` обращается напрямую к менеджеру и до `useLayoutEffect` вернет его старое состояние.
+
+### События после гидратации
+
+`hydrate()` сам по себе не запускает эффекты машин: это импорт состояния, а не бизнес-событие. Если после снимка с сервера нужно запустить клиентскую проверку или синхронизацию, используйте `transitionAfterHydrate`.
+
+```tsx showLineNumbers copy
+export async function ServerLoad({ children }) {
+  const subscription = await loadSubscription();
+
+  return (
+    <FSMHydrationBoundary
+      snapshot={{
+        machines: {
+          profile: {
+            state: "READY",
+            context: { subscription },
+          },
+        },
+      }}
+      transitionAfterHydrate={{ type: "CHECK_ONBOARDING" }}
+    >
+      {children}
+    </FSMHydrationBoundary>
+  );
+}
+```
+
+`transitionAfterHydrate` принимает одно событие или массив событий:
+
+```tsx showLineNumbers copy
+<FSMHydrationBoundary
+  snapshot={snapshot}
+  transitionAfterHydrate={[
+    { type: "PROFILE_HYDRATED" },
+    { type: "CHECK_ONBOARDING" },
+  ]}
+>
+  <Page />
+</FSMHydrationBoundary>
+```
+
+Эти события отправляются только в браузере, после `manager.hydrate(snapshot, { strategy })`. На серверном render-е они не выполняются. Повторный mount в React StrictMode не отправляет те же события повторно для того же snapshot.
 
 `FSMHydrationBoundary` можно вкладывать друг в друга. Вложенный `FSMHydrationBoundary` считает предварительное состояние поверх наложения родителя:
 
