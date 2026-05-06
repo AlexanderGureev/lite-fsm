@@ -1,15 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { MachineManager } from "../../src/core/MachineManager";
-import type { MachineConfig, MachineManagerSnapshot, MachineReducer } from "../../src/core/types";
-import { HYDRATE_ACTION_TYPE } from "../../src/core/utils";
+import { MachineManager } from "@lite-fsm/core";
+import type { MachineConfig, MachineManagerSnapshot, MachineReducer } from "@lite-fsm/core";
+import { HYDRATE_ACTION_TYPE } from "@lite-fsm/core/internal/utils";
 import {
   createJsonStorage,
   persistManager,
   type PersistStatus,
   type PersistedRecord,
   type PersistStorage,
-} from "../../src/persist";
+} from "@lite-fsm/persist";
 
 type CounterConfig = { IDLE: { INC: null } };
 type FlagConfig = { OFF: { TOGGLE: "ON" }; ON: { TOGGLE: "OFF" } };

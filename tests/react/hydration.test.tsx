@@ -5,10 +5,10 @@ import { hydrateRoot } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
-import { MachineManager } from "../../src/core/MachineManager";
-import type { HydrateStrategy, MachineConfig, MachineManagerSnapshot } from "../../src/core/types";
-import { HYDRATE_ACTION_TYPE } from "../../src/core/utils";
-import { FSMContext, FSMContextProvider, FSMHydrationBoundary, useHydrateSnapshot, useManager, useSelector } from "../../src/react";
+import { MachineManager } from "@lite-fsm/core";
+import type { HydrateStrategy, MachineConfig, MachineManagerSnapshot } from "@lite-fsm/core";
+import { HYDRATE_ACTION_TYPE } from "@lite-fsm/core/internal/utils";
+import { FSMContext, FSMContextProvider, FSMHydrationBoundary, useHydrateSnapshot, useManager, useSelector } from "@lite-fsm/react";
 
 type Config = { IDLE: {} };
 type Action = { type: "NOOP" };

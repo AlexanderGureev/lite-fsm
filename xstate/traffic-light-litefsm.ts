@@ -1,6 +1,6 @@
-import { createEffect as baseCreateEffect, createMachine as baseCreateMachine, MachineManager } from "../src/core";
-import type { FSMEvent, MachinesState, TypedCreateMachineFn, TypedCreateEffectFn } from "../src/core";
-import { immerMiddleware } from "../src/middleware/immer";
+import { createEffect as baseCreateEffect, createMachine as baseCreateMachine, MachineManager } from "@lite-fsm/core";
+import type { FSMEvent, MachinesState, TypedCreateMachineFn, TypedCreateEffectFn } from "@lite-fsm/core";
+import { immerMiddleware } from "@lite-fsm/middleware/immer";
 
 type TrafficLightState =
   | "BOOTING"

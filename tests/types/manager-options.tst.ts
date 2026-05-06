@@ -6,7 +6,7 @@ import type {
   MachineManagerOptions,
   ManagerAction,
   SpawnIdContext,
-} from "lite-fsm";
+} from "@lite-fsm/core";
 
 import type { Assert, Equal } from "./_helpers";
 

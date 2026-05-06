@@ -3,8 +3,8 @@ import React from "react";
 import { describe, it, expect } from "vitest";
 import { render } from "@testing-library/react";
 
-import { FSMContext, FSMContextProvider } from "../../src/react";
-import { MachineManager } from "../../src/core/MachineManager";
+import { FSMContext, FSMContextProvider } from "@lite-fsm/react";
+import { MachineManager } from "@lite-fsm/core";
 
 describe("FSMContext / FSMContextProvider", () => {
   it("без Provider контекст равен null", () => {

@@ -1,7 +1,7 @@
 // Общие фикстуры для тестов actor MachineManager.
 // Сьюты routing, lifecycle и middleware переиспользуют один и тот же шаблон likeSync.
 
-import type { AnyEvent, FSMEvent, GenericMiddleware, MachineConfig, MiddlewareApi } from "../../src/core/types";
+import type { AnyEvent, FSMEvent, GenericMiddleware, MachineConfig, MiddlewareApi } from "@lite-fsm/core";
 
 export type LikeConfig = {
   __INIT: { LIKE: "PENDING" };

@@ -1,12 +1,12 @@
 const assert = require("node:assert/strict");
 
-const core = require("lite-fsm");
-const devTools = require("lite-fsm/middleware/devTools");
-const immer = require("lite-fsm/middleware/immer");
-const persist = require("lite-fsm/persist");
-const persistReact = require("lite-fsm/persist/react");
-const react = require("lite-fsm/react");
-const middleware = require("lite-fsm/middleware");
+const core = require("@lite-fsm/core");
+const devTools = require("@lite-fsm/middleware/devTools");
+const immer = require("@lite-fsm/middleware/immer");
+const persist = require("@lite-fsm/persist");
+const persistReact = require("@lite-fsm/persist/react");
+const react = require("@lite-fsm/react");
+const middleware = require("@lite-fsm/middleware");
 
 assert.equal(typeof core.Machine, "function");
 assert.equal(typeof core.MachineManager, "function");

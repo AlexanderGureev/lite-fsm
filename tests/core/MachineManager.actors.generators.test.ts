@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { MachineManager } from "../../src/core";
-import { LiteFsmError } from "../../src/core/utils";
+import { MachineManager } from "@lite-fsm/core";
+import { LiteFsmError } from "@lite-fsm/core/internal/utils";
 
 import { createLikeSync, createSnapshotLikeSync } from "./MachineManager.actors.fixtures";
 

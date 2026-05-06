@@ -1,0 +1,35 @@
+{
+  "name": "@lite-fsm/docs",
+  "version": "1.0.0",
+  "description": "Documentation for lite-fsm",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "check-types": "tsc --noEmit",
+    "postbuild": "pagefind --site .next/server/app --output-path out/_pagefind"
+  },
+  "dependencies": {
+    "@codesandbox/sandpack-react": "^2.20.0",
+    "@codesandbox/sandpack-themes": "^2.0.21",
+    "@lite-fsm/core": "workspace:*",
+    "@lite-fsm/middleware": "workspace:*",
+    "@lite-fsm/persist": "workspace:*",
+    "@lite-fsm/react": "workspace:*",
+    "next": "^16.2.4",
+    "nextra": "^4.6.1",
+    "nextra-theme-docs": "^4.6.1",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "pagefind": "^1.5.2",
+    "prettier": "^3.8.3",
+    "typescript": "^6.0.3"
+  }
+}

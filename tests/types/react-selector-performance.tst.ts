@@ -1,5 +1,5 @@
 import { describe, expect, test } from "tstyche";
-import { type TypedUseManagerHook, type TypedUseSelectorHook, useManager, useSelector } from "lite-fsm/react";
+import { type TypedUseManagerHook, type TypedUseSelectorHook, useManager, useSelector } from "@lite-fsm/react";
 
 import type { AppMachines, AppState, PerfEvent, PerfState, PerfStep } from "./_performance-fixtures";
 

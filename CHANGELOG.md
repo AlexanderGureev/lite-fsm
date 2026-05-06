@@ -32,7 +32,7 @@ Migration для persisted actor records: пересоздать snapshot пос
 
 ### Persist
 
-- Добавлены новые entrypoints `lite-fsm/persist` и `lite-fsm/persist/react`; core entrypoint и `lite-fsm/react` не импортируют persist-слой.
+- Добавлены новые entrypoints `@lite-fsm/persist` и `@lite-fsm/persist/react`; core entrypoint и `@lite-fsm/react` не импортируют persist-слой.
 - `persistManager(manager, opts)` создаёт typed controller для `restore`, `save`, `flush`, `clear`, status snapshots и подписок на manager/storage поверх `MachineManager.dehydrate()` и `hydrate()`.
 - Добавлен `createJsonStorage({ key, storage })` для `localStorage`/`sessionStorage`-совместимых JSON-хранилищ и публичный `PersistStorage<S>` для custom async storage.
 - `start()` стал ref-counted lifecycle API: он запускает background restore и подписки, не блокирует SSR/hydration, а cleanup останавливает подписки и отложенные saves.

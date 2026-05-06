@@ -17,7 +17,7 @@ import type {
   StateType,
   Subscriber,
   TransitionSubscriber,
-} from "lite-fsm";
+} from "@lite-fsm/core";
 
 import type { Assert, Equal } from "./_helpers";
 

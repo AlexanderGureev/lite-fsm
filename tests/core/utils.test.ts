@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { compose, deepFreeze } from "../../src/core/utils";
+import { compose, deepFreeze } from "@lite-fsm/core/internal/utils";
 
 describe("compose", () => {
   it("должен компоновать функции справа налево", () => {

@@ -1,0 +1,154 @@
+# Глобальные эффекты
+
+Глобальные эффекты в `lite-fsm` позволяют выполнять действия в ответ на любые события или состояния, независимо от конкретного состояния автомата. Это мощный инструмент для реализации сквозной функциональности, такой как логирование, аналитика или мониторинг состояния системы.
+
+## Концепция глобальных эффектов
+
+Глобальные эффекты определяются с использованием специального символа `"*"` в определении эффектов и срабатывают при любом переходе или событии.
+
+## Создание глобальных эффектов
+
+Для определения глобального эффекта используйте символ `"*"` в качестве ключа в объекте `effects`:
+
+```ts showLineNumbers copy
+import { createMachine } from "@lite-fsm/core";
+
+export const analytics = createMachine({
+  config: {
+    IDLE: {},
+  },
+  initialState: "IDLE",
+  initialContext: {},
+  effects: {
+    "*": ({ action, getState, ym }) => {
+      if (action.type === "LOGIN_RESOLVE") {
+        const userId = getState().session.context.userId ?? -1;
+        ym.reachGoal("auth", userId);
+      }
+    },
+  },
+});
+```
+
+> `getState` и сервис `ym` здесь — это пользовательские зависимости, которые мы передаём в manager через `setDependencies({ getState: manager.getState, ym })`. См. раздел [Внедрение зависимостей](/guide#внедрение-зависимостей).
+
+## Параметры глобальных эффектов
+
+Глобальные эффекты получают те же параметры, что и обычные:
+
+- `action` — событие, которое привело к переходу;
+- `transition(action)` — отправить новое событие;
+- `condition(predicate)` — дождаться matching action;
+- любые пользовательские зависимости, переданные через `setDependencies`.
+
+```ts showLineNumbers copy
+effects: {
+  "*": ({ action, transition, logger, getState }) => {
+    console.log(`Action: ${action.type}`, action.payload);
+    console.log("Global state:", getState());
+
+    if (action.type === "CRITICAL_ERROR") {
+      logger.error("Critical error occurred", action.payload);
+      transition({ type: "SHOW_ERROR_DIALOG", payload: action.payload });
+    }
+  },
+}
+```
+
+## Типичные сценарии использования
+
+### 1. Отслеживание аналитики
+
+Один из самых распространенных случаев использования глобальных эффектов - отправка событий в системы аналитики:
+
+```ts showLineNumbers copy
+const analyticsMachine = createMachine({
+  config: {
+    IDLE: {},
+  },
+  initialState: "IDLE",
+  initialContext: {},
+  effects: {
+    "*": ({ action, analytics, getState }) => {
+      try {
+        if (action.type.startsWith("__")) return;
+
+        const state = getState();
+        const userId = state.auth?.context?.userId;
+        const sessionId = state.session?.context?.id;
+
+        analytics.track({
+          eventName: action.type,
+          properties: {
+            ...action.payload,
+            userId,
+            sessionId,
+            timestamp: new Date().toISOString(),
+          },
+        });
+      } catch (error) {
+        console.error("Analytics tracking error:", error);
+      }
+    },
+  },
+});
+```
+
+### 2. Логирование состояний и переходов
+
+Глобальные эффекты идеально подходят для реализации логирования:
+
+```ts showLineNumbers copy
+const loggingMachine = createMachine({
+  config: {
+    IDLE: {},
+  },
+  initialState: "IDLE",
+  initialContext: {},
+  effects: {
+    "*": ({ action, getState }) => {
+      if (process.env.NODE_ENV === "development") {
+        const currentState = getState();
+        console.group(`📊 Action: ${action.type}`);
+        console.log("Payload:", action.payload);
+        console.log("Current State:", currentState);
+        console.groupEnd();
+      }
+    },
+  },
+});
+```
+
+### 3. Мониторинг ошибок
+
+Отслеживание и обработка ошибок на глобальном уровне:
+
+```ts showLineNumbers copy
+const errorMonitorMachine = createMachine({
+  config: {
+    IDLE: {},
+  },
+  initialState: "IDLE",
+  initialContext: {},
+  effects: {
+    "*": ({ action, errorMonitoring }) => {
+      if (action.type.includes("ERROR") && action.payload?.error) {
+        errorMonitoring.captureException(action.payload.error, {
+          tags: { actionType: action.type },
+          extra: { payload: action.payload },
+        });
+      }
+    },
+  },
+});
+```
+
+
+## Лучшие практики
+
+1. **Избегайте побочных эффектов**: Глобальные эффекты должны быть преимущественно наблюдателями, не влияющими на основной поток.
+2. **Обрабатывайте ошибки**: Оборачивайте код глобальных эффектов в try-catch, чтобы ошибки не нарушали работу основного приложения.
+3. **Используйте для сквозной функциональности**: Аналитика, логирование, мониторинг - идеальные кандидаты для глобальных эффектов.
+4. **Ограничивайте вызовы переходов**: Будьте осторожны с вызовом `transition` в глобальных эффектах, чтобы избежать бесконечных циклов.
+5. **Разделяйте ответственность**: Создавайте отдельные автоматы с глобальными эффектами, чтобы сохранить чистоту кода.
+6. **Оптимизируйте производительность**: Используйте проверки и условия, чтобы выполнять только необходимые операции в глобальных эффектах. 

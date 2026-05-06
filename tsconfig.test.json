@@ -1,18 +1,9 @@
 {
-  "extends": "./tsconfig.json",
+  "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "rootDir": ".",
-    "types": ["vitest/globals", "node"],
-    "baseUrl": ".",
-    "ignoreDeprecations": "6.0",
-    "paths": {
-      "lite-fsm": ["src/core/index.ts"],
-      "lite-fsm/react": ["src/react/index.ts"],
-      "lite-fsm/persist": ["src/persist/index.ts"],
-      "lite-fsm/persist/react": ["src/persist/react.ts"],
-      "lite-fsm/middleware/immer": ["src/middleware/immer.ts"]
-    }
+    "types": ["vitest/globals", "node"]
   },
-  "include": ["src", "tests"],
+  "include": ["packages/*/src", "tests", "xstate/**/*.ts"],
   "exclude": ["tests/types", "tests/types-dist"]
 }

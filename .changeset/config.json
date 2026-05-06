@@ -1,0 +1,15 @@
+{
+  "$schema": "https://unpkg.com/@changesets/config@3.1.1/schema.json",
+  "changelog": "@changesets/cli/changelog",
+  "commit": false,
+  "fixed": [["@lite-fsm/core", "@lite-fsm/react", "@lite-fsm/middleware", "@lite-fsm/persist"]],
+  "linked": [],
+  "access": "public",
+  "baseBranch": "main",
+  "updateInternalDependencies": "patch",
+  "ignore": ["@lite-fsm/graph"],
+  "privatePackages": {
+    "version": false,
+    "tag": false
+  }
+}

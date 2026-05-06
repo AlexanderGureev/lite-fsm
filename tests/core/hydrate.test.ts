@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { MachineManager } from "../../src/core/MachineManager";
-import { HYDRATE_ACTION_TYPE } from "../../src/core/utils";
-import type { MachineConfig, MachineReducer, Middleware } from "../../src/core/types";
+import { MachineManager } from "@lite-fsm/core";
+import { HYDRATE_ACTION_TYPE } from "@lite-fsm/core/internal/utils";
+import type { MachineConfig, MachineReducer, Middleware } from "@lite-fsm/core";
 
 type CounterConfig = { IDLE: { INC: null }; READY: {} };
 type CounterAction = { type: "INC" } | { type: "IGNORED" };

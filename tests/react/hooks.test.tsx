@@ -3,9 +3,9 @@ import React from "react";
 import { describe, it, expect, vi } from "vitest";
 import { render, renderHook, act } from "@testing-library/react";
 
-import { FSMContextProvider, useManager, useSelector, useTransition } from "../../src/react";
-import { MachineManager } from "../../src/core/MachineManager";
-import { FSMEvent, MachineConfig, MachineReducer } from "../../src/core/types";
+import { FSMContextProvider, useManager, useSelector, useTransition } from "@lite-fsm/react";
+import { MachineManager } from "@lite-fsm/core";
+import { FSMEvent, MachineConfig, MachineReducer } from "@lite-fsm/core";
 
 type CounterConfig = { readonly IDLE: { readonly INC: null; readonly GO: "ACTIVE" }; readonly ACTIVE: {} };
 type CounterAction = { type: "INC" } | { type: "GO" };

@@ -3,9 +3,9 @@ import React from "react";
 import { describe, it, expect, vi } from "vitest";
 import { act, render, waitFor } from "@testing-library/react";
 
-import { FSMContextProvider, useSelector, useTransition } from "../../src/react";
-import { MachineManager } from "../../src/core/MachineManager";
-import type { ActorMeta, FSMEvent, MachineConfig, MachinesState, Middleware, PublicActorSlice } from "../../src/core/types";
+import { FSMContextProvider, useSelector, useTransition } from "@lite-fsm/react";
+import { MachineManager } from "@lite-fsm/core";
+import type { ActorMeta, FSMEvent, MachineConfig, MachinesState, Middleware, PublicActorSlice } from "@lite-fsm/core";
 
 // Канонический actor template для всех сценариев. Reducer возвращает {state, context}
 // без meta — manager пришивает canonical, тесты проверяют что useSelector это ловит.

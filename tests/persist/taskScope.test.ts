@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createTaskScope, isTaskCancelledError } from "../../src/persist/taskScope";
+import { createTaskScope, isTaskCancelledError } from "@lite-fsm/persist/internal/taskScope";
 
 const deferred = <T>() => {
   let resolve!: (value: T) => void;

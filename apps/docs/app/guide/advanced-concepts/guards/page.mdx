@@ -1,0 +1,42 @@
+# Условные переходы и Guards
+
+Условные переходы/guards - это механизм в `lite-fsm`, который позволяет определить логику перехода между состояниями в зависимости от определенных условий.
+
+## Что такое Guard?
+
+**Guard** - это просто условие, которое автомат проверяет при обработке события. Если условие возвращает `true`, автомат выполняет переход в следующее состояние. Если условие возвращает `false`, автомат остается в текущем состоянии или может выполнить альтернативный переход.
+
+В `lite-fsm` guards реализуются через функцию `reducer`, которая предоставляет полный контроль над тем, как события преобразуются в изменения состояния автомата.
+
+```ts showLineNumbers copy
+import { createMachine } from "@lite-fsm/core";
+
+const feedback = createMachine({
+  config: {
+    FORM: {
+      UPDATE: null,
+      SUBMIT: "SUBMITTING",
+    },
+    SUBMITTING: {
+      // другие переходы
+    },
+  },
+  initialState: "FORM",
+  initialContext: {
+    text: "",
+  },
+  reducer: (state, action, { nextState }) => {
+    if (action.type === "UPDATE") {
+      state.context.text = action.payload.text;
+      return;
+    }
+
+    // Guard: пустой отзыв не отправляем
+    if (action.type === "SUBMIT" && state.context.text.length === 0) {
+      return;
+    }
+
+    state.state = nextState;
+  },
+});
+```

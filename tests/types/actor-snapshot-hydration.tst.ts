@@ -1,5 +1,5 @@
 import { describe, expect, test } from "tstyche";
-import { createMachine } from "lite-fsm";
+import { createMachine } from "@lite-fsm/core";
 import type {
   ActorDataSlice,
   ActorSnapshotEntry,
@@ -16,7 +16,7 @@ import type {
   SnapshotForMachine,
   StateType,
   TypedCreateMachineFn,
-} from "lite-fsm";
+} from "@lite-fsm/core";
 
 import type { Assert, Equal } from "./_helpers";
 

@@ -10,10 +10,10 @@ import type {
   MiddlewareApi,
   Reducer,
   VoidReducerMiddleware,
-} from "lite-fsm";
-import { devToolsMiddleware as devToolsFromBarrel, immerMiddleware as immerFromBarrel } from "lite-fsm/middleware";
-import { devToolsMiddleware } from "lite-fsm/middleware/devTools";
-import { immerMiddleware } from "lite-fsm/middleware/immer";
+} from "@lite-fsm/core";
+import { devToolsMiddleware as devToolsFromBarrel, immerMiddleware as immerFromBarrel } from "@lite-fsm/middleware";
+import { devToolsMiddleware } from "@lite-fsm/middleware/devTools";
+import { immerMiddleware } from "@lite-fsm/middleware/immer";
 
 import type { Assert, Equal } from "./_helpers";
 

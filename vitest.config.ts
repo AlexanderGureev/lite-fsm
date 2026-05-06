@@ -1,13 +1,36 @@
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
+const fromRoot = (path: string) => fileURLToPath(new URL(path, import.meta.url));
+const stripWildcard = (value: string) => value.replace(/\/\*$/, "");
+
+type TsconfigPaths = {
+  compilerOptions?: {
+    paths?: Record<string, string[]>;
+  };
+};
+
+const readAliases = () => {
+  const config = JSON.parse(readFileSync(fromRoot("./tsconfig.paths.json"), "utf8")) as TsconfigPaths;
+  const paths = config.compilerOptions?.paths ?? {};
+
+  return Object.entries(paths)
+    .map(([find, replacements]) => {
+      const [replacement] = replacements;
+      if (!replacement) throw new Error(`Missing tsconfig path replacement for ${find}`);
+
+      return {
+        find: stripWildcard(find),
+        replacement: fromRoot(stripWildcard(replacement)),
+      };
+    })
+    .sort((left, right) => right.find.length - left.find.length);
+};
+
 export default defineConfig({
   resolve: {
-    alias: {
-      "lite-fsm/middleware/immer": fileURLToPath(new URL("./src/middleware/immer.ts", import.meta.url)),
-      "lite-fsm/react": fileURLToPath(new URL("./src/react/index.ts", import.meta.url)),
-      "lite-fsm": fileURLToPath(new URL("./src/core/index.ts", import.meta.url)),
-    },
+    alias: readAliases(),
   },
   test: {
     globals: true,
@@ -17,16 +40,16 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "json", "html", "lcov"],
-      include: ["src/**/*.{ts,tsx}"],
+      include: ["packages/**/*.{ts,tsx}"],
       exclude: [
-        "playground/**",
-        "src/**/*.d.ts",
-        "src/middleware.ts",
-        "src/middleware/index.ts",
-        "src/react/index.ts",
-        "src/core/types.ts",
-        "src/core/interfaces.ts",
-        "src/react/types.ts",
+        "packages/**/dist/**",
+        "packages/graph/**",
+        "packages/**/tsup.config.ts",
+        "packages/**/*.d.ts",
+        "packages/**/src/index.ts",
+        "packages/core/src/types.ts",
+        "packages/core/src/interfaces.ts",
+        "packages/react/src/types.ts",
       ],
       thresholds: {
         statements: 100,

@@ -6,11 +6,11 @@
 
 | Импорт                   | Типы                                                                                                                                                                                                                                                               |
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `lite-fsm`               | весь `types.ts` + `interfaces.ts`: `FSMEvent`, `MachineConfig`, `CFG`, `MachineReducer`, `MachineEffect`, `MachineManagerSnapshot`, `MachinesState`, `MachineEvents`, `MachineDependencies`, `IMachineManager`, `Middleware`, actor types, snapshot types, helpers |
-| `lite-fsm/react`         | `FSMContextType`, `FSMContextProviderProps`, `FSMPersistLifecycle`, `FSMHydrationBoundaryProps`, typed hook aliases                                                                                                                                                |
-| `lite-fsm/persist`       | `MaybePromise`, `PersistedRecord`, `PersistStorage`, `PersistStatus`, `PersistRestoreSettledResult`, `PersistManagerOptions`, `PersistController`                                                                                                                   |
-| `lite-fsm/persist/react` | runtime hooks only: `usePersistStatus`, `useIsPersistRestoring`                                                                                                                                                                                                    |
-| `lite-fsm/middleware`    | только runtime middleware                                                                                                                                                                                                                                          |
+| `@lite-fsm/core`          | весь `types.ts` + `interfaces.ts`: `FSMEvent`, `MachineConfig`, `CFG`, `MachineReducer`, `MachineEffect`, `MachineManagerSnapshot`, `MachinesState`, `MachineEvents`, `MachineDependencies`, `IMachineManager`, `Middleware`, actor types, snapshot types, helpers |
+| `@lite-fsm/react`         | `FSMContextType`, `FSMContextProviderProps`, `FSMPersistLifecycle`, `FSMHydrationBoundaryProps`, typed hook aliases                                                                                                                                                 |
+| `@lite-fsm/persist`       | `MaybePromise`, `PersistedRecord`, `PersistStorage`, `PersistStatus`, `PersistRestoreSettledResult`, `PersistManagerOptions`, `PersistController`                                                                                                                   |
+| `@lite-fsm/persist/react` | runtime hooks only: `usePersistStatus`, `useIsPersistRestoring`                                                                                                                                                                                                     |
+| `@lite-fsm/middleware`    | только runtime middleware                                                                                                                                                                                                                                           |
 
 ## Generics
 
@@ -220,7 +220,7 @@ type AppDeps = MachineDependencies<Store>;
 
 ## Persist
 
-`lite-fsm/persist` типизируется от того же `S extends MachineStore`, что и `MachineManager`.
+`@lite-fsm/persist` типизируется от того же `S extends MachineStore`, что и `MachineManager`.
 
 | Тип                        | Форма / назначение                                                                                         |
 | -------------------------- | ---------------------------------------------------------------------------------------------------------- |
@@ -354,7 +354,7 @@ export const useSelector: TypedUseSelectorHook<Store> = baseUseSelector;
 export const useTransition: TypedUseTransitionHook<Event> = baseUseTransition;
 ```
 
-`TypedUseSelectorHook<S>` принимает `MachineStore`, не computed `MachinesState<S>`. `getServerSnapshot` — root state shape `MachinesState<S>`, не dehydrated envelope; custom функция должна возвращать стабильный snapshot для SSR/hydration pass. `transitionAfterHydrate` принимает plain manager action или readonly array actions и выполняется только на клиенте после boundary hydrate. `persist` принимает structural lifecycle или readonly array lifecycle controllers; `lite-fsm/react` не импортирует `lite-fsm/persist`.
+`TypedUseSelectorHook<S>` принимает `MachineStore`, не computed `MachinesState<S>`. `getServerSnapshot` — root state shape `MachinesState<S>`, не dehydrated envelope; custom функция должна возвращать стабильный snapshot для SSR/hydration pass. `transitionAfterHydrate` принимает plain manager action или readonly array actions и выполняется только на клиенте после boundary hydrate. `persist` принимает structural lifecycle или readonly array lifecycle controllers; `@lite-fsm/react` не импортирует `@lite-fsm/persist`.
 
 ### React `defineMachine`
 
@@ -411,6 +411,6 @@ export type AppManager = IMachineManager<Store, AppEvent>;
 
 | Проверка                  | Команда                   |
 | ------------------------- | ------------------------- |
-| Типы по `src/`            | `npm run test:types`      |
-| Типы по собранному пакету | `npm run test:types:dist` |
-| Полный type-loop          | `npm run test:types:all`  |
+| Типы по source packages   | `pnpm run test:types`      |
+| Типы по собранным пакетам | `pnpm run test:types:dist` |
+| Полный type-loop          | `pnpm run test:types:all`  |

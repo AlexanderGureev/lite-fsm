@@ -1,142 +1,29 @@
 {
-  "name": "lite-fsm",
-  "version": "2.0.0",
+  "name": "lite-fsm-monorepo",
+  "private": true,
+  "version": "0.0.0",
   "type": "module",
-  "description": "lightweight finite state machine library",
+  "description": "Monorepo for lite-fsm packages, docs, and playground",
   "author": "Alexander Gureev <g.alex00@bk.ru> (https://github.com/AlexanderGureev)",
   "license": "MIT",
-  "main": "./dist/core.cjs",
-  "module": "./dist/core.js",
-  "types": "./dist/core.d.ts",
-  "sideEffects": false,
-  "exports": {
-    "./package.json": "./package.json",
-    ".": {
-      "import": {
-        "types": "./dist/core.d.ts",
-        "default": "./dist/core.js"
-      },
-      "require": {
-        "types": "./dist/core.d.cts",
-        "default": "./dist/core.cjs"
-      }
-    },
-    "./react": {
-      "import": {
-        "types": "./dist/react.d.ts",
-        "default": "./dist/react.js"
-      },
-      "require": {
-        "types": "./dist/react.d.cts",
-        "default": "./dist/react.cjs"
-      }
-    },
-    "./persist": {
-      "import": {
-        "types": "./dist/persist.d.ts",
-        "default": "./dist/persist.js"
-      },
-      "require": {
-        "types": "./dist/persist.d.cts",
-        "default": "./dist/persist.cjs"
-      }
-    },
-    "./persist/react": {
-      "import": {
-        "types": "./dist/persist/react.d.ts",
-        "default": "./dist/persist/react.js"
-      },
-      "require": {
-        "types": "./dist/persist/react.d.cts",
-        "default": "./dist/persist/react.cjs"
-      }
-    },
-    "./middleware": {
-      "import": {
-        "types": "./dist/middleware.d.ts",
-        "default": "./dist/middleware.js"
-      },
-      "require": {
-        "types": "./dist/middleware.d.cts",
-        "default": "./dist/middleware.cjs"
-      }
-    },
-    "./middleware/devTools": {
-      "import": {
-        "types": "./dist/middleware/devTools.d.ts",
-        "default": "./dist/middleware/devTools.js"
-      },
-      "require": {
-        "types": "./dist/middleware/devTools.d.cts",
-        "default": "./dist/middleware/devTools.cjs"
-      }
-    },
-    "./middleware/immer": {
-      "import": {
-        "types": "./dist/middleware/immer.d.ts",
-        "default": "./dist/middleware/immer.js"
-      },
-      "require": {
-        "types": "./dist/middleware/immer.d.cts",
-        "default": "./dist/middleware/immer.cjs"
-      }
-    }
-  },
-  "typesVersions": {
-    "*": {
-      "*": [
-        "dist/core.d.ts"
-      ],
-      "react": [
-        "dist/react.d.ts"
-      ],
-      "persist": [
-        "dist/persist.d.ts"
-      ],
-      "persist/react": [
-        "dist/persist/react.d.ts"
-      ],
-      "middleware": [
-        "dist/middleware.d.ts"
-      ],
-      "middleware/devTools": [
-        "dist/middleware/devTools.d.ts"
-      ],
-      "middleware/immer": [
-        "dist/middleware/immer.d.ts"
-      ]
-    }
-  },
-  "files": [
-    "dist"
-  ],
-  "keywords": [
-    "react",
-    "redux",
-    "fsm",
-    "finite-state machine"
-  ],
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/AlexanderGureev/lite-fsm.git"
-  },
+  "packageManager": "pnpm@10.33.0",
   "engines": {
-    "node": ">=16"
+    "node": ">=20"
   },
   "scripts": {
-    "build": "tsup --config tsup.config.ts && tsc -p tsconfig.build.json && node scripts/dts-to-dcts.mjs",
-    "playground:sync": "npm --prefix playground run sync:lite-fsm",
-    "playground:dev": "npm --prefix playground run dev",
-    "playground:build": "npm --prefix playground run build",
+    "build": "turbo run build",
+    "build:packages": "turbo run build --filter=@lite-fsm/core --filter=@lite-fsm/react --filter=@lite-fsm/middleware --filter=@lite-fsm/persist",
+    "check-types": "turbo run check-types --filter='./packages/*' && tsc --noEmit -p tsconfig.test.json && pnpm run test:types",
+    "check-types:apps": "pnpm run build:packages && pnpm run check-types:apps:dist",
+    "check-types:apps:dist": "turbo run check-types --filter='./apps/*'",
     "lint": "eslint .",
-    "lint:all": "npm run lint && npm run check-types",
+    "lint:all": "pnpm run lint && pnpm run check-types",
     "prepare": "husky",
-    "prepack": "npm run build && clean-package",
-    "postpack": "clean-package restore && npm run test:release",
-    "prepublishOnly": "npm run check-types && npm run lint && npm run test:coverage",
-    "docs:dev": "cd docs && next dev",
-    "docs:build": "cd docs && next build",
-    "docs:start": "cd docs && next start",
+    "docs:dev": "pnpm run build:packages && pnpm --filter @lite-fsm/docs dev",
+    "docs:build": "pnpm run build:packages && pnpm --filter @lite-fsm/docs build",
+    "docs:start": "pnpm --filter @lite-fsm/docs start",
+    "playground:dev": "pnpm run build:packages && pnpm --filter @lite-fsm/playground dev",
+    "playground:build": "pnpm run build:packages && pnpm --filter @lite-fsm/playground build",
     "pages:build": "node scripts/build-pages.mjs",
     "pages:build:fast": "node scripts/build-pages.mjs --skip-install",
     "pages:preview": "node scripts/preview-pages.mjs",
@@ -144,37 +31,25 @@
     "bench": "vitest bench tests/bench",
     "test:types": "tstyche",
     "test:types:dist": "tstyche --config tstyche.dist.json",
-    "test:types:all": "npm run test:types && npm run build && npm run test:types:dist",
+    "test:types:all": "pnpm run test:types && pnpm run build:packages && pnpm run test:types:dist",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:release": "publint --strict && node tests/smoke/esm.mjs && node tests/smoke/cjs.cjs && tsc --noEmit -p tests/smoke/tsconfig.json",
-    "check-types": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json && npm run test:types && npm run build && npm run playground:sync && npm --prefix playground run check-types",
-    "verify:release": "npm run check-types && npm run lint && npm run test:coverage && npm run build && npm run test:types:dist && npm pack --dry-run",
-    "release": "npm publish"
-  },
-  "clean-package": {
-    "indent": 2,
-    "remove": [
-      "devDependencies"
-    ]
-  },
-  "peerDependencies": {
-    "immer": ">=9.x",
-    "react": ">=18.0.0",
-    "use-sync-external-store": ">=1.2.0"
-  },
-  "peerDependenciesMeta": {
-    "immer": {
-      "optional": true
-    },
-    "react": {
-      "optional": true
-    },
-    "use-sync-external-store": {
-      "optional": true
-    }
+    "publint:release": "publint --strict packages/core && publint --strict packages/react && publint --strict packages/middleware && publint --strict packages/persist",
+    "smoke:release": "node tests/smoke/esm.mjs && node tests/smoke/cjs.cjs && tsc --noEmit -p tests/smoke/tsconfig.json",
+    "test:release": "pnpm run build:packages && pnpm run test:release:dist",
+    "test:release:dist": "pnpm run publint:release && pnpm run smoke:release",
+    "pack:release": "pnpm --filter @lite-fsm/core pack --dry-run && pnpm --filter @lite-fsm/react pack --dry-run && pnpm --filter @lite-fsm/middleware pack --dry-run && pnpm --filter @lite-fsm/persist pack --dry-run",
+    "verify:release": "pnpm run check-types && pnpm run lint && pnpm run test:coverage && pnpm run build:packages && pnpm run test:release:dist && pnpm run check-types:apps:dist && pnpm run test:types:dist && pnpm run pack:release",
+    "changeset": "changeset",
+    "version-packages": "changeset version",
+    "release": "pnpm run verify:release && changeset publish"
   },
   "devDependencies": {
+    "@lite-fsm/core": "workspace:*",
+    "@lite-fsm/middleware": "workspace:*",
+    "@lite-fsm/persist": "workspace:*",
+    "@lite-fsm/react": "workspace:*",
+    "@changesets/cli": "^2.29.7",
     "@eslint/js": "^9.39.4",
     "@playwright/test": "^1.59.1",
     "@testing-library/dom": "^10.4.1",
@@ -186,7 +61,6 @@
     "@types/use-sync-external-store": "^1.5.0",
     "@vitest/coverage-v8": "^4.1.4",
     "agent-browser": "^0.26.0",
-    "clean-package": "2.2.0",
     "eslint": "^9.39.4",
     "eslint-config-prettier": "^10.1.8",
     "eslint-import-resolver-typescript": "^4.4.4",
@@ -206,12 +80,19 @@
     "shadcn": "^4.6.0",
     "ts-node": "^10.9.2",
     "tslib": "^2.8.1",
-    "tstyche": "^7.1.0",
     "tsup": "^8.5.1",
+    "turbo": "^2.6.3",
+    "tstyche": "^7.1.0",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.58.2",
     "use-sync-external-store": "^1.6.0",
     "vite": "^8.0.8",
     "vitest": "^4.1.4"
+  },
+  "pnpm": {
+    "overrides": {
+      "nextra@4.6.1>zod": "4.3.6",
+      "nextra-theme-docs@4.6.1>zod": "4.3.6"
+    }
   }
 }

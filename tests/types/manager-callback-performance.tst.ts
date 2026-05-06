@@ -1,5 +1,5 @@
 import { describe, expect, test } from "tstyche";
-import { MachineManager } from "lite-fsm";
+import { MachineManager } from "@lite-fsm/core";
 import type {
   AnyEvent,
   MachineDependencies,
@@ -8,7 +8,7 @@ import type {
   ManagerAction,
   ManagerCommitAction,
   Middleware,
-} from "lite-fsm";
+} from "@lite-fsm/core";
 
 import type {
   AppMachines,

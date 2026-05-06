@@ -1,6 +1,6 @@
 import React from "react";
 import { describe, expect, test } from "tstyche";
-import { MachineManager } from "lite-fsm";
+import { MachineManager } from "@lite-fsm/core";
 import type {
   FSMEvent,
   MachineConfig,
@@ -9,9 +9,9 @@ import type {
   MachinesState,
   ManagerCommitAction,
   StateType,
-} from "lite-fsm";
-import { FSMContextProvider, type FSMContextProviderProps, type FSMPersistLifecycle } from "lite-fsm/react";
-import * as persistEntry from "lite-fsm/persist";
+} from "@lite-fsm/core";
+import { FSMContextProvider, type FSMContextProviderProps, type FSMPersistLifecycle } from "@lite-fsm/react";
+import * as persistEntry from "@lite-fsm/persist";
 import {
   createJsonStorage,
   persistManager,
@@ -22,9 +22,9 @@ import {
   type PersistStatus,
   type PersistStorage,
   type PersistedRecord,
-} from "lite-fsm/persist";
-import * as persistReactEntry from "lite-fsm/persist/react";
-import { useIsPersistRestoring, usePersistStatus } from "lite-fsm/persist/react";
+} from "@lite-fsm/persist";
+import * as persistReactEntry from "@lite-fsm/persist/react";
+import { useIsPersistRestoring, usePersistStatus } from "@lite-fsm/persist/react";
 
 import type { Assert, Equal } from "./_helpers";
 

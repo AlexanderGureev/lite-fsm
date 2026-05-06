@@ -50,19 +50,19 @@ import {
   type TypedCreateMachineFn,
   type UnknownMachineKeyContext,
   type WILDCARD,
-} from "lite-fsm";
+} from "@lite-fsm/core";
 
-import type { ActorIdentity as InternalActorIdentity, ActorRuntime as InternalActorRuntime } from "../../src/core/actor";
+import type { ActorIdentity as InternalActorIdentity, ActorRuntime as InternalActorRuntime } from "@lite-fsm/core/internal/actor";
 import type { Assert, Equal, IsNever } from "./_helpers";
 
 // @ts-expect-error! внутренние actor runtime типы не экспортируются из публичного entrypoint
-import type { ActorRuntime } from "lite-fsm";
+import type { ActorRuntime } from "@lite-fsm/core";
 // @ts-expect-error! внутренние actor effect deps не экспортируются из публичного entrypoint
-import type { InternalActorEffectDeps } from "lite-fsm";
+import type { InternalActorEffectDeps } from "@lite-fsm/core";
 // @ts-expect-error! внутренний sidecar state не экспортируется из публичного entrypoint
-import type { SidecarState } from "lite-fsm";
+import type { SidecarState } from "@lite-fsm/core";
 // @ts-expect-error! внутренний dispatch context не экспортируется из публичного entrypoint
-import type { DispatchContext } from "lite-fsm";
+import type { DispatchContext } from "@lite-fsm/core";
 
 type Spawn = FSMEvent<"SPAWN", { id: string }>;
 type Done = FSMEvent<"DONE", { ok: boolean }>;

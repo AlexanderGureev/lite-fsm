@@ -1,0 +1,65 @@
+{
+  "name": "@lite-fsm/persist",
+  "version": "2.0.0",
+  "type": "module",
+  "description": "Persistence helpers for lite-fsm",
+  "license": "MIT",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./react": {
+      "import": {
+        "types": "./dist/react.d.ts",
+        "default": "./dist/react.js"
+      },
+      "require": {
+        "types": "./dist/react.d.cts",
+        "default": "./dist/react.cjs"
+      }
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "*": ["dist/index.d.ts"],
+      "react": ["dist/react.d.ts"]
+    }
+  },
+  "files": ["dist"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AlexanderGureev/lite-fsm.git",
+    "directory": "packages/persist"
+  },
+  "engines": {
+    "node": ">=16"
+  },
+  "scripts": {
+    "build": "tsup --config tsup.config.ts && tsc -p tsconfig.build.json && node ../../scripts/dts-to-dcts.mjs dist",
+    "check-types": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@lite-fsm/core": "workspace:*",
+    "use-sync-external-store": ">=1.2.0"
+  },
+  "peerDependencies": {
+    "react": ">=18.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  }
+}

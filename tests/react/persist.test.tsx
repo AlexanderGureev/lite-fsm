@@ -4,11 +4,11 @@ import { act, render, waitFor } from "@testing-library/react";
 import { renderToString } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
-import { MachineManager } from "../../src/core/MachineManager";
-import type { MachineConfig, MachineReducer } from "../../src/core/types";
-import { FSMContextProvider, useSelector } from "../../src/react";
-import { persistManager, type PersistController, type PersistStatus, type PersistStorage } from "../../src/persist";
-import { useIsPersistRestoring, usePersistStatus } from "../../src/persist/react";
+import { MachineManager } from "@lite-fsm/core";
+import type { MachineConfig, MachineReducer } from "@lite-fsm/core";
+import { FSMContextProvider, useSelector } from "@lite-fsm/react";
+import { persistManager, type PersistController, type PersistStatus, type PersistStorage } from "@lite-fsm/persist";
+import { useIsPersistRestoring, usePersistStatus } from "@lite-fsm/persist/react";
 
 type Config = { IDLE: { INC: null } };
 type Action = { type: "INC" };
@@ -270,7 +270,7 @@ describe("FSMContextProvider persist", () => {
   });
 });
 
-describe("lite-fsm/persist/react", () => {
+describe("@lite-fsm/persist/react", () => {
   it("usePersistStatus возвращает stable snapshot и обновляется по подписке", () => {
     const controller = createStatusController();
     const seen: PersistStatus[] = [];

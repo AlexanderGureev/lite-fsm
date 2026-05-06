@@ -1,8 +1,8 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
 
-import { devToolsMiddleware } from "../../src/middleware/devTools";
-import { MachineManager } from "../../src/core/MachineManager";
+import { devToolsMiddleware } from "@lite-fsm/middleware/devTools";
+import { MachineManager } from "@lite-fsm/core";
 
 describe("devToolsMiddleware — без window (SSR)", () => {
   it("возвращает сквозной middleware и не трогает state", () => {

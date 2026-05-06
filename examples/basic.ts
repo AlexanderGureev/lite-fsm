@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { FSMEvent, MachineManager, TypedCreateMachineFn, createMachine as _createMachine } from "lite-fsm";
+import { FSMEvent, MachineManager, TypedCreateMachineFn, createMachine as _createMachine } from "@lite-fsm/core";
 
 interface IPlayerService {
   play(): void;

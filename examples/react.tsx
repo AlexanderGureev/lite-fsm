@@ -1,13 +1,13 @@
 // @ts-nocheck
-import { FSMEvent, MachineManager, TypedCreateMachineFn, createMachine as _createMachine } from "lite-fsm";
-import { immerMiddleware, devToolsMiddleware } from "lite-fsm/middleware";
+import { FSMEvent, MachineManager, TypedCreateMachineFn, createMachine as _createMachine } from "@lite-fsm/core";
+import { immerMiddleware, devToolsMiddleware } from "@lite-fsm/middleware";
 import {
   FSMContextProvider,
   TypedUseSelectorHook,
   TypedUseTransitionHook,
   useSelector as _useSelector,
   useTransition as _useTransition,
-} from "lite-fsm/react";
+} from "@lite-fsm/react";
 
 interface IPlayerService {
   play(): void;

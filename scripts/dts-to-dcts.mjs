@@ -1,7 +1,7 @@
 import { readdirSync, copyFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-const root = "dist";
+const root = process.argv[2] ?? "dist";
 
 const walk = (dir) => {
   for (const entry of readdirSync(dir)) {

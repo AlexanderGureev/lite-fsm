@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { MachineManager, Machine, defineMachine } from "../../src/core";
-import { LiteFsmError } from "../../src/core/utils";
-import type { GenericMiddleware, MachineConfig } from "../../src/core/types";
+import { MachineManager, Machine, defineMachine } from "@lite-fsm/core";
+import { LiteFsmError } from "@lite-fsm/core/internal/utils";
+import type { GenericMiddleware, MachineConfig } from "@lite-fsm/core";
 
 import { createLikeSync, type LikeEvent } from "./MachineManager.actors.fixtures";
 

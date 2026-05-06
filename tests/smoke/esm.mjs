@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 
-import * as core from "lite-fsm";
-import * as devTools from "lite-fsm/middleware/devTools";
-import * as immer from "lite-fsm/middleware/immer";
-import * as persist from "lite-fsm/persist";
-import * as persistReact from "lite-fsm/persist/react";
-import * as react from "lite-fsm/react";
-import * as middleware from "lite-fsm/middleware";
+import * as core from "@lite-fsm/core";
+import * as devTools from "@lite-fsm/middleware/devTools";
+import * as immer from "@lite-fsm/middleware/immer";
+import * as persist from "@lite-fsm/persist";
+import * as persistReact from "@lite-fsm/persist/react";
+import * as react from "@lite-fsm/react";
+import * as middleware from "@lite-fsm/middleware";
 
 assert.equal(typeof core.Machine, "function");
 assert.equal(typeof core.MachineManager, "function");

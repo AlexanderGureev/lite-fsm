@@ -8,8 +8,8 @@ import {
   createMachine,
   createReducer,
   defineMachine,
-} from "lite-fsm";
-import type { FSMEvent, MachineConfig, MachinesState } from "lite-fsm";
+} from "@lite-fsm/core";
+import type { FSMEvent, MachineConfig, MachinesState } from "@lite-fsm/core";
 import {
   FSMContext,
   FSMContextProvider,
@@ -19,17 +19,17 @@ import {
   useManager,
   useSelector,
   useTransition,
-} from "lite-fsm/react";
-import type { FSMContextType, FSMHydrationBoundaryProps } from "lite-fsm/react";
+} from "@lite-fsm/react";
+import type { FSMContextType, FSMHydrationBoundaryProps } from "@lite-fsm/react";
 import {
   devToolsMiddleware as devToolsMiddlewareAll,
   immerMiddleware as immerMiddlewareAll,
-} from "lite-fsm/middleware";
-import { devToolsMiddleware } from "lite-fsm/middleware/devTools";
-import { immerMiddleware } from "lite-fsm/middleware/immer";
-import { createJsonStorage, persistManager } from "lite-fsm/persist";
-import type { PersistController, PersistStorage } from "lite-fsm/persist";
-import { useIsPersistRestoring, usePersistStatus } from "lite-fsm/persist/react";
+} from "@lite-fsm/middleware";
+import { devToolsMiddleware } from "@lite-fsm/middleware/devTools";
+import { immerMiddleware } from "@lite-fsm/middleware/immer";
+import { createJsonStorage, persistManager } from "@lite-fsm/persist";
+import type { PersistController, PersistStorage } from "@lite-fsm/persist";
+import { useIsPersistRestoring, usePersistStatus } from "@lite-fsm/persist/react";
 
 type SmokeEvent = FSMEvent<"START">;
 type SmokeConfig = MachineConfig<any, any, SmokeEvent, {}>;

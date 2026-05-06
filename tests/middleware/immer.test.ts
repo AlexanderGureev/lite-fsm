@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 
-import { createMachine } from "../../src/core/Machine";
-import { immerMiddleware } from "../../src/middleware/immer";
-import { MiddlewareApi, Reducer } from "../../src/core/types";
+import { createMachine } from "@lite-fsm/core/internal/Machine";
+import { immerMiddleware } from "@lite-fsm/middleware/immer";
+import { MiddlewareApi, Reducer } from "@lite-fsm/core";
 
 type UnitState = { count: number; stable?: number };
 type UnitAction = { type: "PATCH" | "NOOP" };

@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createEffect, MachineManager } from "../../src/core";
-import { LiteFsmError } from "../../src/core/utils";
-import type { MachineConfig, Middleware } from "../../src/core/types";
+import { createEffect, MachineManager } from "@lite-fsm/core";
+import { LiteFsmError } from "@lite-fsm/core/internal/utils";
+import type { MachineConfig, Middleware } from "@lite-fsm/core";
 
 import {
   createLikeSync,

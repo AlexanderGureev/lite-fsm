@@ -1,5 +1,5 @@
 import { describe, expect, test } from "tstyche";
-import type { AnyEvent, EffectType, FSMEvent, Reducer, SType, State, WILDCARD } from "lite-fsm";
+import type { AnyEvent, EffectType, FSMEvent, Reducer, SType, State, WILDCARD } from "@lite-fsm/core";
 
 import type { Assert, Equal, IsAny, IsNever, IsUnknown, NotAny, NotNever } from "./_helpers";
 

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 
-import { createEffect, createMachine, createReducer, createConfig } from "../../src/core";
-import type { ActorTransition } from "../../src/core/types";
+import { createEffect, createMachine, createReducer, createConfig } from "@lite-fsm/core";
+import type { ActorTransition } from "@lite-fsm/core";
 
 const makeDeps = (actionType: string) => ({
   transition: vi.fn(),
@@ -119,7 +119,7 @@ describe("createEffect", () => {
     });
   });
 
-  describe("identity helpers из src/core/index.ts", () => {
+  describe("identity helpers из @lite-fsm/core", () => {
     it("createMachine возвращает переданный объект по ссылке (без копирования)", () => {
       const cfg = {
         config: { IDLE: { GO: "ACTIVE" }, ACTIVE: {} },

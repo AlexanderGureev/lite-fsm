@@ -1,5 +1,5 @@
 import { describe, expect, test } from "tstyche";
-import * as core from "lite-fsm";
+import * as core from "@lite-fsm/core";
 import type {
   FSMEvent,
   IMachineManager,
@@ -13,13 +13,13 @@ import type {
   StateType,
   TypedCreateEffectFn,
   TypedCreateMachineFn,
-} from "lite-fsm";
-import * as middleware from "lite-fsm/middleware";
-import * as devToolsEntry from "lite-fsm/middleware/devTools";
-import * as immerEntry from "lite-fsm/middleware/immer";
-import * as react from "lite-fsm/react";
-import { FSMContextProvider } from "lite-fsm/react";
-import type { TypedUseMachineHook } from "lite-fsm/react";
+} from "@lite-fsm/core";
+import * as middleware from "@lite-fsm/middleware";
+import * as devToolsEntry from "@lite-fsm/middleware/devTools";
+import * as immerEntry from "@lite-fsm/middleware/immer";
+import * as react from "@lite-fsm/react";
+import { FSMContextProvider } from "@lite-fsm/react";
+import type { TypedUseMachineHook } from "@lite-fsm/react";
 
 import type { Assert, Equal, IsNever } from "./_helpers";
 

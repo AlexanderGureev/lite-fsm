@@ -1,5 +1,5 @@
-import { createMachine as baseCreateMachine, MachineManager } from "../src/core";
-import type { FSMEvent, TypedCreateMachineFn } from "../src/core";
+import { createMachine as baseCreateMachine, MachineManager } from "@lite-fsm/core";
+import type { FSMEvent, TypedCreateMachineFn } from "@lite-fsm/core";
 
 type Events =
   | FSMEvent<"STROKE_APPEND">

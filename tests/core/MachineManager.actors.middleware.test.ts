@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { createActorMeta, MachineManager } from "../../src/core";
-import { EMPTY_ACTOR_RECORD } from "../../src/core/actor";
-import { LiteFsmError, VOID_REDUCER_ERROR } from "../../src/core/utils";
-import { immerMiddleware } from "../../src/middleware/immer";
-import type { GenericMiddleware, MachineConfig } from "../../src/core/types";
+import { createActorMeta, MachineManager } from "@lite-fsm/core";
+import { EMPTY_ACTOR_RECORD } from "@lite-fsm/core/internal/actor";
+import { LiteFsmError, VOID_REDUCER_ERROR } from "@lite-fsm/core/internal/utils";
+import { immerMiddleware } from "@lite-fsm/middleware/immer";
+import type { GenericMiddleware, MachineConfig } from "@lite-fsm/core";
 
 import { createLikeSync, createReplacingMiddleware, type LikeEvent } from "./MachineManager.actors.fixtures";
 

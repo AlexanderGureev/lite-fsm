@@ -1,9 +1,9 @@
 # lite-fsm
 
-[![Build Status](https://github.com/AlexanderGureev/lite-fsm/actions/workflows/deploy-docs.yml/badge.svg)](https://github.com/AlexanderGureev/lite-fsm/actions)
-[![Bundle Size](https://img.shields.io/bundlephobia/minzip/lite-fsm)](https://bundlephobia.com/package/lite-fsm)
-[![npm version](https://img.shields.io/npm/v/lite-fsm.svg)](https://www.npmjs.com/package/lite-fsm)
-[![npm downloads](https://img.shields.io/npm/dm/lite-fsm.svg)](https://www.npmjs.com/package/lite-fsm)
+[![Build Status](https://github.com/AlexanderGureev/lite-fsm/actions/workflows/deploy-pages.yml/badge.svg)](https://github.com/AlexanderGureev/lite-fsm/actions)
+[![Bundle Size](https://img.shields.io/bundlephobia/minzip/@lite-fsm/core)](https://bundlephobia.com/package/@lite-fsm/core)
+[![npm version](https://img.shields.io/npm/v/@lite-fsm/core.svg)](https://www.npmjs.com/package/@lite-fsm/core)
+[![npm downloads](https://img.shields.io/npm/dm/@lite-fsm/core.svg)](https://www.npmjs.com/package/@lite-fsm/core)
 [![Coverage Status](https://coveralls.io/repos/github/AlexanderGureev/lite-fsm/badge.svg)](https://coveralls.io/github/AlexanderGureev/lite-fsm)
 
 lite-fsm is a lightweight finite state machine library
@@ -13,11 +13,11 @@ lite-fsm is a lightweight finite state machine library
 - Simple and clear API
 - Provides application architecture out of the box (global store, effects, service layer)
 - Support redux middleware
-- [Small size](https://bundlephobia.com/package/lite-fsm) and no [dependencies](./package.json)
+- [Small size](https://bundlephobia.com/package/@lite-fsm/core) and no runtime dependencies in `@lite-fsm/core`
 
 ### Install
 
-    npm install lite-fsm
+    pnpm add @lite-fsm/core
 
 ## Documentation
 
@@ -31,7 +31,7 @@ The full documentation is available at [https://alexandergureev.github.io/lite-f
 ### Quickstart (basic example)
 
 ```ts
-import { createMachine, MachineManager } from "lite-fsm";
+import { createMachine, MachineManager } from "@lite-fsm/core";
 
 const playback = createMachine({
   config: {

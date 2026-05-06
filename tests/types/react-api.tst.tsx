@@ -14,8 +14,8 @@ import type {
   PublicActorSlice,
   StateType,
   Subscriber,
-} from "lite-fsm";
-import { MachineManager } from "lite-fsm";
+} from "@lite-fsm/core";
+import { MachineManager } from "@lite-fsm/core";
 import {
   defineMachine,
   FSMContext,
@@ -32,7 +32,7 @@ import {
   useHydrateSnapshot,
   useSelector,
   useTransition,
-} from "lite-fsm/react";
+} from "@lite-fsm/react";
 
 import type { Assert, Equal } from "./_helpers";
 

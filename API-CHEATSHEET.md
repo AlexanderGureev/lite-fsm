@@ -6,14 +6,14 @@
 
 | Импорт                                                       | Runtime exports                                                                                                                                   |
 | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `lite-fsm`                                                   | `createMachine`, `createConfig`, `createReducer`, `createEffect`, `createActorMeta`, `Machine`, `defineMachine`, `MachineManager`, `LiteFsmError` |
-| `lite-fsm/persist`                                           | `persistManager`, `createJsonStorage`                                                                                                             |
-| `lite-fsm/persist/react`                                     | `usePersistStatus`, `useIsPersistRestoring`                                                                                                       |
-| `lite-fsm/middleware`                                        | `immerMiddleware`, `devToolsMiddleware`                                                                                                           |
-| `lite-fsm/middleware/immer` · `lite-fsm/middleware/devTools` | per-feature entry points                                                                                                                          |
-| `lite-fsm/react`                                             | `FSMContext`, `FSMContextProvider`, `FSMHydrationBoundary`, `useHydrateSnapshot`, `useManager`, `useSelector`, `useTransition`, `defineMachine`   |
+| `@lite-fsm/core`                                                       | `createMachine`, `createConfig`, `createReducer`, `createEffect`, `createActorMeta`, `Machine`, `defineMachine`, `MachineManager`, `LiteFsmError` |
+| `@lite-fsm/persist`                                                    | `persistManager`, `createJsonStorage`                                                                                                             |
+| `@lite-fsm/persist/react`                                              | `usePersistStatus`, `useIsPersistRestoring`                                                                                                       |
+| `@lite-fsm/middleware`                                                 | `immerMiddleware`, `devToolsMiddleware`                                                                                                           |
+| `@lite-fsm/middleware/immer` · `@lite-fsm/middleware/devTools`         | per-feature entry points                                                                                                                          |
+| `@lite-fsm/react`                                                      | `FSMContext`, `FSMContextProvider`, `FSMHydrationBoundary`, `useHydrateSnapshot`, `useManager`, `useSelector`, `useTransition`, `defineMachine`   |
 
-`lite-fsm/react` помечен `"use client"`. Импортировать можно из SSR/RSC, hooks/provider — только в client tree.
+`@lite-fsm/react` помечен `"use client"`. Импортировать можно из SSR/RSC, hooks/provider — только в client tree.
 
 ## Mental model
 
@@ -281,7 +281,7 @@ Unknown machine keys пропускаются: в DEV — warning + `onUnknownMa
 
 ## Persist
 
-`lite-fsm/persist` — опциональный слой поверх `MachineManager.dehydrate()`, `hydrate()` и `onTransition()`. Core entrypoint его не импортирует.
+`@lite-fsm/persist` — опциональный слой поверх `MachineManager.dehydrate()`, `hydrate()` и `onTransition()`. Core entrypoint его не импортирует.
 
 ```ts
 const storage = createJsonStorage<AppStore>({
@@ -505,11 +505,11 @@ function Counter() {
 
 `FSMContextProvider` принимает `getServerSnapshot?: () => MachinesState<S>` и `persist?: { start(): () => void } | readonly { start(): () => void }[]`. Без `getServerSnapshot` он кеширует `machineManager.getState()` для текущего manager-а на первом render-е. Это root state для React `useSyncExternalStore`, не `MachineManagerSnapshot` envelope.
 
-`persist` — structural lifecycle prop: provider вызывает `start()` в `useEffect`, а cleanup вызывает возвращённые stop-функции. `lite-fsm/react` не зависит от `lite-fsm/persist`, поэтому туда можно передать любой совместимый controller.
+`persist` — structural lifecycle prop: provider вызывает `start()` в `useEffect`, а cleanup вызывает возвращённые stop-функции. `@lite-fsm/react` не зависит от `@lite-fsm/persist`, поэтому туда можно передать любой совместимый controller.
 
 ```tsx
-import type { PersistController } from "lite-fsm/persist";
-import { useIsPersistRestoring, usePersistStatus } from "lite-fsm/persist/react";
+import type { PersistController } from "@lite-fsm/persist";
+import { useIsPersistRestoring, usePersistStatus } from "@lite-fsm/persist/react";
 
 function PersistBadge({ persist }: { persist: PersistController }) {
   const status = usePersistStatus(persist);
@@ -573,8 +573,8 @@ Hook-instance совмещает методы standalone machine (`transition`, 
 
 | Проверка             | Команда                  |
 | -------------------- | ------------------------ |
-| Unit tests           | `npm run test`           |
-| Type tests           | `npm run test:types`     |
-| Typecheck            | `npm run check-types`    |
-| Lint                 | `npm run lint`           |
-| Release verification | `npm run verify:release` |
+| Unit tests           | `pnpm run test`           |
+| Type tests           | `pnpm run test:types`     |
+| Typecheck            | `pnpm run check-types`    |
+| Lint                 | `pnpm run lint`           |
+| Release verification | `pnpm run verify:release` |

@@ -4,8 +4,8 @@ import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 const sourceText = `
-import { createMachine as baseCreateMachine } from "../../src/core";
-import type { FSMEvent, TypedCreateMachineFn } from "../../src/core";
+import { createMachine as baseCreateMachine } from "@lite-fsm/core";
+import type { FSMEvent, TypedCreateMachineFn } from "@lite-fsm/core";
 
 type Evt = FSMEvent<"SPAWN"> | FSMEvent<"DONE"> | FSMEvent<"GO">;
 
@@ -111,8 +111,8 @@ baseCreateMachine({
 
 const actorHooksCompletionMarker = "/* actor-hooks-completion */";
 const completionSourceTextWithMarker = `
-import { createMachine as baseCreateMachine } from "../../src/core";
-import type { FSMEvent, TypedCreateMachineFn } from "../../src/core";
+import { createMachine as baseCreateMachine } from "@lite-fsm/core";
+import type { FSMEvent, TypedCreateMachineFn } from "@lite-fsm/core";
 
 type Evt = FSMEvent<"SPAWN"> | FSMEvent<"DONE">;
 
@@ -147,6 +147,9 @@ const options: ts.CompilerOptions = {
   jsx: ts.JsxEmit.ReactJSX,
   skipLibCheck: true,
   noEmit: true,
+  paths: {
+    "@lite-fsm/core": ["./packages/core/src/index.ts"],
+  },
 };
 
 const createProgram = () => {

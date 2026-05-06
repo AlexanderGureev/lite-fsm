@@ -36,10 +36,10 @@ import {
   type TypedCreateMachineFn,
   type TypedCreateReducerFn,
   type WILDCARD,
-} from "lite-fsm";
-import { devToolsMiddleware as devToolsFromAll, immerMiddleware as immerFromAll } from "lite-fsm/middleware";
-import { devToolsMiddleware } from "lite-fsm/middleware/devTools";
-import { immerMiddleware } from "lite-fsm/middleware/immer";
+} from "@lite-fsm/core";
+import { devToolsMiddleware as devToolsFromAll, immerMiddleware as immerFromAll } from "@lite-fsm/middleware";
+import { devToolsMiddleware } from "@lite-fsm/middleware/devTools";
+import { immerMiddleware } from "@lite-fsm/middleware/immer";
 import {
   FSMContext,
   FSMContextProvider,
@@ -51,7 +51,7 @@ import {
   type TypedUseMachineHook,
   type TypedUseSelectorHook,
   type TypedUseTransitionHook,
-} from "lite-fsm/react";
+} from "@lite-fsm/react";
 
 type Equal<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2

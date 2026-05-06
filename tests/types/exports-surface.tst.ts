@@ -1,5 +1,5 @@
 import { describe, expect, test } from "tstyche";
-import { createActorMeta } from "lite-fsm";
+import { createActorMeta } from "@lite-fsm/core";
 import type {
   ActionForState,
   ActorActionForState,
@@ -84,7 +84,7 @@ import type {
   UnknownMachineKeyContext,
   VoidReducerMiddleware,
   WILDCARD,
-} from "lite-fsm";
+} from "@lite-fsm/core";
 
 import type { Assert, Equal } from "./_helpers";
 

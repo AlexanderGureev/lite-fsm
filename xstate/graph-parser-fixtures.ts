@@ -1,5 +1,4 @@
 // @ts-nocheck
-/* eslint-disable */
 
 // Fixture для будущего graph compiler-а.
 // Файл специально не обязан компилироваться или запускаться как приложение.
@@ -15,7 +14,7 @@ import {
   createReducer,
   MachineManager,
   MachineManager as RenamedMachineManager,
-} from "../src/core";
+} from "@lite-fsm/core";
 
 const READY = "READY";
 const DONE = "DONE";

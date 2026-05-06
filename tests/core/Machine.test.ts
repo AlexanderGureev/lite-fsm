@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 
-import { CreateMachine } from "../../src/core/Machine";
-import { WILDCARD } from "../../src/core/utils";
+import { CreateMachine } from "@lite-fsm/core/internal/Machine";
+import { WILDCARD } from "@lite-fsm/core/internal/utils";
 
 describe("CreateMachine — чистая функция", () => {
   describe("переданный config", () => {

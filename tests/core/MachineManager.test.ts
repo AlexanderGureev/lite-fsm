@@ -1,9 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
 
-import { MachineManager } from "../../src/core/MachineManager";
-import { immerMiddleware } from "../../src/middleware/immer";
-import { VOID_REDUCER_ERROR, WILDCARD } from "../../src/core/utils";
-import type { AnyEvent, MachineReducer, Middleware } from "../../src/core/types";
+import { MachineManager } from "@lite-fsm/core";
+import { immerMiddleware } from "@lite-fsm/middleware/immer";
+import { VOID_REDUCER_ERROR, WILDCARD } from "@lite-fsm/core/internal/utils";
+import type { AnyEvent, MachineReducer, Middleware } from "@lite-fsm/core";
 
 describe("MachineManager", () => {
   describe("базовое поведение", () => {

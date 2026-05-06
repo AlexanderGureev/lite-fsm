@@ -3,7 +3,7 @@ import React from "react";
 import { describe, it, expect, vi } from "vitest";
 import { render, renderHook, act } from "@testing-library/react";
 
-import { defineMachine } from "../../src/react";
+import { defineMachine } from "@lite-fsm/react";
 
 describe("defineMachine для React", () => {
   it("создаёт hook-машину: use/getState/transition/onTransition/addMiddleware", () => {

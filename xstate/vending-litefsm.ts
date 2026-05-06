@@ -1,6 +1,6 @@
-import { createMachine as baseCreateMachine, MachineManager } from "../src/core";
-import type { FSMEvent, MachinesState, TypedCreateMachineFn } from "../src/core";
-import { immerMiddleware } from "../src/middleware/immer";
+import { createMachine as baseCreateMachine, MachineManager } from "@lite-fsm/core";
+import type { FSMEvent, MachinesState, TypedCreateMachineFn } from "@lite-fsm/core";
+import { immerMiddleware } from "@lite-fsm/middleware/immer";
 
 export type VendingContext = {};
 

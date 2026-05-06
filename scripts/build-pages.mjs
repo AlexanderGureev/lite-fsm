@@ -3,8 +3,8 @@ import { cpSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const repoRoot = resolve(import.meta.dirname, "..");
-const docsDir = resolve(repoRoot, "docs");
-const playgroundDir = resolve(repoRoot, "playground");
+const docsDir = resolve(repoRoot, "apps/docs");
+const playgroundDir = resolve(repoRoot, "apps/playground");
 const docsOut = resolve(docsDir, "out");
 const playgroundOut = resolve(playgroundDir, "out");
 const playgroundInDocs = resolve(docsOut, "playground");
@@ -17,12 +17,11 @@ const run = (cmd, opts = {}) => {
   execSync(cmd, { stdio: "inherit", ...opts, cwd });
 };
 
-if (!skipInstall) run("npm ci");
-run("npm run build");
+if (!skipInstall) run("pnpm install --frozen-lockfile");
+run("pnpm run build:packages");
 
-if (!skipInstall) run("npm ci", { cwd: docsDir });
-run("npx next build", { cwd: docsDir, env: { ...process.env, NODE_ENV: "production" } });
-run("npx pagefind --site .next/server/app --output-path out/_pagefind", { cwd: docsDir });
+run("pnpm --dir apps/docs exec next build", { env: { ...process.env, NODE_ENV: "production" } });
+run("pnpm --dir apps/docs exec pagefind --site .next/server/app --output-path out/_pagefind");
 
 writeFileSync(resolve(docsOut, "_pagefind-config.json"), '{ "baseUrl": "/lite-fsm" }\n');
 writeFileSync(
@@ -30,8 +29,7 @@ writeFileSync(
   `window.PagefindConfig = {\n  baseUrl: "/lite-fsm",\n  bundlePath: "/lite-fsm/_pagefind/"\n};\n`,
 );
 
-if (!skipInstall) run("npm ci", { cwd: playgroundDir });
-run("npx next build", { cwd: playgroundDir, env: { ...process.env, NODE_ENV: "production" } });
+run("pnpm --dir apps/playground exec next build", { env: { ...process.env, NODE_ENV: "production" } });
 
 rmSync(playgroundInDocs, { recursive: true, force: true });
 mkdirSync(playgroundInDocs, { recursive: true });

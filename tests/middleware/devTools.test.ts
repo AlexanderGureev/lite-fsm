@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import { devToolsMiddleware } from "../../src/middleware/devTools";
-import { immerMiddleware } from "../../src/middleware/immer";
-import { MachineManager } from "../../src/core/MachineManager";
-import { HYDRATE_ACTION_TYPE } from "../../src/core/utils";
-import type { AnyEvent, FSMEvent, MachineConfig, MachineReducer } from "../../src/core/types";
+import { devToolsMiddleware } from "@lite-fsm/middleware/devTools";
+import { immerMiddleware } from "@lite-fsm/middleware/immer";
+import { MachineManager } from "@lite-fsm/core";
+import { HYDRATE_ACTION_TYPE } from "@lite-fsm/core/internal/utils";
+import type { AnyEvent, FSMEvent, MachineConfig, MachineReducer } from "@lite-fsm/core";
 
 type DevtoolsMessage = {
   type: string;

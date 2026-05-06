@@ -14,7 +14,7 @@ import {
   type TypedCreateEffectFn,
   type TypedCreateMachineFn,
   type TypedCreateReducerFn,
-} from "lite-fsm";
+} from "@lite-fsm/core";
 
 import type { Assert, Equal, IsNever } from "./_helpers";
 

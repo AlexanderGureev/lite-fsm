@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { MachineManager } from "../../src/core/MachineManager";
-import type { MachineConfig, MachineReducer } from "../../src/core/types";
+import { MachineManager } from "@lite-fsm/core";
+import type { MachineConfig, MachineReducer } from "@lite-fsm/core";
 
 type Config = { IDLE: { INC: null } };
 type Action = { type: "INC" };

@@ -2,16 +2,16 @@
 
 ## Назначение
 
-Этот документ описывает только дизайн `playground/`.
+Этот документ описывает только дизайн `apps/playground/`.
 
 Источники истины:
 
-- `playground/app/globals.css`
-- `playground/app/layout.tsx`
-- `playground/app/page.tsx`
-- `playground/components/*`
-- `playground/app/examples/**/components/*`
-- `playground/lib/examples-manifest.ts`
+- `apps/playground/app/globals.css`
+- `apps/playground/app/layout.tsx`
+- `apps/playground/app/page.tsx`
+- `apps/playground/components/*`
+- `apps/playground/app/examples/**/components/*`
+- `apps/playground/lib/examples-manifest.ts`
 
 Документ является строгой спецификацией, а не changelog. Если реализация playground меняет токены, компоненты, навигацию, категорию примеров или поведение состояний, этот файл обновляется в той же правке.
 
@@ -126,7 +126,7 @@ Use this gradient only for the `lite-fsm` word in the homepage hero.
 
 ## Typography
 
-Fonts are loaded in `playground/app/layout.tsx`:
+Fonts are loaded in `apps/playground/app/layout.tsx`:
 
 - Sans: `Onest`, CSS variable `--font-sans`, weights `300 400 500 600 700`.
 - Display: `Unbounded`, CSS variable `--font-display`, weights `400 500 600 700 800`.
@@ -401,7 +401,7 @@ No icon tile, top accent bar or tag-pill footer may be reintroduced unless `Exam
 - Brand block:
   - 8px `primary` dot;
   - `lite-fsm` in `text-caption-strong`;
-  - `playground` pill in `canvas-parchment`;
+  - `apps/playground` pill in `canvas-parchment`;
   - body copy `text-body text-ink-muted-80`.
 - Links:
   - grid `grid-cols-2 sm:grid-cols-3`;
@@ -590,7 +590,7 @@ All interactive targets should remain at least visually comfortable on touch. Pr
 
 ## Prohibited
 
-- Не документировать паттерны, которых нет в текущих `playground/` исходниках.
+- Не документировать паттерны, которых нет в текущих `apps/playground/` исходниках.
 - Не добавлять второй общий интерактивный акцент.
 - Не использовать category colors для global actions, nav links, primary buttons или focus rings.
 - Не добавлять idle shadows к cards, buttons или badges.

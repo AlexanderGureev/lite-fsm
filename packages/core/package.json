@@ -1,0 +1,43 @@
+{
+  "name": "@lite-fsm/core",
+  "version": "2.0.0",
+  "type": "module",
+  "description": "Framework-agnostic runtime for lite-fsm",
+  "license": "MIT",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "*": ["dist/index.d.ts"]
+    }
+  },
+  "files": ["dist"],
+  "keywords": ["fsm", "finite-state machine"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AlexanderGureev/lite-fsm.git",
+    "directory": "packages/core"
+  },
+  "engines": {
+    "node": ">=16"
+  },
+  "scripts": {
+    "build": "tsup --config tsup.config.ts && tsc -p tsconfig.build.json && node ../../scripts/dts-to-dcts.mjs dist",
+    "check-types": "tsc --noEmit -p tsconfig.json"
+  }
+}

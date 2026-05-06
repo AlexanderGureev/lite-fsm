@@ -1,19 +1,10 @@
 {
-  "extends": "./tsconfig.json",
+  "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "rootDir": ".",
     "noUnusedLocals": false,
     "noUnusedParameters": false,
-    "types": ["node", "react"],
-    "paths": {
-      "lite-fsm": ["./src/core.ts"],
-      "lite-fsm/react": ["./src/react.ts"],
-      "lite-fsm/persist": ["./src/persist.ts"],
-      "lite-fsm/persist/react": ["./src/persist/react.ts"],
-      "lite-fsm/middleware": ["./src/middleware.ts"],
-      "lite-fsm/middleware/devTools": ["./src/middleware/devTools.ts"],
-      "lite-fsm/middleware/immer": ["./src/middleware/immer.ts"]
-    }
+    "types": ["node", "react"]
   },
-  "include": ["src", "tests/types"]
+  "include": ["packages/*/src", "tests/types"]
 }

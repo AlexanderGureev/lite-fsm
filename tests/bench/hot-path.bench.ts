@@ -1,7 +1,7 @@
 import { bench, describe } from "vitest";
 
-import { MachineManager } from "../../src/core/MachineManager";
-import type { MachineConfig, MachineStore } from "../../src/core/types";
+import { MachineManager } from "@lite-fsm/core";
+import type { MachineConfig, MachineStore } from "@lite-fsm/core";
 
 type Event =
   | { type: "SPAWN_ENEMY" }

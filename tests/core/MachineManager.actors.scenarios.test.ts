@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { MachineManager } from "../../src/core";
-import type { MachineConfig } from "../../src/core/types";
+import { MachineManager } from "@lite-fsm/core";
+import type { MachineConfig } from "@lite-fsm/core";
 
 describe("MachineManager actors — характерные сценарии", () => {
   it("likes scenario: unscoped LIKE создаёт actor, domain видит LIKE, actor resolve/reject обновляет domain", () => {

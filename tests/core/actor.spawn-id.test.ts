@@ -6,7 +6,7 @@ import {
   isOwnedId,
   parseSpawnId,
   SPAWN_ID_SEP,
-} from "../../src/core/actor";
+} from "@lite-fsm/core/internal/actor";
 
 const makeCounters = (actor = 0, groups: Array<[string, number]> = []): Counters => ({
   actor,

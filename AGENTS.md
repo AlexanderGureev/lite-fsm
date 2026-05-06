@@ -4,14 +4,16 @@
 
 `lite-fsm` — легковесная TypeScript-библиотека для FSM.
 
-- `lite-fsm`: независимые от фреймворков `createMachine`, `MachineManager`, эффекты и middleware.
-- `lite-fsm/react`: React-контекст и хуки.
-- `lite-fsm/middleware`: опциональные интеграции, такие как DevTools и Immer.
+- `@lite-fsm/core`: независимые от фреймворков `createMachine`, `MachineManager`, эффекты и core types.
+- `@lite-fsm/react`: React-контекст и хуки.
+- `@lite-fsm/middleware`: опциональные интеграции, такие как DevTools и Immer.
+- `@lite-fsm/persist`: persistence helpers.
 
 ## Жесткие правила
 
 - Держи публичный API небольшим, предсказуемым и строго типизированным.
 - При изменении публичного API или типов обновляй `API-CHEATSHEET.md` и `TYPES-CHEATSHEET.md`; они должны оставаться справочниками возможностей, а не changelog.
+- Агентам запрещено запускать сборку документации и команды, которые транзитивно ее запускают: `pnpm run build`, `pnpm --filter @lite-fsm/docs build`, `pnpm run docs:build`, `pnpm run pages:build*` и любые `next build` внутри `apps/docs`. Если нужна проверка docs build, явно передай ее пользователю; для агентной проверки пакетов используй `pnpm run build:packages`.
 
 ## Стиль кода
 
@@ -34,13 +36,15 @@
 
 ## Структура
 
-- `src/core/`: FSM runtime, manager, types и interfaces.
-- `src/react/`: React provider, context и hooks.
-- `src/middleware/`: middleware entrypoints и integrations.
+- `packages/core/src/`: FSM runtime, manager, types и interfaces.
+- `packages/react/src/`: React provider, context и hooks.
+- `packages/middleware/src/`: middleware entrypoints и integrations.
+- `packages/persist/src/`: persistence helpers.
+- `packages/graph/`: private/experimental graph tooling workspace.
 - `tests/`: runtime tests, smoke tests и Tstyche type tests.
-- `docs/` и `playground/`: документация и demos.
+- `apps/docs/` и `apps/playground/`: документация и demos.
 
 ## Команды
 
-- Основные проверки: `npm run test`, `npm run test:types`, `npm run check-types`, `npm run lint`.
-- Релизные проверки: `npm run build`, `npm run verify:release`.
+- Основные проверки: `pnpm run test`, `pnpm run test:types`, `pnpm run check-types`, `pnpm run lint`.
+- Релизные проверки: `pnpm run build`, `pnpm run verify:release`.

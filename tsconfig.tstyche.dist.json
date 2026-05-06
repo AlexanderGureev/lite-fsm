@@ -1,10 +1,14 @@
 {
-  "extends": "./tsconfig.json",
+  "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "rootDir": ".",
     "noUnusedLocals": false,
     "noUnusedParameters": false,
-    "types": ["node", "react"]
+    "types": ["node", "react"],
+    "paths": {
+      "@lite-fsm/core/internal/*": ["./packages/core/src/*"],
+      "@lite-fsm/persist/internal/*": ["./packages/persist/src/*"]
+    }
   },
   "include": ["tests/types"]
 }

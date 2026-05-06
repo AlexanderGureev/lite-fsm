@@ -1,0 +1,75 @@
+{
+  "name": "@lite-fsm/middleware",
+  "version": "2.0.0",
+  "type": "module",
+  "description": "Optional middleware integrations for lite-fsm",
+  "license": "MIT",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./devTools": {
+      "import": {
+        "types": "./dist/devTools.d.ts",
+        "default": "./dist/devTools.js"
+      },
+      "require": {
+        "types": "./dist/devTools.d.cts",
+        "default": "./dist/devTools.cjs"
+      }
+    },
+    "./immer": {
+      "import": {
+        "types": "./dist/immer.d.ts",
+        "default": "./dist/immer.js"
+      },
+      "require": {
+        "types": "./dist/immer.d.cts",
+        "default": "./dist/immer.cjs"
+      }
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "*": ["dist/index.d.ts"],
+      "devTools": ["dist/devTools.d.ts"],
+      "immer": ["dist/immer.d.ts"]
+    }
+  },
+  "files": ["dist"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AlexanderGureev/lite-fsm.git",
+    "directory": "packages/middleware"
+  },
+  "engines": {
+    "node": ">=16"
+  },
+  "scripts": {
+    "build": "tsup --config tsup.config.ts && tsc -p tsconfig.build.json && node ../../scripts/dts-to-dcts.mjs dist",
+    "check-types": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@lite-fsm/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "immer": ">=9.x"
+  },
+  "peerDependenciesMeta": {
+    "immer": {
+      "optional": true
+    }
+  }
+}

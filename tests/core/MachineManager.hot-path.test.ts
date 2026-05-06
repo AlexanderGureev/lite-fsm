@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { MachineManager } from "../../src/core/MachineManager";
-import type { MachineConfig } from "../../src/core/types";
+import { MachineManager } from "@lite-fsm/core";
+import type { MachineConfig } from "@lite-fsm/core";
 
 describe("MachineManager — hot-path индексы", () => {
   it("не вызывает domain reducer для action без transition edge", () => {

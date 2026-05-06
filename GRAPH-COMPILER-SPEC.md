@@ -113,7 +113,8 @@ MachineManager({ machineA, inline: createMachine({ ... }) }, options);
 Известные source specifiers для v1:
 
 - `"@lite-fsm/core"`;
-- `"../src/core"` для текущих fixture-ов и внутренних тестов до миграции в монорепу.
+
+После миграции в монорепу fixture-ы и внутренние тесты должны использовать package import `"@lite-fsm/core"`, а не legacy-пути вида `"../src/core"`.
 
 Парсер не должен считать произвольный импорт из любого модуля API `@lite-fsm/core`, даже если локальное имя похоже на `createMachine`.
 
@@ -621,11 +622,13 @@ LFG_AMBIGUOUS_MACHINE_SELECTOR
 @lite-fsm/core        runtime createMachine, MachineManager, core types
 @lite-fsm/react       React bindings
 @lite-fsm/middleware  optional middleware packages/entrypoints
-@lite-fsm/graph       graph compiler, IR, analyzer, simulator, view-model
-@lite-fsm/cli         CLI package
+@lite-fsm/graph       private/experimental graph compiler workspace до стабилизации API
+@lite-fsm/cli         будущий CLI package; не является обязательным publish target v1
 ```
 
 Graph API не должен жить внутри runtime-пакета. `@lite-fsm/core` не зависит от `@lite-fsm/graph`, `ts-morph`, TypeScript parser tooling или CLI. Это сохраняет lightweight runtime и позволяет graph tooling развиваться отдельно.
+
+На первом этапе `@lite-fsm/graph` остается private/experimental workspace package и не входит в fixed release group runtime-пакетов. Runtime fixed group включает `@lite-fsm/core`, `@lite-fsm/react`, `@lite-fsm/middleware` и `@lite-fsm/persist`.
 
 Export:
 
@@ -1063,13 +1066,14 @@ export const machine = createMachine({
 
 1. Проект переходит на монорепу и scoped packages `@lite-fsm/*`; миграция монорепы будет описана отдельным ТЗ.
 2. Runtime живет в `@lite-fsm/core`; graph tooling живет отдельно в `@lite-fsm/graph` и не попадает в runtime dependencies.
-3. CLI живет отдельно в `@lite-fsm/cli` и зависит от `@lite-fsm/graph`.
-4. `trustedEval` не входит в v1 API. Единственный parser mode v1 - static parser.
-5. Ручные graph/codegen metadata не входят в v1 и появятся только после реального сценария редактирования диаграммы или codegen.
-6. Stable IDs строятся от semantic path; source location хранится отдельно и не является публичной частью ID.
-7. Actor template simulation по умолчанию использует `spawnLifecycle`. `activeActor` требует явный `startState`, кроме случая с единственным однозначным public state.
-8. Reducer-derived targets не перекрывают `config` слой в IR. UI и simulator используют reducer layer как effective branch, но сохраняют config acceptance видимым.
-9. `dead-end-state` и `effect-event-acceptance` остаются analyzer rules, но по умолчанию не должны создавать жесткий warning для неполных single-machine snippets.
+3. `@lite-fsm/graph` на первом этапе private/experimental и не публикуется вместе с runtime fixed group.
+4. CLI живет отдельно в `@lite-fsm/cli` и зависит от `@lite-fsm/graph`, но не является обязательным publish target до стабилизации graph API.
+5. `trustedEval` не входит в v1 API. Единственный parser mode v1 - static parser.
+6. Ручные graph/codegen metadata не входят в v1 и появятся только после реального сценария редактирования диаграммы или codegen.
+7. Stable IDs строятся от semantic path; source location хранится отдельно и не является публичной частью ID.
+8. Actor template simulation по умолчанию использует `spawnLifecycle`. `activeActor` требует явный `startState`, кроме случая с единственным однозначным public state.
+9. Reducer-derived targets не перекрывают `config` слой в IR. UI и simulator используют reducer layer как effective branch, но сохраняют config acceptance видимым.
+10. `dead-end-state` и `effect-event-acceptance` остаются analyzer rules, но по умолчанию не должны создавать жесткий warning для неполных single-machine snippets.
 
 ## Итоговая рекомендация
 

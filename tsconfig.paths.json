@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "paths": {
+      "@lite-fsm/core": ["./packages/core/src/index.ts"],
+      "@lite-fsm/core/internal/*": ["./packages/core/src/*"],
+      "@lite-fsm/react": ["./packages/react/src/index.ts"],
+      "@lite-fsm/middleware": ["./packages/middleware/src/index.ts"],
+      "@lite-fsm/middleware/devTools": ["./packages/middleware/src/devTools.ts"],
+      "@lite-fsm/middleware/immer": ["./packages/middleware/src/immer.ts"],
+      "@lite-fsm/persist": ["./packages/persist/src/index.ts"],
+      "@lite-fsm/persist/react": ["./packages/persist/src/react.ts"],
+      "@lite-fsm/persist/internal/*": ["./packages/persist/src/*"],
+      "@lite-fsm/graph": ["./packages/graph/src/index.ts"]
+    }
+  }
+}

@@ -14,10 +14,10 @@ export default defineConfig([
   globalIgnores([
     "node_modules/",
     "dist/",
+    "packages/*/dist/",
     "coverage/",
-    "docs/",
-    "playground/",
-    "playground/",
+    "apps/docs/",
+    "apps/playground/",
     "examples/",
     "tests/",
     "**/*.d.ts",
@@ -45,7 +45,7 @@ export default defineConfig([
     settings: {
       react: { version: "detect" },
       "import/resolver": {
-        typescript: { project: "./tsconfig.json" },
+        typescript: { project: ["./tsconfig.json", "./packages/*/tsconfig.json"], noWarnOnMultipleProjects: true },
         node: { extensions: [".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx"] },
       },
     },

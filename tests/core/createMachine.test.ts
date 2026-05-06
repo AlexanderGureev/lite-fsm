@@ -1,9 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
 
-import { createMachine, defineMachine } from "../../src/core/Machine";
-import { immerMiddleware } from "../../src/middleware/immer";
-import { FSMEvent, Middleware } from "../../src/core/types";
-import { VOID_REDUCER_ERROR, VOID_REDUCER_MIDDLEWARE_MARKER, WILDCARD } from "../../src/core/utils";
+import { createMachine, defineMachine } from "@lite-fsm/core/internal/Machine";
+import { immerMiddleware } from "@lite-fsm/middleware/immer";
+import { FSMEvent, Middleware } from "@lite-fsm/core";
+import { VOID_REDUCER_ERROR, VOID_REDUCER_MIDDLEWARE_MARKER, WILDCARD } from "@lite-fsm/core/internal/utils";
 
 describe("createMachine — stateful-обёртка", () => {
   describe("базовое поведение", () => {

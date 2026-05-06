@@ -8,6 +8,7 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+.pnpm-store
 dist
 dist-ssr
 *.local
@@ -23,15 +24,18 @@ dist-ssr
 *.sln
 *.sw?
 
-docs/.next/
-docs/node_modules/
+apps/**/.next/
+apps/**/node_modules/
+apps/**/out/
+packages/**/dist/
+.turbo/
 .preview/
 
 # Pagefind индексы для поиска
-docs/public/_pagefind/
+apps/docs/public/_pagefind/
 out/
 coverage/
 internal
 .cursor
-tsconfig.tsbuildinfo
+*.tsbuildinfo
 .agents

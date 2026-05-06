@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { MachineManager } from "../../src/core";
-import { EMPTY_ACTOR_RECORD } from "../../src/core/actor";
-import type { MachineConfig, Middleware } from "../../src/core/types";
-import { HYDRATE_ACTION_TYPE, LiteFsmError } from "../../src/core/utils";
+import { MachineManager } from "@lite-fsm/core";
+import { EMPTY_ACTOR_RECORD } from "@lite-fsm/core/internal/actor";
+import type { MachineConfig, Middleware } from "@lite-fsm/core";
+import { HYDRATE_ACTION_TYPE, LiteFsmError } from "@lite-fsm/core/internal/utils";
 
 import {
   createLikeSync,

@@ -1,13 +1,13 @@
 import { describe, expect, test } from "tstyche";
-import { MachineManager } from "lite-fsm";
+import { MachineManager } from "@lite-fsm/core";
 import type {
   MachineManagerRuntimeSnapshot,
   MachineManagerSnapshot,
   ManagerAction,
   SnapshotMachineKey,
   StateType,
-} from "lite-fsm";
-import { type FSMHydrationBoundaryProps, useHydrateSnapshot } from "lite-fsm/react";
+} from "@lite-fsm/core";
+import { type FSMHydrationBoundaryProps, useHydrateSnapshot } from "@lite-fsm/react";
 
 import type {
   ActorPerfMachines,
