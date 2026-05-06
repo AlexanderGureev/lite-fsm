@@ -1,2 +1,3 @@
-npm run lint:all
-npm run test:coverage
+pnpm run lint
+pnpm run check-types
+pnpm run test:coverage
