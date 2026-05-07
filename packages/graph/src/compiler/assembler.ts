@@ -1,5 +1,6 @@
 import type {
   GraphDiagnostic,
+  GraphReducerCase,
   GraphSource,
   GraphState,
   GraphStateRef,
@@ -14,6 +15,7 @@ import {
   createGraphTargetFromLabel,
   createMachineId,
   createManagerId,
+  createReducerCaseId,
   createStateId,
   createTransitionId,
 } from "./ids";
@@ -112,14 +114,36 @@ const createMachineFromSlice = (
     };
   });
 
+  const sourceRefFromKey = (sourceKey: string): GraphStateRef =>
+    sourceKey === "*"
+      ? { kind: "wildcard" }
+      : stateIdsByKey.has(sourceKey)
+        ? { kind: "state", stateId: stateIdsByKey.get(sourceKey) as string }
+        : { kind: "unknown", label: sourceKey };
+
+  const reducerCaseOrdinals = new Map<string, number>();
+  const reducerCases = (slice.reducer?.reducerCases ?? []).map((reducerCase): GraphReducerCase => {
+    const ordinal = reducerCaseOrdinals.get(reducerCase.event.type) ?? 0;
+    reducerCaseOrdinals.set(reducerCase.event.type, ordinal + 1);
+
+    return {
+      id: createReducerCaseId({
+        machineId,
+        eventType: reducerCase.event.type,
+        ordinal,
+      }),
+      event: reducerCase.event,
+      guard: reducerCase.guard,
+      writesState: reducerCase.writesState,
+      targets: reducerCase.targets.map((target) => target.target ?? createGraphTargetFromLabel(target.targetLabel, stateIdsByKey)),
+      confidence: reducerCase.confidence,
+      loc: reducerCase.loc,
+    };
+  });
+
   const transitionOrdinals = new Map<string, number>();
-  const transitions = (config?.transitions ?? []).map((transition, index): GraphTransition => {
-    const source: GraphStateRef =
-      transition.sourceKey === "*"
-        ? { kind: "wildcard" }
-        : stateIdsByKey.has(transition.sourceKey)
-          ? { kind: "state", stateId: stateIdsByKey.get(transition.sourceKey) as string }
-          : { kind: "unknown", label: transition.sourceKey };
+  const configTransitions = (config?.transitions ?? []).map((transition, index): GraphTransition => {
+    const source = sourceRefFromKey(transition.sourceKey);
     const target = transition.target ?? createGraphTargetFromLabel(transition.targetLabel, stateIdsByKey);
     const targetLabel = transition.targetLabel ?? "self";
     const bucket = `${transition.layer ?? "config"}:${transition.sourceKey}:${transition.event.type}:${targetLabel}`;
@@ -145,6 +169,36 @@ const createMachineFromSlice = (
       loc: transition.loc,
     };
   });
+  const reducerTransitions = (slice.reducer?.transitions ?? []).map((transition, index): GraphTransition => {
+    const source = sourceRefFromKey(transition.sourceKey);
+    const target = transition.target ?? createGraphTargetFromLabel(transition.targetLabel, stateIdsByKey);
+    const targetLabel = transition.targetLabel ?? "self";
+    const bucket = `reducer:${transition.sourceKey}:${transition.event.type}:${targetLabel}`;
+    const ordinal = transitionOrdinals.get(bucket) ?? 0;
+    transitionOrdinals.set(bucket, ordinal + 1);
+
+    return {
+      id: createTransitionId({
+        machineId,
+        layer: "reducer",
+        sourceKey: transition.sourceKey,
+        eventType: transition.event.type,
+        targetLabel,
+        ordinal,
+      }),
+      machineId,
+      source,
+      event: transition.event,
+      target,
+      layer: "reducer",
+      order: configTransitions.length + index,
+      guard: transition.guard,
+      reducerCaseId: reducerCases[transition.reducerCaseIndex]?.id,
+      confidence: transition.confidence,
+      loc: transition.loc,
+    };
+  });
+  const transitions = [...configTransitions, ...reducerTransitions];
 
   const diagnostics = normalizeDiagnostics([
     ...slice.diagnostics,
@@ -168,7 +222,7 @@ const createMachineFromSlice = (
     states,
     transitions,
     emissions: [],
-    reducerCases: [],
+    reducerCases,
     diagnostics,
     loc: candidate.loc,
   };

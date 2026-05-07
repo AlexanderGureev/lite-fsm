@@ -8,6 +8,7 @@ import { createPartialEvaluator, type PartialEvaluator } from "./compiler/evalua
 import { createStableHash } from "./compiler/ids";
 import { linkManagers } from "./compiler/manager";
 import type { CompilerContext, MachineGraphSlice } from "./compiler/pipeline";
+import { compileReducerGraph } from "./compiler/reducer";
 import { createSourceAdapter, inferGraphLanguage, type SourceAdapter } from "./compiler/source";
 
 const createGraphSource = (source: unknown, options: CompileLiteFsmGraphOptions | undefined): GraphSource => ({
@@ -50,12 +51,17 @@ const compileMachineSlices = (
   candidates: readonly MachineCandidate[],
   context: CompilerContext,
 ): MachineGraphSlice[] => {
-  return candidates.map((candidate) => ({
-    candidate,
-    config: compileConfigGraph(candidate, context),
-    managerKeys: candidate.managerKeys,
-    diagnostics: [],
-  }));
+  return candidates.map((candidate) => {
+    const config = compileConfigGraph(candidate, context);
+
+    return {
+      candidate,
+      config,
+      reducer: compileReducerGraph(candidate, config, context),
+      managerKeys: candidate.managerKeys,
+      diagnostics: [],
+    };
+  });
 };
 
 export const compileLiteFsmGraph = (

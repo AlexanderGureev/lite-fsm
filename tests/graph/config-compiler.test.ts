@@ -43,6 +43,16 @@ const transitionRows = (machine: LiteFsmGraphMachine): Array<[string, string, st
   ]);
 };
 
+const configTransitionRows = (machine: LiteFsmGraphMachine): Array<[string, string, string]> => {
+  return machine.transitions
+    .filter((transition) => transition.layer === "config")
+    .map((transition) => [
+      sourceLabel(machine, transition.source),
+      transition.event.type,
+      targetLabel(machine, transition.target),
+    ]);
+};
+
 const transitionDetails = (machine: LiteFsmGraphMachine) => {
   return machine.transitions.map((transition) => ({
     id: transition.id,
@@ -99,7 +109,7 @@ describe("ConfigGraphCompiler по fixture", () => {
       ["FAILED", "RETRY", "WORKING"],
       ["FAILED", "RESET", "IDLE"],
     ]);
-    expect(transitionRows(helperWrappedMachine)).toEqual([
+    expect(configTransitionRows(helperWrappedMachine)).toEqual([
       ["IDLE", "START_HELPER", "WORKING"],
       ["WORKING", "COMPLETE_HELPER", "DONE"],
       ["WORKING", "RESET_HELPER", "IDLE"],

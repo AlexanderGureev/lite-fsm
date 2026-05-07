@@ -6,6 +6,7 @@ export type {
   GraphDiagnostic,
   GraphEmission,
   GraphEventRef,
+  GraphReducerCase,
   GraphRouting,
   GraphRoutingTarget,
   GraphSource,

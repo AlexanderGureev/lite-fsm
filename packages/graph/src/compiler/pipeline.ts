@@ -1,6 +1,7 @@
 import type { Node } from "ts-morph";
 import type {
   GraphDiagnostic,
+  GraphCondition,
   GraphEventRef,
   GraphState,
   GraphTarget,
@@ -67,9 +68,35 @@ export type ConfigGraphSlice = {
 };
 
 export type ReducerGraphSlice = {
-  reducerCases: [];
-  transitions: [];
+  reducerCases: ReducerCaseSlice[];
+  transitions: ReducerTransitionSlice[];
   diagnostics?: GraphDiagnostic[];
+};
+
+export type ReducerTargetSlice = {
+  targetLabel: string | null;
+  target?: GraphTargetSlice;
+  loc?: SourceLocation;
+};
+
+export type ReducerCaseSlice = {
+  event: GraphEventRef;
+  guard?: GraphCondition;
+  writesState: boolean;
+  targets: ReducerTargetSlice[];
+  confidence: "exact" | "partial" | "unknown";
+  loc?: SourceLocation;
+};
+
+export type ReducerTransitionSlice = {
+  sourceKey: string;
+  event: GraphEventRef;
+  targetLabel: string | null;
+  target?: GraphTargetSlice;
+  guard?: GraphCondition;
+  reducerCaseIndex: number;
+  confidence: GraphTransition["confidence"];
+  loc?: SourceLocation;
 };
 
 export type EffectsGraphSlice = {

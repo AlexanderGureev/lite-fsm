@@ -7,11 +7,11 @@
 | Поле | Значение |
 | --- | --- |
 | Дата | 2026-05-07 |
-| Готово | Этапы 0-4: IR/API/harness, Source Catalog/Candidates, Partial Evaluator, ConfigGraphCompiler, ManagerLinker/select API |
+| Готово | Этапы 0-5: IR/API/harness, Source Catalog/Candidates, Partial Evaluator, ConfigGraphCompiler, ManagerLinker/select API, ReducerCompiler |
 | Package | `@lite-fsm/graph`, private/experimental |
 | Public API | `compileLiteFsmGraph(source, options?)`, `selectMachineGraph(document, selector?)` + IR-типы |
-| Текущий output | config-only `LiteFsmGraphDocument`: source metadata, diagnostics, machines, linked managers, config states/transitions и machine facts |
-| Еще не строится | reducer cases, effect emissions, analyzer, simulator, CLI/UI |
+| Текущий output | `LiteFsmGraphDocument`: source metadata, diagnostics, machines, linked managers, config states/transitions, reducer cases/transitions и machine facts |
+| Еще не строится | effect emissions, analyzer, simulator, CLI/UI |
 | Fixture contract | `xstate/graph-parser-fixtures.ts`: 28 machine candidates, 3 manager candidates |
 | Coverage | `packages/graph/src/**/*.ts`, кроме `types.ts`: 100% statements/branches/functions/lines |
 
@@ -28,6 +28,8 @@
 - `ManagerLinker` раскрывает manager object literals/local const maps через `PartialEvaluator`, связывает inline/referenced machines и заполняет manager refs без пересканирования AST в selector-е.
 - `selectMachineGraph` работает только поверх готового `LiteFsmGraphDocument` и возвращает controlled diagnostics для not found/ambiguous selectors.
 - Dynamic/external targets сохраняются как dynamic graph targets с diagnostics; unsupported config fragments не валят весь document.
+- `ReducerCompiler` извлекает symbolic reducer cases из `switch`, `if`/`else if`/`else`, прямых `state.state` assignments, ternary targets и `return { state }`; `nextState` раскрывается только через join с config/wildcard acceptance.
+- Reducer-layer transitions добавляются отдельно от config transitions и не создают acceptance для событий, которых нет в `config`/wildcard.
 
 ## Проверки
 
@@ -47,6 +49,6 @@ Root/docs build не запускался.
 
 ## Следующий этап
 
-Этап 5: reducer branch compiler.
+Этап 6: effects compiler.
 
-Он должен извлекать reducer cases и reducer-layer transitions из поддержанных `switch`/`if`/`return { state }` форм, не проверяя consistency с config.
+Он должен извлекать effect emissions из поддержанных state-specific/wildcard effects, `createEffect` wrappers и прямых `transition(...)` вызовов, не превращая emissions в state transitions.
