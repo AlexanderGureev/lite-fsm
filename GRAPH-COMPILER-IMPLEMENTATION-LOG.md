@@ -17,8 +17,8 @@
 
 ## Ключевые решения
 
-- Public surface оставлен маленьким: runtime exports пока только `compileLiteFsmGraph`.
-- `selectMachineGraph`, `analyzeLiteFsmGraph`, `createGraphSimulator` не добавлены до своих этапов.
+- Public surface оставлен маленьким: package exports пока только `compileLiteFsmGraph`, `selectMachineGraph` и IR-типы.
+- `analyzeLiteFsmGraph` и `createGraphSimulator` не добавлены до своих этапов.
 - `ts-morph` добавлен как direct dependency `@lite-fsm/graph`, потому что compiler парсит строки во время выполнения.
 - `SourceAdapter` скрывает `ts-morph`; публичный API не протекает parser-типами.
 - Ambient API names распознаются только если нет local/import binding; lookalike imports и alias chains игнорируются.

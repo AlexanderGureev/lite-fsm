@@ -9,7 +9,10 @@ import {
   createGraphTargetFromLabel,
   createMachineId,
   createReducerCaseId,
+  createStateId,
   createStableHash,
+  createTransitionId,
+  encodeIdSegment,
   targetLabelOf,
 } from "../../packages/graph/src/compiler/ids";
 import { createSourceAdapter } from "../../packages/graph/src/compiler/source";
@@ -245,8 +248,8 @@ describe("GraphAssembler и stable IDs", () => {
       "actor:transition:config:RUNNING:TICK:self:1",
     );
     expect(machine?.emissions.map((emission) => [emission.id, emissionSourceLabel(emission), emission.confidence])).toEqual([
-      ["actor:emission:*:RESET:group:[a,self.groupId]:0", "*", "partial"],
-      ["actor:emission:RUNNING:DYNAMIC:actor:dynamic:0", "actor:state:RUNNING", "partial"],
+      ["actor:emission:*:RESET:group%3A%5Ba%2Cself.groupId%5D:0", "*", "partial"],
+      ["actor:emission:RUNNING:DYNAMIC:actor%3Adynamic:0", "actor:state:RUNNING", "partial"],
       ["actor:emission:RUNNING:PING:default:0", "actor:state:RUNNING", "exact"],
       ["actor:emission:RUNNING:PING:default:1", "actor:state:RUNNING", "exact"],
       ["actor:emission:RUNNING:UNKNOWN:unknown:0", "actor:state:RUNNING", "unknown"],
@@ -472,7 +475,7 @@ describe("GraphAssembler и stable IDs", () => {
     const machine = document.machines[0];
 
     expect(machine?.transitions.map((transition) => transition.id)).toEqual([
-      "graphTargets:transition:config:IDLE:STATE:external:state:READY:0",
+      "graphTargets:transition:config:IDLE:STATE:external%3Astate%3AREADY:0",
       "graphTargets:transition:config:IDLE:SELF:self:0",
       "graphTargets:transition:config:IDLE:TERMINAL:__CANCELLED:0",
       "graphTargets:transition:config:IDLE:DYNAMIC:runtimeTarget:0",
@@ -543,6 +546,18 @@ describe("diagnostics и id helpers", () => {
     expect(createEmissionId({ machineId: "m", sourceState: "READY", eventType: "GO", routingLabel: "default", ordinal: 1 })).toBe(
       "m:emission:READY:GO:default:1",
     );
+    expect(encodeIdSegment("a:b%20c")).toBe("a%3Ab%2520c");
+    expect(createStateId("machine:3", "A:B")).toBe("machine%3A3:state:A%3AB");
+    expect(
+      createTransitionId({
+        machineId: "machine:3",
+        layer: "config",
+        sourceKey: "A:B",
+        eventType: "GO:NOW",
+        targetLabel: "target:ready",
+        ordinal: 0,
+      }),
+    ).toBe("machine%3A3:transition:config:A%3AB:GO%3ANOW:target%3Aready:0");
     expect(targets.map(targetLabelOf)).toEqual([
       "machine:state:READY",
       "self",

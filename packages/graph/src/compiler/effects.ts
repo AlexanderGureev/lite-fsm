@@ -46,6 +46,18 @@ type EventRead = {
   diagnostics: GraphDiagnostic[];
 };
 
+type EffectStatementRule = {
+  name: string;
+  match(statement: Statement): boolean;
+  compile(
+    statement: Statement,
+    guard: GraphCondition | undefined,
+    baseConfidence: EffectEmissionSlice["confidence"],
+    state: EffectBuildState,
+    context: CompilerContext,
+  ): void;
+};
+
 const ACTOR_ROUTING_METHODS = new Set(["actor", "group", "tag", "unscoped"]);
 
 const EMPTY_EFFECTS_SLICE: EffectsGraphSlice = {
@@ -741,6 +753,66 @@ const compileSwitchStatement = (
   }
 };
 
+const EFFECT_STATEMENT_RULES: readonly EffectStatementRule[] = [
+  {
+    name: "block",
+    match: Node.isBlock,
+    compile(statement, guard, baseConfidence, state, context) {
+      if (!Node.isBlock(statement)) return;
+      compileStatements(statement.getStatements(), guard, baseConfidence, state, context);
+    },
+  },
+  {
+    name: "if-statement",
+    match: Node.isIfStatement,
+    compile(statement, _guard, baseConfidence, state, context) {
+      compileIfStatement(statement as IfStatement, baseConfidence, state, context);
+    },
+  },
+  {
+    name: "switch-statement",
+    match: Node.isSwitchStatement,
+    compile(statement, _guard, baseConfidence, state, context) {
+      compileSwitchStatement(statement as SwitchStatement, baseConfidence, state, context);
+    },
+  },
+  {
+    name: "expression-statement",
+    match: Node.isExpressionStatement,
+    compile(statement, guard, baseConfidence, state, context) {
+      if (!Node.isExpressionStatement(statement)) return;
+      compileExpression(statement.getExpression(), guard, baseConfidence, state, context);
+    },
+  },
+  {
+    name: "return-statement",
+    match: Node.isReturnStatement,
+    compile(statement, guard, baseConfidence, state, context) {
+      if (!Node.isReturnStatement(statement)) return;
+      const expression = statement.getExpression();
+      if (expression) compileExpression(expression, guard, baseConfidence, state, context);
+    },
+  },
+  {
+    name: "variable-statement",
+    match: Node.isVariableStatement,
+    compile(statement, guard, baseConfidence, state, context) {
+      if (!Node.isVariableStatement(statement)) return;
+      for (const declaration of statement.getDeclarationList().getDeclarations()) {
+        const initializer = declaration.getInitializer();
+        if (initializer) compileExpression(initializer, guard, baseConfidence, state, context);
+      }
+    },
+  },
+  {
+    name: "function-declaration",
+    match: Node.isFunctionDeclaration,
+    compile(statement, _guard, _baseConfidence, state, context) {
+      detectEscapedTransition(statement, state, context);
+    },
+  },
+];
+
 const compileStatement = (
   statement: Statement,
   guard: GraphCondition | undefined,
@@ -748,43 +820,8 @@ const compileStatement = (
   state: EffectBuildState,
   context: CompilerContext,
 ) => {
-  if (Node.isBlock(statement)) {
-    compileStatements(statement.getStatements(), guard, baseConfidence, state, context);
-    return;
-  }
-
-  if (Node.isIfStatement(statement)) {
-    compileIfStatement(statement, baseConfidence, state, context);
-    return;
-  }
-
-  if (Node.isSwitchStatement(statement)) {
-    compileSwitchStatement(statement, baseConfidence, state, context);
-    return;
-  }
-
-  if (Node.isExpressionStatement(statement)) {
-    compileExpression(statement.getExpression(), guard, baseConfidence, state, context);
-    return;
-  }
-
-  if (Node.isReturnStatement(statement)) {
-    const expression = statement.getExpression();
-    if (expression) compileExpression(expression, guard, baseConfidence, state, context);
-    return;
-  }
-
-  if (Node.isVariableStatement(statement)) {
-    for (const declaration of statement.getDeclarationList().getDeclarations()) {
-      const initializer = declaration.getInitializer();
-      if (initializer) compileExpression(initializer, guard, baseConfidence, state, context);
-    }
-    return;
-  }
-
-  if (Node.isFunctionDeclaration(statement)) {
-    detectEscapedTransition(statement, state, context);
-  }
+  const rule = EFFECT_STATEMENT_RULES.find((candidate) => candidate.match(statement));
+  if (rule) rule.compile(statement, guard, baseConfidence, state, context);
 };
 
 function compileStatements(

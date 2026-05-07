@@ -6016,7 +6016,7 @@ exports[`GraphAssembler интеграция этапа 7 > сохраняет s
             "type": "ACTOR_DONE",
           },
           "guard": undefined,
-          "id": "domainWithMetaTransitionMachine:emission:ACTIVE:ACTOR_DONE:actor:actor-1:0",
+          "id": "domainWithMetaTransitionMachine:emission:ACTIVE:ACTOR_DONE:actor%3Aactor-1:0",
           "loc": {
             "end": {
               "column": 71,
@@ -6050,7 +6050,7 @@ exports[`GraphAssembler интеграция этапа 7 > сохраняет s
             "type": "GROUP_DONE",
           },
           "guard": undefined,
-          "id": "domainWithMetaTransitionMachine:emission:ACTIVE:GROUP_DONE:group:group-1:0",
+          "id": "domainWithMetaTransitionMachine:emission:ACTIVE:GROUP_DONE:group%3Agroup-1:0",
           "loc": {
             "end": {
               "column": 71,
@@ -6084,7 +6084,7 @@ exports[`GraphAssembler интеграция этапа 7 > сохраняет s
             "type": "GROUP_ARRAY_DONE",
           },
           "guard": undefined,
-          "id": "domainWithMetaTransitionMachine:emission:ACTIVE:GROUP_ARRAY_DONE:group:[group-1,group-2]:0",
+          "id": "domainWithMetaTransitionMachine:emission:ACTIVE:GROUP_ARRAY_DONE:group%3A%5Bgroup-1%2Cgroup-2%5D:0",
           "loc": {
             "end": {
               "column": 90,
@@ -6127,7 +6127,7 @@ exports[`GraphAssembler интеграция этапа 7 > сохраняет s
             "type": "TAG_DONE",
           },
           "guard": undefined,
-          "id": "domainWithMetaTransitionMachine:emission:ACTIVE:TAG_DONE:tag:workers:0",
+          "id": "domainWithMetaTransitionMachine:emission:ACTIVE:TAG_DONE:tag%3Aworkers:0",
           "loc": {
             "end": {
               "column": 70,
@@ -6161,7 +6161,7 @@ exports[`GraphAssembler интеграция этапа 7 > сохраняет s
             "type": "TAG_ARRAY_DONE",
           },
           "guard": undefined,
-          "id": "domainWithMetaTransitionMachine:emission:ACTIVE:TAG_ARRAY_DONE:tag:[workers,admins]:0",
+          "id": "domainWithMetaTransitionMachine:emission:ACTIVE:TAG_ARRAY_DONE:tag%3A%5Bworkers%2Cadmins%5D:0",
           "loc": {
             "end": {
               "column": 88,
@@ -6551,7 +6551,7 @@ exports[`GraphAssembler интеграция этапа 7 > сохраняет s
             "type": "COMPLETE",
           },
           "guard": undefined,
-          "id": "actorTemplate:emission:RUNNING:COMPLETE:actor:job-1:0",
+          "id": "actorTemplate:emission:RUNNING:COMPLETE:actor%3Ajob-1:0",
           "loc": {
             "end": {
               "column": 54,
@@ -6585,7 +6585,7 @@ exports[`GraphAssembler интеграция этапа 7 > сохраняет s
             "type": "COMPLETE",
           },
           "guard": undefined,
-          "id": "actorTemplate:emission:RUNNING:COMPLETE:actor:[self.actorId]:0",
+          "id": "actorTemplate:emission:RUNNING:COMPLETE:actor%3A%5Bself.actorId%5D:0",
           "loc": {
             "end": {
               "column": 61,
@@ -6624,7 +6624,7 @@ exports[`GraphAssembler интеграция этапа 7 > сохраняет s
             "type": "COMPLETE",
           },
           "guard": undefined,
-          "id": "actorTemplate:emission:RUNNING:COMPLETE:group:self.groupId:0",
+          "id": "actorTemplate:emission:RUNNING:COMPLETE:group%3Aself.groupId:0",
           "loc": {
             "end": {
               "column": 59,
@@ -6658,7 +6658,7 @@ exports[`GraphAssembler интеграция этапа 7 > сохраняет s
             "type": "FAIL",
           },
           "guard": undefined,
-          "id": "actorTemplate:emission:RUNNING:FAIL:group:[self.groupId]:0",
+          "id": "actorTemplate:emission:RUNNING:FAIL:group%3A%5Bself.groupId%5D:0",
           "loc": {
             "end": {
               "column": 57,
@@ -6697,7 +6697,7 @@ exports[`GraphAssembler интеграция этапа 7 > сохраняет s
             "type": "FORCE_CANCEL",
           },
           "guard": undefined,
-          "id": "actorTemplate:emission:RUNNING:FORCE_CANCEL:tag:self.groupTag:0",
+          "id": "actorTemplate:emission:RUNNING:FORCE_CANCEL:tag%3Aself.groupTag:0",
           "loc": {
             "end": {
               "column": 62,
@@ -6731,7 +6731,7 @@ exports[`GraphAssembler интеграция этапа 7 > сохраняет s
             "type": "FORCE_CANCEL",
           },
           "guard": undefined,
-          "id": "actorTemplate:emission:RUNNING:FORCE_CANCEL:tag:[jobs,urgent]:0",
+          "id": "actorTemplate:emission:RUNNING:FORCE_CANCEL:tag%3A%5Bjobs%2Curgent%5D:0",
           "loc": {
             "end": {
               "column": 67,
@@ -7612,7 +7612,7 @@ exports[`GraphAssembler интеграция этапа 7 > сохраняет s
             },
             "text": "case "HEARTBEAT"",
           },
-          "id": "actorWildcardEffectTemplate:emission:*:COMPLETE:actor:self.actorId:0",
+          "id": "actorWildcardEffectTemplate:emission:*:COMPLETE:actor%3Aself.actorId:0",
           "loc": {
             "end": {
               "column": 65,
@@ -7658,7 +7658,7 @@ exports[`GraphAssembler интеграция этапа 7 > сохраняет s
             },
             "text": "default",
           },
-          "id": "actorWildcardEffectTemplate:emission:*:ABORT_TASK:tag:self.groupTag:0",
+          "id": "actorWildcardEffectTemplate:emission:*:ABORT_TASK:tag%3Aself.groupTag:0",
           "loc": {
             "end": {
               "column": 66,

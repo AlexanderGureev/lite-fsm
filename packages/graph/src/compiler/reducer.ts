@@ -60,6 +60,12 @@ type BuildState = {
   transitions: ReducerTransitionSlice[];
 };
 
+type ReducerStatementRule = {
+  name: string;
+  match(statement: Statement): boolean;
+  compile(statement: Statement, parameters: ReducerParameters, state: BuildState, context: CompilerContext): void;
+};
+
 const EMPTY_REDUCER_SLICE: ReducerGraphSlice = {
   reducerCases: [],
   transitions: [],
@@ -777,6 +783,28 @@ const compileEventlessStatement = (
   addBranchCases(state, inferredEvents, branch, undefined, context.source.locFromNode(statement));
 };
 
+const REDUCER_STATEMENT_RULES: readonly ReducerStatementRule[] = [
+  {
+    name: "if-statement",
+    match: Node.isIfStatement,
+    compile(statement, parameters, state, context) {
+      compileIfStatement(statement as IfStatement, parameters, state, context);
+    },
+  },
+  {
+    name: "switch-statement",
+    match: Node.isSwitchStatement,
+    compile(statement, parameters, state, context) {
+      compileSwitchStatement(statement as SwitchStatement, parameters, state, context);
+    },
+  },
+  {
+    name: "eventless-statement",
+    match: () => true,
+    compile: compileEventlessStatement,
+  },
+];
+
 const compileReducerStatements = (
   statements: readonly Statement[],
   parameters: ReducerParameters,
@@ -784,17 +812,8 @@ const compileReducerStatements = (
   context: CompilerContext,
 ) => {
   for (const statement of statements) {
-    if (Node.isIfStatement(statement)) {
-      compileIfStatement(statement, parameters, state, context);
-      continue;
-    }
-
-    if (Node.isSwitchStatement(statement)) {
-      compileSwitchStatement(statement, parameters, state, context);
-      continue;
-    }
-
-    compileEventlessStatement(statement, parameters, state, context);
+    const rule = REDUCER_STATEMENT_RULES.find((candidate) => candidate.match(statement)) as ReducerStatementRule;
+    rule.compile(statement, parameters, state, context);
   }
 };
 

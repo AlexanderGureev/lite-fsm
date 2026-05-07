@@ -3,6 +3,14 @@ import type { MachineCandidate } from "./candidates";
 
 const TERMINAL_TARGETS = new Set(["__RESOLVED", "__REJECTED", "__CANCELLED"]);
 
+export const encodeIdSegment = (segment: string | number): string => {
+  return encodeURIComponent(String(segment));
+};
+
+const joinIdSegments = (segments: ReadonlyArray<string | number>): string => {
+  return segments.map(encodeIdSegment).join(":");
+};
+
 export const createStableHash = (source: string): string => {
   let hash = 2166136261;
 
@@ -31,7 +39,7 @@ export const createManagerId = (input: { index: number; exportName?: string; var
 };
 
 export const createStateId = (machineId: string, stateKey: string): string => {
-  return `${machineId}:state:${stateKey}`;
+  return joinIdSegments([machineId, "state", stateKey]);
 };
 
 export const createTransitionId = (input: {
@@ -42,11 +50,19 @@ export const createTransitionId = (input: {
   targetLabel: string;
   ordinal: number;
 }): string => {
-  return `${input.machineId}:transition:${input.layer}:${input.sourceKey}:${input.eventType}:${input.targetLabel}:${input.ordinal}`;
+  return joinIdSegments([
+    input.machineId,
+    "transition",
+    input.layer,
+    input.sourceKey,
+    input.eventType,
+    input.targetLabel,
+    input.ordinal,
+  ]);
 };
 
 export const createReducerCaseId = (input: { machineId: string; eventType: string; ordinal: number }): string => {
-  return `${input.machineId}:reducer:${input.eventType}:${input.ordinal}`;
+  return joinIdSegments([input.machineId, "reducer", input.eventType, input.ordinal]);
 };
 
 export const createEmissionId = (input: {
@@ -56,7 +72,14 @@ export const createEmissionId = (input: {
   routingLabel: string;
   ordinal: number;
 }): string => {
-  return `${input.machineId}:emission:${input.sourceState}:${input.eventType}:${input.routingLabel}:${input.ordinal}`;
+  return joinIdSegments([
+    input.machineId,
+    "emission",
+    input.sourceState,
+    input.eventType,
+    input.routingLabel,
+    input.ordinal,
+  ]);
 };
 
 export const createGraphTargetFromLabel = (

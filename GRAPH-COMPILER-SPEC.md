@@ -21,7 +21,7 @@
 
 ## Тестовый набор форм API
 
-Файл [`xstate/graph-parser-fixtures.ts`](xstate/graph-parser-fixtures.ts) является основным fixture-набором для будущего parser-а. В нем собраны разные валидные и диагностические формы объявления `createMachine`, `createEffect`, `createConfig`, `createReducer` и `MachineManager`, которые parser должен корректно разобрать из одной строки исходника и преобразовать в `LiteFsmGraphDocument`.
+Файл [`tests/graph/fixtures/graph-sources.ts`](tests/graph/fixtures/graph-sources.ts) является основным fixture-набором parser-а. В нем собраны разные валидные и диагностические формы объявления `createMachine`, `createEffect`, `createConfig`, `createReducer` и `MachineManager`, которые parser должен корректно разобрать из одной строки исходника и преобразовать в `LiteFsmGraphDocument`.
 
 Этот файл нужно использовать как контракт покрытия для реализации:
 
@@ -1052,7 +1052,7 @@ export const machine = createMachine({
 1. После миграции монорепы добавить пакет `@lite-fsm/graph`.
 2. Описать типы `LiteFsmGraphDocument`, `LiteFsmGraphMachine`, transitions, emissions, reducer cases, diagnostics, selectors.
 3. Добавить `compileLiteFsmGraph(source)` как заглушку, которая возвращает пустой document без падения.
-4. Добавить тестовый harness, который читает `xstate/graph-parser-fixtures.ts` как строку.
+4. Добавить тестовый harness, который читает `tests/graph/fixtures/graph-sources.ts` как строку.
 5. Добавить внутренние типы/контракты для `SourceAdapter`, `SourceCatalog`, `CompilerContext`, `CompilerPass`, `PatternRule`, graph slices и `DiagnosticSink`.
 6. Добавить минимальный контракт `GraphAssembler`/stable-id builder: сборка пустого document, нормализация diagnostics, базовое назначение semantic IDs и сборка config-only slices без чтения AST.
 7. Добавить базовые тесты публичных типов.
@@ -1081,7 +1081,7 @@ export const machine = createMachine({
 
 Проверка:
 
-1. По `xstate/graph-parser-fixtures.ts` возвращается ожидаемое число machine candidates.
+1. По `tests/graph/fixtures/graph-sources.ts` возвращается ожидаемое число machine candidates.
 2. Alias import, ambient shape guard, default export и inline manager machine покрыты отдельными тестами.
 3. Неподдержанный alias chain не распознается как machine.
 4. Следующие этапы могут читать только `SourceCatalog`/candidates, не сканируя source заново.
@@ -1217,7 +1217,7 @@ Reducer source contract:
 2. Нормализовать document-level и machine-level diagnostics.
 3. Применить общий stable-id builder для states, transitions, emissions, reducer cases.
 4. Детерминированно сортировать machines, managers, transitions, reducer cases, emissions и diagnostics.
-5. Добавить snapshot tests полного документа по `xstate/graph-parser-fixtures.ts`.
+5. Добавить snapshot tests полного документа по `tests/graph/fixtures/graph-sources.ts`.
 6. Не запускать semantic analyzer внутри compiler по умолчанию.
 7. Не читать AST и не выполнять pattern matching внутри assembler-а.
 
@@ -1242,7 +1242,7 @@ Reducer source contract:
 
 Проверка:
 
-1. Analyzer тестируется на hand-written IR fixtures и на document из `xstate/graph-parser-fixtures.ts`.
+1. Analyzer тестируется на hand-written IR fixtures и на document из `tests/graph/fixtures/graph-sources.ts`.
 2. Analyzer можно запустить повторно после ручного изменения IR без повторного parsing-а source.
 3. CLI/UI могут объединить diagnostics, но API сохраняет отдельный `GraphAnalysisResult`.
 
@@ -1320,7 +1320,7 @@ Reducer source contract:
 
 Проверка:
 
-1. Вставка `xstate/graph-parser-fixtures.ts` показывает список машин и не ломает UI.
+1. Вставка `tests/graph/fixtures/graph-sources.ts` показывает список машин и не ломает UI.
 2. Можно выбрать одну машину из многих и симулировать только ее.
 3. Diagnostics подсвечивают source locations, если они есть.
 
