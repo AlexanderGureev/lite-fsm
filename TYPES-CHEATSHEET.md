@@ -321,20 +321,24 @@ export const defineEffect: TypedCreateEffectFn<AppEvent, Deps> = createEffect;
 `@lite-fsm/graph` экспортирует типы JSON-документа для tooling-слоя. Runtime-пакеты от него не зависят.
 
 ```ts
-import { compileLiteFsmGraph, type LiteFsmGraphDocument } from "@lite-fsm/graph";
+import { compileLiteFsmGraph, selectMachineGraph, type LiteFsmGraphDocument } from "@lite-fsm/graph";
 
 const result = compileLiteFsmGraph(source);
 const document: LiteFsmGraphDocument = result.document;
+const selected = selectMachineGraph(document, { managerKey: "machineKey" });
 ```
 
 | Тип                         | Форма                                                                                 |
 | --------------------------- | ------------------------------------------------------------------------------------- |
 | `LiteFsmGraphResult`        | `{ document: LiteFsmGraphDocument; diagnostics: GraphDiagnostic[] }`                  |
 | `LiteFsmGraphDocument`      | `{ version, source, machines, managers, diagnostics }`                                |
+| `LiteFsmGraphManager`       | manager metadata плюс `machineRefs: { key, machineId, loc? }[]`                       |
 | `LiteFsmGraphMachine`       | machine metadata плюс `states`, `transitions`, `emissions`, `reducerCases`            |
 | `GraphTransition`           | accepted event edge слоя `config` или `reducer`                                       |
 | `GraphEmission`             | событие, которое может отправить effect при входе в state                             |
 | `GraphDiagnostic`           | `{ code, severity, message, machineId?, loc? }`                                       |
+| `MachineSelector`           | `{ index }`, `{ id }`, `{ variableName }`, `{ exportName }`, `{ managerKey }` или `{ managerId, managerKey }` |
+| `SelectMachineGraphResult`  | success `{ ok: true, machine, diagnostics }` или failure `{ ok: false, candidates, diagnostics }` |
 | `CompileLiteFsmGraphOptions` | `{ filename?, language?, parser?: "static", maxMachines? }`                           |
 
 ## Middleware

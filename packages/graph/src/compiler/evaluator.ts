@@ -12,7 +12,13 @@ import type { SourceLocation } from "../types";
 import type { LiteFsmApiName, SourceCatalog } from "./catalog";
 import type { SourceAdapter } from "./source";
 
-export type EvaluationExpectedPosition = "config" | "reducer" | "effectEntry" | "computedKey" | "unknown";
+export type EvaluationExpectedPosition =
+  | "config"
+  | "reducer"
+  | "effectEntry"
+  | "computedKey"
+  | "managerMap"
+  | "unknown";
 
 export type EvaluatedGraphObjectProperty = {
   key: string;
@@ -38,6 +44,7 @@ export type EvaluatedGraphValue =
         cancelFn?: EvaluatedGraphValue;
       };
     }
+  | { kind: "expression"; node: Expression; text: string; loc?: SourceLocation }
   | { kind: "external"; label: string; loc?: SourceLocation }
   | { kind: "dynamic"; label: string; loc?: SourceLocation }
   | { kind: "unsupported"; code: string; message: string; loc?: SourceLocation };
@@ -118,6 +125,17 @@ const readObjectPropertyValue = (
   if (shouldPreservePartialObjectValue(context)) return { ok: true, value: partialValueFromResult(result) };
 
   return { ok: false, result };
+};
+
+const expressionValue = (expression: Expression, context: EvaluatorRuleContext): EvaluatedGraphValue => {
+  const loc = context.source.locFromNode(expression);
+
+  return {
+    kind: "expression",
+    node: expression,
+    text: context.source.textOf(expression),
+    loc,
+  };
 };
 
 const isStringKnown = (result: EvaluationResult): result is Extract<EvaluationResult, { kind: "known" }> & {
@@ -238,7 +256,10 @@ const evaluateObjectLiteralProperties = (
   context: EvaluatorRuleContext,
 ): EvaluationResult | EvaluatedGraphObjectProperty[] => {
   const properties: EvaluatedGraphObjectProperty[] = [];
-  const nestedExpectedPosition = context.options.expectedPosition === "config" ? "config" : "unknown";
+  const nestedExpectedPosition =
+    context.options.expectedPosition === "config" || context.options.expectedPosition === "managerMap"
+      ? context.options.expectedPosition
+      : "unknown";
 
   for (const property of objectLiteral.getProperties()) {
     if (Node.isSpreadAssignment(property)) {
@@ -261,6 +282,15 @@ const evaluateObjectLiteralProperties = (
     }
 
     if (Node.isShorthandPropertyAssignment(property)) {
+      if (context.options.expectedPosition === "managerMap") {
+        properties.push({
+          key: property.getName(),
+          value: expressionValue(property.getNameNode(), context),
+          loc: context.source.locFromNode(property),
+        });
+        continue;
+      }
+
       const value = context.evaluate(property.getNameNode(), { expectedPosition: nestedExpectedPosition }, context.state);
       const propertyValue = readObjectPropertyValue(value, context);
       if (!propertyValue.ok) return propertyValue.result;
@@ -285,6 +315,15 @@ const evaluateObjectLiteralProperties = (
           message: "Object property has no initializer.",
           loc: context.source.locFromNode(property),
         };
+      }
+
+      if (context.options.expectedPosition === "managerMap") {
+        properties.push({
+          key,
+          value: expressionValue(initializer, context),
+          loc: context.source.locFromNode(property),
+        });
+        continue;
       }
 
       const value = context.evaluate(initializer, { expectedPosition: nestedExpectedPosition }, context.state);

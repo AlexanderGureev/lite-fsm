@@ -17,14 +17,21 @@ import {
   createStateId,
   createTransitionId,
 } from "./ids";
+import type { ManagerLinkSlice } from "./manager";
 import type { MachineGraphSlice } from "./pipeline";
 
 export type GraphAssemblyInput = {
   source: GraphSource;
   candidates?: readonly MachineCandidate[];
   managers?: readonly ManagerCandidate[];
+  managerLinks?: readonly ManagerLinkSlice[];
   machineSlices?: readonly MachineGraphSlice[];
   diagnostics?: readonly GraphDiagnostic[];
+};
+
+type MachineKeySource = {
+  candidate: MachineCandidate;
+  managerKeys: readonly string[];
 };
 
 const uniqueOrUndefined = (values: readonly string[]): string | undefined => {
@@ -33,16 +40,31 @@ const uniqueOrUndefined = (values: readonly string[]): string | undefined => {
   return uniqueValues.length === 1 ? uniqueValues[0] : undefined;
 };
 
-const uniqueMachineKeyByCandidate = (candidates: readonly MachineCandidate[]): ReadonlyMap<MachineCandidate, string> => {
+const uniqueMachineKeyBySource = (sources: readonly MachineKeySource[]): ReadonlyMap<MachineCandidate, string> => {
   const keyCounts = new Map<string, number>();
-  for (const candidate of candidates) {
-    for (const key of candidate.managerKeys) keyCounts.set(key, (keyCounts.get(key) ?? 0) + 1);
+  for (const source of sources) {
+    for (const key of source.managerKeys) keyCounts.set(key, (keyCounts.get(key) ?? 0) + 1);
   }
 
   const result = new Map<MachineCandidate, string>();
-  for (const candidate of candidates) {
-    const key = uniqueOrUndefined(candidate.managerKeys);
-    if (key && keyCounts.get(key) === 1) result.set(candidate, key);
+  for (const source of sources) {
+    const key = uniqueOrUndefined(source.managerKeys);
+    if (key && keyCounts.get(key) === 1) result.set(source.candidate, key);
+  }
+
+  return result;
+};
+
+const managerKeysFromLinks = (managerLinks: readonly ManagerLinkSlice[]): ReadonlyMap<MachineCandidate, string[]> => {
+  const result = new Map<MachineCandidate, string[]>();
+
+  for (const link of managerLinks) {
+    for (const ref of link.refs) {
+      const keys = result.get(ref.machineCandidate) ?? [];
+      if (keys.includes(ref.key)) continue;
+
+      result.set(ref.machineCandidate, [...keys, ref.key]);
+    }
   }
 
   return result;
@@ -163,9 +185,33 @@ const createManagerShells = (managers: readonly ManagerCandidate[]): LiteFsmGrap
   }));
 };
 
+const createManagersFromLinks = (
+  managerLinks: readonly ManagerLinkSlice[],
+  machineIdsByCandidate: ReadonlyMap<MachineCandidate, string>,
+): LiteFsmGraphManager[] => {
+  const usedIds = new Set<string>();
+
+  return managerLinks.map((link) => ({
+    id: createUniqueId(createManagerId(link.manager), usedIds),
+    variableName: link.manager.variableName,
+    machineRefs: link.refs.flatMap((ref) => {
+      const machineId = machineIdsByCandidate.get(ref.machineCandidate);
+      if (!machineId) return [];
+
+      return [
+        {
+          key: ref.key,
+          machineId,
+          loc: ref.loc,
+        },
+      ];
+    }),
+    loc: link.manager.loc,
+  }));
+};
+
 export const assembleGraphDocument = (input: GraphAssemblyInput): LiteFsmGraphDocument => {
   const candidates = input.candidates ?? input.machineSlices?.map((slice) => slice.candidate) ?? [];
-  const uniqueManagerKeys = uniqueMachineKeyByCandidate(candidates);
   const slices =
     input.machineSlices ??
     candidates.map((candidate) => ({
@@ -173,16 +219,34 @@ export const assembleGraphDocument = (input: GraphAssemblyInput): LiteFsmGraphDo
       managerKeys: candidate.managerKeys,
       diagnostics: [],
     }));
+  const managerKeysByCandidate = input.managerLinks ? managerKeysFromLinks(input.managerLinks) : undefined;
+  const slicesWithManagerKeys = slices.map((slice) => ({
+    ...slice,
+    managerKeys: managerKeysByCandidate?.get(slice.candidate) ?? slice.managerKeys,
+  }));
+  const idKeySources: readonly MachineKeySource[] = input.managerLinks
+    ? slicesWithManagerKeys
+    : candidates.map((candidate) => ({
+        candidate,
+        managerKeys: candidate.managerKeys,
+      }));
+  const uniqueManagerKeys = uniqueMachineKeyBySource(idKeySources);
   const usedMachineIds = new Set<string>();
-  const machines = slices.map((slice) => {
+  const machineIdsByCandidate = new Map<MachineCandidate, string>();
+  const machines = slicesWithManagerKeys.map((slice) => {
     const preferredId = createMachineId(slice.candidate, uniqueManagerKeys.get(slice.candidate));
     const machineId = createUniqueId(preferredId, usedMachineIds);
 
+    machineIdsByCandidate.set(slice.candidate, machineId);
+
     return createMachineFromSlice(slice, machineId);
   });
-  const managers = createManagerShells(input.managers ?? []);
+  const managers = input.managerLinks
+    ? createManagersFromLinks(input.managerLinks, machineIdsByCandidate)
+    : createManagerShells(input.managers ?? []);
   const diagnostics = normalizeDiagnostics([
     ...(input.diagnostics ?? []),
+    ...(input.managerLinks?.flatMap((link) => link.diagnostics) ?? []),
     ...machines.flatMap((machine) => machine.diagnostics),
   ]);
 

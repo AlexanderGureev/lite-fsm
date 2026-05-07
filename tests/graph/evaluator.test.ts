@@ -186,6 +186,35 @@ describe("PartialEvaluator", () => {
     });
   });
 
+  it("в managerMap сохраняет values как expressions и раскрывает nested manager spreads", () => {
+    const result = evaluateConst(
+      `
+        const computed = "computed";
+        const first = createMachine({ config: {}, initialState: "IDLE", initialContext: {} });
+        const base = { first };
+        const managerMap = {
+          ...base,
+          [computed]: (first as const),
+          inline: createMachine({ config: {}, initialState: "IDLE", initialContext: {} }),
+        };
+      `,
+      "managerMap",
+      "managerMap",
+    );
+
+    expect(result.kind).toBe("known");
+    if (result.kind !== "known" || result.value.kind !== "object") throw new Error("Expected object result");
+
+    expect(result.value.properties.map((property) => [property.key, property.value.kind])).toEqual([
+      ["first", "expression"],
+      ["computed", "expression"],
+      ["inline", "expression"],
+    ]);
+    expect(
+      result.value.properties.map((property) => (property.value.kind === "expression" ? property.value.text : "")),
+    ).toEqual(["first", "(first as const)", 'createMachine({ config: {}, initialState: "IDLE", initialContext: {} })']);
+  });
+
   it("разрешает ambient transparent wrappers, но не wrappers из чужого import-а", () => {
     const ambient = evaluateConst("const cfg = createConfig({ IDLE: {} });", "cfg", "config");
     const importedElsewhere = evaluateConst(

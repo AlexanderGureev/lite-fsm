@@ -1,4 +1,5 @@
 export { compileLiteFsmGraph } from "./compile";
+export { selectMachineGraph } from "./select";
 export type {
   CompileLiteFsmGraphOptions,
   GraphCondition,

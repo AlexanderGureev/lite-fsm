@@ -6,6 +6,7 @@ import { compileConfigGraph } from "./compiler/config";
 import { createDiagnosticSink, normalizeDiagnostics } from "./compiler/diagnostics";
 import { createPartialEvaluator, type PartialEvaluator } from "./compiler/evaluator";
 import { createStableHash } from "./compiler/ids";
+import { linkManagers } from "./compiler/manager";
 import type { CompilerContext, MachineGraphSlice } from "./compiler/pipeline";
 import { createSourceAdapter, inferGraphLanguage, type SourceAdapter } from "./compiler/source";
 
@@ -73,6 +74,7 @@ export const compileLiteFsmGraph = (
     const maxMachines = options.maxMachines ?? Number.POSITIVE_INFINITY;
     const machineCandidates = candidates.machines.slice(0, maxMachines);
     const context = createCompilerContext(sourceAdapter, catalog, evaluator);
+    const managerLinks = linkManagers(candidates.managers, machineCandidates, context);
     const machineSlices = compileMachineSlices(machineCandidates, context);
     const maxMachineDiagnostic: GraphDiagnostic[] =
       candidates.machines.length > maxMachines
@@ -91,7 +93,7 @@ export const compileLiteFsmGraph = (
         hash: createStableHash(source),
       },
       machineSlices,
-      managers: candidates.managers,
+      managerLinks,
       diagnostics: [...sourceAdapter.diagnostics, ...maxMachineDiagnostic],
     });
 

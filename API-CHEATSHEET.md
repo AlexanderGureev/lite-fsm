@@ -12,7 +12,7 @@
 | `@lite-fsm/middleware`                                                 | `immerMiddleware`, `devToolsMiddleware`                                                                                                           |
 | `@lite-fsm/middleware/immer` · `@lite-fsm/middleware/devTools`         | per-feature entry points                                                                                                                          |
 | `@lite-fsm/react`                                                      | `FSMContext`, `FSMContextProvider`, `FSMHydrationBoundary`, `useHydrateSnapshot`, `useManager`, `useSelector`, `useTransition`, `defineMachine`   |
-| `@lite-fsm/graph`                                                      | experimental: `compileLiteFsmGraph` и IR-типы для graph tooling                                                                                   |
+| `@lite-fsm/graph`                                                      | experimental: `compileLiteFsmGraph`, `selectMachineGraph` и IR-типы для graph tooling                                                             |
 
 `@lite-fsm/react` помечен `"use client"`. Импортировать можно из SSR/RSC, hooks/provider — только в client tree.
 
@@ -29,9 +29,10 @@ const result = compileLiteFsmGraph(source, {
 
 | API                         | Назначение                                                                                  |
 | --------------------------- | ------------------------------------------------------------------------------------------- |
-| `compileLiteFsmGraph(src)`  | строит `LiteFsmGraphDocument`; сейчас компилирует найденные machines/managers и config-layer states/transitions |
-| `LiteFsmGraphDocument`      | универсальный IR для будущих визуализаторов, CLI, analyzer-а и simulator-а                  |
-| `GraphDiagnostic`           | diagnostic как часть результата; compiler не должен падать на частично неподдержанном коде  |
+| `compileLiteFsmGraph(src)`      | строит `LiteFsmGraphDocument`; компилирует machines/managers, manager refs и config-layer states/transitions |
+| `selectMachineGraph(doc, sel?)` | выбирает одну machine по `index`, `id`, `variableName`, `exportName`, `managerKey` или `{ managerId, managerKey }` |
+| `LiteFsmGraphDocument`          | универсальный IR для будущих визуализаторов, CLI, analyzer-а и simulator-а                  |
+| `GraphDiagnostic`               | diagnostic как часть результата; compiler не должен падать на частично неподдержанном коде  |
 
 ## Mental model
 

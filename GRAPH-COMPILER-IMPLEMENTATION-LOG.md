@@ -7,11 +7,11 @@
 | Поле | Значение |
 | --- | --- |
 | Дата | 2026-05-07 |
-| Готово | Этапы 0-3: IR/API/harness, Source Catalog/Candidates, Partial Evaluator, ConfigGraphCompiler |
+| Готово | Этапы 0-4: IR/API/harness, Source Catalog/Candidates, Partial Evaluator, ConfigGraphCompiler, ManagerLinker/select API |
 | Package | `@lite-fsm/graph`, private/experimental |
-| Public API | `compileLiteFsmGraph(source, options?)` + IR-типы |
-| Текущий output | config-only `LiteFsmGraphDocument`: source metadata, diagnostics, machine/manager shells, config states/transitions и machine facts |
-| Еще не строится | reducer cases, effect emissions, analyzer, simulator, CLI/UI, полноценный manager linker |
+| Public API | `compileLiteFsmGraph(source, options?)`, `selectMachineGraph(document, selector?)` + IR-типы |
+| Текущий output | config-only `LiteFsmGraphDocument`: source metadata, diagnostics, machines, linked managers, config states/transitions и machine facts |
+| Еще не строится | reducer cases, effect emissions, analyzer, simulator, CLI/UI |
 | Fixture contract | `xstate/graph-parser-fixtures.ts`: 28 machine candidates, 3 manager candidates |
 | Coverage | `packages/graph/src/**/*.ts`, кроме `types.ts`: 100% statements/branches/functions/lines |
 
@@ -25,6 +25,8 @@
 - `PartialEvaluator` не знает FSM-семантику и возвращает structured `known`/`external`/`dynamic`/`unsupported`.
 - `createConfig`, `createReducer`, `createEffect` раскрываются только как transparent parse wrappers в ожидаемых позициях.
 - `ConfigGraphCompiler` строит только config layer: states, accepted transitions, `initialState`, `initialContextSummary`, `groupTag`, `persistence` и `kind`.
+- `ManagerLinker` раскрывает manager object literals/local const maps через `PartialEvaluator`, связывает inline/referenced machines и заполняет manager refs без пересканирования AST в selector-е.
+- `selectMachineGraph` работает только поверх готового `LiteFsmGraphDocument` и возвращает controlled diagnostics для not found/ambiguous selectors.
 - Dynamic/external targets сохраняются как dynamic graph targets с diagnostics; unsupported config fragments не валят весь document.
 
 ## Проверки
@@ -45,6 +47,6 @@ Root/docs build не запускался.
 
 ## Следующий этап
 
-Этап 4: manager linker и выбор одной машины.
+Этап 5: reducer branch compiler.
 
-Он должен связать `ManagerCandidate` с уже собранными machines, заполнить `LiteFsmGraphManager.machineRefs`, расширить `managerKeys` за пределами inline manager cases и добавить `selectMachineGraph(...)` без пересканирования AST.
+Он должен извлекать reducer cases и reducer-layer transitions из поддержанных `switch`/`if`/`return { state }` форм, не проверяя consistency с config.
