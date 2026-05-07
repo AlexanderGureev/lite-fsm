@@ -7,7 +7,7 @@
 | Поле | Значение |
 | --- | --- |
 | Дата | 2026-05-07 |
-| Готово | Этапы 0-7: IR/API/harness, Source Catalog/Candidates, Partial Evaluator, ConfigGraphCompiler, ManagerLinker/select API, ReducerCompiler, EffectsCompiler, интеграция GraphAssembler |
+| Готово | Этапы 0-7 + чистка перед этапом 8: IR/API/harness, Source Catalog/Candidates, Partial Evaluator, ConfigGraphCompiler, ManagerLinker/select API, ReducerCompiler, EffectsCompiler, GraphAssembler, общий `compiler/ast.ts` |
 | Package | `@lite-fsm/graph`, private/experimental |
 | Public API | `compileLiteFsmGraph(source, options?)`, `selectMachineGraph(document, selector?)` + IR-типы |
 | Текущий output | `LiteFsmGraphDocument`: source metadata, diagnostics, machines, linked managers, config states/transitions, reducer cases/transitions, effect emissions и machine facts |
@@ -34,6 +34,9 @@
 - Escaped `transition`, dynamic event type, unsupported effects/effect entries и invalid domain actor routing возвращают compiler diagnostics без падения документа.
 - `GraphAssembler` нормализует порядок machines/managers, transitions, reducer cases, emissions и diagnostics, назначает final `machineId` для machine diagnostics и не зависит от AST/pattern matching.
 - Graph compiler tests больше не читают `xstate/graph-parser-fixtures.ts`; fixture-кейсы живут в `tests/graph/fixtures/graph-sources.ts`, чтобы `xstate/` можно было удалить отдельно.
+- Общие AST-утилиты для feature compilers вынесены в `packages/graph/src/compiler/ast.ts` (`unwrapTransparent`, `propertyNameText`, `bindingNameText`, `readMachineOptions`/`readMachineOption`, `statementsFromBranch`, `isActionTypeAccess`, `condition`, `combineConfidence`, `stringFromExpression`); локальные дубликаты в `candidates`/`config`/`manager`/`reducer`/`effects` удалены.
+- Из `pipeline.ts` удалены неиспользуемые `AstNodeRef`/`CompilerPass`/`PatternRule`/`GraphTargetSlice`-алиас; контракты slice-ов и `CompilerContext` остаются единственными внутренними типами pipeline-а.
+- Самые большие feature-compiler файлы разнесены в подпапки без изменения публичного контракта: `effects.ts` -> `effects/{setup,routing}.ts`, `reducer.ts` -> `reducer/{setup,writes}.ts`, `evaluator.ts` -> `evaluator/{types,object,wrappers}.ts`, `assembler.ts` -> `assembler/{sort,machine,manager}.ts`. Точки входа (`compileEffectsGraph`, `compileReducerGraph`, `createPartialEvaluator`, `assembleGraphDocument`) и публичные типы остаются в исходных файлах через прямой re-export, тесты `tests/graph/*` и `compile.ts` не правились.
 
 ## Проверки
 
@@ -47,6 +50,7 @@ pnpm --filter @lite-fsm/graph build
 pnpm exec tsc --noEmit -p tsconfig.test.json
 pnpm run lint
 pnpm run test:types
+pnpm run test
 ```
 
 Root/docs build не запускался.

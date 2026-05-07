@@ -1,7 +1,6 @@
-import type { Node } from "ts-morph";
 import type {
-  GraphDiagnostic,
   GraphCondition,
+  GraphDiagnostic,
   GraphEventRef,
   GraphRouting,
   GraphState,
@@ -14,28 +13,13 @@ import type { MachineCandidate } from "./candidates";
 import type { SourceAdapter } from "./source";
 import type { SourceCatalog } from "./catalog";
 import type { DiagnosticSink } from "./diagnostics";
-import type { PartialEvaluator } from "./evaluator";
-
-export type AstNodeRef = {
-  node: Node;
-};
+import type { PartialEvaluator } from "./evaluator/types";
 
 export type CompilerContext = {
   source: SourceAdapter;
   catalog: SourceCatalog;
   evaluator: PartialEvaluator;
   diagnostics: DiagnosticSink;
-};
-
-export type CompilerPass<Input, Output> = {
-  name: string;
-  run(input: Input, context: CompilerContext): Output;
-};
-
-export type PatternRule<RuleContext, Result> = {
-  name: string;
-  match(node: AstNodeRef, context: RuleContext): boolean;
-  read(node: AstNodeRef, context: RuleContext): Result;
 };
 
 export type ConfigStateSlice = {
@@ -50,7 +34,7 @@ export type ConfigTransitionSlice = {
   sourceKey: string;
   event: GraphEventRef;
   targetLabel: string | null;
-  target?: GraphTargetSlice;
+  target?: GraphTarget;
   layer?: GraphTransition["layer"];
   order?: number;
   confidence?: GraphTransition["confidence"];
@@ -68,15 +52,9 @@ export type ConfigGraphSlice = {
   diagnostics?: GraphDiagnostic[];
 };
 
-export type ReducerGraphSlice = {
-  reducerCases: ReducerCaseSlice[];
-  transitions: ReducerTransitionSlice[];
-  diagnostics?: GraphDiagnostic[];
-};
-
 export type ReducerTargetSlice = {
   targetLabel: string | null;
-  target?: GraphTargetSlice;
+  target?: GraphTarget;
   loc?: SourceLocation;
 };
 
@@ -85,7 +63,7 @@ export type ReducerCaseSlice = {
   guard?: GraphCondition;
   writesState: boolean;
   targets: ReducerTargetSlice[];
-  confidence: "exact" | "partial" | "unknown";
+  confidence: GraphTransition["confidence"];
   loc?: SourceLocation;
 };
 
@@ -93,11 +71,17 @@ export type ReducerTransitionSlice = {
   sourceKey: string;
   event: GraphEventRef;
   targetLabel: string | null;
-  target?: GraphTargetSlice;
+  target?: GraphTarget;
   guard?: GraphCondition;
   reducerCaseIndex: number;
   confidence: GraphTransition["confidence"];
   loc?: SourceLocation;
+};
+
+export type ReducerGraphSlice = {
+  reducerCases: ReducerCaseSlice[];
+  transitions: ReducerTransitionSlice[];
+  diagnostics?: GraphDiagnostic[];
 };
 
 export type EffectEmissionSlice = {
@@ -106,7 +90,7 @@ export type EffectEmissionSlice = {
   routing: GraphRouting;
   origin: "effect" | "unknown";
   guard?: GraphCondition;
-  confidence: "exact" | "partial" | "unknown";
+  confidence: GraphTransition["confidence"];
   loc?: SourceLocation;
 };
 
@@ -123,5 +107,3 @@ export type MachineGraphSlice = {
   managerKeys: string[];
   diagnostics: GraphDiagnostic[];
 };
-
-export type GraphTargetSlice = GraphTarget;

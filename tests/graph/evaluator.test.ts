@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createSourceCatalog } from "../../packages/graph/src/compiler/catalog";
-import {
-  createPartialEvaluator,
-  type EvaluationExpectedPosition,
-} from "../../packages/graph/src/compiler/evaluator";
+import { createPartialEvaluator } from "../../packages/graph/src/compiler/evaluator";
+import type { EvaluationExpectedPosition } from "../../packages/graph/src/compiler/evaluator/types";
 import { createSourceAdapter } from "../../packages/graph/src/compiler/source";
 
 const setup = (sourceText: string) => {

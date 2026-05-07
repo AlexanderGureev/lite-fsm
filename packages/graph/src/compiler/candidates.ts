@@ -2,11 +2,10 @@ import {
   Node,
   SyntaxKind,
   type CallExpression,
-  type Expression,
   type ObjectLiteralExpression,
-  type PropertyAssignment,
 } from "ts-morph";
 import type { SourceLocation } from "../types";
+import { propertyNameText, readMachineOptions, unwrapTransparent } from "./ast";
 import type { LiteFsmApiName, SourceCatalog } from "./catalog";
 import type { SourceAdapter } from "./source";
 
@@ -43,58 +42,29 @@ type AssignmentNames = {
   isDefaultExport: boolean;
 };
 
-const MACHINE_CONFIG_KEYS = new Set(["config", "initialState", "initialContext"]);
-
-const unwrapTransparentExpression = (expression: Expression): Expression => {
-  let current = expression;
-
-  while (
-    Node.isParenthesizedExpression(current) ||
-    Node.isAsExpression(current) ||
-    Node.isSatisfiesExpression(current) ||
-    Node.isTypeAssertion(current)
-  ) {
-    current = current.getExpression();
-  }
-
-  return current;
-};
-
-const propertyNameNodeText = (nameNode: Node): string | undefined => {
-  if (Node.isIdentifier(nameNode)) return nameNode.getText();
-  if (Node.isStringLiteral(nameNode) || Node.isNumericLiteral(nameNode)) return nameNode.getLiteralText();
-
-  return undefined;
-};
-
-const propertyNameText = (property: PropertyAssignment): string | undefined => {
-  return propertyNameNodeText(property.getNameNode());
-};
+const MACHINE_CONFIG_KEYS = ["config", "initialState", "initialContext"] as const;
 
 const objectLiteralHasMachineShape = (objectLiteral: ObjectLiteralExpression): boolean => {
   const keys = new Set<string>();
 
   for (const property of objectLiteral.getProperties()) {
-    if (!Node.isPropertyAssignment(property) && !Node.isShorthandPropertyAssignment(property)) continue;
-
     if (Node.isShorthandPropertyAssignment(property)) {
       keys.add(property.getName());
       continue;
     }
 
-    const key = propertyNameText(property);
+    if (!Node.isPropertyAssignment(property)) continue;
+
+    const key = propertyNameText(property.getNameNode());
     if (key) keys.add(key);
   }
 
-  return [...MACHINE_CONFIG_KEYS].every((key) => keys.has(key));
+  return MACHINE_CONFIG_KEYS.every((key) => keys.has(key));
 };
 
 const firstArgumentLooksLikeMachineConfig = (call: CallExpression): boolean => {
-  const [firstArgument] = call.getArguments();
-  if (!firstArgument || !Node.isExpression(firstArgument)) return false;
-
-  return Node.isObjectLiteralExpression(unwrapTransparentExpression(firstArgument)) &&
-    objectLiteralHasMachineShape(unwrapTransparentExpression(firstArgument) as ObjectLiteralExpression);
+  const options = readMachineOptions(call);
+  return options !== undefined && objectLiteralHasMachineShape(options);
 };
 
 const readCalleeIdentifier = (call: CallExpression): string | undefined => {
@@ -115,10 +85,6 @@ const resolveApiCall = (
   return catalog.resolveApiIdentifier(calleeName, apiName);
 };
 
-const readPropertyKey = (property: PropertyAssignment): string | undefined => {
-  return propertyNameNodeText(property.getNameNode());
-};
-
 const isExportedVariableDeclaration = (call: CallExpression): boolean => {
   const variableDeclaration = call.getFirstAncestorByKind(SyntaxKind.VariableDeclaration);
   const variableStatement = variableDeclaration?.getVariableStatement();
@@ -131,7 +97,7 @@ const getVariableName = (call: CallExpression): string | undefined => {
   if (!variableDeclaration) return undefined;
 
   const initializer = variableDeclaration.getInitializer();
-  if (!initializer || unwrapTransparentExpression(initializer) !== call) return undefined;
+  if (!initializer || unwrapTransparent(initializer) !== call) return undefined;
 
   const nameNode = variableDeclaration.getNameNode();
   return Node.isIdentifier(nameNode) ? nameNode.getText() : undefined;
@@ -156,14 +122,6 @@ const readAssignmentNames = (call: CallExpression): AssignmentNames => {
   };
 };
 
-const managerObjectArgument = (managerCall: CallExpression): ObjectLiteralExpression | undefined => {
-  const [firstArgument] = managerCall.getArguments();
-  if (!firstArgument || !Node.isExpression(firstArgument)) return undefined;
-
-  const unwrapped = unwrapTransparentExpression(firstArgument);
-  return Node.isObjectLiteralExpression(unwrapped) ? unwrapped : undefined;
-};
-
 const collectInlineMachineManagerKeys = (
   managers: readonly CallExpression[],
   catalog: SourceCatalog,
@@ -171,13 +129,13 @@ const collectInlineMachineManagerKeys = (
   const keysByCall = new Map<CallExpression, string[]>();
 
   for (const managerCall of managers) {
-    const objectArgument = managerObjectArgument(managerCall);
+    const objectArgument = readMachineOptions(managerCall);
     if (!objectArgument) continue;
 
     for (const property of objectArgument.getProperties()) {
       if (!Node.isPropertyAssignment(property)) continue;
 
-      const key = readPropertyKey(property);
+      const key = propertyNameText(property.getNameNode());
       const initializer = property.getInitializer();
       if (!key || !initializer || !Node.isCallExpression(initializer)) continue;
 

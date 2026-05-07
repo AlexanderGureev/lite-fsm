@@ -1,8 +1,9 @@
 import { Node, type Expression } from "ts-morph";
 import type { GraphDiagnostic, SourceLocation } from "../types";
+import { unwrapTransparent } from "./ast";
 import type { MachineCandidate, ManagerCandidate } from "./candidates";
 import type { CompilerContext } from "./pipeline";
-import type { EvaluatedGraphValue, EvaluationResult } from "./evaluator";
+import type { EvaluatedGraphValue, EvaluationResult } from "./evaluator/types";
 
 export type ManagerLinkRef = {
   key: string;
@@ -14,21 +15,6 @@ export type ManagerLinkSlice = {
   manager: ManagerCandidate;
   refs: ManagerLinkRef[];
   diagnostics: GraphDiagnostic[];
-};
-
-const unwrapTransparentExpression = (expression: Expression): Expression => {
-  let current = expression;
-
-  while (
-    Node.isParenthesizedExpression(current) ||
-    Node.isAsExpression(current) ||
-    Node.isSatisfiesExpression(current) ||
-    Node.isTypeAssertion(current)
-  ) {
-    current = current.getExpression();
-  }
-
-  return current;
 };
 
 const managerMapDiagnostic = (
@@ -93,7 +79,7 @@ const findMachineCandidate = (
   expression: Expression,
   candidates: readonly MachineCandidate[],
 ): MachineCandidate | undefined => {
-  const unwrapped = unwrapTransparentExpression(expression);
+  const unwrapped = unwrapTransparent(expression);
   if (Node.isCallExpression(unwrapped)) {
     return candidates.find((candidate) => candidate.call === unwrapped);
   }

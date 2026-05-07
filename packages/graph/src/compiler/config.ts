@@ -1,93 +1,19 @@
-import { Node, type Expression, type ObjectLiteralExpression, type PropertyAssignment } from "ts-morph";
+import type { Expression } from "ts-morph";
 import type { GraphDiagnostic, GraphTarget, GraphValueSummary, SourceLocation } from "../types";
+import { readMachineOption, readMachineOptions } from "./ast";
 import type { MachineCandidate } from "./candidates";
-import type { CompilerContext, ConfigGraphSlice, ConfigStateSlice, ConfigTransitionSlice } from "./pipeline";
 import type {
   EvaluatedGraphObjectProperty,
   EvaluatedGraphValue,
   EvaluationResult,
-} from "./evaluator";
-
-type MachineOption = {
-  value: Expression;
-  loc?: SourceLocation;
-};
+} from "./evaluator/types";
+import type { CompilerContext, ConfigGraphSlice, ConfigStateSlice, ConfigTransitionSlice } from "./pipeline";
 
 type ConfigBuildState = {
   diagnostics: GraphDiagnostic[];
   states: ConfigStateSlice[];
   stateKeys: Set<string>;
   transitions: ConfigTransitionSlice[];
-};
-
-const unwrapTransparentExpression = (expression: Expression): Expression => {
-  let current = expression;
-
-  while (
-    Node.isParenthesizedExpression(current) ||
-    Node.isAsExpression(current) ||
-    Node.isSatisfiesExpression(current) ||
-    Node.isTypeAssertion(current)
-  ) {
-    current = current.getExpression();
-  }
-
-  return current;
-};
-
-const propertyNameText = (property: PropertyAssignment): string | undefined => {
-  const nameNode = property.getNameNode();
-  if (Node.isIdentifier(nameNode)) return nameNode.getText();
-  if (Node.isStringLiteral(nameNode) || Node.isNumericLiteral(nameNode)) return nameNode.getLiteralText();
-
-  return undefined;
-};
-
-const readMachineOptions = (
-  candidate: MachineCandidate,
-  context: CompilerContext,
-): ObjectLiteralExpression | GraphDiagnostic => {
-  const [firstArgument] = candidate.call.getArguments();
-  if (!firstArgument || !Node.isExpression(firstArgument)) {
-    return {
-      code: "LFG_UNSUPPORTED_MACHINE_OPTIONS",
-      severity: "warning",
-      message: "createMachine call must have an object literal options argument.",
-      loc: context.source.locFromNode(candidate.call),
-    };
-  }
-
-  const options = unwrapTransparentExpression(firstArgument);
-  if (!Node.isObjectLiteralExpression(options)) {
-    return {
-      code: "LFG_UNSUPPORTED_MACHINE_OPTIONS",
-      severity: "warning",
-      message: "createMachine options must be an object literal for graph compilation.",
-      loc: context.source.locFromNode(options),
-    };
-  }
-
-  return options;
-};
-
-const readOption = (options: ObjectLiteralExpression, key: string, context: CompilerContext): MachineOption | undefined => {
-  for (const property of options.getProperties()) {
-    if (Node.isPropertyAssignment(property) && propertyNameText(property) === key) {
-      return {
-        value: property.getInitializerOrThrow(),
-        loc: context.source.locFromNode(property),
-      };
-    }
-
-    if (Node.isShorthandPropertyAssignment(property) && property.getName() === key) {
-      return {
-        value: property.getNameNode(),
-        loc: context.source.locFromNode(property),
-      };
-    }
-  }
-
-  return undefined;
 };
 
 const diagnosticFromEvaluation = (
@@ -287,55 +213,36 @@ const summarizeKnownInitialContext = (
 };
 
 const summarizeInitialContext = (
-  option: MachineOption | undefined,
+  expression: Expression | undefined,
   context: CompilerContext,
 ): GraphValueSummary | undefined => {
-  if (!option) return undefined;
+  if (!expression) return undefined;
 
-  const result = context.evaluator.evaluateExpression(option.value);
-  if (result.kind === "known") return summarizeKnownInitialContext(result.value, option.value, context);
+  const result = context.evaluator.evaluateExpression(expression);
+  if (result.kind === "known") return summarizeKnownInitialContext(result.value, expression, context);
   if (result.kind === "external") return { kind: "external", text: result.label };
   if (result.kind === "dynamic") return { kind: "dynamic", text: result.label };
 
   return { kind: "unknown", text: result.message };
 };
 
-const readInitialState = (
-  option: MachineOption | undefined,
+const readStringMetadata = (
+  expression: Expression | undefined,
   diagnostics: GraphDiagnostic[],
   context: CompilerContext,
+  diagnosticCode: string,
+  diagnosticMessage: string,
 ): string | undefined => {
-  if (!option) return undefined;
+  if (!expression) return undefined;
 
-  const result = context.evaluator.evaluateExpression(option.value);
+  const result = context.evaluator.evaluateExpression(expression);
   const value = knownString(result);
   if (value !== undefined) return value;
 
   diagnostics.push({
-    code: "LFG_UNSUPPORTED_INITIAL_STATE",
+    code: diagnosticCode,
     severity: "warning",
-    message: "initialState must resolve to a string literal.",
-    loc: result.loc,
-  });
-
-  return undefined;
-};
-
-const readGroupTag = (
-  option: MachineOption | undefined,
-  diagnostics: GraphDiagnostic[],
-  context: CompilerContext,
-): string | undefined => {
-  if (!option) return undefined;
-
-  const result = context.evaluator.evaluateExpression(option.value);
-  const value = knownString(result);
-  if (value !== undefined) return value;
-
-  diagnostics.push({
-    code: "LFG_UNSUPPORTED_GROUP_TAG",
-    severity: "warning",
-    message: "groupTag must resolve to a string literal.",
+    message: diagnosticMessage,
     loc: result.loc,
   });
 
@@ -343,13 +250,13 @@ const readGroupTag = (
 };
 
 const readPersistence = (
-  option: MachineOption | undefined,
+  expression: Expression | undefined,
   diagnostics: GraphDiagnostic[],
   context: CompilerContext,
 ): "runtime" | "snapshot" | "unknown" | undefined => {
-  if (!option) return undefined;
+  if (!expression) return undefined;
 
-  const result = context.evaluator.evaluateExpression(option.value);
+  const result = context.evaluator.evaluateExpression(expression);
   const value = knownString(result);
   if (value === "runtime" || value === "snapshot") return value;
 
@@ -363,28 +270,47 @@ const readPersistence = (
   return "unknown";
 };
 
+const unsupportedMachineOptionsSlice = (loc: SourceLocation | undefined): ConfigGraphSlice => ({
+  kind: "unknown",
+  states: [],
+  transitions: [],
+  diagnostics: [
+    {
+      code: "LFG_UNSUPPORTED_MACHINE_OPTIONS",
+      severity: "warning",
+      message: "createMachine first argument must be an object literal options.",
+      loc,
+    },
+  ],
+});
+
 export const compileConfigGraph = (
   candidate: MachineCandidate,
   context: CompilerContext,
 ): ConfigGraphSlice => {
+  const options = readMachineOptions(candidate.call);
+  if (!options) return unsupportedMachineOptionsSlice(context.source.locFromNode(candidate.call));
+
   const diagnostics: GraphDiagnostic[] = [];
-  const options = readMachineOptions(candidate, context);
-  if ("code" in options) {
-    return {
-      kind: "unknown",
-      states: [],
-      transitions: [],
-      diagnostics: [options],
-    };
-  }
+  const configExpression = readMachineOption(options, "config");
+  const initialState = readStringMetadata(
+    readMachineOption(options, "initialState"),
+    diagnostics,
+    context,
+    "LFG_UNSUPPORTED_INITIAL_STATE",
+    "initialState must resolve to a string literal.",
+  );
+  const initialContextSummary = summarizeInitialContext(readMachineOption(options, "initialContext"), context);
+  const groupTag = readStringMetadata(
+    readMachineOption(options, "groupTag"),
+    diagnostics,
+    context,
+    "LFG_UNSUPPORTED_GROUP_TAG",
+    "groupTag must resolve to a string literal.",
+  );
+  const persistence = readPersistence(readMachineOption(options, "persistence"), diagnostics, context);
 
-  const configOption = readOption(options, "config", context);
-  const initialState = readInitialState(readOption(options, "initialState", context), diagnostics, context);
-  const initialContextSummary = summarizeInitialContext(readOption(options, "initialContext", context), context);
-  const groupTag = readGroupTag(readOption(options, "groupTag", context), diagnostics, context);
-  const persistence = readPersistence(readOption(options, "persistence", context), diagnostics, context);
-
-  if (!configOption) {
+  if (!configExpression) {
     diagnostics.push({
       code: "LFG_MISSING_MACHINE_CONFIG",
       severity: "warning",
@@ -404,7 +330,7 @@ export const compileConfigGraph = (
     };
   }
 
-  const configResult = context.evaluator.evaluateExpression(configOption.value, { expectedPosition: "config" });
+  const configResult = context.evaluator.evaluateExpression(configExpression, { expectedPosition: "config" });
   const config = knownObject(configResult);
   if (!config) {
     diagnostics.push(
