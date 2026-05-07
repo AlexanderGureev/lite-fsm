@@ -303,7 +303,25 @@ transition escaped from effect; emitted events may be incomplete
 entering STATE may emit EVENT
 ```
 
-Симулятор может показывать такие события как suggested/auto, но базовая симуляция одной машины все равно разрешает вручную активировать любое событие, принимаемое текущим state.
+Симулятор может показывать такие события как suggested follow-up events, но базовая симуляция одной машины все равно разрешает вручную активировать любое событие, принимаемое текущим state.
+
+Важно не склеивать effect emission и следующий accepted transition в одно ребро. Runtime выполняет это как два шага:
+
+```txt
+A --TO_B--> B
+entering B may emit GO_C / GO_X
+B --GO_C--> C
+B --GO_X--> X
+```
+
+В IR это должно оставаться двумя слоями:
+
+1. `GraphTransition`: какие события машина принимает и куда они переводят state.
+2. `GraphEmission`: какие события effect может отправить после входа в state.
+
+Для симуляции полного бизнес-сценария simulator может после перехода в `B` предложить emissions из `B` как продолжение. Если пользователь выбирает emission `GO_C`, simulator применяет его как обычное событие только если текущий state действительно принимает `GO_C` через `config`/wildcard/reducer branch. Если событие не принято, оно остается suggested emission с diagnostic/analyzer-подсказкой, но не двигает state.
+
+Для v1 headless simulator автоматически применяет только local/default-routing emissions. Emissions с `actor`, `group`, `tag`, `unscoped` или `unknown` routing должны показываться в suggested list, но не применяться как локальный переход одной машины. Полноценная доставка таких событий относится к будущему symbolic system simulator поверх `MachineManager`.
 
 ### Middleware
 
@@ -521,8 +539,10 @@ const sim = createGraphSimulator(machineGraph);
 sim.start();
 sim.getSnapshot();
 sim.getAvailableTransitions();
+sim.getSuggestedEmissions();
 sim.send({ event: "NEXT" });
 sim.choose({ transitionId: "..." });
+sim.followEmission({ emissionId: "..." });
 sim.restart();
 ```
 
@@ -539,11 +559,35 @@ export type GraphSimulationSnapshot = {
 export type GraphSimulationStep = {
   event: string;
   transitionId: string;
+  emissionId?: string;
+  cause: "external" | "effect";
   from: string;
   to: string;
   guard?: string;
   timestamp?: number;
 };
+
+export type GraphSuggestedEmission = {
+  emissionId: string;
+  event: GraphEventRef;
+  routing: GraphRouting;
+  guard?: GraphCondition;
+  canFollowLocally: boolean;
+  blockedReason?: string;
+};
+
+export type GraphFollowEmissionResult =
+  | {
+      ok: true;
+      snapshot: GraphSimulationSnapshot;
+      step: GraphSimulationStep;
+    }
+  | {
+      ok: false;
+      reason: "event-not-accepted" | "non-local-routing" | "unknown-emission";
+      snapshot: GraphSimulationSnapshot;
+      emission?: GraphSuggestedEmission;
+    };
 ```
 
 Правила:
@@ -552,10 +596,13 @@ export type GraphSimulationStep = {
 2. Любое событие, принятое текущим state через `config`/wildcard/reducer branch, считается доступным для внешней отправки.
 3. Источник события не важен: UI, другая машина, effect, actor или тест.
 4. Отправки событий из effects показываются как suggested events, но не блокируют ручной выбор принимаемых событий.
-5. Ветки reducer с несколькими target-ами становятся выбираемыми ветками.
-6. Guards не вычисляются. UI выбирает конкретную ветку.
-7. `null` target считается self target, если reducer не дал более точную ветку.
-8. Terminal target для actor template переводит symbolic snapshot в terminal pseudo-state. UI может дополнительно показать это как disposed actor, но v1 симулятор не удаляет actor record и не моделирует полный `MachineManager`.
+5. `getSuggestedEmissions()` возвращает emissions, применимые к текущему state после последнего шага симуляции. State-specific effect связывается с входом в этот state; wildcard effect связывается с wildcard source.
+6. `followEmission({ emissionId })` применяет emission как следующий event только если `canFollowLocally === true`: routing является `default`, а текущий state принимает event через `config`/wildcard/reducer branch.
+7. Если emission имеет guard/condition, simulator не вычисляет его. UI выбирает конкретную emission branch так же, как guarded/reducer branch.
+8. Ветки reducer с несколькими target-ами становятся выбираемыми ветками.
+9. Guards не вычисляются. UI выбирает конкретную ветку.
+10. `null` target считается self target, если reducer не дал более точную ветку.
+11. Terminal target для actor template переводит symbolic snapshot в terminal pseudo-state. UI может дополнительно показать это как disposed actor, но v1 симулятор не удаляет actor record и не моделирует полный `MachineManager`.
 
 Для actor template нужны два режима:
 
@@ -579,6 +626,17 @@ Reducer/config layering:
 3. В simulator reducer branch считается effective target для выбранной ветки события.
 4. `config: null` остается видимым self/targetless acceptance и используется как fallback, если reducer не дал выбранной ветки.
 5. UI должен показывать config edge и reducer-derived target как разные слои, а не терять один из них.
+
+Effect emission following:
+
+1. Emission не является transition и не меняет snapshot сама по себе.
+2. После успешного `send`/`choose` simulator может вычислить suggested emissions для нового state.
+3. Пользователь может выбрать одну suggested emission и применить ее как следующий event.
+4. Follow-up event проходит через тот же resolver доступных transitions, что и внешний `send`.
+5. Если event не принят текущим state, simulator не меняет snapshot и должен вернуть blocked follow result с причиной `event-not-accepted`.
+6. Если emission имеет routing не `default`, simulator одной машины не доставляет его локально. Такой emission остается видимым для UI/analyzer и будущего system simulator.
+7. Автоматический режим `auto-unambiguous` может сам применить только одну однозначную local/default emission без guard-а. Если emissions несколько или есть guard, simulator должен вернуть choices и ждать выбора UI/пользователя.
+8. Автоматический режим follow-up должен иметь ограничение глубины, чтобы не зависнуть на циклах вида `B -> effect GO_B -> B`.
 
 ## Diagnostics
 
@@ -671,10 +729,13 @@ export type CompileLiteFsmGraphOptions = {
 };
 
 export type ActorSimulationMode = "spawnLifecycle" | "activeActor";
+export type EffectFollowMode = "manual" | "auto-unambiguous";
 
 export type GraphSimulatorOptions = {
   actorMode?: ActorSimulationMode;
   startState?: string;
+  effectFollowMode?: EffectFollowMode;
+  maxEffectFollowDepth?: number;
 };
 
 export type AnalyzeLiteFsmGraphOptions = {
@@ -731,10 +792,102 @@ CLI не должен добавлять режим проекта в v1.
 Граница адаптера:
 
 ```txt
-строка исходника -> ts-morph AST -> внутренняя модель извлечения -> LiteFsmGraphDocument
+строка исходника
+  -> SourceAdapter над ts-morph
+  -> SourceCatalog / binding layer
+  -> MachineCandidate / ManagerCandidate discovery
+  -> PartialEvaluator
+  -> feature compilers: config / manager / reducer / effects
+  -> GraphAssembler
+  -> LiteFsmGraphDocument
 ```
 
 Не экспортировать типы `ts-morph` из публичного API.
+
+### Внутренняя архитектура compiler-а
+
+Решение для v1: фиксированный compiler pipeline и внутренние registries маленьких правил. Публичную plugin API не добавлять до стабилизации `@lite-fsm/graph` и появления нескольких реальных расширений. Это сохраняет ядро расширяемым, но не закрепляет преждевременно внутренние AST-контракты как публичный API.
+
+Цель архитектуры: новый поддерживаемый синтаксический кейс должен добавляться локально - новым resolver/rule в нужном слое, минимальным fixture-примером и тестом. Он не должен требовать правок в config compiler-е, reducer compiler-е, effects compiler-е и assembler-е одновременно.
+
+Внутренние контракты:
+
+```ts
+type CompilerContext = {
+  source: SourceAdapter;
+  catalog: SourceCatalog;
+  evaluator: PartialEvaluator;
+  diagnostics: DiagnosticSink;
+};
+
+type CompilerPass<Input, Output> = {
+  name: string;
+  run(input: Input, context: CompilerContext): Output;
+};
+
+type PatternRule<RuleContext, Result> = {
+  name: string;
+  match(node: AstNodeRef, context: RuleContext): boolean;
+  read(node: AstNodeRef, context: RuleContext): Result;
+};
+```
+
+Эти типы являются внутренними. Они не экспортируются из `@lite-fsm/graph` как публичный extension API.
+
+Внутренние слои:
+
+1. `SourceAdapter` скрывает `ts-morph`, нормализует `loc`, text ranges и базовые операции чтения AST.
+2. `SourceCatalog` строится один раз и хранит import provenance, локальные `const`, known API names, candidate calls и быстрые lookup-таблицы.
+3. `CandidateDiscovery` находит `MachineCandidate[]` и `ManagerCandidate[]`, но не строит graph transitions.
+4. `PartialEvaluator` раскрывает поддерживаемое TypeScript-подмножество без знания FSM-семантики.
+5. Feature compilers (`ConfigCompiler`, `ManagerLinker`, `ReducerCompiler`, `EffectsCompiler`) читают candidates/evaluator и возвращают независимые graph slices.
+6. `GraphAssembler` объединяет slices, назначает stable IDs, сортирует сущности и нормализует diagnostics.
+
+Partial evaluator должен быть registry-based. Базовые resolvers v1:
+
+1. `StringLiteralResolver`;
+2. `NullLiteralResolver`;
+3. `ArrayLiteralResolver`;
+4. `ObjectLiteralResolver`;
+5. `LocalConstIdentifierResolver`;
+6. `AsConstResolver`;
+7. `SatisfiesResolver`;
+8. `ParenthesizedExpressionResolver`;
+9. `ObjectSpreadResolver`;
+10. `ComputedKeyResolver`;
+11. `TransparentWrapperResolver` для `createConfig(...)`, `createReducer(...)`, `createEffect(...)` только в ожидаемых позициях.
+
+Evaluator возвращает structured result, а не бросает исключение:
+
+```ts
+type EvaluationResult =
+  | { kind: "known"; value: GraphValue; loc?: SourceLocation }
+  | { kind: "external"; label: string; loc?: SourceLocation }
+  | { kind: "dynamic"; label?: string; loc?: SourceLocation }
+  | { kind: "unsupported"; code: string; message: string; loc?: SourceLocation };
+```
+
+Feature compilers должны возвращать slices:
+
+```ts
+type MachineGraphSlices = {
+  candidate: MachineCandidate;
+  config?: ConfigGraphSlice;
+  reducer?: ReducerGraphSlice;
+  effects?: EffectsGraphSlice;
+  managerKeys: string[];
+  diagnostics: GraphDiagnostic[];
+};
+```
+
+Разделение ответственности:
+
+1. `ConfigCompiler` не раскрывает identifiers, spreads, wrappers или computed keys вручную; для этого используется `PartialEvaluator`.
+2. `ReducerCompiler` не проверяет consistency с `config`; он извлекает reducer cases и reducer-layer transitions.
+3. `EffectsCompiler` не превращает emissions в state transitions и не проверяет, принимает ли машина emitted event.
+4. `ManagerLinker` не пересобирает машины; он связывает уже найденные candidates с manager keys.
+5. `GraphAssembler` не читает AST и не содержит pattern matching для `switch`, `if`, `createEffect`, spread или routing.
+6. Semantic diagnostics остаются в analyzer-е на базе IR, а compiler diagnostics ограничены извлечением исходника.
 
 ## Анализ корректности на базе IR
 
@@ -818,7 +971,7 @@ export const machine = createMachine({
 
 ### Этап 0: каркас `@lite-fsm/graph` и контракты IR
 
-Цель: зафиксировать типы и тестовую инфраструктуру до реализации анализа AST.
+Цель: зафиксировать публичные IR-типы, тестовую инфраструктуру и внутренние контракты compiler pipeline до реализации анализа AST.
 
 Состав:
 
@@ -826,32 +979,36 @@ export const machine = createMachine({
 2. Описать типы `LiteFsmGraphDocument`, `LiteFsmGraphMachine`, transitions, emissions, reducer cases, diagnostics, selectors.
 3. Добавить `compileLiteFsmGraph(source)` как заглушку, которая возвращает пустой document без падения.
 4. Добавить тестовый harness, который читает `xstate/graph-parser-fixtures.ts` как строку.
-5. Добавить базовые тесты публичных типов.
+5. Добавить внутренние типы/контракты для `SourceAdapter`, `SourceCatalog`, `CompilerContext`, `CompilerPass`, `PatternRule`, graph slices и `DiagnosticSink`.
+6. Добавить базовые тесты публичных типов.
 
 Проверка:
 
 1. `compileLiteFsmGraph("")` возвращает валидный пустой `LiteFsmGraphDocument`.
 2. Fixture-файл читается как строка в тестах.
 3. Type tests подтверждают форму публичного API.
+4. Внутренний pipeline можно создать с no-op passes без обращения к `ts-morph` из публичных exports.
 
-### Этап 1: source catalog и обнаружение API
+### Этап 1: source catalog, API provenance и обнаружение candidates
 
 Цель: научиться находить кандидаты `createMachine`/`MachineManager` без построения graph transitions.
 
 Состав:
 
 1. Парсить строку через `ts-morph` без project mode.
-2. Построить import provenance map для известных source specifiers.
-3. Найти вызовы `createMachine`, alias-импорты, ambient `createMachine`, `export default createMachine(...)`.
-4. Найти `MachineManager(...)` и inline `createMachine(...)` внутри manager object.
-5. Сохранить `variableName`, `exportName`, `managerKey`, `index`, `loc`.
-6. Игнорировать alias chains без import provenance и неподдержанные похожие imports.
+2. Реализовать `SourceAdapter`, чтобы остальные слои не зависели напрямую от типов `ts-morph`.
+3. Построить `SourceCatalog`: import provenance map, local const declarations, known API names и call lookup.
+4. Найти `MachineCandidate[]`: вызовы `createMachine`, alias-импорты, ambient `createMachine`, `export default createMachine(...)`.
+5. Найти `ManagerCandidate[]`: `MachineManager(...)`, alias-импорты и inline `createMachine(...)` внутри manager object.
+6. Сохранить `variableName`, `exportName`, `managerKey`, `index`, `loc` в candidates.
+7. Игнорировать alias chains без import provenance и неподдержанные похожие imports.
 
 Проверка:
 
 1. По `xstate/graph-parser-fixtures.ts` возвращается ожидаемое число machine candidates.
 2. Alias import, ambient shape guard, default export и inline manager machine покрыты отдельными тестами.
 3. Неподдержанный alias chain не распознается как machine.
+4. Следующие этапы могут читать только `SourceCatalog`/candidates, не сканируя source заново.
 
 ### Этап 2: partial evaluator для поддерживаемого подмножества
 
@@ -859,18 +1016,21 @@ export const machine = createMachine({
 
 Состав:
 
-1. Поддержать object literals, local `const`, string literals, null, arrays.
-2. Поддержать `as const`, `satisfies`, parenthesized expressions.
-3. Поддержать spreads из локальных object literals.
-4. Поддержать computed keys из local const string.
-5. Поддержать transparent wrappers `createConfig({ ... })` и `createReducer(fn)` в ожидаемых позициях.
-6. Возвращать structured result: `known`, `external`, `dynamic`, `unsupported` с `loc` и diagnostic metadata.
+1. Реализовать `PartialEvaluator` как registry resolvers, а не как один большой `switch` по всем будущим кейсам.
+2. Поддержать object literals, local `const`, string literals, null, arrays.
+3. Поддержать `as const`, `satisfies`, parenthesized expressions.
+4. Поддержать spreads из локальных object literals.
+5. Поддержать computed keys из local const string.
+6. Поддержать transparent wrappers `createConfig({ ... })`, `createReducer(fn)`, `createEffect({ effect })` в ожидаемых позициях.
+7. Возвращать structured result: `known`, `external`, `dynamic`, `unsupported` с `loc` и diagnostic metadata.
+8. Не добавлять FSM-specific правила в evaluator: state/event/target/routing интерпретируют feature compilers.
 
 Проверка:
 
 1. Unit tests без `createMachine`: evaluator раскрывает literals/spreads/computed keys.
 2. Dynamic target и external identifier дают контролируемый result, а не exception.
 3. Evaluator не читает файловую систему и не резолвит imports.
+4. Новый resolver можно протестировать изолированно без изменения config/reducer/effects tests.
 
 ### Этап 3: config graph compiler
 
@@ -878,18 +1038,20 @@ export const machine = createMachine({
 
 Состав:
 
-1. Для каждого machine candidate извлечь `config`, `initialState`, `initialContextSummary`, `groupTag`, `persistence`.
-2. Построить `states` и `transitions` слоя `config`.
+1. Для каждого machine candidate через `PartialEvaluator` извлечь `config`, `initialState`, `initialContextSummary`, `groupTag`, `persistence`.
+2. Построить `ConfigGraphSlice`: states, transitions слоя `config`, machine facts и diagnostics.
 3. Поддержать wildcard `"*"`, `null`, terminal targets, dynamic targets.
-4. Определить `kind: "domain" | "actorTemplate" | "unknown"` по `config`.
-5. Сохранить source locations и stable IDs для states/transitions.
+4. Определить `kind: "domain" | "actorTemplate" | "unknown"` по evaluated `config`.
+5. Сохранить source locations; stable IDs финализирует `GraphAssembler`.
 6. Вернуть compiler diagnostics только для неподдержанного исходника: unknown config identifier, dynamic key, dynamic target.
+7. Не раскрывать identifiers/spreads/wrappers внутри config compiler-а напрямую.
 
 Проверка:
 
 1. `directObjectMachine`, `localConstConfigMachine`, `computedKeysMachine`, `satisfiesMachine`, `wildcardMachine`, `helperWrappedMachine` строятся по config.
 2. Actor template получает `kind: "actorTemplate"` и terminal targets.
 3. Diagnostic-примеры с external config и dynamic target не ломают document.
+4. Config compiler tests используют mocked/evaluated values там, где не проверяется сам evaluator.
 
 ### Этап 4: manager linker и выбор одной машины
 
@@ -897,17 +1059,19 @@ export const machine = createMachine({
 
 Состав:
 
-1. Построить `LiteFsmGraphManager[]`.
-2. Заполнить `managerKeys` у машин.
-3. Поддержать manager object literal и local const manager map.
-4. Реализовать `selectMachineGraph(document, selector)`.
-5. Обрабатывать неоднозначный selector через diagnostic и candidates.
+1. Из `ManagerCandidate[]` и machine identity map построить `ManagerLinkSlice`.
+2. Построить `LiteFsmGraphManager[]`.
+3. Заполнить `managerKeys` у машин через slice, не пересканируя AST.
+4. Поддержать manager object literal и local const manager map через `PartialEvaluator`.
+5. Реализовать `selectMachineGraph(document, selector)`.
+6. Обрабатывать неоднозначный selector через diagnostic и candidates.
 
 Проверка:
 
 1. `manager`, `renamedManager` и `inlineManager` из fixture-а дают ожидаемые manager refs.
 2. `selectMachineGraph` выбирает по `index`, `id`, `variableName`, `exportName`, `managerKey`, `{ managerId, managerKey }`.
 3. Неоднозначный `managerKey` возвращает candidates, а не случайную машину.
+4. Inline machine получает тот же candidate/assembler path, что и top-level machine.
 
 ### Этап 5: reducer branch compiler
 
@@ -915,19 +1079,22 @@ export const machine = createMachine({
 
 Состав:
 
-1. Поддержать inline reducer function и `reducer: createReducer(fn)`.
-2. Поддержать `switch (action.type)`.
-3. Поддержать `if`/`else if`/`else` с `action.type === "..."`.
-4. Поддержать прямые записи `state.state = ...`, `s.state = ...`, `state.state = nextState`.
-5. Поддержать ternary targets и простой `return { state, context }`.
-6. Создавать `GraphReducerCase[]` и transitions слоя `reducer`.
-7. Сохранять guard text как `GraphCondition`, не вычисляя его.
+1. Реализовать `ReducerCompiler` как registry rules для reducer function body.
+2. Поддержать inline reducer function и `reducer: createReducer(fn)` через evaluator/wrapper resolver.
+3. Поддержать `switch (action.type)`.
+4. Поддержать `if`/`else if`/`else` с `action.type === "..."`.
+5. Поддержать прямые записи `state.state = ...`, `s.state = ...`, `state.state = nextState`.
+6. Поддержать ternary targets и простой `return { state, context }`.
+7. Создавать `ReducerGraphSlice`: `GraphReducerCase[]`, transitions слоя `reducer`, diagnostics.
+8. Сохранять guard text как `GraphCondition`, не вычисляя его.
+9. Не проверять consistency reducer/config в compiler-е.
 
 Проверка:
 
 1. `switchReducerMachine`, `ifReducerMachine`, `chainedIfReducerMachine`, `returnObjectReducerMachine`, `helperWrappedMachine` дают expected reducer cases.
 2. Reducer targets не удаляют config transitions, а добавляются отдельным слоем.
 3. Unsupported reducer mutation/helper call дает partial diagnostic без падения.
+4. Новое reducer rule можно проверить на функции reducer-а без полного machine fixture.
 
 ### Этап 6: effects emission compiler
 
@@ -935,15 +1102,18 @@ export const machine = createMachine({
 
 Состав:
 
-1. Поддержать inline effects object и local const effects object.
-2. Поддержать plain effect function inline/local const.
-3. Поддержать `createEffect({ effect })`, local `createEffect`, `type`, `cancelFn`.
-4. Поддержать state-specific, wildcard и computed effect keys.
-5. Поддержать прямой `transition({ type })`.
-6. Поддержать `transition({ type, meta: { actorId/groupId/groupTag } })`.
-7. Поддержать `transition.actor/group/tag/unscoped` только для actor effects.
-8. Поддержать `if`/`else if`/`else` и `switch(action.type)` labels внутри effect.
-9. Детектить escaped `transition`.
+1. Реализовать `EffectsCompiler` как registry rules для effects object, effect function body и routing.
+2. Поддержать inline effects object и local const effects object.
+3. Поддержать plain effect function inline/local const.
+4. Поддержать `createEffect({ effect })`, local `createEffect`, `type`, `cancelFn`.
+5. Поддержать state-specific, wildcard и computed effect keys.
+6. Поддержать прямой `transition({ type })`.
+7. Поддержать `transition({ type, meta: { actorId/groupId/groupTag } })`.
+8. Поддержать `transition.actor/group/tag/unscoped` только для actor effects.
+9. Поддержать `if`/`else if`/`else` и `switch(action.type)` labels внутри effect.
+10. Детектить escaped `transition`.
+11. Создавать `EffectsGraphSlice`: `GraphEmission[]` и diagnostics.
+12. Не проверять acceptance emitted events в compiler-е.
 
 Проверка:
 
@@ -951,6 +1121,7 @@ export const machine = createMachine({
 2. `domainWithMetaTransitionMachine` распознает routing через `meta`.
 3. `actorTemplate` и `actorWildcardEffectTemplate` распознают actor routing sugar.
 4. `escapedTransitionMachine` возвращает diagnostic.
+5. Routing resolver tests покрывают default/meta/sugar routing без полного graph assembler-а.
 
 ### Этап 7: сборка полного compiler result
 
@@ -958,17 +1129,20 @@ export const machine = createMachine({
 
 Состав:
 
-1. Объединить source catalog, config graph, manager links, reducer branches и effect emissions.
+1. Реализовать `GraphAssembler`, который объединяет source catalog, candidates, config slices, manager link slice, reducer slices и effects slices.
 2. Нормализовать document-level и machine-level diagnostics.
 3. Обеспечить stable IDs для states, transitions, emissions, reducer cases.
-4. Добавить snapshot tests полного документа по `xstate/graph-parser-fixtures.ts`.
-5. Не запускать semantic analyzer внутри compiler по умолчанию.
+4. Детерминированно сортировать machines, managers, transitions, reducer cases, emissions и diagnostics.
+5. Добавить snapshot tests полного документа по `xstate/graph-parser-fixtures.ts`.
+6. Не запускать semantic analyzer внутри compiler по умолчанию.
+7. Не читать AST и не выполнять pattern matching внутри assembler-а.
 
 Проверка:
 
 1. `compileLiteFsmGraph(fixtureSource)` возвращает document со всеми валидными машинами, managers, transitions, reducer cases и emissions.
 2. Повторный запуск на том же source дает те же IDs.
 3. Compiler diagnostics относятся только к извлечению исходника, а не к semantic analysis.
+4. Удаление/добавление feature compiler slice меняет только соответствующий слой документа, а не contract assembler-а.
 
 ### Этап 8: анализ корректности на базе IR
 
@@ -1000,12 +1174,16 @@ export const machine = createMachine({
 4. Давать выбрать конкретную guarded/reducer ветку.
 5. Поддержать self transitions, dynamic/unknown targets и terminal targets.
 6. Показывать effect emissions как suggested events, не превращая их в state transition.
+7. Поддержать `followEmission`, чтобы выбранный local/default emission применялся как следующий accepted event.
+8. Добавить защиту от бесконечного auto-follow цикла через `maxEffectFollowDepth`.
 
 Проверка:
 
 1. Симулятор проходит сценарии vending/traffic-light и несколько машин из fixture-а.
 2. Любое событие, принятое текущим state, можно отправить вручную независимо от source события.
 3. Guards и reducer branches выбираются символически, без исполнения условий.
+4. Сценарий `A --TO_B--> B`, где effect `B` условно emits `GO_C` или `GO_X`, показывает обе suggested emissions и позволяет выбрать продолжение `B --GO_C--> C` или `B --GO_X--> X`.
+5. Emission для event, который текущий state не принимает, не меняет snapshot и возвращает blocked follow result.
 
 ### Этап 10: CLI
 
