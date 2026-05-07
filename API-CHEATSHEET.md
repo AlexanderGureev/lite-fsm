@@ -12,8 +12,26 @@
 | `@lite-fsm/middleware`                                                 | `immerMiddleware`, `devToolsMiddleware`                                                                                                           |
 | `@lite-fsm/middleware/immer` · `@lite-fsm/middleware/devTools`         | per-feature entry points                                                                                                                          |
 | `@lite-fsm/react`                                                      | `FSMContext`, `FSMContextProvider`, `FSMHydrationBoundary`, `useHydrateSnapshot`, `useManager`, `useSelector`, `useTransition`, `defineMachine`   |
+| `@lite-fsm/graph`                                                      | experimental: `compileLiteFsmGraph` и IR-типы для graph tooling                                                                                   |
 
 `@lite-fsm/react` помечен `"use client"`. Импортировать можно из SSR/RSC, hooks/provider — только в client tree.
+
+## Experimental graph compiler
+
+`@lite-fsm/graph` принимает строку TypeScript/JavaScript и возвращает JSON-документ графа без исполнения пользовательского кода.
+
+```ts
+const result = compileLiteFsmGraph(source, {
+  filename: "machine.ts",
+  parser: "static",
+});
+```
+
+| API                         | Назначение                                                                                  |
+| --------------------------- | ------------------------------------------------------------------------------------------- |
+| `compileLiteFsmGraph(src)`  | строит `LiteFsmGraphDocument`; на раннем этапе возвращает найденные machines/managers без transitions |
+| `LiteFsmGraphDocument`      | универсальный IR для будущих визуализаторов, CLI, analyzer-а и simulator-а                  |
+| `GraphDiagnostic`           | diagnostic как часть результата; compiler не должен падать на частично неподдержанном коде  |
 
 ## Mental model
 

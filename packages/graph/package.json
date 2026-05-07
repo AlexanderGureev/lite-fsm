@@ -22,6 +22,9 @@
     }
   },
   "files": ["dist"],
+  "dependencies": {
+    "ts-morph": "^27.0.2"
+  },
   "scripts": {
     "build": "tsup --config tsup.config.ts && tsc -p tsconfig.build.json && node ../../scripts/dts-to-dcts.mjs dist",
     "check-types": "tsc --noEmit -p tsconfig.json"

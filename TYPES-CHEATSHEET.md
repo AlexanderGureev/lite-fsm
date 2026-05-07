@@ -316,6 +316,27 @@ export const defineEffect: TypedCreateEffectFn<AppEvent, Deps> = createEffect;
 | `TypedCreateMachineFn<P, D>` | union событий и deps эффектов |
 | `TypedCreateEffectFn<P, D>`  | union событий и deps эффектов |
 
+## Experimental graph IR
+
+`@lite-fsm/graph` экспортирует типы JSON-документа для tooling-слоя. Runtime-пакеты от него не зависят.
+
+```ts
+import { compileLiteFsmGraph, type LiteFsmGraphDocument } from "@lite-fsm/graph";
+
+const result = compileLiteFsmGraph(source);
+const document: LiteFsmGraphDocument = result.document;
+```
+
+| Тип                         | Форма                                                                                 |
+| --------------------------- | ------------------------------------------------------------------------------------- |
+| `LiteFsmGraphResult`        | `{ document: LiteFsmGraphDocument; diagnostics: GraphDiagnostic[] }`                  |
+| `LiteFsmGraphDocument`      | `{ version, source, machines, managers, diagnostics }`                                |
+| `LiteFsmGraphMachine`       | machine metadata плюс `states`, `transitions`, `emissions`, `reducerCases`            |
+| `GraphTransition`           | accepted event edge слоя `config` или `reducer`                                       |
+| `GraphEmission`             | событие, которое может отправить effect при входе в state                             |
+| `GraphDiagnostic`           | `{ code, severity, message, machineId?, loc? }`                                       |
+| `CompileLiteFsmGraphOptions` | `{ filename?, language?, parser?: "static", maxMachines? }`                           |
+
 ## Middleware
 
 ```ts

@@ -275,7 +275,11 @@ importers:
 
   packages/core: {}
 
-  packages/graph: {}
+  packages/graph:
+    dependencies:
+      ts-morph:
+        specifier: ^27.0.2
+        version: 27.0.2
 
   packages/middleware:
     dependencies:
