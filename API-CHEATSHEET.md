@@ -29,7 +29,7 @@ const result = compileLiteFsmGraph(source, {
 
 | API                         | Назначение                                                                                  |
 | --------------------------- | ------------------------------------------------------------------------------------------- |
-| `compileLiteFsmGraph(src)`  | строит `LiteFsmGraphDocument`; на раннем этапе возвращает найденные machines/managers без transitions |
+| `compileLiteFsmGraph(src)`  | строит `LiteFsmGraphDocument`; сейчас компилирует найденные machines/managers и config-layer states/transitions |
 | `LiteFsmGraphDocument`      | универсальный IR для будущих визуализаторов, CLI, analyzer-а и simulator-а                  |
 | `GraphDiagnostic`           | diagnostic как часть результата; compiler не должен падать на частично неподдержанном коде  |
 

@@ -24,6 +24,7 @@ export type EvaluatedGraphValue =
   | { kind: "string"; value: string; loc?: SourceLocation }
   | { kind: "number"; value: number; loc?: SourceLocation }
   | { kind: "boolean"; value: boolean; loc?: SourceLocation }
+  | { kind: "undefined"; loc?: SourceLocation }
   | { kind: "null"; loc?: SourceLocation }
   | { kind: "array"; items: EvaluatedGraphValue[]; loc?: SourceLocation }
   | { kind: "object"; properties: EvaluatedGraphObjectProperty[]; loc?: SourceLocation }
@@ -36,12 +37,15 @@ export type EvaluatedGraphValue =
         type?: EvaluatedGraphValue;
         cancelFn?: EvaluatedGraphValue;
       };
-    };
+    }
+  | { kind: "external"; label: string; loc?: SourceLocation }
+  | { kind: "dynamic"; label: string; loc?: SourceLocation }
+  | { kind: "unsupported"; code: string; message: string; loc?: SourceLocation };
 
 export type EvaluationResult =
   | { kind: "known"; value: EvaluatedGraphValue; loc?: SourceLocation }
   | { kind: "external"; label: string; loc?: SourceLocation }
-  | { kind: "dynamic"; label?: string; loc?: SourceLocation }
+  | { kind: "dynamic"; label: string; loc?: SourceLocation }
   | { kind: "unsupported"; code: string; message: string; loc?: SourceLocation };
 
 export type EvaluateExpressionOptions = {
@@ -51,6 +55,12 @@ export type EvaluateExpressionOptions = {
 type EvaluationState = {
   seenIdentifiers: ReadonlySet<string>;
 };
+
+type IncompleteEvaluationResult = Exclude<EvaluationResult, { kind: "known" }>;
+
+type ObjectPropertyValueResult =
+  | { ok: true; value: EvaluatedGraphValue }
+  | { ok: false; result: IncompleteEvaluationResult };
 
 type EvaluatorRuleContext = {
   source: SourceAdapter;
@@ -79,6 +89,36 @@ const known = (value: EvaluatedGraphValue, loc?: SourceLocation): EvaluationResu
   value,
   loc,
 });
+
+const partialValueFromResult = (result: IncompleteEvaluationResult): EvaluatedGraphValue => {
+  switch (result.kind) {
+    case "external":
+      return { kind: "external", label: result.label, loc: result.loc };
+    case "dynamic":
+      return { kind: "dynamic", label: result.label, loc: result.loc };
+    case "unsupported":
+      return {
+        kind: "unsupported",
+        code: result.code,
+        message: result.message,
+        loc: result.loc,
+      };
+  }
+};
+
+const shouldPreservePartialObjectValue = (context: EvaluatorRuleContext): boolean => {
+  return context.options.expectedPosition === "config";
+};
+
+const readObjectPropertyValue = (
+  result: EvaluationResult,
+  context: EvaluatorRuleContext,
+): ObjectPropertyValueResult => {
+  if (result.kind === "known") return { ok: true, value: result.value };
+  if (shouldPreservePartialObjectValue(context)) return { ok: true, value: partialValueFromResult(result) };
+
+  return { ok: false, result };
+};
 
 const isStringKnown = (result: EvaluationResult): result is Extract<EvaluationResult, { kind: "known" }> & {
   value: Extract<EvaluatedGraphValue, { kind: "string" }>;
@@ -124,7 +164,6 @@ const primitiveLiteralRule: EvaluatorRule = {
     if (node.getKind() === SyntaxKind.TrueKeyword || node.getKind() === SyntaxKind.FalseKeyword) {
       return known({ kind: "boolean", value: node.getKind() === SyntaxKind.TrueKeyword, loc }, loc);
     }
-
     return known({ kind: "null", loc }, loc);
   },
 };
@@ -199,10 +238,15 @@ const evaluateObjectLiteralProperties = (
   context: EvaluatorRuleContext,
 ): EvaluationResult | EvaluatedGraphObjectProperty[] => {
   const properties: EvaluatedGraphObjectProperty[] = [];
+  const nestedExpectedPosition = context.options.expectedPosition === "config" ? "config" : "unknown";
 
   for (const property of objectLiteral.getProperties()) {
     if (Node.isSpreadAssignment(property)) {
-      const spreadResult = context.evaluate(property.getExpression(), { expectedPosition: "unknown" }, context.state);
+      const spreadResult = context.evaluate(
+        property.getExpression(),
+        { expectedPosition: nestedExpectedPosition },
+        context.state,
+      );
       if (spreadResult.kind !== "known" || spreadResult.value.kind !== "object") {
         return {
           kind: "unsupported",
@@ -217,12 +261,13 @@ const evaluateObjectLiteralProperties = (
     }
 
     if (Node.isShorthandPropertyAssignment(property)) {
-      const value = context.evaluate(property.getNameNode(), { expectedPosition: "unknown" }, context.state);
-      if (value.kind !== "known") return value;
+      const value = context.evaluate(property.getNameNode(), { expectedPosition: nestedExpectedPosition }, context.state);
+      const propertyValue = readObjectPropertyValue(value, context);
+      if (!propertyValue.ok) return propertyValue.result;
 
       properties.push({
         key: property.getName(),
-        value: value.value,
+        value: propertyValue.value,
         loc: context.source.locFromNode(property),
       });
       continue;
@@ -242,12 +287,13 @@ const evaluateObjectLiteralProperties = (
         };
       }
 
-      const value = context.evaluate(initializer, { expectedPosition: "unknown" }, context.state);
-      if (value.kind !== "known") return value;
+      const value = context.evaluate(initializer, { expectedPosition: nestedExpectedPosition }, context.state);
+      const propertyValue = readObjectPropertyValue(value, context);
+      if (!propertyValue.ok) return propertyValue.result;
 
       properties.push({
         key,
-        value: value.value,
+        value: propertyValue.value,
         loc: context.source.locFromNode(property),
       });
       continue;
@@ -346,7 +392,7 @@ const transparentWrapperRule: EvaluatorRule = {
     }
 
     if (apiCall.apiName === "createConfig") {
-      return context.evaluate(firstArgument, { expectedPosition: "unknown" }, context.state);
+      return context.evaluate(firstArgument, { expectedPosition: "config" }, context.state);
     }
 
     if (apiCall.apiName === "createReducer") {
@@ -396,6 +442,11 @@ const localConstIdentifierRule: EvaluatorRule = {
   },
   read(node, context) {
     const name = (node as Identifier).getText();
+    if (name === "undefined") {
+      const loc = context.source.locFromNode(node);
+
+      return known({ kind: "undefined", loc }, loc);
+    }
 
     const binding = context.catalog.getConstBinding(name);
     if (!binding) {

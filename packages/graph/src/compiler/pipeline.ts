@@ -12,6 +12,7 @@ import type { MachineCandidate } from "./candidates";
 import type { SourceAdapter } from "./source";
 import type { SourceCatalog } from "./catalog";
 import type { DiagnosticSink } from "./diagnostics";
+import type { PartialEvaluator } from "./evaluator";
 
 export type AstNodeRef = {
   node: Node;
@@ -20,6 +21,7 @@ export type AstNodeRef = {
 export type CompilerContext = {
   source: SourceAdapter;
   catalog: SourceCatalog;
+  evaluator: PartialEvaluator;
   diagnostics: DiagnosticSink;
 };
 
@@ -46,6 +48,7 @@ export type ConfigTransitionSlice = {
   sourceKey: string;
   event: GraphEventRef;
   targetLabel: string | null;
+  target?: GraphTargetSlice;
   layer?: GraphTransition["layer"];
   order?: number;
   confidence?: GraphTransition["confidence"];

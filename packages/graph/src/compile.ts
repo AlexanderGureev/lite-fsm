@@ -1,10 +1,13 @@
 import type { CompileLiteFsmGraphOptions, GraphDiagnostic, GraphSource, LiteFsmGraphResult } from "./types";
 import { assembleGraphDocument } from "./compiler/assembler";
-import { createSourceCatalog } from "./compiler/catalog";
-import { discoverCandidates } from "./compiler/candidates";
-import { normalizeDiagnostics } from "./compiler/diagnostics";
+import { createSourceCatalog, type SourceCatalog } from "./compiler/catalog";
+import { discoverCandidates, type MachineCandidate } from "./compiler/candidates";
+import { compileConfigGraph } from "./compiler/config";
+import { createDiagnosticSink, normalizeDiagnostics } from "./compiler/diagnostics";
+import { createPartialEvaluator, type PartialEvaluator } from "./compiler/evaluator";
 import { createStableHash } from "./compiler/ids";
-import { createSourceAdapter, inferGraphLanguage } from "./compiler/source";
+import type { CompilerContext, MachineGraphSlice } from "./compiler/pipeline";
+import { createSourceAdapter, inferGraphLanguage, type SourceAdapter } from "./compiler/source";
 
 const createGraphSource = (source: unknown, options: CompileLiteFsmGraphOptions | undefined): GraphSource => ({
   filename: options?.filename,
@@ -31,6 +34,29 @@ const createCompilerFailure = (
   return { document, diagnostics: document.diagnostics };
 };
 
+const createCompilerContext = (
+  source: SourceAdapter,
+  catalog: SourceCatalog,
+  evaluator: PartialEvaluator,
+): CompilerContext => ({
+  source,
+  catalog,
+  evaluator,
+  diagnostics: createDiagnosticSink(),
+});
+
+const compileMachineSlices = (
+  candidates: readonly MachineCandidate[],
+  context: CompilerContext,
+): MachineGraphSlice[] => {
+  return candidates.map((candidate) => ({
+    candidate,
+    config: compileConfigGraph(candidate, context),
+    managerKeys: candidate.managerKeys,
+    diagnostics: [],
+  }));
+};
+
 export const compileLiteFsmGraph = (
   source: string,
   options: CompileLiteFsmGraphOptions = {},
@@ -42,9 +68,12 @@ export const compileLiteFsmGraph = (
 
     const sourceAdapter = createSourceAdapter(source, options);
     const catalog = createSourceCatalog(sourceAdapter);
+    const evaluator = createPartialEvaluator(sourceAdapter, catalog);
     const candidates = discoverCandidates(sourceAdapter, catalog);
     const maxMachines = options.maxMachines ?? Number.POSITIVE_INFINITY;
     const machineCandidates = candidates.machines.slice(0, maxMachines);
+    const context = createCompilerContext(sourceAdapter, catalog, evaluator);
+    const machineSlices = compileMachineSlices(machineCandidates, context);
     const maxMachineDiagnostic: GraphDiagnostic[] =
       candidates.machines.length > maxMachines
         ? [
@@ -61,7 +90,7 @@ export const compileLiteFsmGraph = (
         language: sourceAdapter.language,
         hash: createStableHash(source),
       },
-      candidates: machineCandidates,
+      machineSlices,
       managers: candidates.managers,
       diagnostics: [...sourceAdapter.diagnostics, ...maxMachineDiagnostic],
     });

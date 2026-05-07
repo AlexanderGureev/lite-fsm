@@ -34,13 +34,20 @@ describe("CandidateDiscovery", () => {
     expect(result.managers.map((candidate) => candidate.exportName)).toEqual(["manager", "renamedManager", "inlineManager"]);
   });
 
-  it("возвращает partial machines из compileLiteFsmGraph без transitions", () => {
+  it("возвращает machines из compileLiteFsmGraph с config transitions для поддержанных configs", () => {
     const fixtureSource = readFileSync(fixturePath, "utf8");
     const result = compileLiteFsmGraph(fixtureSource, { filename: fixturePath });
+    const directObjectMachine = result.document.machines.find((machine) => machine.id === "directObjectMachine");
+    const unresolvedConfigMachine = result.document.machines.find((machine) => machine.id === "unresolvedConfigMachine");
 
     expect(result.document.machines).toHaveLength(28);
     expect(result.document.managers).toHaveLength(3);
-    expect(result.document.machines.every((machine) => machine.transitions.length === 0)).toBe(true);
+    expect(directObjectMachine?.transitions.map((transition) => transition.event.type)).toEqual([
+      "START",
+      "PATCH",
+      "FINISH",
+    ]);
+    expect(unresolvedConfigMachine?.transitions).toEqual([]);
   });
 
   it("распознает ambient createMachine только с shape guard", () => {

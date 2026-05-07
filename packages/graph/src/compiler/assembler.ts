@@ -98,7 +98,7 @@ const createMachineFromSlice = (
         : stateIdsByKey.has(transition.sourceKey)
           ? { kind: "state", stateId: stateIdsByKey.get(transition.sourceKey) as string }
           : { kind: "unknown", label: transition.sourceKey };
-    const target = createGraphTargetFromLabel(transition.targetLabel, stateIdsByKey);
+    const target = transition.target ?? createGraphTargetFromLabel(transition.targetLabel, stateIdsByKey);
     const targetLabel = transition.targetLabel ?? "self";
     const bucket = `${transition.layer ?? "config"}:${transition.sourceKey}:${transition.event.type}:${targetLabel}`;
     const ordinal = transitionOrdinals.get(bucket) ?? 0;

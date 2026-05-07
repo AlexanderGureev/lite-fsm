@@ -7,11 +7,11 @@
 | Поле | Значение |
 | --- | --- |
 | Дата | 2026-05-07 |
-| Готово | Этапы 0-2: IR/API/harness, Source Catalog/Candidates, Partial Evaluator |
+| Готово | Этапы 0-3: IR/API/harness, Source Catalog/Candidates, Partial Evaluator, ConfigGraphCompiler |
 | Package | `@lite-fsm/graph`, private/experimental |
 | Public API | `compileLiteFsmGraph(source, options?)` + IR-типы |
-| Текущий output | partial `LiteFsmGraphDocument`: source metadata, diagnostics, machine/manager shells |
-| Еще не строится | config transitions, reducer cases, effect emissions, analyzer, simulator, CLI/UI |
+| Текущий output | config-only `LiteFsmGraphDocument`: source metadata, diagnostics, machine/manager shells, config states/transitions и machine facts |
+| Еще не строится | reducer cases, effect emissions, analyzer, simulator, CLI/UI, полноценный manager linker |
 | Fixture contract | `xstate/graph-parser-fixtures.ts`: 28 machine candidates, 3 manager candidates |
 | Coverage | `packages/graph/src/**/*.ts`, кроме `types.ts`: 100% statements/branches/functions/lines |
 
@@ -24,6 +24,8 @@
 - Ambient API names распознаются только если нет local/import binding; lookalike imports и alias chains игнорируются.
 - `PartialEvaluator` не знает FSM-семантику и возвращает structured `known`/`external`/`dynamic`/`unsupported`.
 - `createConfig`, `createReducer`, `createEffect` раскрываются только как transparent parse wrappers в ожидаемых позициях.
+- `ConfigGraphCompiler` строит только config layer: states, accepted transitions, `initialState`, `initialContextSummary`, `groupTag`, `persistence` и `kind`.
+- Dynamic/external targets сохраняются как dynamic graph targets с diagnostics; unsupported config fragments не валят весь document.
 
 ## Проверки
 
@@ -43,6 +45,6 @@ Root/docs build не запускался.
 
 ## Следующий этап
 
-Этап 3: `ConfigGraphCompiler`.
+Этап 4: manager linker и выбор одной машины.
 
-Он должен использовать готовые `MachineCandidate`, `SourceCatalog`, `PartialEvaluator` и `GraphAssembler`; не раскрывать identifiers/spreads/wrappers вручную внутри config compiler-а.
+Он должен связать `ManagerCandidate` с уже собранными machines, заполнить `LiteFsmGraphManager.machineRefs`, расширить `managerKeys` за пределами inline manager cases и добавить `selectMachineGraph(...)` без пересканирования AST.
