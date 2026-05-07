@@ -47,7 +47,7 @@ UI, CLI, симулятор, линтеры и будущий codegen должн
   -> статический парсер на ts-morph
   -> частичный вычислитель для поддерживаемого подмножества
   -> LiteFsmGraphDocument
-  -> selectMachine(...)
+  -> selectMachineGraph(...)
   -> символический симулятор / UI / CLI / анализаторы
 ```
 
@@ -497,6 +497,8 @@ export type SelectMachineGraphResult =
   | { ok: false; candidates: LiteFsmGraphMachine[]; diagnostics: GraphDiagnostic[] };
 ```
 
+`LiteFsmGraphDocument.diagnostics` является source of truth для compiler diagnostics документа. `LiteFsmGraphResult.diagnostics` - convenience mirror того же нормализованного списка без дополнительных entries; он нужен для короткого доступа вызывающего к diagnostics, но не хранит отдельный слой состояния.
+
 ## Выбор одной машины
 
 Документ графа может содержать много машин, но UI и simulator должны уметь выбрать одну.
@@ -546,9 +548,29 @@ sim.followEmission({ emissionId: "..." });
 sim.restart();
 ```
 
-Черновой snapshot:
+Черновые публичные типы:
 
 ```ts
+export type GraphSimulator = {
+  start(): GraphSimulatorStartResult;
+  restart(): GraphSimulatorStartResult;
+  getSnapshot(): GraphSimulationSnapshot;
+  getAvailableTransitions(): GraphAvailableTransition[];
+  getSuggestedEmissions(): GraphSuggestedEmission[];
+  send(input: GraphSendInput): GraphSendResult;
+  choose(input: GraphChooseTransitionInput): GraphSendResult;
+  followEmission(input: GraphFollowEmissionInput): GraphFollowEmissionResult;
+};
+
+export type GraphSimulatorStartResult =
+  | { ok: true; snapshot: GraphSimulationSnapshot }
+  | {
+      ok: false;
+      reason: "missing-active-actor-start" | "ambiguous-active-actor-start" | "unknown-start-state";
+      candidates: GraphState[];
+      diagnostics: GraphDiagnostic[];
+    };
+
 export type GraphSimulationSnapshot = {
   machineId: string;
   stateId: string;
@@ -567,6 +589,39 @@ export type GraphSimulationStep = {
   timestamp?: number;
 };
 
+export type GraphAvailableTransition = {
+  transitionId: string;
+  event: GraphEventRef;
+  source: GraphStateRef;
+  target: GraphTarget;
+  layer: "config" | "reducer";
+  guard?: GraphCondition;
+  reducerCaseId?: string;
+};
+
+export type GraphSendInput = {
+  event: string;
+};
+
+export type GraphChooseTransitionInput = {
+  transitionId: string;
+};
+
+export type GraphSendResult =
+  | {
+      ok: true;
+      snapshot: GraphSimulationSnapshot;
+      step: GraphSimulationStep;
+      suggestedEmissions: GraphSuggestedEmission[];
+    }
+  | {
+      ok: false;
+      reason: "not-started" | "event-not-accepted" | "ambiguous-transition" | "unknown-transition";
+      snapshot?: GraphSimulationSnapshot;
+      candidates?: GraphAvailableTransition[];
+      diagnostics: GraphDiagnostic[];
+    };
+
 export type GraphSuggestedEmission = {
   emissionId: string;
   event: GraphEventRef;
@@ -574,6 +629,10 @@ export type GraphSuggestedEmission = {
   guard?: GraphCondition;
   canFollowLocally: boolean;
   blockedReason?: string;
+};
+
+export type GraphFollowEmissionInput = {
+  emissionId: string;
 };
 
 export type GraphFollowEmissionResult =
@@ -860,6 +919,19 @@ Partial evaluator должен быть registry-based. Базовые resolvers
 Evaluator возвращает structured result, а не бросает исключение:
 
 ```ts
+type GraphObjectProperty = {
+  key: string;
+  value: GraphValue;
+  loc?: SourceLocation;
+};
+
+type GraphValue =
+  | { kind: "string"; value: string; loc?: SourceLocation }
+  | { kind: "null"; loc?: SourceLocation }
+  | { kind: "array"; items: GraphValue[]; loc?: SourceLocation }
+  | { kind: "object"; properties: GraphObjectProperty[]; loc?: SourceLocation }
+  | { kind: "function"; node: AstNodeRef; loc?: SourceLocation };
+
 type EvaluationResult =
   | { kind: "known"; value: GraphValue; loc?: SourceLocation }
   | { kind: "external"; label: string; loc?: SourceLocation }
@@ -969,6 +1041,8 @@ export const machine = createMachine({
 
 Каждый этап должен быть законченным проверяемым куском. После любого этапа код должен собираться, а результат этапа должен иметь тесты по fixture-ам или snapshot-ам. Если этап добавляет новый слой, он не должен требовать знания внутренностей предыдущего слоя кроме публичного/внутреннего контракта, описанного в ТЗ.
 
+Для этапов, которые меняют `@lite-fsm/graph`, обязательная проверка этапа: `pnpm --filter @lite-fsm/graph check-types`, плюс релевантные Vitest/Tstyche tests. Если этап меняет build exports, package surface или dist contract, дополнительно запускать `pnpm --filter @lite-fsm/graph build`. Не использовать root `pnpm run build` и не считать `pnpm run build:packages` достаточной проверкой graph compiler-а: root build запрещен для агентной проверки, а `build:packages` исключает `@lite-fsm/graph`.
+
 ### Этап 0: каркас `@lite-fsm/graph` и контракты IR
 
 Цель: зафиксировать публичные IR-типы, тестовую инфраструктуру и внутренние контракты compiler pipeline до реализации анализа AST.
@@ -980,7 +1054,8 @@ export const machine = createMachine({
 3. Добавить `compileLiteFsmGraph(source)` как заглушку, которая возвращает пустой document без падения.
 4. Добавить тестовый harness, который читает `xstate/graph-parser-fixtures.ts` как строку.
 5. Добавить внутренние типы/контракты для `SourceAdapter`, `SourceCatalog`, `CompilerContext`, `CompilerPass`, `PatternRule`, graph slices и `DiagnosticSink`.
-6. Добавить базовые тесты публичных типов.
+6. Добавить минимальный контракт `GraphAssembler`/stable-id builder: сборка пустого document, нормализация diagnostics, базовое назначение semantic IDs и сборка config-only slices без чтения AST.
+7. Добавить базовые тесты публичных типов.
 
 Проверка:
 
@@ -988,6 +1063,7 @@ export const machine = createMachine({
 2. Fixture-файл читается как строка в тестах.
 3. Type tests подтверждают форму публичного API.
 4. Внутренний pipeline можно создать с no-op passes без обращения к `ts-morph` из публичных exports.
+5. Минимальный `GraphAssembler` собирает пустой document и hand-written config-only slice, не читая AST и не выполняя pattern matching.
 
 ### Этап 1: source catalog, API provenance и обнаружение candidates
 
@@ -1042,7 +1118,7 @@ export const machine = createMachine({
 2. Построить `ConfigGraphSlice`: states, transitions слоя `config`, machine facts и diagnostics.
 3. Поддержать wildcard `"*"`, `null`, terminal targets, dynamic targets.
 4. Определить `kind: "domain" | "actorTemplate" | "unknown"` по evaluated `config`.
-5. Сохранить source locations; stable IDs финализирует `GraphAssembler`.
+5. Сохранить source locations; `ConfigCompiler` возвращает slice без публичных IDs, а минимальный `GraphAssembler` из этапа 0 собирает config-only document со stable IDs.
 6. Вернуть compiler diagnostics только для неподдержанного исходника: unknown config identifier, dynamic key, dynamic target.
 7. Не раскрывать identifiers/spreads/wrappers внутри config compiler-а напрямую.
 
@@ -1089,6 +1165,14 @@ export const machine = createMachine({
 8. Сохранять guard text как `GraphCondition`, не вычисляя его.
 9. Не проверять consistency reducer/config в compiler-е.
 
+Reducer source contract:
+
+1. `ReducerCompiler` извлекает `GraphReducerCase[]` независимо от consistency с `config`.
+2. Reducer-layer `GraphTransition` создается только через join reducer case с уже принятой config/wildcard acceptance.
+3. Для state-specific config acceptance `source` reducer transition указывает на конкретный state.
+4. Для wildcard acceptance `source` reducer transition равен `{ kind: "wildcard" }`; simulator применяет его как fallback, если в текущем state нет state-specific acceptance.
+5. Если reducer event не принят через config/wildcard, reducer case сохраняется, но reducer transition не создает новую acceptance; это проверяет analyzer rule `reducer-config-consistency`.
+
 Проверка:
 
 1. `switchReducerMachine`, `ifReducerMachine`, `chainedIfReducerMachine`, `returnObjectReducerMachine`, `helperWrappedMachine` дают expected reducer cases.
@@ -1123,15 +1207,15 @@ export const machine = createMachine({
 4. `escapedTransitionMachine` возвращает diagnostic.
 5. Routing resolver tests покрывают default/meta/sugar routing без полного graph assembler-а.
 
-### Этап 7: сборка полного compiler result
+### Этап 7: полная интеграция assembler-а всех slices
 
-Цель: собрать все compiler-слои в стабильный `LiteFsmGraphDocument`.
+Цель: расширить минимальный `GraphAssembler` до сборки всех compiler-слоев в стабильный `LiteFsmGraphDocument`.
 
 Состав:
 
-1. Реализовать `GraphAssembler`, который объединяет source catalog, candidates, config slices, manager link slice, reducer slices и effects slices.
+1. Расширить `GraphAssembler`, чтобы он объединял source catalog, candidates, config slices, manager link slice, reducer slices и effects slices.
 2. Нормализовать document-level и machine-level diagnostics.
-3. Обеспечить stable IDs для states, transitions, emissions, reducer cases.
+3. Применить общий stable-id builder для states, transitions, emissions, reducer cases.
 4. Детерминированно сортировать machines, managers, transitions, reducer cases, emissions и diagnostics.
 5. Добавить snapshot tests полного документа по `xstate/graph-parser-fixtures.ts`.
 6. Не запускать semantic analyzer внутри compiler по умолчанию.
