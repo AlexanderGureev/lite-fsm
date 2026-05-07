@@ -336,7 +336,9 @@ const selected = selectMachineGraph(document, { managerKey: "machineKey" });
 | `LiteFsmGraphMachine`       | machine metadata плюс `states`, `transitions`, `emissions`, `reducerCases`            |
 | `GraphTransition`           | accepted event edge слоя `config` или `reducer`                                       |
 | `GraphReducerCase`          | symbolic reducer branch: event, guard, state-write targets, confidence                |
-| `GraphEmission`             | событие, которое может отправить effect при входе в state                             |
+| `GraphEmission`             | событие, которое может отправить effect при входе в state; не является transition     |
+| `GraphRouting`              | routing emission-а: `default`, `unscoped`, `actor`, `group`, `tag` или `unknown`      |
+| `GraphRoutingTarget`        | literal, array, `self.actorId/groupId/groupTag` или dynamic routing target            |
 | `GraphDiagnostic`           | `{ code, severity, message, machineId?, loc? }`                                       |
 | `MachineSelector`           | `{ index }`, `{ id }`, `{ variableName }`, `{ exportName }`, `{ managerKey }` или `{ managerId, managerKey }` |
 | `SelectMachineGraphResult`  | success `{ ok: true, machine, diagnostics }` или failure `{ ok: false, candidates, diagnostics }` |

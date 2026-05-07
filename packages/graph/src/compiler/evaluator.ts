@@ -15,6 +15,7 @@ import type { SourceAdapter } from "./source";
 export type EvaluationExpectedPosition =
   | "config"
   | "reducer"
+  | "effects"
   | "effectEntry"
   | "computedKey"
   | "managerMap"
@@ -257,7 +258,9 @@ const evaluateObjectLiteralProperties = (
 ): EvaluationResult | EvaluatedGraphObjectProperty[] => {
   const properties: EvaluatedGraphObjectProperty[] = [];
   const nestedExpectedPosition =
-    context.options.expectedPosition === "config" || context.options.expectedPosition === "managerMap"
+    context.options.expectedPosition === "config" ||
+    context.options.expectedPosition === "managerMap" ||
+    context.options.expectedPosition === "effects"
       ? context.options.expectedPosition
       : "unknown";
 
@@ -282,7 +285,7 @@ const evaluateObjectLiteralProperties = (
     }
 
     if (Node.isShorthandPropertyAssignment(property)) {
-      if (context.options.expectedPosition === "managerMap") {
+      if (context.options.expectedPosition === "managerMap" || context.options.expectedPosition === "effects") {
         properties.push({
           key: property.getName(),
           value: expressionValue(property.getNameNode(), context),
@@ -317,7 +320,7 @@ const evaluateObjectLiteralProperties = (
         };
       }
 
-      if (context.options.expectedPosition === "managerMap") {
+      if (context.options.expectedPosition === "managerMap" || context.options.expectedPosition === "effects") {
         properties.push({
           key,
           value: expressionValue(initializer, context),

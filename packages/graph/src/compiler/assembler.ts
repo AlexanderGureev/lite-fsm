@@ -1,6 +1,9 @@
 import type {
   GraphDiagnostic,
+  GraphEmission,
   GraphReducerCase,
+  GraphRouting,
+  GraphRoutingTarget,
   GraphSource,
   GraphState,
   GraphStateRef,
@@ -13,6 +16,7 @@ import type { MachineCandidate, ManagerCandidate } from "./candidates";
 import { normalizeDiagnostics } from "./diagnostics";
 import {
   createGraphTargetFromLabel,
+  createEmissionId,
   createMachineId,
   createManagerId,
   createReducerCaseId,
@@ -92,6 +96,34 @@ const createStateKind = (key: string): GraphState["kind"] => {
   if (key === "__RESOLVED" || key === "__REJECTED" || key === "__CANCELLED") return "terminal";
 
   return "normal";
+};
+
+const routingTargetLabel = (target: GraphRoutingTarget): string => {
+  switch (target.kind) {
+    case "literal":
+      return target.value;
+    case "array":
+      return `[${target.items.map(routingTargetLabel).join(",")}]`;
+    case "selfField":
+      return `self.${target.field}`;
+    case "dynamic":
+      return target.label ?? "dynamic";
+  }
+};
+
+const routingLabel = (routing: GraphRouting): string => {
+  switch (routing.kind) {
+    case "default":
+      return "default";
+    case "unscoped":
+      return "unscoped";
+    case "actor":
+    case "group":
+    case "tag":
+      return `${routing.kind}:${routingTargetLabel(routing.target)}`;
+    case "unknown":
+      return routing.label ?? "unknown";
+  }
 };
 
 const createMachineFromSlice = (
@@ -199,6 +231,31 @@ const createMachineFromSlice = (
     };
   });
   const transitions = [...configTransitions, ...reducerTransitions];
+  const emissionOrdinals = new Map<string, number>();
+  const emissions = (slice.effects?.emissions ?? []).map((emission): GraphEmission => {
+    const routeLabel = routingLabel(emission.routing);
+    const bucket = `${emission.sourceKey}:${emission.event.type}:${routeLabel}`;
+    const ordinal = emissionOrdinals.get(bucket) ?? 0;
+    emissionOrdinals.set(bucket, ordinal + 1);
+
+    return {
+      id: createEmissionId({
+        machineId,
+        sourceState: emission.sourceKey,
+        eventType: emission.event.type,
+        routingLabel: routeLabel,
+        ordinal,
+      }),
+      machineId,
+      sourceState: emission.sourceKey === "*" ? "*" : sourceRefFromKey(emission.sourceKey),
+      event: emission.event,
+      routing: emission.routing,
+      origin: emission.origin,
+      guard: emission.guard,
+      confidence: emission.confidence,
+      loc: emission.loc,
+    };
+  });
 
   const diagnostics = normalizeDiagnostics([
     ...slice.diagnostics,
@@ -221,7 +278,7 @@ const createMachineFromSlice = (
     persistence: config?.persistence,
     states,
     transitions,
-    emissions: [],
+    emissions,
     reducerCases,
     diagnostics,
     loc: candidate.loc,

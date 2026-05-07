@@ -5,6 +5,8 @@ import type {
   GraphDiagnostic,
   GraphEmission,
   GraphReducerCase,
+  GraphRouting,
+  GraphRoutingTarget,
   GraphState,
   GraphTransition,
   GraphValueSummary,
@@ -47,6 +49,8 @@ describe("@lite-fsm/graph public API", () => {
       Assert<NotAny<GraphTransition["layer"]>>,
       Assert<NotAny<GraphReducerCase["confidence"]>>,
       Assert<NotAny<GraphEmission["routing"]>>,
+      Assert<NotAny<GraphRouting>>,
+      Assert<NotAny<GraphRoutingTarget>>,
       Assert<NotAny<GraphValueSummary["kind"]>>,
       Assert<NotAny<MachineSelector>>,
       Assert<NotAny<SelectMachineGraphResult>>,
@@ -54,5 +58,22 @@ describe("@lite-fsm/graph public API", () => {
     ];
 
     expect<Checks>().type.not.toBe<never>();
+  });
+
+  test("GraphEmission routing сужается по discriminants", () => {
+    const emission = {} as GraphEmission;
+
+    if (emission.routing.kind === "actor") {
+      expect(emission.routing.target).type.toBe<GraphRoutingTarget>();
+    }
+
+    const target = {} as GraphRoutingTarget;
+    if (target.kind === "selfField") {
+      expect(target.field).type.toBe<"actorId" | "groupId" | "groupTag">();
+    }
+
+    if (target.kind === "array") {
+      expect(target.items).type.toBe<GraphRoutingTarget[]>();
+    }
   });
 });

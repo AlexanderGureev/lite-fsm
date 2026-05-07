@@ -29,12 +29,12 @@ const result = compileLiteFsmGraph(source, {
 
 | API                         | Назначение                                                                                  |
 | --------------------------- | ------------------------------------------------------------------------------------------- |
-| `compileLiteFsmGraph(src)`      | строит `LiteFsmGraphDocument`; компилирует machines/managers, manager refs, config-layer transitions и reducer-layer branches |
+| `compileLiteFsmGraph(src)`      | строит `LiteFsmGraphDocument`; компилирует machines/managers, refs, config/reducer transitions и effect emissions |
 | `selectMachineGraph(doc, sel?)` | выбирает одну machine по `index`, `id`, `variableName`, `exportName`, `managerKey` или `{ managerId, managerKey }` |
 | `LiteFsmGraphDocument`          | универсальный IR для будущих визуализаторов, CLI, analyzer-а и simulator-а                  |
 | `GraphDiagnostic`               | diagnostic как часть результата; compiler не должен падать на частично неподдержанном коде  |
 
-Reducer branches в graph IR символические: compiler сохраняет `reducerCases` и отдельные `GraphTransition` со слоем `"reducer"`, не проверяя consistency с `config`.
+Reducer branches в graph IR символические: compiler сохраняет `reducerCases` и отдельные `GraphTransition` со слоем `"reducer"`, не проверяя consistency с `config`. Effect emissions сохраняются как `GraphEmission`: это suggested events при входе в state, а не state transitions.
 
 ## Mental model
 

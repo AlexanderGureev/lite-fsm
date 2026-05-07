@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { GraphDiagnostic, GraphTarget } from "../../packages/graph/src/types";
+import type { GraphDiagnostic, GraphEmission, GraphTarget } from "../../packages/graph/src/types";
 import { assembleGraphDocument } from "../../packages/graph/src/compiler/assembler";
 import { createSourceCatalog } from "../../packages/graph/src/compiler/catalog";
 import { discoverCandidates } from "../../packages/graph/src/compiler/candidates";
@@ -19,6 +19,14 @@ const candidatesFrom = (sourceText: string) => {
   const catalog = createSourceCatalog(source);
 
   return discoverCandidates(source, catalog);
+};
+
+const emissionSourceLabel = (emission: GraphEmission): string => {
+  if (emission.sourceState === "*") return "*";
+  if (emission.sourceState.kind === "wildcard") return "*";
+  if (emission.sourceState.kind === "unknown") return emission.sourceState.label ?? "unknown";
+
+  return emission.sourceState.stateId;
 };
 
 describe("GraphAssembler и stable IDs", () => {
@@ -123,6 +131,54 @@ describe("GraphAssembler и stable IDs", () => {
               { sourceKey: "RUNNING", event: { type: "TICK" }, targetLabel: null, confidence: "partial" },
             ],
           },
+          effects: {
+            emissions: [
+              {
+                sourceKey: "RUNNING",
+                event: { type: "PING", source: "effect" },
+                routing: { kind: "default" },
+                origin: "effect",
+                confidence: "exact",
+              },
+              {
+                sourceKey: "RUNNING",
+                event: { type: "PING", source: "effect" },
+                routing: { kind: "default" },
+                origin: "effect",
+                confidence: "exact",
+              },
+              {
+                sourceKey: "*",
+                event: { type: "RESET", source: "effect" },
+                routing: {
+                  kind: "group",
+                  target: {
+                    kind: "array",
+                    items: [
+                      { kind: "literal", value: "a" },
+                      { kind: "selfField", field: "groupId" },
+                    ],
+                  },
+                },
+                origin: "effect",
+                confidence: "partial",
+              },
+              {
+                sourceKey: "RUNNING",
+                event: { type: "DYNAMIC", source: "effect" },
+                routing: { kind: "actor", target: { kind: "dynamic" } },
+                origin: "effect",
+                confidence: "partial",
+              },
+              {
+                sourceKey: "RUNNING",
+                event: { type: "UNKNOWN", source: "effect" },
+                routing: { kind: "unknown" },
+                origin: "unknown",
+                confidence: "unknown",
+              },
+            ],
+          },
         },
       ],
     });
@@ -162,6 +218,13 @@ describe("GraphAssembler и stable IDs", () => {
     expect(machine?.transitions.map((transition) => transition.id)).toContain(
       "actor:transition:config:RUNNING:TICK:self:1",
     );
+    expect(machine?.emissions.map((emission) => [emission.id, emissionSourceLabel(emission), emission.confidence])).toEqual([
+      ["actor:emission:RUNNING:PING:default:0", "actor:state:RUNNING", "exact"],
+      ["actor:emission:RUNNING:PING:default:1", "actor:state:RUNNING", "exact"],
+      ["actor:emission:*:RESET:group:[a,self.groupId]:0", "*", "partial"],
+      ["actor:emission:RUNNING:DYNAMIC:actor:dynamic:0", "actor:state:RUNNING", "partial"],
+      ["actor:emission:RUNNING:UNKNOWN:unknown:0", "actor:state:RUNNING", "unknown"],
+    ]);
   });
 });
 

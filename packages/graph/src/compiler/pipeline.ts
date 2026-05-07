@@ -3,6 +3,7 @@ import type {
   GraphDiagnostic,
   GraphCondition,
   GraphEventRef,
+  GraphRouting,
   GraphState,
   GraphTarget,
   GraphTransition,
@@ -99,8 +100,18 @@ export type ReducerTransitionSlice = {
   loc?: SourceLocation;
 };
 
+export type EffectEmissionSlice = {
+  sourceKey: string;
+  event: GraphEventRef;
+  routing: GraphRouting;
+  origin: "effect" | "unknown";
+  guard?: GraphCondition;
+  confidence: "exact" | "partial" | "unknown";
+  loc?: SourceLocation;
+};
+
 export type EffectsGraphSlice = {
-  emissions: [];
+  emissions: EffectEmissionSlice[];
   diagnostics?: GraphDiagnostic[];
 };
 
