@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   compileLiteFsmGraph,
@@ -8,10 +6,9 @@ import {
   type GraphTarget,
   type LiteFsmGraphMachine,
 } from "@lite-fsm/graph";
+import { fullAssemblerFilename, fullAssemblerSource } from "./fixtures/graph-sources";
 
-const fixturePath = fileURLToPath(new URL("../../xstate/graph-parser-fixtures.ts", import.meta.url));
-
-const compileFixture = () => compileLiteFsmGraph(readFileSync(fixturePath, "utf8"), { filename: fixturePath });
+const compileFixture = () => compileLiteFsmGraph(fullAssemblerSource, { filename: fullAssemblerFilename });
 
 const getMachine = (machines: readonly LiteFsmGraphMachine[], id: string): LiteFsmGraphMachine => {
   const machine = machines.find((candidate) => candidate.id === id);
@@ -200,8 +197,8 @@ describe("ReducerCompiler по fixture", () => {
     ]);
     expect(reducerCaseRows(helperWrappedMachine)).toEqual([
       expect.objectContaining({ id: "helperWrappedMachine:reducer:COMPLETE_HELPER:0", event: "COMPLETE_HELPER", targets: ["DONE"] }),
-      expect.objectContaining({ id: "helperWrappedMachine:reducer:START_HELPER:0", event: "START_HELPER", targets: ["WORKING"] }),
       expect.objectContaining({ id: "helperWrappedMachine:reducer:RESET_HELPER:0", event: "RESET_HELPER", targets: ["IDLE"] }),
+      expect.objectContaining({ id: "helperWrappedMachine:reducer:START_HELPER:0", event: "START_HELPER", targets: ["WORKING"] }),
     ]);
     expect(reducerTransitionRows(helperWrappedMachine).map((row) => [row.source, row.event, row.target])).toEqual([
       ["WORKING", "COMPLETE_HELPER", "DONE"],
@@ -219,9 +216,9 @@ describe("ReducerCompiler по fixture", () => {
     expect(reducerCaseRows(machine)).toEqual([
       expect.objectContaining({ event: "SPAWN_JOB", targets: ["RUNNING"] }),
       expect.objectContaining({ event: "TICK", targets: ["__RESOLVED", "self"], guardKind: "ternary" }),
+      expect.objectContaining({ event: "CANCEL", targets: ["__CANCELLED"] }),
       expect.objectContaining({ event: "COMPLETE", targets: ["__RESOLVED"] }),
       expect.objectContaining({ event: "FAIL", targets: ["__REJECTED"] }),
-      expect.objectContaining({ event: "CANCEL", targets: ["__CANCELLED"] }),
       expect.objectContaining({ event: "FORCE_CANCEL", targets: ["__CANCELLED"] }),
     ]);
     expect(reducerTransitionRows(machine)).toContainEqual(
@@ -531,8 +528,8 @@ describe("ReducerCompiler join rules", () => {
       expect.objectContaining({ event: "DUPE", targets: ["READY", "DONE"] }),
     ]);
     expect(reducerTransitionRows(duplicateConfigTargets).map((row) => [row.id, row.source, row.event, row.target])).toEqual([
-      ["duplicateConfigTargets:transition:reducer:IDLE:DUPE:READY:0", "IDLE", "DUPE", "READY"],
       ["duplicateConfigTargets:transition:reducer:IDLE:DUPE:DONE:0", "IDLE", "DUPE", "DONE"],
+      ["duplicateConfigTargets:transition:reducer:IDLE:DUPE:READY:0", "IDLE", "DUPE", "READY"],
     ]);
   });
 

@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   compileLiteFsmGraph,
@@ -9,10 +7,9 @@ import {
   type GraphStateRef,
   type LiteFsmGraphMachine,
 } from "@lite-fsm/graph";
+import { fullAssemblerFilename, fullAssemblerSource } from "./fixtures/graph-sources";
 
-const fixturePath = fileURLToPath(new URL("../../xstate/graph-parser-fixtures.ts", import.meta.url));
-
-const compileFixture = () => compileLiteFsmGraph(readFileSync(fixturePath, "utf8"), { filename: fixturePath });
+const compileFixture = () => compileLiteFsmGraph(fullAssemblerSource, { filename: fullAssemblerFilename });
 
 const getMachine = (machines: readonly LiteFsmGraphMachine[], id: string): LiteFsmGraphMachine => {
   const machine = machines.find((candidate) => candidate.id === id);

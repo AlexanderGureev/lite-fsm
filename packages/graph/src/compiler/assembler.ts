@@ -7,6 +7,7 @@ import type {
   GraphSource,
   GraphState,
   GraphStateRef,
+  GraphTarget,
   GraphTransition,
   LiteFsmGraphDocument,
   LiteFsmGraphMachine,
@@ -22,9 +23,17 @@ import {
   createReducerCaseId,
   createStateId,
   createTransitionId,
+  targetLabelOf,
 } from "./ids";
 import type { ManagerLinkSlice } from "./manager";
-import type { MachineGraphSlice } from "./pipeline";
+import type {
+  ConfigTransitionSlice,
+  EffectEmissionSlice,
+  MachineGraphSlice,
+  ReducerCaseSlice,
+  ReducerTransitionSlice,
+  ReducerTargetSlice,
+} from "./pipeline";
 
 export type GraphAssemblyInput = {
   source: GraphSource;
@@ -38,6 +47,55 @@ export type GraphAssemblyInput = {
 type MachineKeySource = {
   candidate: MachineCandidate;
   managerKeys: readonly string[];
+};
+
+type Indexed<T> = {
+  value: T;
+  index: number;
+};
+
+type SortPart = number | string;
+
+const withIndex = <T>(values: readonly T[]): Array<Indexed<T>> => {
+  return values.map((value, index) => ({ value, index }));
+};
+
+const compareParts = (
+  left: ReadonlyArray<SortPart>,
+  right: ReadonlyArray<SortPart>,
+): number => {
+  for (let index = 0; index < left.length; index += 1) {
+    const leftPart = left[index] as number | string;
+    const rightPart = right[index] as number | string;
+    if (leftPart === rightPart) continue;
+
+    if (typeof leftPart === "number" && typeof rightPart === "number") return leftPart - rightPart;
+
+    return String(leftPart).localeCompare(String(rightPart));
+  }
+
+  /* v8 ignore next -- all assembler sort tuples include original index as the final tie-breaker. */
+  return 0;
+};
+
+const sortIndexedByParts = <T>(
+  values: readonly T[],
+  readParts: (value: T, index: number) => ReadonlyArray<SortPart>,
+): Array<Indexed<T>> => {
+  return withIndex(values).sort((left, right) =>
+    compareParts(readParts(left.value, left.index), readParts(right.value, right.index)),
+  );
+};
+
+const sortByParts = <T>(
+  values: readonly T[],
+  readParts: (value: T, index: number) => ReadonlyArray<SortPart>,
+): T[] => {
+  return sortIndexedByParts(values, readParts).map((item) => item.value);
+};
+
+const locOffset = (value: { loc?: GraphDiagnostic["loc"] }): number => {
+  return value.loc?.start.offset ?? Number.MAX_SAFE_INTEGER;
 };
 
 const uniqueOrUndefined = (values: readonly string[]): string | undefined => {
@@ -126,6 +184,87 @@ const routingLabel = (routing: GraphRouting): string => {
   }
 };
 
+const graphTargetLabel = (targetLabel: string | null, target?: GraphTarget): string => {
+  if (targetLabel !== null) return targetLabel;
+  if (target) return targetLabelOf(target);
+
+  return "self";
+};
+
+const reducerTargetLabel = (target: ReducerTargetSlice): string => {
+  return graphTargetLabel(target.targetLabel, target.target);
+};
+
+const conditionLabel = (guard: { kind: string; text: string } | undefined): string => {
+  if (!guard) return "";
+
+  return `${guard.kind}:${guard.text}`;
+};
+
+const sortConfigTransitions = (
+  transitions: readonly ConfigTransitionSlice[],
+): ConfigTransitionSlice[] => {
+  return sortByParts(transitions, (transition, index) => [
+    locOffset(transition),
+    transition.sourceKey,
+    transition.event.type,
+    graphTargetLabel(transition.targetLabel, transition.target),
+    index,
+  ]);
+};
+
+const sortReducerCases = (
+  reducerCases: readonly ReducerCaseSlice[],
+): Array<Indexed<ReducerCaseSlice>> => {
+  return sortIndexedByParts(reducerCases, (reducerCase, index) => [
+    locOffset(reducerCase),
+    reducerCase.event.type,
+    conditionLabel(reducerCase.guard),
+    reducerCase.targets.map(reducerTargetLabel).join("|"),
+    index,
+  ]);
+};
+
+const sortReducerTransitions = (
+  transitions: readonly ReducerTransitionSlice[],
+): ReducerTransitionSlice[] => {
+  return sortByParts(transitions, (transition, index) => [
+    locOffset(transition),
+    transition.sourceKey,
+    transition.event.type,
+    graphTargetLabel(transition.targetLabel, transition.target),
+    conditionLabel(transition.guard),
+    index,
+  ]);
+};
+
+const sortEmissions = (emissions: readonly EffectEmissionSlice[]): EffectEmissionSlice[] => {
+  return sortByParts(emissions, (emission, index) => [
+    locOffset(emission),
+    emission.sourceKey,
+    emission.event.type,
+    routingLabel(emission.routing),
+    conditionLabel(emission.guard),
+    index,
+  ]);
+};
+
+const sortMachineSlices = (slices: readonly MachineGraphSlice[]): MachineGraphSlice[] => {
+  return sortByParts(slices, (slice, index) => [slice.candidate.index, index]);
+};
+
+const sortMachineCandidates = (candidates: readonly MachineCandidate[]): MachineCandidate[] => {
+  return sortByParts(candidates, (candidate, index) => [candidate.index, index]);
+};
+
+const sortManagerCandidates = (managers: readonly ManagerCandidate[]): ManagerCandidate[] => {
+  return sortByParts(managers, (manager, index) => [manager.index, index]);
+};
+
+const sortManagerLinks = (links: readonly ManagerLinkSlice[]): ManagerLinkSlice[] => {
+  return sortByParts(links, (link, index) => [link.manager.index, index]);
+};
+
 const createMachineFromSlice = (
   slice: MachineGraphSlice,
   machineId: string,
@@ -154,16 +293,20 @@ const createMachineFromSlice = (
         : { kind: "unknown", label: sourceKey };
 
   const reducerCaseOrdinals = new Map<string, number>();
-  const reducerCases = (slice.reducer?.reducerCases ?? []).map((reducerCase): GraphReducerCase => {
+  const reducerCaseIdsByInputIndex = new Map<number, string>();
+  const reducerCases = sortReducerCases(slice.reducer?.reducerCases ?? []).map((entry): GraphReducerCase => {
+    const reducerCase = entry.value;
     const ordinal = reducerCaseOrdinals.get(reducerCase.event.type) ?? 0;
     reducerCaseOrdinals.set(reducerCase.event.type, ordinal + 1);
+    const id = createReducerCaseId({
+      machineId,
+      eventType: reducerCase.event.type,
+      ordinal,
+    });
+    reducerCaseIdsByInputIndex.set(entry.index, id);
 
     return {
-      id: createReducerCaseId({
-        machineId,
-        eventType: reducerCase.event.type,
-        ordinal,
-      }),
+      id,
       event: reducerCase.event,
       guard: reducerCase.guard,
       writesState: reducerCase.writesState,
@@ -174,10 +317,10 @@ const createMachineFromSlice = (
   });
 
   const transitionOrdinals = new Map<string, number>();
-  const configTransitions = (config?.transitions ?? []).map((transition, index): GraphTransition => {
+  const configTransitions = sortConfigTransitions(config?.transitions ?? []).map((transition, index): GraphTransition => {
     const source = sourceRefFromKey(transition.sourceKey);
     const target = transition.target ?? createGraphTargetFromLabel(transition.targetLabel, stateIdsByKey);
-    const targetLabel = transition.targetLabel ?? "self";
+    const targetLabel = graphTargetLabel(transition.targetLabel, transition.target);
     const bucket = `${transition.layer ?? "config"}:${transition.sourceKey}:${transition.event.type}:${targetLabel}`;
     const ordinal = transitionOrdinals.get(bucket) ?? 0;
     transitionOrdinals.set(bucket, ordinal + 1);
@@ -201,10 +344,10 @@ const createMachineFromSlice = (
       loc: transition.loc,
     };
   });
-  const reducerTransitions = (slice.reducer?.transitions ?? []).map((transition, index): GraphTransition => {
+  const reducerTransitions = sortReducerTransitions(slice.reducer?.transitions ?? []).map((transition, index): GraphTransition => {
     const source = sourceRefFromKey(transition.sourceKey);
     const target = transition.target ?? createGraphTargetFromLabel(transition.targetLabel, stateIdsByKey);
-    const targetLabel = transition.targetLabel ?? "self";
+    const targetLabel = graphTargetLabel(transition.targetLabel, transition.target);
     const bucket = `reducer:${transition.sourceKey}:${transition.event.type}:${targetLabel}`;
     const ordinal = transitionOrdinals.get(bucket) ?? 0;
     transitionOrdinals.set(bucket, ordinal + 1);
@@ -225,14 +368,14 @@ const createMachineFromSlice = (
       layer: "reducer",
       order: configTransitions.length + index,
       guard: transition.guard,
-      reducerCaseId: reducerCases[transition.reducerCaseIndex]?.id,
+      reducerCaseId: reducerCaseIdsByInputIndex.get(transition.reducerCaseIndex),
       confidence: transition.confidence,
       loc: transition.loc,
     };
   });
   const transitions = [...configTransitions, ...reducerTransitions];
   const emissionOrdinals = new Map<string, number>();
-  const emissions = (slice.effects?.emissions ?? []).map((emission): GraphEmission => {
+  const emissions = sortEmissions(slice.effects?.emissions ?? []).map((emission): GraphEmission => {
     const routeLabel = routingLabel(emission.routing);
     const bucket = `${emission.sourceKey}:${emission.event.type}:${routeLabel}`;
     const ordinal = emissionOrdinals.get(bucket) ?? 0;
@@ -262,7 +405,7 @@ const createMachineFromSlice = (
     ...(slice.config?.diagnostics ?? []),
     ...(slice.reducer?.diagnostics ?? []),
     ...(slice.effects?.diagnostics ?? []),
-  ]);
+  ]).map((diagnostic) => ({ ...diagnostic, machineId }));
   const candidate = slice.candidate;
 
   return {
@@ -322,20 +465,22 @@ const createManagersFromLinks = (
 };
 
 export const assembleGraphDocument = (input: GraphAssemblyInput): LiteFsmGraphDocument => {
-  const candidates = input.candidates ?? input.machineSlices?.map((slice) => slice.candidate) ?? [];
+  const inputMachineSlices = input.machineSlices ? sortMachineSlices(input.machineSlices) : undefined;
+  const managerLinks = input.managerLinks ? sortManagerLinks(input.managerLinks) : undefined;
+  const candidates = inputMachineSlices?.map((slice) => slice.candidate) ?? sortMachineCandidates(input.candidates ?? []);
   const slices =
-    input.machineSlices ??
+    inputMachineSlices ??
     candidates.map((candidate) => ({
       candidate,
       managerKeys: candidate.managerKeys,
       diagnostics: [],
     }));
-  const managerKeysByCandidate = input.managerLinks ? managerKeysFromLinks(input.managerLinks) : undefined;
+  const managerKeysByCandidate = managerLinks ? managerKeysFromLinks(managerLinks) : undefined;
   const slicesWithManagerKeys = slices.map((slice) => ({
     ...slice,
     managerKeys: managerKeysByCandidate?.get(slice.candidate) ?? slice.managerKeys,
   }));
-  const idKeySources: readonly MachineKeySource[] = input.managerLinks
+  const idKeySources: readonly MachineKeySource[] = managerLinks
     ? slicesWithManagerKeys
     : candidates.map((candidate) => ({
         candidate,
@@ -352,12 +497,12 @@ export const assembleGraphDocument = (input: GraphAssemblyInput): LiteFsmGraphDo
 
     return createMachineFromSlice(slice, machineId);
   });
-  const managers = input.managerLinks
-    ? createManagersFromLinks(input.managerLinks, machineIdsByCandidate)
-    : createManagerShells(input.managers ?? []);
+  const managers = managerLinks
+    ? createManagersFromLinks(managerLinks, machineIdsByCandidate)
+    : createManagerShells(sortManagerCandidates(input.managers ?? []));
   const diagnostics = normalizeDiagnostics([
     ...(input.diagnostics ?? []),
-    ...(input.managerLinks?.flatMap((link) => link.diagnostics) ?? []),
+    ...(managerLinks?.flatMap((link) => link.diagnostics) ?? []),
     ...machines.flatMap((machine) => machine.diagnostics),
   ]);
 

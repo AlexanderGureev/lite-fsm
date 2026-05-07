@@ -1,12 +1,9 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { compileLiteFsmGraph } from "@lite-fsm/graph";
 import { createSourceCatalog } from "../../packages/graph/src/compiler/catalog";
 import { discoverCandidates } from "../../packages/graph/src/compiler/candidates";
 import { createSourceAdapter } from "../../packages/graph/src/compiler/source";
-
-const fixturePath = fileURLToPath(new URL("../../xstate/graph-parser-fixtures.ts", import.meta.url));
+import { fullAssemblerFilename, fullAssemblerSource } from "./fixtures/graph-sources";
 
 const discover = (sourceText: string) => {
   const source = createSourceAdapter(sourceText, { filename: "input.ts" });
@@ -17,8 +14,7 @@ const discover = (sourceText: string) => {
 
 describe("CandidateDiscovery", () => {
   it("находит все machine и manager candidates из fixture", () => {
-    const fixtureSource = readFileSync(fixturePath, "utf8");
-    const result = discover(fixtureSource);
+    const result = discover(fullAssemblerSource);
     const inlineMachine = result.machines.find((candidate) => candidate.managerKeys.includes("inlineCreated"));
 
     expect(result.machines).toHaveLength(28);
@@ -35,8 +31,7 @@ describe("CandidateDiscovery", () => {
   });
 
   it("возвращает machines из compileLiteFsmGraph с config transitions для поддержанных configs", () => {
-    const fixtureSource = readFileSync(fixturePath, "utf8");
-    const result = compileLiteFsmGraph(fixtureSource, { filename: fixturePath });
+    const result = compileLiteFsmGraph(fullAssemblerSource, { filename: fullAssemblerFilename });
     const directObjectMachine = result.document.machines.find((machine) => machine.id === "directObjectMachine");
     const unresolvedConfigMachine = result.document.machines.find((machine) => machine.id === "unresolvedConfigMachine");
 

@@ -7,12 +7,12 @@
 | Поле | Значение |
 | --- | --- |
 | Дата | 2026-05-07 |
-| Готово | Этапы 0-6: IR/API/harness, Source Catalog/Candidates, Partial Evaluator, ConfigGraphCompiler, ManagerLinker/select API, ReducerCompiler, EffectsCompiler |
+| Готово | Этапы 0-7: IR/API/harness, Source Catalog/Candidates, Partial Evaluator, ConfigGraphCompiler, ManagerLinker/select API, ReducerCompiler, EffectsCompiler, интеграция GraphAssembler |
 | Package | `@lite-fsm/graph`, private/experimental |
 | Public API | `compileLiteFsmGraph(source, options?)`, `selectMachineGraph(document, selector?)` + IR-типы |
 | Текущий output | `LiteFsmGraphDocument`: source metadata, diagnostics, machines, linked managers, config states/transitions, reducer cases/transitions, effect emissions и machine facts |
 | Еще не строится | analyzer, simulator, CLI/UI |
-| Fixture contract | `xstate/graph-parser-fixtures.ts`: 28 machine candidates, 3 manager candidates |
+| Fixture contract | `tests/graph/fixtures/graph-sources.ts`: 28 machine candidates, 3 manager candidates, полный assembler snapshot |
 | Coverage | `packages/graph/src/**/*.ts`, кроме `types.ts`: 100% statements/branches/functions/lines |
 
 ## Ключевые решения
@@ -32,6 +32,8 @@
 - Reducer-layer transitions добавляются отдельно от config transitions и не создают acceptance для событий, которых нет в `config`/wildcard.
 - `EffectsCompiler` извлекает `GraphEmission` из inline/local effects, `createEffect` wrappers, direct `transition(...)`, domain `meta` routing и actor-only routing sugar; emissions остаются отдельным слоем и не создают state transitions.
 - Escaped `transition`, dynamic event type, unsupported effects/effect entries и invalid domain actor routing возвращают compiler diagnostics без падения документа.
+- `GraphAssembler` нормализует порядок machines/managers, transitions, reducer cases, emissions и diagnostics, назначает final `machineId` для machine diagnostics и не зависит от AST/pattern matching.
+- Graph compiler tests больше не читают `xstate/graph-parser-fixtures.ts`; fixture-кейсы живут в `tests/graph/fixtures/graph-sources.ts`, чтобы `xstate/` можно было удалить отдельно.
 
 ## Проверки
 
@@ -51,6 +53,6 @@ Root/docs build не запускался.
 
 ## Следующий этап
 
-Этап 7: полная интеграция assembler-а всех slices.
+Этап 8: анализ корректности на базе IR.
 
-Нужно расширить интеграционный слой вокруг готовых compiler slices и подготовить основу для analyzer/simulator, не запуская semantic analyzer внутри compiler по умолчанию.
+Нужно добавить semantic analyzer поверх готового `LiteFsmGraphDocument`, не запуская его внутри compiler по умолчанию.

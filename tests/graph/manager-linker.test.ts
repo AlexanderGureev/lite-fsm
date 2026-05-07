@@ -1,15 +1,12 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { compileLiteFsmGraph, type LiteFsmGraphDocument, type LiteFsmGraphManager } from "@lite-fsm/graph";
 import { assembleGraphDocument } from "../../packages/graph/src/compiler/assembler";
 import { createSourceCatalog } from "../../packages/graph/src/compiler/catalog";
 import { discoverCandidates, type MachineCandidate } from "../../packages/graph/src/compiler/candidates";
 import { createSourceAdapter } from "../../packages/graph/src/compiler/source";
+import { fullAssemblerFilename, fullAssemblerSource } from "./fixtures/graph-sources";
 
-const fixturePath = fileURLToPath(new URL("../../xstate/graph-parser-fixtures.ts", import.meta.url));
-
-const compileFixture = () => compileLiteFsmGraph(readFileSync(fixturePath, "utf8"), { filename: fixturePath });
+const compileFixture = () => compileLiteFsmGraph(fullAssemblerSource, { filename: fullAssemblerFilename });
 
 const getManager = (document: LiteFsmGraphDocument, id: string): LiteFsmGraphManager => {
   const manager = document.managers.find((candidate) => candidate.id === id);

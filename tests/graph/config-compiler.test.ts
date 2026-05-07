@@ -1,11 +1,8 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { compileLiteFsmGraph, type GraphStateRef, type GraphTarget, type LiteFsmGraphMachine } from "@lite-fsm/graph";
+import { fullAssemblerFilename, fullAssemblerSource } from "./fixtures/graph-sources";
 
-const fixturePath = fileURLToPath(new URL("../../xstate/graph-parser-fixtures.ts", import.meta.url));
-
-const compileFixture = () => compileLiteFsmGraph(readFileSync(fixturePath, "utf8"), { filename: fixturePath });
+const compileFixture = () => compileLiteFsmGraph(fullAssemblerSource, { filename: fullAssemblerFilename });
 
 const getMachine = (machines: readonly LiteFsmGraphMachine[], id: string): LiteFsmGraphMachine => {
   const machine = machines.find((candidate) => candidate.id === id);
@@ -102,12 +99,12 @@ describe("ConfigGraphCompiler по fixture", () => {
 
     expect(localConstConfigMachine.states.map((state) => state.key)).toEqual(["IDLE", "WORKING", "FAILED", "DONE"]);
     expect(transitionRows(localConstConfigMachine)).toEqual([
-      ["IDLE", "START", "WORKING"],
+      ["FAILED", "RESET", "IDLE"],
       ["IDLE", "RESET", "IDLE"],
+      ["IDLE", "START", "WORKING"],
       ["WORKING", "SUCCESS", "DONE"],
       ["WORKING", "FAIL", "FAILED"],
       ["FAILED", "RETRY", "WORKING"],
-      ["FAILED", "RESET", "IDLE"],
     ]);
     expect(configTransitionRows(helperWrappedMachine)).toEqual([
       ["IDLE", "START_HELPER", "WORKING"],

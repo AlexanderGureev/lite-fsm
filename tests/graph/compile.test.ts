@@ -1,13 +1,10 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { compileLiteFsmGraph, type GraphDiagnostic } from "@lite-fsm/graph";
 import { assembleGraphDocument } from "../../packages/graph/src/compiler/assembler";
 import { createSourceCatalog } from "../../packages/graph/src/compiler/catalog";
 import { discoverCandidates } from "../../packages/graph/src/compiler/candidates";
 import { createSourceAdapter } from "../../packages/graph/src/compiler/source";
-
-const fixturePath = fileURLToPath(new URL("../../xstate/graph-parser-fixtures.ts", import.meta.url));
+import { fullAssemblerSource } from "./fixtures/graph-sources";
 
 describe("compileLiteFsmGraph", () => {
   it("возвращает пустой валидный document для пустой строки", () => {
@@ -27,10 +24,8 @@ describe("compileLiteFsmGraph", () => {
   });
 
   it("читает основной fixture как строку", () => {
-    const fixtureSource = readFileSync(fixturePath, "utf8");
-
-    expect(fixtureSource).toContain("directObjectMachine");
-    expect(fixtureSource).toContain("escapedTransitionMachine");
+    expect(fullAssemblerSource).toContain("directObjectMachine");
+    expect(fullAssemblerSource).toContain("escapedTransitionMachine");
   });
 
   it("не падает на синтаксически неполном source и возвращает diagnostics", () => {
@@ -166,6 +161,6 @@ describe("GraphAssembler", () => {
       source: { kind: "state", stateId: "flow:state:IDLE" },
       target: { kind: "state", stateId: "flow:state:READY" },
     });
-    expect(document.diagnostics).toEqual([diagnostic]);
+    expect(document.diagnostics).toEqual([{ ...diagnostic, machineId: "flow" }]);
   });
 });
