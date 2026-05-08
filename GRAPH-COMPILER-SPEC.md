@@ -800,8 +800,13 @@ export type GraphSimulatorOptions = {
 export type AnalyzeLiteFsmGraphOptions = {
   rules?: GraphAnalysisRuleId[];
   strict?: boolean;
-  scope?: { machineId?: string; managerId?: string };
+  scope?: GraphAnalysisScope;
 };
+
+export type GraphAnalysisScope =
+  | { kind: "document" }
+  | { kind: "machine"; machineId: string }
+  | { kind: "manager"; managerId: string };
 
 export type GraphAnalysisResult = {
   diagnostics: GraphDiagnostic[];
@@ -998,6 +1003,61 @@ type MachineGraphSlices = {
 5. `reducer-config-consistency`: reducer пишет target для события, которое не принято через `config`/wildcard, или пишет неизвестный target.
 6. `effect-event-acceptance`: effect emits event, который не принимается ни одной машиной в текущем document/scope. Для single-machine snippets и неполного документа по умолчанию severity `info`; для явно выбранного manager scope или `strict` mode может быть `warning`.
 7. `wildcard-shadowing`: wildcard transition перекрыт state-specific transition и может быть подсвечен как info.
+
+Граница diagnostics:
+
+1. Compiler diagnostics описывают проблемы извлечения IR из исходной строки: syntax errors, unknown/dynamic identifiers, unsupported AST forms, dynamic targets, escaped transition и похожие ограничения parser-а.
+2. Analyzer diagnostics описывают только проблемы уже построенной модели `LiteFsmGraphDocument`.
+3. Analyzer не должен дублировать compiler diagnostics для `dynamic`, `external` и `unsupported` фрагментов. Такие участки нужно пропускать или понижать severity, если правило не может сделать надежный вывод.
+4. Analyzer diagnostics должны быть отличимы от compiler diagnostics. Для v1 использовать коды с префиксом `LFG_ANALYZER_`, например `LFG_ANALYZER_UNREACHABLE_STATE`.
+
+Внутренняя архитектура analyzer-а:
+
+```txt
+packages/graph/src/analyze.ts
+packages/graph/src/analyzer/
+  context.ts
+  indexes.ts
+  rules.ts
+  rules/
+    unknown-target.ts
+    unreachable-state.ts
+    dead-end-state.ts
+    actor-template-shape.ts
+    reducer-config-consistency.ts
+    effect-event-acceptance.ts
+    wildcard-shadowing.ts
+```
+
+Публичная точка входа `analyzeLiteFsmGraph(document, options?)` находится рядом с `compileLiteFsmGraph` и `selectMachineGraph`, но внутренние контракты правил не экспортируются как plugin API.
+
+Правила analyzer-а запускаются через внутренний registry:
+
+```ts
+type GraphAnalysisRule = {
+  id: GraphAnalysisRuleId;
+  run(context: GraphAnalysisContext): GraphDiagnostic[];
+};
+```
+
+Перед запуском правил analyzer строит общий `GraphAnalysisIndex`, чтобы правила не пересобирали одни и те же lookup-таблицы:
+
+1. `machinesById`;
+2. `managersById`;
+3. `statesByMachineId`;
+4. `stateKeysByMachineId`;
+5. `acceptedEventsByMachineId`;
+6. `acceptedEventsByStateId`;
+7. `wildcardTransitionsByMachineId`;
+8. `scopedMachineIds`.
+
+`scope` определяет, какие машины участвуют в cross-machine rules:
+
+1. `{ kind: "document" }` или отсутствие `scope` - весь document.
+2. `{ kind: "machine", machineId }` - одна машина.
+3. `{ kind: "manager", managerId }` - машины, связанные через manager.
+
+Дискриминирующий `GraphAnalysisScope` используется вместо `{ machineId?: string; managerId?: string }`, чтобы не допускать неоднозначных options.
 
 ## Направление codegen
 
@@ -1235,16 +1295,23 @@ Reducer source contract:
 Состав:
 
 1. Реализовать `analyzeLiteFsmGraph(document)`.
-2. Analyzer не использует AST, `ts-morph`, source files или import resolution.
-3. Реализовать rules v1: `unknown-target`, `unreachable-state`, `dead-end-state`, `actor-template-shape`, `reducer-config-consistency`, `effect-event-acceptance`, `wildcard-shadowing`.
-4. Возвращать `GraphDiagnostic[]` с `machineId` и `loc`, если `loc` есть в IR.
-5. Оставить compiler diagnostics и analyzer diagnostics различимыми.
+2. Добавить публичные типы `AnalyzeLiteFsmGraphOptions`, `GraphAnalysisScope`, `GraphAnalysisResult`, `GraphAnalysisRuleId`.
+3. Analyzer не использует AST, `ts-morph`, source files или import resolution.
+4. Analyzer не запускается внутри `compileLiteFsmGraph` по умолчанию и не мутирует `LiteFsmGraphDocument`.
+5. Реализовать внутренний registry правил и общий `GraphAnalysisIndex`.
+6. Реализовать rules v1: `unknown-target`, `unreachable-state`, `dead-end-state`, `actor-template-shape`, `reducer-config-consistency`, `effect-event-acceptance`, `wildcard-shadowing`.
+7. Возвращать `GraphDiagnostic[]` с `machineId` и `loc`, если `loc` есть в IR.
+8. Оставить compiler diagnostics и analyzer diagnostics различимыми через коды `LFG_ANALYZER_*`.
+9. Не дублировать compiler diagnostics для `dynamic`, `external` и `unsupported` участков IR.
 
 Проверка:
 
 1. Analyzer тестируется на hand-written IR fixtures и на document из `tests/graph/fixtures/graph-sources.ts`.
 2. Analyzer можно запустить повторно после ручного изменения IR без повторного parsing-а source.
-3. CLI/UI могут объединить diagnostics, но API сохраняет отдельный `GraphAnalysisResult`.
+3. Покрыты options `rules`, `strict` и `scope`.
+4. CLI/UI могут объединить diagnostics, но API сохраняет отдельный `GraphAnalysisResult`.
+5. `compileLiteFsmGraph(...).document.diagnostics` не содержит analyzer diagnostics.
+6. `pnpm exec vitest run tests/graph` и `pnpm --filter @lite-fsm/graph check-types` проходят.
 
 ### Этап 9: headless simulator одной машины
 
