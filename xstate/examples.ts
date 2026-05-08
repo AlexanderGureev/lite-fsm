@@ -6,7 +6,8 @@ type Events =
   | FSMEvent<"SUBSCRIPTION_FETCH_RESOLVE", { type: "premium" | "free" }>
   | FSMEvent<"LOGOUT">
   | FSMEvent<"DO_INIT">
-  | FSMEvent<"GO_B">;
+  | FSMEvent<"GO_B">
+  | FSMEvent<"SEND_TO_ANALYTICS">;
 
 type AppDeps = {
   getState: () => AppState;
@@ -66,19 +67,29 @@ const p3 = createMachine({
 
 const p4 = createMachine({
   config: {
+    "*": {
+      LOGOUT: "IDLE",
+    },
     IDLE: {
-      DO_INIT: "A",
+      SUBSCRIPTION_FETCH_RESOLVE: null,
     },
-    A: {
-      GO_B: "B",
-    },
-    B: {},
+    PREMIUM: {},
+    FREE: {},
   },
   initialState: "IDLE",
   initialContext: {},
+  reducer: (s, action) => {
+    switch (action.type) {
+      case "SUBSCRIPTION_FETCH_RESOLVE":
+        s.state = action.payload.type === "premium" ? "PREMIUM" : "FREE";
+        break;
+    }
+
+    // могут быть if условия вместо switch
+  },
   effects: {
-    A: ({ transition }) => {
-      transition({ type: "GO_B" });
+    PREMIUM: ({ transition }) => {
+      transition({ type: "SEND_TO_ANALYTICS" });
 
       //также могут быть условия для transition
       //transition может быть передан как аргумент в другие функции / сервисы
