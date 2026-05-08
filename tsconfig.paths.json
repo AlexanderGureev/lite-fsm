@@ -10,7 +10,8 @@
       "@lite-fsm/persist": ["./packages/persist/src/index.ts"],
       "@lite-fsm/persist/react": ["./packages/persist/src/react.ts"],
       "@lite-fsm/persist/internal/*": ["./packages/persist/src/*"],
-      "@lite-fsm/graph": ["./packages/graph/src/index.ts"]
+      "@lite-fsm/graph": ["./packages/graph/src/index.ts"],
+      "@lite-fsm/graph/simulator": ["./packages/graph/src/simulator/index.ts"]
     }
   }
 }

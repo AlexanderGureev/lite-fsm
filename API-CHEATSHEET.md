@@ -13,6 +13,7 @@
 | `@lite-fsm/middleware/immer` · `@lite-fsm/middleware/devTools`         | per-feature entry points                                                                                                                          |
 | `@lite-fsm/react`                                                      | `FSMContext`, `FSMContextProvider`, `FSMHydrationBoundary`, `useHydrateSnapshot`, `useManager`, `useSelector`, `useTransition`, `defineMachine`   |
 | `@lite-fsm/graph`                                                      | experimental: `compileLiteFsmGraph`, `selectMachineGraph`, `analyzeLiteFsmGraph` и IR-типы для graph tooling                                      |
+| `@lite-fsm/graph/simulator`                                            | experimental: `createGraphSimulator` для headless-симуляции одной compiled machine                                                                |
 
 `@lite-fsm/react` помечен `"use client"`. Импортировать можно из SSR/RSC, hooks/provider — только в client tree.
 
@@ -32,12 +33,15 @@ const result = compileLiteFsmGraph(source, {
 | `compileLiteFsmGraph(src)`      | строит `LiteFsmGraphDocument`; компилирует machines/managers, refs, config/reducer transitions и effect emissions |
 | `selectMachineGraph(doc, sel?)` | выбирает одну machine по `index`, `id`, `variableName`, `exportName`, `managerKey` или `{ managerId, managerKey }` |
 | `analyzeLiteFsmGraph(doc, opts?)` | запускает semantic analyzer поверх готового IR; возвращает отдельные diagnostics `LFG_ANALYZER_*` |
+| `createGraphSimulator(machine)` | subpath `@lite-fsm/graph/simulator`; интерактивно симулирует одну machine по IR без исполнения reducer/effects |
 | `LiteFsmGraphDocument`          | универсальный IR для будущих визуализаторов, CLI, analyzer-а и simulator-а                  |
 | `GraphDiagnostic`               | diagnostic как часть результата; compiler не должен падать на частично неподдержанном коде  |
 
 Reducer branches в graph IR символические: compiler сохраняет `reducerCases` и отдельные `GraphTransition` со слоем `"reducer"`, не проверяя consistency с `config`. Effect emissions сохраняются как `GraphEmission`: это suggested events при входе в state, а не state transitions.
 
 `analyzeLiteFsmGraph` не запускается внутри `compileLiteFsmGraph` автоматически и не мутирует document. Правила v1: `unknown-target`, `unreachable-state`, `dead-end-state`, `actor-template-shape`, `reducer-config-consistency`, `effect-event-acceptance`, `wildcard-shadowing`.
+
+`createGraphSimulator` экспортируется только из `@lite-fsm/graph/simulator`, а не из root `@lite-fsm/graph`. Он показывает доступные события, guarded/reducer branches и suggested effect emissions. `followEmission` применяет только local/default-routing emission; actor/group/tag/unscoped routing остается visible, но не доставляется в simulator одной машины.
 
 ## Mental model
 

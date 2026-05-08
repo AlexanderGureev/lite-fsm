@@ -656,6 +656,7 @@ export type GraphFollowEmissionResult =
       ok: true;
       snapshot: GraphSimulationSnapshot;
       step: GraphSimulationStep;
+      suggestedEmissions: GraphSuggestedEmission[];
     }
   | {
       ok: false;
@@ -665,9 +666,12 @@ export type GraphFollowEmissionResult =
         | "non-local-routing"
         | "unknown-emission"
         | "target-not-resolved"
-        | "blocked-target";
+        | "blocked-target"
+        | "ambiguous-transition";
       snapshot?: GraphSimulationSnapshot;
       emission?: GraphSuggestedEmission;
+      candidates?: GraphAvailableTransition[];
+      diagnostics: GraphDiagnostic[];
     };
 ```
 
@@ -682,7 +686,7 @@ export type GraphFollowEmissionResult =
 7. `getSuggestedEmissions()` возвращает emissions, применимые к текущему state после последнего успешного шага симуляции. State-specific effect связывается с входом в этот state; wildcard effect связывается с wildcard source.
 8. Effect precedence должна повторять runtime: если `prevState !== currentState` и для нового state есть state-specific effect, simulator предлагает только state-specific emissions; иначе предлагает wildcard emissions, если они есть. Для self transition state-specific effect не считается входом в state, поэтому может примениться wildcard effect.
 9. `followEmission({ emissionId })` применяет emission как следующий event только если `canFollowLocally === true`: routing является `default`, а текущий state принимает event через state-specific `config` edge или runtime wildcard fallback.
-10. Если emission имеет guard/condition или несколько possible branches, simulator не вычисляет условие. UI выбирает конкретную emission branch так же, как guarded/reducer branch.
+10. Если emission имеет guard/condition или follow-up event имеет несколько possible reducer branches, simulator не вычисляет условие. `followEmission` возвращает `ambiguous-transition` с `candidates`, а UI выбирает конкретную ветку через `choose`.
 11. Ветки reducer с несколькими target-ами становятся выбираемыми ветками.
 12. Guards/reducer conditions в v1 не вычисляются по payload/context. UI выбирает конкретную ветку. Future evaluator может сузить список branches до однозначной ветки, но должен работать как отдельная policy поверх того же resolver-а.
 13. `null` target считается self target, если reducer не дал более точную ветку.
@@ -743,8 +747,9 @@ Effect emission following:
 4. Follow-up event проходит через тот же resolver доступных transitions, что и внешний `send`.
 5. Если event не принят текущим state, simulator не меняет snapshot и должен вернуть blocked follow result с причиной `event-not-accepted`.
 6. Если emission имеет routing не `default`, simulator одной машины не доставляет его локально. Такой emission остается видимым для UI/analyzer и будущего system simulator.
-7. В этапе 9 simulator возвращает choices и ждет выбора UI/пользователя. Автоматический режим `auto-unambiguous` можно добавить позже: он сможет сам применить только одну однозначную local/default emission без guard-а.
-8. Если автоматический follow-up будет добавлен позже, у него должно быть ограничение глубины, чтобы не зависнуть на циклах вида `B -> effect GO_B -> B`.
+7. Если local/default emission ведет к нескольким guarded/reducer branches, `followEmission` возвращает `ambiguous-transition` с `candidates` и не меняет snapshot.
+8. В этапе 9 simulator возвращает choices и ждет выбора UI/пользователя. Автоматический режим `auto-unambiguous` можно добавить позже: он сможет сам применить только одну однозначную local/default emission без guard-а.
+9. Если автоматический follow-up будет добавлен позже, у него должно быть ограничение глубины, чтобы не зависнуть на циклах вида `B -> effect GO_B -> B`.
 
 ## Diagnostics
 

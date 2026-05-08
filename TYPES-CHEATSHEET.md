@@ -11,6 +11,8 @@
 | `@lite-fsm/persist`       | `MaybePromise`, `PersistedRecord`, `PersistStorage`, `PersistStatus`, `PersistRestoreSettledResult`, `PersistManagerOptions`, `PersistController`                                                                                                                   |
 | `@lite-fsm/persist/react` | runtime hooks only: `usePersistStatus`, `useIsPersistRestoring`                                                                                                                                                                                                     |
 | `@lite-fsm/middleware`    | только runtime middleware                                                                                                                                                                                                                                           |
+| `@lite-fsm/graph`         | experimental graph compiler/analyzer IR-типы                                                                                                                                                                                                                        |
+| `@lite-fsm/graph/simulator` | experimental simulator-типы: `GraphSimulator`, snapshot/result/transition/emission types                                                                                                                                                                           |
 
 ## Generics
 
@@ -322,11 +324,13 @@ export const defineEffect: TypedCreateEffectFn<AppEvent, Deps> = createEffect;
 
 ```ts
 import { analyzeLiteFsmGraph, compileLiteFsmGraph, selectMachineGraph, type LiteFsmGraphDocument } from "@lite-fsm/graph";
+import { createGraphSimulator, type GraphSimulator } from "@lite-fsm/graph/simulator";
 
 const result = compileLiteFsmGraph(source);
 const document: LiteFsmGraphDocument = result.document;
 const selected = selectMachineGraph(document, { managerKey: "machineKey" });
 const analysis = analyzeLiteFsmGraph(document, { strict: true });
+const simulator: GraphSimulator | undefined = selected.ok ? createGraphSimulator(selected.machine) : undefined;
 ```
 
 | Тип                         | Форма                                                                                 |
@@ -348,6 +352,19 @@ const analysis = analyzeLiteFsmGraph(document, { strict: true });
 | `AnalyzeLiteFsmGraphOptions` | `{ rules?: GraphAnalysisRuleId[], strict?: boolean, scope?: GraphAnalysisScope }`      |
 | `GraphAnalysisScope`        | `{ kind: "document" }`, `{ kind: "machine", machineId }` или `{ kind: "manager", managerId }` |
 | `GraphAnalysisRuleId`       | analyzer rule union: `unknown-target`, `unreachable-state`, `dead-end-state`, `actor-template-shape`, `reducer-config-consistency`, `effect-event-acceptance`, `wildcard-shadowing` |
+
+Simulator-типы экспортируются только из `@lite-fsm/graph/simulator`:
+
+| Тип                         | Форма                                                                                 |
+| --------------------------- | ------------------------------------------------------------------------------------- |
+| `GraphSimulator`            | `start`, `restart`, `getSnapshot`, `getAvailableTransitions`, `getSuggestedEmissions`, `send`, `choose`, `followEmission` |
+| `GraphSimulatorOptions`     | `{ actorMode?: "spawnLifecycle" \| "activeActor"; startState?: string }`             |
+| `GraphSimulationSnapshot`   | `{ machineId, stateId, stateKey, history }`                                           |
+| `GraphSimulationStep`       | событие, config acceptance id, effective transition id, cause и `from`/`to`            |
+| `GraphAvailableTransition`  | selectable config/reducer branch; unresolved targets имеют `canApply: false`          |
+| `GraphSuggestedEmission`    | suggested effect event; `canFollowLocally` true только для local/default accepted event |
+| `GraphSendResult`           | success со snapshot/step или controlled failure: not-started, not-accepted, ambiguity, unresolved/blocked target |
+| `GraphFollowEmissionResult` | как `send`, плюс `unknown-emission`, `non-local-routing` и ambiguity candidates        |
 
 `LiteFsmGraphDocument.diagnostics` содержит compiler diagnostics. Diagnostics analyzer-а возвращаются отдельно из `GraphAnalysisResult` и имеют коды `LFG_ANALYZER_*`.
 

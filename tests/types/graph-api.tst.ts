@@ -1,4 +1,6 @@
 import { describe, expect, test } from "tstyche";
+import * as graphRoot from "@lite-fsm/graph";
+import * as simulatorEntry from "@lite-fsm/graph/simulator";
 import { analyzeLiteFsmGraph, compileLiteFsmGraph, selectMachineGraph } from "@lite-fsm/graph";
 import type {
   AnalyzeLiteFsmGraphOptions,
@@ -20,7 +22,19 @@ import type {
   MachineSelector,
   SelectMachineGraphResult,
 } from "@lite-fsm/graph";
-import type { Assert, NotAny, NotNever } from "./_helpers";
+import { createGraphSimulator } from "@lite-fsm/graph/simulator";
+import type {
+  ActorSimulationMode,
+  GraphAvailableTransition,
+  GraphFollowEmissionResult,
+  GraphSendResult,
+  GraphSimulationSnapshot,
+  GraphSimulator,
+  GraphSimulatorOptions,
+  GraphSimulatorStartResult,
+  GraphSuggestedEmission,
+} from "@lite-fsm/graph/simulator";
+import type { Assert, Equal, IsNever, NotAny, NotNever } from "./_helpers";
 
 describe("@lite-fsm/graph public API", () => {
   test("compileLiteFsmGraph возвращает graph result", () => {
@@ -104,5 +118,49 @@ describe("@lite-fsm/graph public API", () => {
     if (target.kind === "array") {
       expect(target.items).type.toBe<GraphRoutingTarget[]>();
     }
+  });
+
+  test("simulator доступен только через subpath entry", () => {
+    type _NoRootSimulator = Assert<IsNever<Extract<keyof typeof graphRoot, "createGraphSimulator">>>;
+    type _SimulatorRuntimeKeys = Assert<Equal<keyof typeof simulatorEntry, "createGraphSimulator">>;
+
+    const machine = {} as LiteFsmGraphMachine;
+    const simulator = createGraphSimulator(machine, { actorMode: "activeActor", startState: "READY" });
+
+    expect(simulator).type.toBe<GraphSimulator>();
+    expect(simulator.start()).type.toBe<GraphSimulatorStartResult>();
+    expect(simulator.getSnapshot()).type.toBe<GraphSimulationSnapshot | undefined>();
+    expect(simulator.getAvailableTransitions()).type.toBe<GraphAvailableTransition[]>();
+    expect(simulator.getSuggestedEmissions()).type.toBe<GraphSuggestedEmission[]>();
+    expect(simulator.send({ event: "NEXT" })).type.toBe<GraphSendResult>();
+    expect(simulator.followEmission({ emissionId: "emission" })).type.toBe<GraphFollowEmissionResult>();
+  });
+
+  test("simulator unions сужаются по ok и reason", () => {
+    const send = {} as GraphSendResult;
+    if (send.ok) {
+      expect(send.snapshot).type.toBe<GraphSimulationSnapshot>();
+      expect(send.suggestedEmissions).type.toBe<GraphSuggestedEmission[]>();
+    } else if (send.reason === "ambiguous-transition") {
+      expect(send.candidates).type.toBe<GraphAvailableTransition[] | undefined>();
+    } else {
+      expect(send.diagnostics).type.toBe<GraphDiagnostic[]>();
+    }
+
+    const follow = {} as GraphFollowEmissionResult;
+    if (!follow.ok && follow.reason === "ambiguous-transition") {
+      expect(follow.candidates).type.toBe<GraphAvailableTransition[] | undefined>();
+      expect(follow.emission).type.toBe<GraphSuggestedEmission | undefined>();
+    }
+
+    const mode = "spawnLifecycle" satisfies ActorSimulationMode;
+    type _SimulatorTypeChecks = [
+      Assert<NotAny<GraphSimulatorOptions>>,
+      Assert<NotAny<ActorSimulationMode>>,
+      Assert<NotNever<GraphSimulatorStartResult>>,
+    ];
+
+    expect(mode).type.toBe<"spawnLifecycle">();
+    expect<_SimulatorTypeChecks>().type.not.toBe<never>();
   });
 });
