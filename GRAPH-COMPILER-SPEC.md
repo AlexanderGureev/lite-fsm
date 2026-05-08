@@ -870,7 +870,181 @@ export function buildGraphViewModel(
 ): GraphViewModel;
 ```
 
-Конкретные `GraphViewModel`/`BuildGraphViewModelOptions` типы фиксируются на этапе 11. Они должны быть DOM-free и не зависеть от React или конкретного layout engine.
+Этап 11 фиксирует `GraphViewModel` как тонкий UI-agnostic projection layer, а не как workbench/app store. Он отвечает на вопрос "что можно нарисовать и как это связано с IR/source/simulator", но не управляет вкладками, панелями, редактором, payload drafts или lifecycle симуляции.
+
+Черновой контракт этапа 11:
+
+```ts
+export type BuildGraphViewModelOptions = {
+  diagnostics?: readonly GraphDiagnostic[];
+  selected?: GraphViewSelection;
+  simulation?: GraphViewSimulationOverlayInput;
+};
+
+export type GraphViewModel = {
+  machineId: string;
+  title: string;
+  nodes: GraphViewNode[];
+  edges: GraphViewEdge[];
+  diagnostics: GraphViewDiagnosticAnchor[];
+  selectedTransition?: GraphSelectedTransitionView;
+  layoutInput: GraphLayoutInput;
+};
+
+export type GraphViewSelection = {
+  stateId?: string;
+  transitionId?: string;
+  emissionId?: string;
+  diagnosticId?: string;
+};
+
+export type GraphViewSimulationOverlayInput = {
+  currentStateId?: string;
+  availableTransitionIds?: readonly string[];
+  blockedTransitionIds?: readonly string[];
+  selectedTransitionId?: string;
+  suggestedEmissionIds?: readonly string[];
+};
+
+export type GraphViewNode = {
+  id: string;
+  machineId: string;
+  kind: "machine" | "state" | "pseudo";
+  stateId?: string;
+  parentId?: string;
+  label: string;
+  badges: GraphViewBadge[];
+  sourceAnchors: GraphSourceAnchor[];
+  diagnosticIds: string[];
+  simulation?: GraphNodeSimulationView;
+  layoutHints?: GraphNodeLayoutHints;
+};
+
+export type GraphViewEdge = {
+  id: string;
+  machineId: string;
+  kind: "transition" | "reducer-branch" | "emission";
+  layer: "config" | "reducer" | "effect" | "analysis";
+  sourceNodeId: string;
+  targetNodeId?: string;
+  label: string;
+  eventType?: string;
+  badges: GraphViewBadge[];
+  sourceAnchors: GraphSourceAnchor[];
+  diagnosticIds: string[];
+  simulation?: GraphEdgeSimulationView;
+  layoutHints?: GraphEdgeLayoutHints;
+};
+
+export type GraphViewBadge = {
+  kind:
+    | "initial"
+    | "wildcard"
+    | "terminal"
+    | "actor-template"
+    | "config"
+    | "reducer"
+    | "effect"
+    | "diagnostic";
+  label: string;
+  severity?: GraphDiagnostic["severity"];
+};
+
+export type GraphSourceAnchor = {
+  kind:
+    | "machine"
+    | "state"
+    | "config-transition"
+    | "reducer-branch"
+    | "effect-emission"
+    | "initial-state"
+    | "initial-context";
+  loc?: SourceLocation;
+  editable: boolean;
+};
+
+export type GraphViewDiagnosticAnchor = {
+  diagnostic: GraphDiagnostic;
+  sourceAnchor?: GraphSourceAnchor;
+  graphItemId?: string;
+};
+
+export type GraphSelectedTransitionView = {
+  transitionId: string;
+  acceptedTransitionId?: string;
+  effectiveTransitionId?: string;
+  sourceNodeId: string;
+  targetNodeId?: string;
+  eventType: string;
+  layer: GraphViewEdge["layer"];
+  guard?: GraphCondition;
+  canApply?: boolean;
+  blockedReason?: string;
+  sourceAnchors: GraphSourceAnchor[];
+};
+
+export type GraphNodeSimulationView = {
+  current: boolean;
+  active: boolean;
+};
+
+export type GraphEdgeSimulationView = {
+  available: boolean;
+  selected: boolean;
+  suggested: boolean;
+  canApply: boolean;
+  blockedReason?: string;
+};
+
+export type GraphNodeLayoutHints = {
+  parentId?: string;
+  rank?: number;
+  preferredSize?: { width: number; height: number };
+};
+
+export type GraphEdgeLayoutHints = {
+  sourcePort?: "top" | "right" | "bottom" | "left";
+  targetPort?: "top" | "right" | "bottom" | "left";
+};
+
+export type GraphLayoutInput = {
+  nodes: Array<{
+    id: string;
+    parentId?: string;
+    label: string;
+    hints?: GraphNodeLayoutHints;
+  }>;
+  edges: Array<{
+    id: string;
+    sourceNodeId: string;
+    targetNodeId?: string;
+    label: string;
+    hints?: GraphEdgeLayoutHints;
+  }>;
+};
+
+export type GraphLayoutResult = {
+  nodes: Record<string, { x: number; y: number; width: number; height: number }>;
+  edges: Record<string, { points: Array<{ x: number; y: number }> }>;
+  bounds: { width: number; height: number };
+  diagnostics: GraphDiagnostic[];
+};
+
+export type GraphLayoutAdapter = (
+  input: GraphLayoutInput,
+  options?: GraphLayoutOptions,
+) => GraphLayoutResult | Promise<GraphLayoutResult>;
+
+export type GraphLayoutOptions = {
+  direction?: "down" | "right";
+};
+```
+
+`GraphSourceAnchor.editable` в v1 является read-only provenance hint для будущего codegen/editor layer. Он не означает, что stage 11 умеет изменять source. Edit operations и генерация кода должны добавляться отдельным слоем после появления конкретного сценария.
+
+`GraphLayoutInput` является layout-ready projection внутри `GraphViewModel`, но не содержит координаты. `GraphLayoutResult` с координатами и routing paths отделен от IR и semantic nodes/edges: координаты не хранятся в `LiteFsmGraphDocument`, а concrete layout engine подключается в UI/app или отдельном adapter-е.
+
+`GraphViewModel` может принимать simulator projection только как готовые ids/flags. Branching timeline, reset semantics, payload drafts и JSON-safe context lifecycle остаются ответственностью simulator/app слоев, а не `@lite-fsm/graph/view-model`.
 
 Опции:
 
@@ -1472,25 +1646,30 @@ Reducer source contract:
 2. CLI не добавляет project mode и не резолвит imports.
 3. Snapshot tests CLI output покрывают list-machines, selected machine и diagnostics.
 
-### Этап 11: UI view-model и layout adapter
+### Этап 11: UI-agnostic visualizer projection и layout adapter contract
 
-Цель: отделить IR от конкретного UI и библиотеки отрисовки.
+Цель: отделить IR от конкретного UI, библиотеки отрисовки и layout engine-а. Этап 11 должен дать тонкую render projection для диаграммы, но не превращать `@lite-fsm/graph/view-model` в workbench/app store.
 
 Состав:
 
 1. Реализовать DOM-free view-model в subpath entrypoint `@lite-fsm/graph/view-model`.
-2. Преобразовать `LiteFsmGraphMachine` в render model: nodes, edges, labels, badges, emissions, diagnostics anchors.
-3. Выбрать layout adapter или оставить layout pluggable.
+2. Преобразовать `LiteFsmGraphMachine` в `GraphViewModel`: nodes, edges, labels, badges, source anchors, diagnostics anchors и selected transition details.
+3. Сохранить слой происхождения edge-ов: `config`, `reducer`, `effect`, `analysis`.
 4. Не хранить координаты в базовом IR.
-5. Поддержать view-model для state graph, emissions overlay и selected transition details.
-6. Не реэкспортировать view-model из root `@lite-fsm/graph`; UI импортирует ее явно из `@lite-fsm/graph/view-model`.
+5. Зафиксировать `GraphLayoutInput`, `GraphLayoutResult` и `GraphLayoutAdapter` как pluggable contract без зависимости от конкретного engine-а.
+6. Поддержать simulation overlay как набор flags/ids поверх готового simulator state: current/active state, available transitions, blocked transitions, suggested emissions.
+7. Поддержать read-only `GraphSourceAnchor` на machine/state/config transition/reducer branch/effect emission/initialState/initialContext, чтобы будущий codegen/editor layer мог привязаться к source без переписывания render model.
+8. Не включать в `@lite-fsm/graph/view-model` app state: active tabs, drawer/panel state, CodeMirror state, payload draft lifecycle, branching timeline storage, user layout preferences и concrete renderer nodes.
+9. Не реэкспортировать view-model из root `@lite-fsm/graph`; UI импортирует ее явно из `@lite-fsm/graph/view-model`.
 
 Проверка:
 
 1. Snapshot tests render model на fixture-машинах.
-2. Render model не требует DOM и может использоваться в CLI/debug output.
-3. Layout adapter можно заменить без изменения IR.
-4. Import из `@lite-fsm/graph` не загружает view-model entrypoint; view-model доступна через `@lite-fsm/graph/view-model`.
+2. Snapshot tests selected transition details, source anchors, diagnostic anchors и simulation overlay.
+3. Render model не требует DOM и может использоваться в CLI/debug output.
+4. Layout adapter contract можно заменить без изменения IR и без изменения `GraphViewModel`.
+5. Import из `@lite-fsm/graph` не загружает view-model entrypoint; view-model доступна через `@lite-fsm/graph/view-model`.
+6. View-model subpath не тянет React, CodeMirror, React Flow, ELK, DOM APIs или конкретный UI store.
 
 ### Этап 12: Sketch-like UI
 
@@ -1498,18 +1677,31 @@ Reducer source contract:
 
 Состав:
 
-1. Редактор исходной строки в духе Sketch.
+1. Редактор исходной строки в духе Sketch. Рекомендованный v1 stack: CodeMirror 6 с TypeScript/JavaScript mode и diagnostics markers из `SourceLocation`.
 2. Выбор машины из document.
-3. Диаграмма из render model.
-4. Панель симуляции одной машины.
-5. Панель diagnostics.
-6. Возможность копировать/вставлять source без project mode.
+3. Диаграмма из `GraphViewModel` через concrete renderer adapter. Рекомендованный v1 stack: `@xyflow/react` для canvas/interactions и ELK-based layout adapter поверх `GraphLayoutInput`/`GraphLayoutResult`. Layout engine должен оставаться заменяемым.
+4. Панель симуляции одной машины: start/stop/reset, step-by-step runner без обязательного auto-play, выбор доступного события, выбор reducer/guard branch вручную, follow suggested local emissions.
+5. Branching timeline UI. `reset` очищает все ветки и возвращает симуляцию в стартовое состояние. Успешные transitions попадают в timeline; blocked/failed attempts не создают timeline entry.
+6. Payload drafts scoped by `machineId + eventType`; payload всегда JSON object. Если event имеет несколько symbolic branches, payload общий для event, а branch выбирается отдельно.
+7. State/context inspector: v1 показывает state и JSON-safe/symbolic context из source. Override initial context зарезервирован на будущее, но в v1 не обязателен.
+8. Console UI с каналами `compiler`, `analyzer`, `simulator`, `payload`, `layout`. Active tab, panel state и фильтры являются app state, а не частью `@lite-fsm/graph/view-model`.
+9. Diagnostics подсвечиваются и в editor-е, и в console-е. CodeMirror markers используют `loc.start.offset`/`loc.end.offset`; console показывает `filename`, `line` и `column`, если `loc` есть, и может перейти к тому же source range. Analyzer diagnostics только отображаются и не блокируют simulation.
+10. При изменении editor source и новом compiled document симуляция сбрасывается. Payload drafts можно сохранить только для surviving `machineId + eventType`.
+11. Возможность копировать/вставлять source без project mode.
+12. Multi-machine/actor routing в v1 показывается статически через managers/routing metadata; полноценная system simulation остается будущим этапом.
+13. Codegen future закладывается через `GraphSourceAnchor` и stable ids. Этап 12 не обязан редактировать диаграмму или генерировать код, но UI не должен терять source provenance у видимых graph items.
 
 Проверка:
 
 1. Вставка `tests/graph/fixtures/graph-sources.ts` показывает список машин и не ломает UI.
 2. Можно выбрать одну машину из многих и симулировать только ее.
 3. Diagnostics подсвечивают source locations, если они есть.
+4. Console разделяет compiler/analyzer/simulator/payload/layout entries и может перейти к source/graph item, когда есть anchor.
+5. Branching timeline сохраняет несколько веток после отката и альтернативного выбора, а `reset` очищает все ветки.
+6. Blocked transition, invalid payload JSON и unresolved target попадают в console, но не создают committed timeline entry.
+7. Payload draft для event сохраняется между шагами симуляции и применяется при отправке этого event.
+8. Source edit/recompile сбрасывает simulation state и не оставляет stale overlay на графе.
+9. Layout adapter можно заменить без изменения stage 11 render model.
 
 ## Закрытые решения
 
@@ -1527,6 +1719,10 @@ Reducer source contract:
 12. Этап 9 реализует interactive simulation. Выбор reducer/effect branch в v1 остается за пользователем/UI; future payload/context evaluator должен добавляться как отдельная selection policy поверх resolver-а, а не как переписывание simulator core.
 13. Effects на `start()`/`restart()` не вызываются. Suggested emissions появляются только после успешного шага симуляции и используют runtime precedence state-specific vs wildcard effects.
 14. Simulator не commit-ит `dynamic`/`unknown`/`blocked` targets в snapshot; такие choices видимы, но возвращают controlled blocked result.
+15. Этап 11 остается библиотечным visualizer projection layer. Workbench/app behavior, вкладки, panel layout, payload draft lifecycle и concrete canvas/editor integrations относятся к этапу 12.
+16. Координаты и routing paths layout-а не хранятся в IR. `GraphLayoutInput`/`GraphLayoutResult` являются заменяемым adapter contract поверх `GraphViewModel`.
+17. `GraphSourceAnchor` - это read-only provenance для source locations и будущего codegen. Он не добавляет edit API и не является ручной graph/codegen metadata.
+18. В UI v1 successful transitions попадают в branching timeline, а blocked/failed attempts попадают в console и не создают committed timeline entry.
 
 ## Итоговая рекомендация
 
