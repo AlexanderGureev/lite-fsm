@@ -24,6 +24,30 @@ export type LiteFsmGraphResult = {
   diagnostics: GraphDiagnostic[];
 };
 
+export type GraphAnalysisRuleId =
+  | "unknown-target"
+  | "unreachable-state"
+  | "dead-end-state"
+  | "actor-template-shape"
+  | "reducer-config-consistency"
+  | "effect-event-acceptance"
+  | "wildcard-shadowing";
+
+export type GraphAnalysisScope =
+  | { kind: "document" }
+  | { kind: "machine"; machineId: string }
+  | { kind: "manager"; managerId: string };
+
+export type AnalyzeLiteFsmGraphOptions = {
+  rules?: GraphAnalysisRuleId[];
+  strict?: boolean;
+  scope?: GraphAnalysisScope;
+};
+
+export type GraphAnalysisResult = {
+  diagnostics: GraphDiagnostic[];
+};
+
 export type LiteFsmGraphManager = {
   id: string;
   variableName?: string;

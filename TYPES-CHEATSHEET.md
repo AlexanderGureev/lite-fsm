@@ -321,16 +321,18 @@ export const defineEffect: TypedCreateEffectFn<AppEvent, Deps> = createEffect;
 `@lite-fsm/graph` экспортирует типы JSON-документа для tooling-слоя. Runtime-пакеты от него не зависят.
 
 ```ts
-import { compileLiteFsmGraph, selectMachineGraph, type LiteFsmGraphDocument } from "@lite-fsm/graph";
+import { analyzeLiteFsmGraph, compileLiteFsmGraph, selectMachineGraph, type LiteFsmGraphDocument } from "@lite-fsm/graph";
 
 const result = compileLiteFsmGraph(source);
 const document: LiteFsmGraphDocument = result.document;
 const selected = selectMachineGraph(document, { managerKey: "machineKey" });
+const analysis = analyzeLiteFsmGraph(document, { strict: true });
 ```
 
 | Тип                         | Форма                                                                                 |
 | --------------------------- | ------------------------------------------------------------------------------------- |
 | `LiteFsmGraphResult`        | `{ document: LiteFsmGraphDocument; diagnostics: GraphDiagnostic[] }`                  |
+| `GraphAnalysisResult`       | `{ diagnostics: GraphDiagnostic[] }` для semantic analyzer-а                          |
 | `LiteFsmGraphDocument`      | `{ version, source, machines, managers, diagnostics }`                                |
 | `LiteFsmGraphManager`       | manager metadata плюс `machineRefs: { key, machineId, loc? }[]`                       |
 | `LiteFsmGraphMachine`       | machine metadata плюс `states`, `transitions`, `emissions`, `reducerCases`            |
@@ -343,6 +345,11 @@ const selected = selectMachineGraph(document, { managerKey: "machineKey" });
 | `MachineSelector`           | `{ index }`, `{ id }`, `{ variableName }`, `{ exportName }`, `{ managerKey }` или `{ managerId, managerKey }` |
 | `SelectMachineGraphResult`  | success `{ ok: true, machine, diagnostics }` или failure `{ ok: false, candidates, diagnostics }` |
 | `CompileLiteFsmGraphOptions` | `{ filename?, language?, parser?: "static", maxMachines? }`                           |
+| `AnalyzeLiteFsmGraphOptions` | `{ rules?: GraphAnalysisRuleId[], strict?: boolean, scope?: GraphAnalysisScope }`      |
+| `GraphAnalysisScope`        | `{ kind: "document" }`, `{ kind: "machine", machineId }` или `{ kind: "manager", managerId }` |
+| `GraphAnalysisRuleId`       | analyzer rule union: `unknown-target`, `unreachable-state`, `dead-end-state`, `actor-template-shape`, `reducer-config-consistency`, `effect-event-acceptance`, `wildcard-shadowing` |
+
+`LiteFsmGraphDocument.diagnostics` содержит compiler diagnostics. Diagnostics analyzer-а возвращаются отдельно из `GraphAnalysisResult` и имеют коды `LFG_ANALYZER_*`.
 
 ## Middleware
 

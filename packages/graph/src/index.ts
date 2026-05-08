@@ -1,7 +1,12 @@
 export { compileLiteFsmGraph } from "./compile";
 export { selectMachineGraph } from "./select";
+export { analyzeLiteFsmGraph } from "./analyze";
 export type {
+  AnalyzeLiteFsmGraphOptions,
   CompileLiteFsmGraphOptions,
+  GraphAnalysisResult,
+  GraphAnalysisRuleId,
+  GraphAnalysisScope,
   GraphCondition,
   GraphDiagnostic,
   GraphEmission,

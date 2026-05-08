@@ -6,19 +6,19 @@
 
 | Поле | Значение |
 | --- | --- |
-| Дата | 2026-05-07 |
-| Готово | Этапы 0-7 + чистка перед этапом 8: IR/API/harness, Source Catalog/Candidates, Partial Evaluator, ConfigGraphCompiler, ManagerLinker/select API, ReducerCompiler, EffectsCompiler, GraphAssembler, общий `compiler/ast.ts` |
+| Дата | 2026-05-08 |
+| Готово | Этапы 0-8: IR/API/harness, Source Catalog/Candidates, Partial Evaluator, ConfigGraphCompiler, ManagerLinker/select API, ReducerCompiler, EffectsCompiler, GraphAssembler, общий `compiler/ast.ts`, Semantic Analyzer |
 | Package | `@lite-fsm/graph`, private/experimental |
-| Public API | `compileLiteFsmGraph(source, options?)`, `selectMachineGraph(document, selector?)` + IR-типы |
-| Текущий output | `LiteFsmGraphDocument`: source metadata, diagnostics, machines, linked managers, config states/transitions, reducer cases/transitions, effect emissions и machine facts |
-| Еще не строится | analyzer, simulator, CLI/UI |
+| Public API | `compileLiteFsmGraph(source, options?)`, `selectMachineGraph(document, selector?)`, `analyzeLiteFsmGraph(document, options?)` + IR/analyzer-типы |
+| Текущий output | `LiteFsmGraphDocument`: source metadata, compiler diagnostics, machines, linked managers, config states/transitions, reducer cases/transitions, effect emissions и machine facts; `GraphAnalysisResult`: analyzer diagnostics |
+| Еще не строится | simulator, CLI/UI |
 | Fixture contract | `tests/graph/fixtures/graph-sources.ts`: 28 machine candidates, 3 manager candidates, полный assembler snapshot |
 | Coverage | `packages/graph/src/**/*.ts`, кроме `types.ts`: 100% statements/branches/functions/lines |
 
 ## Ключевые решения
 
-- Public surface оставлен маленьким: package exports пока только `compileLiteFsmGraph`, `selectMachineGraph` и IR-типы.
-- `analyzeLiteFsmGraph` и `createGraphSimulator` не добавлены до своих этапов.
+- Public surface оставлен маленьким: package exports пока только `compileLiteFsmGraph`, `selectMachineGraph`, `analyzeLiteFsmGraph` и IR/analyzer-типы.
+- `createGraphSimulator` не добавлен до своего этапа.
 - `ts-morph` добавлен как direct dependency `@lite-fsm/graph`, потому что compiler парсит строки во время выполнения.
 - `SourceAdapter` скрывает `ts-morph`; публичный API не протекает parser-типами.
 - Ambient API names распознаются только если нет local/import binding; lookalike imports и alias chains игнорируются.
@@ -37,6 +37,9 @@
 - Общие AST-утилиты для feature compilers вынесены в `packages/graph/src/compiler/ast.ts` (`unwrapTransparent`, `propertyNameText`, `bindingNameText`, `readMachineOptions`/`readMachineOption`, `statementsFromBranch`, `isActionTypeAccess`, `condition`, `combineConfidence`, `stringFromExpression`); локальные дубликаты в `candidates`/`config`/`manager`/`reducer`/`effects` удалены.
 - Из `pipeline.ts` удалены неиспользуемые `AstNodeRef`/`CompilerPass`/`PatternRule`/`GraphTargetSlice`-алиас; контракты slice-ов и `CompilerContext` остаются единственными внутренними типами pipeline-а.
 - Самые большие feature-compiler файлы разнесены в подпапки без изменения публичного контракта: `effects.ts` -> `effects/{setup,routing}.ts`, `reducer.ts` -> `reducer/{setup,writes}.ts`, `evaluator.ts` -> `evaluator/{types,object,wrappers}.ts`, `assembler.ts` -> `assembler/{sort,machine,manager}.ts`. Точки входа (`compileEffectsGraph`, `compileReducerGraph`, `createPartialEvaluator`, `assembleGraphDocument`) и публичные типы остаются в исходных файлах через прямой re-export, тесты `tests/graph/*` и `compile.ts` не правились.
+- `analyzeLiteFsmGraph` добавлен как отдельный semantic layer поверх `LiteFsmGraphDocument`; compiler не запускает analyzer автоматически и не мутирует document.
+- Analyzer использует внутренний `GraphAnalysisIndex`, `scope` как discriminated union и registry v1 rules: `unknown-target`, `unreachable-state`, `dead-end-state`, `actor-template-shape`, `reducer-config-consistency`, `effect-event-acceptance`, `wildcard-shadowing`.
+- Analyzer diagnostics отделены кодами `LFG_ANALYZER_*`; `document.diagnostics` остается слоем compiler diagnostics.
 
 ## Проверки
 
@@ -50,13 +53,10 @@ pnpm --filter @lite-fsm/graph build
 pnpm exec tsc --noEmit -p tsconfig.test.json
 pnpm run lint
 pnpm run test:types
-pnpm run test
 ```
 
 Root/docs build не запускался.
 
 ## Следующий этап
 
-Этап 8: анализ корректности на базе IR.
-
-Нужно добавить semantic analyzer поверх готового `LiteFsmGraphDocument`, не запуская его внутри compiler по умолчанию.
+Этап 9: headless simulator одной машины.

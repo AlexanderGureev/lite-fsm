@@ -1,7 +1,11 @@
 import { describe, expect, test } from "tstyche";
-import { compileLiteFsmGraph, selectMachineGraph } from "@lite-fsm/graph";
+import { analyzeLiteFsmGraph, compileLiteFsmGraph, selectMachineGraph } from "@lite-fsm/graph";
 import type {
+  AnalyzeLiteFsmGraphOptions,
   CompileLiteFsmGraphOptions,
+  GraphAnalysisResult,
+  GraphAnalysisRuleId,
+  GraphAnalysisScope,
   GraphDiagnostic,
   GraphEmission,
   GraphReducerCase,
@@ -22,11 +26,17 @@ describe("@lite-fsm/graph public API", () => {
   test("compileLiteFsmGraph возвращает graph result", () => {
     const result = compileLiteFsmGraph("", { parser: "static", filename: "machine.ts" });
     const selected = selectMachineGraph(result.document, { index: 0 });
+    const analyzed = analyzeLiteFsmGraph(result.document, {
+      rules: ["unknown-target"],
+      scope: { kind: "document" },
+    });
 
     expect(result).type.toBe<LiteFsmGraphResult>();
     expect(result.document).type.toBe<LiteFsmGraphDocument>();
     expect(result.diagnostics).type.toBe<GraphDiagnostic[]>();
     expect(selected).type.toBe<SelectMachineGraphResult>();
+    expect(analyzed).type.toBe<GraphAnalysisResult>();
+    expect(analyzed.diagnostics).type.toBe<GraphDiagnostic[]>();
   });
 
   test("selectMachineGraph сужает результат по ok", () => {
@@ -55,9 +65,28 @@ describe("@lite-fsm/graph public API", () => {
       Assert<NotAny<MachineSelector>>,
       Assert<NotAny<SelectMachineGraphResult>>,
       Assert<NotAny<CompileLiteFsmGraphOptions>>,
+      Assert<NotAny<AnalyzeLiteFsmGraphOptions>>,
+      Assert<NotAny<GraphAnalysisScope>>,
+      Assert<NotAny<GraphAnalysisRuleId>>,
+      Assert<NotAny<GraphAnalysisResult>>,
     ];
 
     expect<Checks>().type.not.toBe<never>();
+  });
+
+  test("GraphAnalysisScope сужается по discriminants", () => {
+    const scope = {} as GraphAnalysisScope;
+    const rule = "effect-event-acceptance" satisfies GraphAnalysisRuleId;
+
+    if (scope.kind === "machine") {
+      expect(scope.machineId).type.toBe<string>();
+    }
+
+    if (scope.kind === "manager") {
+      expect(scope.managerId).type.toBe<string>();
+    }
+
+    expect(rule).type.toBe<"effect-event-acceptance">();
   });
 
   test("GraphEmission routing сужается по discriminants", () => {
