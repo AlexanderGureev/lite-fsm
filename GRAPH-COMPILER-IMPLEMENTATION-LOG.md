@@ -65,4 +65,4 @@ Root/docs build не запускался.
 
 ## Следующий этап
 
-Этап 9a: optional symbolic context timeline.
+Этап 10 CLI или этап 11 view-model. Time travel, payload-aware simulation и полный context log перенесены в этапы 13-14.

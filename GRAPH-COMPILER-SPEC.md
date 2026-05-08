@@ -831,7 +831,7 @@ Root entrypoint `@lite-fsm/graph` должен оставаться ядром t
 @lite-fsm/graph/select
 ```
 
-Но v1 не обязан дробить core API на эти subpath-и до появления потребителя, которому это действительно нужно. Минимальное обязательство для этапов 9-12: simulator и view-model не попадают в root export.
+Но v1 не обязан дробить core API на эти subpath-и до появления потребителя, которому это действительно нужно. Минимальное обязательство для этапов 9-14: simulator и view-model не попадают в root export.
 
 Черновые exports:
 
@@ -1044,7 +1044,7 @@ export type GraphLayoutOptions = {
 
 `GraphLayoutInput` является layout-ready projection внутри `GraphViewModel`, но не содержит координаты. `GraphLayoutResult` с координатами и routing paths отделен от IR и semantic nodes/edges: координаты не хранятся в `LiteFsmGraphDocument`, а concrete layout engine подключается в UI/app или отдельном adapter-е.
 
-`GraphViewModel` может принимать simulator projection только как готовые ids/flags. Branching timeline, reset semantics, payload drafts и JSON-safe context lifecycle остаются ответственностью simulator/app слоев, а не `@lite-fsm/graph/view-model`.
+`GraphViewModel` может принимать simulator projection только как готовые ids/flags. Workbench lifecycle, start/stop semantics, branching timeline, payload drafts и JSON-safe context lifecycle остаются ответственностью simulator/app слоев, а не `@lite-fsm/graph/view-model`.
 
 Опции:
 
@@ -1621,11 +1621,11 @@ Reducer source contract:
 11. Terminal actor target переводит snapshot в absorbing pseudo-state: дальнейшие wildcard transitions и effects не предлагаются.
 12. `send({ event })` commit-ит единственный effective candidate, возвращает `ambiguous-transition` для нескольких candidates и не мутирует snapshot для blocked/unresolved target.
 
-### Этап 9a: optional symbolic context timeline
+### Примечание: time travel и context timeline
 
-Цель: кратко зафиксировать будущую доработку state/context log и time travel без расширения обязательного этапа 9.
+Time travel, branching timeline, payload-aware simulation, context override и полный state/context log не входят в MVP визуализатора этапов 11-12.
 
-Решение: базовый этап 9 хранит точный state history, но context остается `initialContextSummary`/symbolic. Опциональный этап 9a может добавить JSON-safe `initialContext`, symbolic context patches из поддержанного reducer subset, payload-aware `send`/`choose`, immutable timeline с `cursor` и методы time travel (`jumpTo`, `stepBack`, `stepForward`). Режим по умолчанию остается статическим и безопасным. Для точного state/context можно добавить explicit/trusted reducer execution mode: он исполняет только reducer-ы из текущего source string, без import/project resolving, с ожиданием что reducer не зависит от внешних helpers/globals и возвращает JSON-safe или structured-clone-safe snapshot; ошибки исполнения становятся controlled diagnostics/timeline entries и не валят UI.
+Решение: базовый этап 9 хранит точный state history, но context остается `initialContextSummary`/symbolic. Headless-механика time travel и context history выносится в этап 13, а UI для этих возможностей - в этап 14. Для точного state/context можно добавить explicit/trusted reducer execution mode: он исполняет только reducer-ы из текущего source string, без import/project resolving, с ожиданием что reducer не зависит от внешних helpers/globals и возвращает JSON-safe или structured-clone-safe snapshot; ошибки исполнения становятся controlled diagnostics/timeline entries и не валят UI.
 
 ### Этап 10: CLI
 
@@ -1671,37 +1671,428 @@ Reducer source contract:
 5. Import из `@lite-fsm/graph` не загружает view-model entrypoint; view-model доступна через `@lite-fsm/graph/view-model`.
 6. View-model subpath не тянет React, CodeMirror, React Flow, ELK, DOM APIs или конкретный UI store.
 
-### Этап 12: Sketch-like UI
+### Этап 12: Sketch-like visualizer MVP
 
-Цель: собрать интерактивный визуализатор поверх готового compiler/analyzer/simulator/view-model.
+Цель: собрать первый интерактивный visualizer/workbench поверх готового compiler/analyzer/simulator/view-model без time travel, payload editor, context evaluation и ветвящейся истории. Этап 12 делится на последовательные подэтапы, каждый должен быть законченным и проверяемым.
+
+### Архитектурные контракты этапа 12
+
+Этап 12 должен заложить ядро visualizer-а так, чтобы будущий codegen, редактирование диаграммы, patch preview/apply и graph diff verification можно было добавить отдельными этапами без переписывания workbench, card model, canvas adapter, editor sync и inspector. Сам codegen в этап 12 не входит: не реализуются generator rules, применение patches к source, editable diagram gestures, generated regions и public codegen API. В этапе 12 фиксируются только внутренние типы, границы слоев и reserved intents/capabilities.
+
+Базовый поток данных:
+
+```txt
+SourceSession
+  -> GraphCompilerClient
+  -> compile/analyze result
+  -> selected machine
+  -> simulator state
+  -> GraphViewModel overlay
+  -> card model
+  -> canvas/editor/inspector renderers
+
+future codegen:
+card/editor action
+  -> SourceEditIntent
+  -> SourcePatchPlan preview/apply
+  -> source edit
+  -> recompile
+  -> graph diff verification
+```
+
+Внутренний `SourceSession` является источником истины для workbench:
+
+```ts
+type SourceSession = {
+  source: string;
+  filename?: string;
+  language: "ts" | "tsx" | "js" | "jsx";
+  version: number;
+  hash: string;
+};
+```
+
+Все производные результаты должны быть привязаны к `sourceVersion`: compile/analyze result, selected machine snapshot, simulator state, layout result, console entries, card/canvas model и будущий codegen preview. При изменении source старые simulation/layout/codegen данные становятся stale и не применяются к новому graph overlay.
+
+Workbench остается pure domain layer без React/DOM/CodeMirror/React Flow типов:
+
+```ts
+type WorkbenchState = {
+  source: SourceSession;
+  compile: CompileState;
+  selection: WorkbenchSelection;
+  simulation: SimulationState;
+  view: ViewState;
+  layout: LayoutState;
+  console: ConsoleState;
+  codegen?: CodegenState;
+};
+
+type WorkbenchCommand =
+  | { type: "source.changed"; source: string }
+  | { type: "machine.selected"; machineId: string }
+  | { type: "graph.item.selected"; ref: GraphItemRef }
+  | { type: "simulation.started" }
+  | { type: "simulation.stopped" }
+  | { type: "simulation.event.sent"; eventType: string }
+  | { type: "simulation.branch.chosen"; transitionId: string }
+  | { type: "simulation.emission.followed"; emissionId: string }
+  | { type: "source.anchor.selected"; anchor: GraphSourceAnchor }
+  | { type: "codegen.intent.created"; intent: SourceEditIntent };
+```
+
+React components dispatch `WorkbenchCommand` and read selectors. They do not call compiler, analyzer, simulator, layout or future codegen planner directly.
+
+Compiler/analyzer/layout boundaries должны быть async с первого MVP, даже если stage 12 implementation вызывает локальные функции напрямую:
+
+```ts
+type GraphCompilerClient = {
+  compile(input: CompileRequest): Promise<CompileResponse>;
+};
+
+type GraphAnalyzerClient = {
+  analyze(input: AnalyzeRequest): Promise<AnalyzeResponse>;
+};
+
+type GraphLayoutClient = {
+  layout(input: LayoutRequest): Promise<LayoutResponse>;
+};
+```
+
+Это нужно, чтобы тяжелые parser/layout операции можно было перенести в Web Worker или backend endpoint без изменения workbench commands, UI components и card/canvas models. В этапе 12 реализация по умолчанию остается без Worker до появления измеримой проблемы производительности; async boundary является контрактом, а не требованием выносить compiler/layout из main thread сразу.
+
+Async lifecycle является частью workbench-контракта:
+
+```ts
+type WorkbenchAsyncRequest = {
+  requestId: string;
+  sourceVersion: number;
+  signal?: AbortSignal;
+};
+
+type WorkbenchAsyncResponse<T> = {
+  requestId: string;
+  sourceVersion: number;
+  result: T;
+};
+```
+
+Каждый compile/analyze/layout request должен нести `requestId` и `sourceVersion`. Workbench применяет только latest matching response для текущего `source.version`; устаревшие responses отбрасываются и могут попасть в debug/source console entry, но не мутируют active graph, layout, diagnostics или simulation overlay. При новом source edit workbench должен отменять поддерживающие `AbortSignal` операции и в любом случае игнорировать responses старого `sourceVersion`.
+
+Единая ссылка на графовый объект используется во всех слоях selection/source sync/inspector/console/codegen intents:
+
+```ts
+type GraphItemRef =
+  | { kind: "machine"; machineId: string }
+  | { kind: "state"; machineId: string; stateId: string }
+  | { kind: "transition"; machineId: string; transitionId: string }
+  | { kind: "emission"; machineId: string; emissionId: string }
+  | { kind: "reducerCase"; machineId: string; reducerCaseId: string }
+  | { kind: "diagnostic"; diagnosticId: string };
+```
+
+Canvas node id, React Flow node id, CodeMirror decoration id и DOM id не являются domain identifiers. Они должны мапиться на `GraphItemRef`/`GraphSourceAnchor`, а не заменять их.
+
+Так как `GraphDiagnostic` в IR не обязан иметь публичный `id`, workbench должен нормализовать diagnostics в стабильные для текущего source version refs:
+
+```ts
+type WorkbenchDiagnosticOrigin = "compiler" | "analyzer" | "layout" | "simulator" | "source" | "codegen";
+
+type WorkbenchDiagnosticRef = {
+  diagnosticId: string;
+  sourceVersion: number;
+  origin: WorkbenchDiagnosticOrigin;
+  diagnostic: GraphDiagnostic;
+  graphItemRef?: GraphItemRef;
+  sourceAnchor?: GraphSourceAnchor;
+};
+```
+
+`diagnosticId` строится внутри workbench от `sourceVersion`, `origin`, `code`, `loc` и ordinal внутри одинакового bucket. Console, editor markers, graph badges и inspector используют `WorkbenchDiagnosticRef`, а не пытаются выводить id из `GraphDiagnostic` напрямую.
+
+Card registry должен возвращать не только визуальные rows/sections, но и capabilities/actions:
+
+```ts
+type CardCapability =
+  | { kind: "select-source"; anchors: GraphSourceAnchor[] }
+  | { kind: "inspect"; ref: GraphItemRef }
+  | { kind: "simulate-event"; eventType: string }
+  | { kind: "choose-transition"; transitionId: string }
+  | { kind: "follow-emission"; emissionId: string }
+  | { kind: "propose-source-edit"; intent: SourceEditIntent };
+```
+
+`propose-source-edit` в этапе 12 является reserved capability: card model может сохранить намерение как тип, но UI не обязан показывать editable action, а workbench не обязан строить patch. Это контракт для будущего codegen, а не функциональность MVP.
+
+Future codegen pipeline должен быть отдельным planner-слоем поверх source, а не мутацией IR или card model:
+
+```ts
+type SourceEditIntent =
+  | { kind: "add-state"; machineId: string; stateKey: string }
+  | { kind: "add-transition"; machineId: string; sourceStateId: string; eventType: string; targetStateKey: string }
+  | { kind: "change-transition-target"; transitionId: string; targetStateKey: string }
+  | { kind: "add-effect-emission"; machineId: string; sourceStateId: string; eventType: string }
+  | { kind: "rename-state"; machineId: string; stateId: string; nextKey: string };
+
+type SourcePatchPlan = {
+  sourceVersion: number;
+  edits: TextEdit[];
+  expectedGraphChange: GraphChangeExpectation;
+  diagnostics: CodegenDiagnostic[];
+};
+
+type TextEdit = {
+  range: SourceLocation;
+  expectedText?: string;
+  replacement: string;
+};
+```
+
+`SourcePatchPlan`, `GraphChangeExpectation` и `CodegenDiagnostic` могут оставаться internal/reserved types до появления отдельного этапа codegen. Применение patch-а в будущем должно проверять `sourceVersion`, `expectedText` и результат повторной компиляции. Если source изменился или graph diff не совпал с ожиданием, apply должен завершиться controlled conflict/diagnostic, а не портить source.
+
+Reserved `SourceEditIntent` scope этапа 12 включает и `config` edits, и effect emission intents. Это не означает, что effects редактируются в MVP; типы нужны, чтобы card/capability model сразу учитывала будущую генерацию/правку behavior, а не только state/config edges.
+
+Для будущих editable controls card/inspector model должен уметь объяснить, почему объект редактируем или read-only:
+
+```ts
+type EditableSupport =
+  | { kind: "yes" }
+  | { kind: "readonly"; reason: "derived-from-reducer" | "derived-from-effect" | "analysis-only" }
+  | { kind: "unsupported-source-shape"; reason: string }
+  | { kind: "dynamic"; reason: string }
+  | { kind: "external"; reason: string };
+```
+
+В этапе 12 это отображается как metadata/disabled capability, а не как полноценное редактирование.
+
+Console model должен поддерживать каналы `compiler`, `analyzer`, `layout`, `simulator`, `source` и reserved `codegen`. UI этапа 12 обязан показывать только реально используемые каналы, но модель не должна требовать изменения формата entries при добавлении codegen diagnostics.
+
+Рекомендуемая внутренняя структура `apps/visualizer`:
+
+```txt
+apps/visualizer/src/
+  app/
+  workbench/
+  services/
+  cards/
+  canvas/
+  editor/
+  inspector/
+  console/
+  codegen/
+```
+
+Папка `codegen/` в этапе 12 может содержать только reserved types и no-op boundaries. Ее наличие не означает, что visualizer умеет генерировать или применять код.
+
+### Этап 12a: Vite visualizer app scaffold
+
+Цель: заранее закрыть инфраструктуру отдельного приложения, зависимости и базовый app shell до реализации visualizer logic.
 
 Состав:
 
-1. Редактор исходной строки в духе Sketch. Рекомендованный v1 stack: CodeMirror 6 с TypeScript/JavaScript mode и diagnostics markers из `SourceLocation`.
-2. Выбор машины из document.
-3. Диаграмма из `GraphViewModel` через concrete renderer adapter. Рекомендованный v1 stack: `@xyflow/react` для canvas/interactions и ELK-based layout adapter поверх `GraphLayoutInput`/`GraphLayoutResult`. Layout engine должен оставаться заменяемым.
-4. Панель симуляции одной машины: start/stop/reset, step-by-step runner без обязательного auto-play, выбор доступного события, выбор reducer/guard branch вручную, follow suggested local emissions.
-5. Branching timeline UI. `reset` очищает все ветки и возвращает симуляцию в стартовое состояние. Успешные transitions попадают в timeline; blocked/failed attempts не создают timeline entry.
-6. Payload drafts scoped by `machineId + eventType`; payload всегда JSON object. Если event имеет несколько symbolic branches, payload общий для event, а branch выбирается отдельно.
-7. State/context inspector: v1 показывает state и JSON-safe/symbolic context из source. Override initial context зарезервирован на будущее, но в v1 не обязателен.
-8. Console UI с каналами `compiler`, `analyzer`, `simulator`, `payload`, `layout`. Active tab, panel state и фильтры являются app state, а не частью `@lite-fsm/graph/view-model`.
-9. Diagnostics подсвечиваются и в editor-е, и в console-е. CodeMirror markers используют `loc.start.offset`/`loc.end.offset`; console показывает `filename`, `line` и `column`, если `loc` есть, и может перейти к тому же source range. Analyzer diagnostics только отображаются и не блокируют simulation.
-10. При изменении editor source и новом compiled document симуляция сбрасывается. Payload drafts можно сохранить только для surviving `machineId + eventType`.
-11. Возможность копировать/вставлять source без project mode.
-12. Multi-machine/actor routing в v1 показывается статически через managers/routing metadata; полноценная system simulation остается будущим этапом.
-13. Codegen future закладывается через `GraphSourceAnchor` и stable ids. Этап 12 не обязан редактировать диаграмму или генерировать код, но UI не должен терять source provenance у видимых graph items.
+1. Создать отдельное private приложение `apps/visualizer` с package name `@lite-fsm/visualizer`. Не смешивать его с docs/playground и не добавлять visualizer runtime в runtime packages.
+2. Настроить Vite SPA, React, TypeScript, Tailwind CSS v4, shadcn/ui, lucide icons. Visualizer должен оставаться легким SPA с возможностью будущего embeddable widget.
+3. Добавить зависимости для будущих частей этапа 12: CodeMirror 6 для editor-а, `@xyflow/react` как canvas/runtime adapter, ELK-based layout adapter. Допустимо подключить их в package и оставить часть интеграции до 12c.
+4. Настроить Playwright e2e-инфраструктуру для `apps/visualizer`: `playwright.config`, отдельный `test:e2e` script, web server на visualizer dev/preview command, базовый smoke test для app shell и shared test helpers/fixtures. Этап 12a настраивает инфраструктуру; этапы 12c/12d/12e добавляют содержательные e2e-сценарии поверх нее.
+5. Настроить scripts `dev`, `build`, `check-types`, `test:e2e` для `@lite-fsm/visualizer`. App build и e2e не должны запускать docs build.
+6. Добавить visualizer в workspace/turbo config так, чтобы его проверки можно было запускать отдельно от docs/playground.
+7. Сделать базовый workbench shell: editor pane placeholder, graph pane placeholder, inspector pane placeholder, console pane placeholder, simulation controls placeholder. Это приложение-инструмент, а не landing page.
 
 Проверка:
 
-1. Вставка `tests/graph/fixtures/graph-sources.ts` показывает список машин и не ломает UI.
-2. Можно выбрать одну машину из многих и симулировать только ее.
-3. Diagnostics подсвечивают source locations, если они есть.
-4. Console разделяет compiler/analyzer/simulator/payload/layout entries и может перейти к source/graph item, когда есть anchor.
-5. Branching timeline сохраняет несколько веток после отката и альтернативного выбора, а `reset` очищает все ветки.
-6. Blocked transition, invalid payload JSON и unresolved target попадают в console, но не создают committed timeline entry.
-7. Payload draft для event сохраняется между шагами симуляции и применяется при отправке этого event.
-8. Source edit/recompile сбрасывает simulation state и не оставляет stale overlay на графе.
-9. Layout adapter можно заменить без изменения stage 11 render model.
+1. `pnpm --filter @lite-fsm/visualizer check-types`.
+2. `pnpm --filter @lite-fsm/visualizer build`.
+3. `pnpm --filter @lite-fsm/visualizer dev` поднимает отдельное SPA-приложение без запуска docs build.
+4. `pnpm --filter @lite-fsm/visualizer test:e2e` запускает Playwright против visualizer shell без docs build.
+5. Стартовая страница показывает workbench shell и не является landing page.
+
+### Этап 12b: headless workbench, card model и canvas model
+
+Цель: построить внутреннюю модель visualizer-а без UI-зависимостей, чтобы богатые карточки, canvas adapter, simulation commands и будущий codegen не переписывались при росте проекта.
+
+Состав:
+
+1. Реализовать внутренний app-level workbench module: source session, compile/analyze result, selected machine/item, simulation status, console entries и layout status. Он не является публичным package/API этапа 12, но пишется DOM-free и без React/CodeMirror/XYFlow типов, чтобы позже его можно было вынести.
+2. Подключить compiler/select/analyzer/simulator/view-model к workbench: source -> compile/analyze -> selected machine -> simulator state -> `GraphViewModel` overlay input. Compile/analyze/layout должны вызываться через async service/client boundary, даже если реализация MVP локальная.
+3. Реализовать card model builders как pure TypeScript слой без React/DOM/XYFlow типов. Поток данных: `GraphViewModel` -> card model builders -> canvas node/edge models -> React renderers.
+4. Card registry должен поддерживать минимум card kinds: `machine`, `state`, `global-behavior`, `actor-template`, `diagnostic`, `unknown`, `draft`. `draft` резервируется для будущего генератора/drag-and-drop и в MVP может не использоваться.
+5. State card model является структурированной моделью, а не произвольным JSX: title, badges, source anchors, sections, rows и actions. Section/row kinds должны быть discriminated unions для accepted events, reducer decisions, effects, routed emissions, global behavior и diagnostics.
+6. State card группирует исходящее поведение по смыслу: accepted events from `config`, reducer decisions/refinements, system effects/suggested emissions, routed emissions, wildcard/global behavior и diagnostics/unknown behavior.
+7. `config` transitions моделируются как event rows: `EVENT -> target`. Если target `null`/self/unknown, модель обязана явно сохранить семантику: handled in place, self transition, reducer decides, dynamic/unknown target или blocked target.
+8. Reducer branches моделируются как decision table rows для выбранного event/state: guard/condition text, effective target, `nextState` fallback и blocked/dynamic target status. В MVP условия не вычисляются по payload, но они должны быть видимы.
+9. Effects моделируются как system-triggered behavior: `system may emit`/`after entering state`, event type, guard/condition, local followability, target если событие локально принимается текущей машиной, и routing если событие уходит наружу. UI/card model должны явно сохранять смысл `may emit`: effect emission показывается как возможная системная отправка, а не как гарантированный переход, пока отдельная evaluator policy не доказала обратное.
+10. Wildcard config/effects моделируются как global behavior, а не копируются в каждую карточку. На state card допустим компактный inherited/global marker; подробный список wildcard behavior должен быть доступен отдельной card/section или inspector model.
+11. Routed emissions моделируются отдельными lanes/badges: local/default, unscoped, actor, group, tag, unknown. Non-local routing остается видимым для анализа бизнес-потока, но не применяется single-machine simulator-ом.
+12. Card actions не мутируют source напрямую. Они возвращают команды/намерения/capabilities: select source, inspect graph item, send event/follow emission, и зарезервированный `SourceEditIntent` для будущего codegen. Source остается единственным source of truth: edit intent -> codegen preview/apply -> recompile -> rebuild cards from fresh IR. В MVP `SourceEditIntent` не обязан иметь UI affordance или patch planner.
+13. Canvas items должны иметь origin: IR-backed item с graph item/source anchors или future draft item с draft id/edit intent. В MVP используются IR-backed items, но модель не должна закрывать путь к draft cards.
+14. Layout для rich cards должен использовать стабильные размеры: preferred width/height из card model или измеримый deterministic sizing, truncate/wrap длинных labels, collapse state в app layout state. Layout state не хранится в `LiteFsmGraphDocument` или `GraphViewModel`.
+15. React Flow (`@xyflow/react`) проектируется только как replaceable canvas/runtime adapter. React Flow node `data` должен содержать только adapter-facing ids/props, например `cardId`/origin/layout metadata. Node components не читают IR напрямую и не вычисляют business logic.
+16. Canvas adapter boundary должен позволять заменить React Flow без переписывания `GraphViewModel`, card builders, workbench commands или source/codegen intents.
+17. Workbench commands должны поддерживать `Start`, `Stop`, send available event/transition, choose ambiguous branch, follow local/default suggested emission, select graph item/source anchor, record console entry.
+18. Workbench selection, inspector, console, card capabilities и canvas items должны ссылаться на graph/source через `GraphItemRef` и `GraphSourceAnchor`, а не через React Flow/DOM/editor ids.
+19. Compiler error блокирует simulation целиком; analyzer diagnostics только отображаются и не блокируют simulation. TypeScript semantic/project errors не входят в MVP.
+
+Проверка:
+
+1. `pnpm --filter @lite-fsm/visualizer check-types`.
+2. Unit tests или focused Vitest tests для workbench/card model builders на fixture source: direct config, reducer decisions, effects, wildcard, routed actor/group/tag emissions, diagnostics/dynamic targets.
+3. Вставка `tests/graph/fixtures/graph-sources.ts` компилируется workbench-слоем, показывает список машин и выбирает одну машину без UI runtime.
+4. State card model содержит accepted config events, reducer refinements, effects/suggested emissions, wildcard/global behavior и diagnostics без чтения source.
+5. `null`/self/dynamic/unknown/blocked targets сохраняются как осмысленные rows/badges, а не пропадают из модели.
+6. Card builders, card renderers и card actions разделены; card builders не импортируют React/DOM/XYFlow.
+7. Canvas model различает IR-backed items и future draft items.
+8. Canvas adapter boundary изолирует React Flow от `GraphViewModel`, card builders и workbench domain logic.
+9. `SourceSession.version`/`sourceVersion` используется для compile/layout/simulation/console состояния; source edit помечает старые производные данные stale.
+10. Card model содержит capabilities, включая reserved `propose-source-edit`, но stage 12 не строит и не применяет patches.
+11. Workbench/card/canvas/editor tests проверяют, что React Flow node id и CodeMirror decoration id не используются как domain identifiers.
+12. Async client tests покрывают latest-wins/stale-response discard для compile/analyze/layout.
+13. Diagnostics normalization tests покрывают стабильные `WorkbenchDiagnosticRef` ids для compiler/analyzer/layout diagnostics внутри одного `sourceVersion`.
+
+### Этап 12c: read-only visualizer vertical slice
+
+Цель: собрать первый end-to-end read-only visualizer поверх 12a/12b без interactive simulation и без финального usability hardening: редактор, выбор машины, read-only диаграмма с карточками, diagnostics, inspector, console и базовый source/graph sync.
+
+Состав:
+
+1. Реализовать workbench layout: code editor, machine selector, graph canvas, read-only inspector и console. Simulation controls можно оставить disabled/placeholder до 12e.
+2. Редактор исходной строки в духе Sketch: CodeMirror 6 с TypeScript/JavaScript mode и diagnostics markers из `SourceLocation`.
+3. Выбор машины из document.
+4. Диаграмма из `GraphViewModel`/card models через concrete renderer adapter. Layout engine должен оставаться заменяемым. На этом этапе достаточно baseline layout-а, если graph nonblank, items selectable и layout не ломает fixture-графы.
+5. Реализовать React Flow canvas adapter: viewport, базовые pan/zoom/fit view, selection, handles/ports и edges. Он не является источником truth для domain state, card model или graph semantics.
+6. Renderer registry живет отдельно от card model builders. React Flow node components рендерят card renderer по готовой card model и не читают IR напрямую.
+7. Все слои автомата видимы одновременно: `config`, `reducer`, `effect`, `analysis`. Их нужно различать визуально цветом/стилем/badges, потому что цель визуализатора - показать бизнес-логику целиком без раскрытия деталей реализации.
+8. Diagnostics, dynamic/unknown targets и escaped/unsupported effects должны быть видимы на диаграмме как badges, unknown nodes/rows или blocked rows, а не только в console.
+9. Source/graph sync обязателен в базовом виде: клик по state/event/reducer branch/effect/diagnostic на графе подсвечивает source range в editor-е, если есть `SourceLocation`; клик по editor diagnostic или console entry подсвечивает связанный graph item, если есть anchor.
+10. Read-only inspector показывает выбранный state/event/transition/effect: layer, labels, source anchors, guard/condition, target/routing/confidence и diagnostics. Simulation result fields остаются пустыми до 12e.
+11. Console UI с каналами `compiler`, `analyzer`, `layout` и `source`; channel model резервирует `codegen`, но UI этапа 12 не обязан показывать пустой codegen channel. Active tab, panel state и фильтры являются app state, а не частью `@lite-fsm/graph/view-model`.
+12. Diagnostics подсвечиваются и в editor-е, и в console-е. CodeMirror markers используют `loc.start.offset`/`loc.end.offset`; console показывает `filename`, `line` и `column`, если `loc` есть, и может перейти к тому же source range. Compiler error не ломает UI; analyzer diagnostics отображаются отдельно.
+13. Возможность копировать/вставлять source без project mode. UI показывает только compiler/analyzer diagnostics graph tooling-а. Starter source catalog, examples dropdown, persistent local draft storage, import/export source и file/project picker не входят в этап 12.
+14. Multi-machine/actor routing в MVP показывается статически через managers/routing metadata; полноценная system simulation остается будущим этапом. Визуально машины можно закладывать как collapsible blocks для будущего multi-machine graph, но реализация может ограничиться выбором одной машины.
+15. Codegen future закладывается через `GraphSourceAnchor`, `GraphItemRef`, stable ids, `SourceEditIntent` и `EditableSupport`. Этап 12c не редактирует диаграмму, не генерирует код и не применяет patches, но UI не должен терять source provenance у видимых graph items.
+
+Проверка:
+
+1. `pnpm --filter @lite-fsm/visualizer check-types`.
+2. `pnpm --filter @lite-fsm/visualizer build`.
+3. Вставка `tests/graph/fixtures/graph-sources.ts` показывает список машин и не ломает UI.
+4. Можно выбрать одну машину из многих и увидеть ее read-only graph.
+5. Diagnostics подсвечивают source locations, если они есть.
+6. Console разделяет compiler/analyzer/layout/source entries и может перейти к source/graph item, когда есть anchor.
+7. State card показывает accepted config events, reducer refinements, effects/suggested emissions, wildcard/global behavior и diagnostics без необходимости читать source.
+8. `null`/self/dynamic/unknown/blocked targets видимы как осмысленные rows/badges, а не пропадают из диаграммы.
+9. Read-only inspector объясняет static path `config -> reducer -> effect` с source anchors.
+10. Routed actor/group/tag/unscoped emissions видимы как routed behavior и не смешиваются с local transitions.
+11. Source/graph sync работает в обе стороны для graph items и diagnostics с anchors.
+12. React Flow node components получают adapter-facing ids/props и не читают IR напрямую.
+13. Layout adapter можно заменить без изменения stage 11 render model.
+14. Codegen-related capabilities остаются read-only/reserved: в UI нет apply/preview генерации кода в этапе 12.
+
+### Этап 12d: visualizer usability и e2e hardening
+
+Цель: довести read-only visualizer из 12c до удобного MVP-инструмента для больших fixture-графов: legend, navigation, confidence styling, responsive floor, label handling и содержательные Playwright smoke tests.
+
+Состав:
+
+1. UI содержит постоянную visual legend/key для слоев и маркеров: `config`, `reducer`, `effect`, `analysis`, local/actor/group/tag routing, current/available/blocked/suggested simulation states. Simulation-specific markers могут быть shown as disabled/legend-only до 12e.
+2. Confidence/uncertainty из IR (`exact`, `partial`, `unknown`) отображается визуально через badges/style. `partial` и `unknown` не должны выглядеть как полностью надежные transitions/effects.
+3. Для больших графов нужны navigation controls: zoom/pan, fit-to-view, search по state/event, collapse/expand для machine/group/state clusters или outline/sidebar. MVP не обязан решать auto-layout идеально, но graph должен оставаться usable на больших fixture-ах.
+4. Responsive floor: основной сценарий должен быть usable на desktop/tablet widths. Editor/graph split, inspector и console не должны перекрывать друг друга; длинные state/event/guard labels должны сокращаться или переноситься без поломки layout.
+5. Rich card sizing не вызывает layout jumps при раскрытии badges/rows/labels. Layout для rich cards использует stable preferred sizes или deterministic sizing из card/canvas model.
+6. Playwright e2e tests на готовой инфраструктуре 12a покрывают загрузку fixture source, nonblank graph, выбор graph item, inspector update и source/graph sync.
+
+Проверка:
+
+1. `pnpm --filter @lite-fsm/visualizer check-types`.
+2. `pnpm --filter @lite-fsm/visualizer build`.
+3. `pnpm --filter @lite-fsm/visualizer test:e2e`.
+4. Visual legend объясняет слои, routing markers, simulation states и отличие `may emit`/suggested effect emissions от гарантированных transitions.
+5. `exact`/`partial`/`unknown` confidence визуально различимы.
+6. Большие fixture-графы остаются usable через zoom/pan, fit-to-view, search и collapse/outline controls.
+7. Desktop/tablet layout не ломает editor/graph/inspector/console и не допускает нечитаемых label overlaps.
+8. Rich card sizing не вызывает layout jumps при раскрытии badges/rows/labels.
+9. Playwright e2e tests проходят сценарии fixture source -> graph -> selection -> inspector -> source/graph sync.
+
+### Этап 12e: visualizer MVP simulation UI
+
+Цель: добавить interactive single-machine simulation поверх hardened read-only visualizer из 12d.
+
+Состав:
+
+1. Панель симуляции одной машины: `Start` включает simulation mode и стартовый snapshot; `Stop` полностью очищает simulator state, graph overlay и выходит из simulation mode. Отдельный reset/restart, branching timeline и autoplay не входят в MVP.
+2. Доступные transitions/branches показываются на диаграмме и в панели управления. Клик по доступному edge/event сразу отправляет event; если simulator возвращает ambiguity, UI показывает кандидаты и дает выбрать конкретную ветку вручную. Payload при отправке не задается.
+3. Suggested local/default emissions показываются как effect/suggested слой и могут быть применены вручную через `followEmission`, если simulator пометил их как локально применимые.
+4. Selected event/transition inspector расширяется simulation context-ом: config acceptance, reducer effective branch, effect/suggested emissions, routing, source anchors, result simulation step, current state и blocked reason.
+5. State/context inspector показывает текущий state и context summary/unknown/empty placeholder. Полный context snapshot, initial context override и context history относятся к этапам 13-14.
+6. Линейный run log текущей симуляции показывает стартовый state и последовательность committed steps из `snapshot.history`: external events, chosen ambiguous branches, followed local emissions, from/to states, guard/condition label, accepted config transition и effective reducer/config transition. Это не branching timeline: run log только читает текущую историю simulator snapshot, не поддерживает jump/back/branch и очищается при `Stop` или source edit/recompile.
+7. Console получает канал `simulator`. Compiler error блокирует `Start`; analyzer diagnostics только отображаются и не блокируют simulation.
+8. При изменении editor source и новом compiled document активная simulation останавливается, overlay очищается и stale simulator state не показывается на новом графе.
+9. Simulation overlay использует уже существующие card/canvas models: current state, available transitions, selected transition, blocked transitions, suggested emissions.
+10. Non-local routing остается видимым для анализа бизнес-потока, но не применяется single-machine simulator-ом.
+
+Проверка:
+
+1. `pnpm --filter @lite-fsm/visualizer check-types`.
+2. `pnpm --filter @lite-fsm/visualizer build`.
+3. Можно выбрать одну машину из многих и симулировать только ее.
+4. Compiler error блокирует `Start`; analyzer warnings/info не блокируют `Start`.
+5. Console разделяет compiler/analyzer/simulator/layout/source entries и может перейти к source/graph item, когда есть anchor.
+6. `Start` подсвечивает current state и available transitions.
+7. Доступный transition можно отправить кликом по edge/event; ambiguity показывает кандидаты и применяет только выбранную ветку.
+8. Suggested local/default emission можно применить вручную; non-local routing остается видимым, но не применяется в single-machine simulator.
+9. Selected event/transition inspector объясняет runtime path `config -> reducer -> effect` с source anchors и result simulation step.
+10. Run log показывает committed external/followed-emission steps в порядке применения и не создает ветки или отдельный cursor.
+11. `Stop` очищает simulation overlay, run log и выходит из simulation mode.
+12. Source edit/recompile останавливает simulation, очищает run log и не оставляет stale overlay на графе.
+13. Playwright e2e tests на готовой инфраструктуре 12a покрывают `Start`, клик по available transition, ambiguous branch choice, follow local suggested emission и обновление run log.
+
+### Этап 13: headless time travel и context history
+
+Цель: добавить headless-механику ветвящейся истории, payload-aware commands и полного state/context log без привязки к UI.
+
+Состав:
+
+1. Добавить internal или subpath-level `GraphSimulationSession` только после подтверждения реального потребителя. Если потребитель один - visualizer app, сначала держать слой внутренним модулем app/workbench.
+2. Ввести immutable timeline tree с `cursor` и операциями `jumpTo`, `stepBack`, `stepForward`. Успешные transitions создают committed timeline node; blocked/failed attempts попадают в diagnostics/console, но не создают committed node.
+3. Source edit не пытается rebase-ить историю: timeline помечается `stale` по `sourceVersion`, старый timeline остается read-only, новый `Start` создает новую историю.
+4. Добавить JSON-safe `initialContextOverride` как полную замену стартового context. Если source `initialContext` dynamic/external/unknown и override не задан, session возвращает controlled error и просит задать context явно.
+5. Добавить payload drafts scoped by `machineId + eventType`; payload всегда JSON object. Типы должны сразу допускать будущие `transitionId`/`branchId`, но MVP этапа 13 использует общий payload для event.
+6. Payload-aware `send`/`choose`/`followEmission` сохраняют payload в timeline/log. Влияние payload на выбор ветки добавляется отдельной selection/evaluation policy поверх resolver-а, а не переписыванием simulator core.
+7. Для полного state/context можно добавить explicit/trusted reducer execution mode. Он исполняет только reducer-ы из текущего source string, без import/project resolving; ошибки исполнения становятся controlled diagnostics/timeline entries.
+8. Context snapshot должен быть JSON-safe или structured-clone-safe. Большие payload/context значения обрезаются простым лимитом и помечаются как truncated.
+9. Console entries версионируются по `sourceVersion` и могут иметь несколько anchors: source range, graph item, timeline node.
+
+Проверка:
+
+1. Timeline сохраняет ветки после отката и альтернативного выбора.
+2. `jumpTo`/`stepBack`/`stepForward` меняют cursor без мутации старых timeline nodes.
+3. Source edit помечает старый timeline stale и не показывает его overlay на новом graph.
+4. Invalid payload JSON блокирует применение event/branch и создает controlled payload diagnostic.
+5. Dynamic/external/unknown initial context без override блокирует start с controlled diagnostic.
+6. Context/payload snapshots сериализуемы и обрезаются при превышении лимита.
+7. Trusted reducer execution errors не валят session.
+
+### Этап 14: visualizer time travel и полный context log
+
+Цель: доработать visualizer UI под возможности этапа 13: ветвящийся timeline, payload editor, initial context override и полный state/context inspector.
+
+Состав:
+
+1. Timeline panel показывает дерево веток, cursor, stale status и committed steps. Переход по node в timeline обновляет graph overlay и inspector.
+2. Payload editor открывается для event type и работает с JSON object draft. Invalid JSON блокирует активацию ветки/event и подсвечивается в editor-е и console-е.
+3. Initial context editor задает полную замену стартового context. Для dynamic/external/unknown source context UI требует явный override перед `Start`.
+4. State/context inspector показывает полный current snapshot, payload события и признак truncation. Diff view можно добавить позже; обязательный MVP этапа 14 - snapshot.
+5. Console фильтруется по current/stale source version и может перейти к source, graph item или timeline node через anchors.
+6. Source edit помечает старую историю stale; пользователь может смотреть ее read-only, но новая simulation стартует отдельно.
+7. UI сохраняет payload drafts для surviving `machineId + eventType` после recompile, если это не конфликтует с новым document.
+
+Проверка:
+
+1. Пользователь может откатиться к timeline node, выбрать другую ветку и увидеть две ветки в timeline tree.
+2. Cursor в timeline синхронизирован с current state на graph overlay и state/context inspector.
+3. Invalid payload JSON блокирует клик по event/branch.
+4. Initial context override влияет на стартовый context snapshot.
+5. Stale timeline clearly отделен от current source version и не смешивается с новым graph overlay.
+6. Console anchors переходят к source, graph item и timeline node.
 
 ## Закрытые решения
 
@@ -1719,10 +2110,11 @@ Reducer source contract:
 12. Этап 9 реализует interactive simulation. Выбор reducer/effect branch в v1 остается за пользователем/UI; future payload/context evaluator должен добавляться как отдельная selection policy поверх resolver-а, а не как переписывание simulator core.
 13. Effects на `start()`/`restart()` не вызываются. Suggested emissions появляются только после успешного шага симуляции и используют runtime precedence state-specific vs wildcard effects.
 14. Simulator не commit-ит `dynamic`/`unknown`/`blocked` targets в snapshot; такие choices видимы, но возвращают controlled blocked result.
-15. Этап 11 остается библиотечным visualizer projection layer. Workbench/app behavior, вкладки, panel layout, payload draft lifecycle и concrete canvas/editor integrations относятся к этапу 12.
+15. Этап 11 остается библиотечным visualizer projection layer. Workbench/app behavior, вкладки, panel layout и concrete canvas/editor integrations относятся к этапу 12. Payload draft lifecycle, branching timeline и full context lifecycle относятся к этапам 13-14.
 16. Координаты и routing paths layout-а не хранятся в IR. `GraphLayoutInput`/`GraphLayoutResult` являются заменяемым adapter contract поверх `GraphViewModel`.
 17. `GraphSourceAnchor` - это read-only provenance для source locations и будущего codegen. Он не добавляет edit API и не является ручной graph/codegen metadata.
-18. В UI v1 successful transitions попадают в branching timeline, а blocked/failed attempts попадают в console и не создают committed timeline entry.
+18. Этап 12 visualizer MVP не содержит branching timeline, payload editor, initial context override или reducer/context execution. Эти возможности добавляются headless в этапе 13 и визуально в этапе 14.
+19. Этап 12 фиксирует codegen-ready внутренние контракты visualizer-а (`GraphItemRef`, `SourceEditIntent`, `EditableSupport`, sourceVersion/stale model), но не реализует generator rules, patch preview/apply, editable diagram gestures или public codegen API.
 
 ## Итоговая рекомендация
 
