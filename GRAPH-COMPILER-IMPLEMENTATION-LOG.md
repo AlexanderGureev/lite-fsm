@@ -4,16 +4,16 @@
 
 ## Состояние
 
-| Поле             | Значение                                                                                                                                                                                                                       |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Дата             | 2026-05-09                                                                                                                                                                                                                     |
-| Готово           | Этапы 0-9 IR/API/harness, Source Catalog/Candidates, Partial Evaluator, ConfigGraphCompiler, ManagerLinker/select API, ReducerCompiler, EffectsCompiler, GraphAssembler, общий `compiler/ast.ts`, Semantic Analyzer, Simulator |
-| Package          | `@lite-fsm/graph`, private/experimental                                                                                                                                                                                        |
-| Public API       | `compileLiteFsmGraph(source, options?)`, `selectMachineGraph(document, selector?)`, `analyzeLiteFsmGraph(document, options?)`, `@lite-fsm/graph/simulator` + IR/analyzer/simulator-типы                                      |
+| Поле             | Значение                                                                                                                                                                                                                                                                                                          |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Дата             | 2026-05-09                                                                                                                                                                                                                                                                                                        |
+| Готово           | Этапы 0-9 IR/API/harness, Source Catalog/Candidates, Partial Evaluator, ConfigGraphCompiler, ManagerLinker/select API, ReducerCompiler, EffectsCompiler, GraphAssembler, общий `compiler/ast.ts`, Semantic Analyzer, Simulator                                                                                    |
+| Package          | `@lite-fsm/graph`, private/experimental                                                                                                                                                                                                                                                                           |
+| Public API       | `compileLiteFsmGraph(source, options?)`, `selectMachineGraph(document, selector?)`, `analyzeLiteFsmGraph(document, options?)`, `@lite-fsm/graph/simulator` + IR/analyzer/simulator-типы                                                                                                                           |
 | Текущий output   | `LiteFsmGraphDocument`: source metadata, compiler diagnostics, machines, linked managers, config states/transitions, reducer cases/transitions, effect emissions, machine facts и `initialContextJson`; `GraphAnalysisResult`: analyzer diagnostics; `GraphSimulationSnapshot`: slices/timeline/choices/emissions |
-| Еще не строится  | CLI/UI                                                                                                                                                                                                                         |
-| Fixture contract | `tests/graph/fixtures/graph-sources.ts`: 28 machine candidates, 3 manager candidates, полный assembler snapshot                                                                                                                |
-| Coverage         | Последний полный coverage был до simulator; для этапа 9 прогнаны required package/type/runtime checks                                                                                                                         |
+| Еще не строится  | CLI/UI                                                                                                                                                                                                                                                                                                            |
+| Fixture contract | `tests/graph/fixtures/graph-sources.ts`: 28 machine candidates, 3 manager candidates, полный assembler snapshot                                                                                                                                                                                                   |
+| Coverage         | Последний полный coverage был до simulator; для этапа 9 прогнаны required package/type/runtime checks                                                                                                                                                                                                             |
 
 ## Ключевые решения
 
@@ -58,4 +58,4 @@ Root/docs build не запускался.
 
 ## Следующий этап
 
-Этап 10.
+Этап 11.
