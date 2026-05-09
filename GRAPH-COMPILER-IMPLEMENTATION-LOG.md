@@ -4,21 +4,20 @@
 
 ## Состояние
 
-| Поле | Значение |
-| --- | --- |
-| Дата | 2026-05-08 |
-| Готово | Этапы 0-9: IR/API/harness, Source Catalog/Candidates, Partial Evaluator, ConfigGraphCompiler, ManagerLinker/select API, ReducerCompiler, EffectsCompiler, GraphAssembler, общий `compiler/ast.ts`, Semantic Analyzer, headless simulator одной машины (упрощённый pipeline) |
-| Package | `@lite-fsm/graph`, private/experimental |
-| Public API | `compileLiteFsmGraph(source, options?)`, `selectMachineGraph(document, selector?)`, `analyzeLiteFsmGraph(document, options?)` + IR/analyzer-типы; `@lite-fsm/graph/simulator`: `createGraphSimulator(machine, options?)` + simulator-типы |
-| Текущий output | `LiteFsmGraphDocument`: source metadata, compiler diagnostics, machines, linked managers, config states/transitions, reducer cases/transitions, effect emissions и machine facts; `GraphAnalysisResult`: analyzer diagnostics; `GraphSimulator`: symbolic single-machine snapshots, choices, history и suggested emissions |
-| Еще не строится | CLI/UI |
-| Fixture contract | `tests/graph/fixtures/graph-sources.ts`: 28 machine candidates, 3 manager candidates, полный assembler snapshot |
-| Coverage | `packages/graph/src/**/*.ts`, кроме `types.ts`: 100% statements/branches/functions/lines |
+| Поле             | Значение                                                                                                                                                                                                                       |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Дата             | 2026-05-08                                                                                                                                                                                                                     |
+| Готово           | Этапы 0-8 IR/API/harness, Source Catalog/Candidates, Partial Evaluator, ConfigGraphCompiler, ManagerLinker/select API, ReducerCompiler, EffectsCompiler, GraphAssembler, общий `compiler/ast.ts`, Semantic Analyzer            |
+| Package          | `@lite-fsm/graph`, private/experimental                                                                                                                                                                                        |
+| Public API       | `compileLiteFsmGraph(source, options?)`, `selectMachineGraph(document, selector?)`, `analyzeLiteFsmGraph(document, options?)` + IR/analyzer-типы;`                                                                             |
+| Текущий output   | `LiteFsmGraphDocument`: source metadata, compiler diagnostics, machines, linked managers, config states/transitions, reducer cases/transitions, effect emissions и machine facts; `GraphAnalysisResult`: analyzer diagnostics; |
+| Еще не строится  | CLI/UI                                                                                                                                                                                                                         |
+| Fixture contract | `tests/graph/fixtures/graph-sources.ts`: 28 machine candidates, 3 manager candidates, полный assembler snapshot                                                                                                                |
+| Coverage         | `packages/graph/src/**/*.ts`, кроме `types.ts`: 100% statements/branches/functions/lines                                                                                                                                       |
 
 ## Ключевые решения
 
 - Root public surface оставлен маленьким: `@lite-fsm/graph` экспортирует только `compileLiteFsmGraph`, `selectMachineGraph`, `analyzeLiteFsmGraph` и IR/analyzer-типы.
-- `createGraphSimulator` добавлен только в subpath `@lite-fsm/graph/simulator`; root entrypoint не реэкспортирует simulator runtime или simulator-типы.
 - `ts-morph` добавлен как direct dependency `@lite-fsm/graph`, потому что compiler парсит строки во время выполнения.
 - `SourceAdapter` скрывает `ts-morph`; публичный API не протекает parser-типами.
 - Ambient API names распознаются только если нет local/import binding; lookalike imports и alias chains игнорируются.
@@ -40,12 +39,6 @@
 - `analyzeLiteFsmGraph` добавлен как отдельный semantic layer поверх `LiteFsmGraphDocument`; compiler не запускает analyzer автоматически и не мутирует document.
 - Analyzer использует внутренний `GraphAnalysisIndex`, `scope` как discriminated union и registry v1 rules: `unknown-target`, `unreachable-state`, `dead-end-state`, `actor-template-shape`, `reducer-config-consistency`, `effect-event-acceptance`, `wildcard-shadowing`.
 - Analyzer diagnostics отделены кодами `LFG_ANALYZER_*`; `document.diagnostics` остается слоем compiler diagnostics.
-- `GraphSimulator` работает только по `LiteFsmGraphMachine`: не исполняет reducer/effects/user code, а вычисляет accepted config transitions, effective reducer branches, controlled unresolved-target results и suggested emissions.
-- Simulator event handling вынесен во внутренний fixed pipeline: prepare command -> resolve candidates -> select branch -> evaluate target -> commit snapshot -> build controlled result. Накопление состояния в одном `TransactionContext` без промежуточных narrowed типов; failure dispatch в один `failure(ctx, ...)` по `command.kind`. `evaluateCandidate` оставлен thin wrapper над `evaluateTarget` как точка расширения для будущего trusted/payload/context evaluator-а без изменения public facade.
-- Simulator start/restart не запускает initial effects; emissions появляются только после успешного шага и повторяют runtime precedence: state-specific effect при реальном входе в state, иначе wildcard effect.
-- `followEmission` применяет только `routing.kind === "default"`; actor/group/tag/unscoped/unknown routing остаются visible, но не доставляются в simulator одной машины.
-- `followEmission` для event с несколькими reducer branches возвращает `ambiguous-transition` с candidates; UI выбирает ветку через `choose`.
-- Actor template simulator поддерживает `spawnLifecycle` из `__INIT` и `activeActor` с явным или однозначно выводимым public start state; wildcard transitions/effects не применяются из `__INIT` и terminal pseudo-state.
 
 ## Проверки
 
@@ -65,4 +58,4 @@ Root/docs build не запускался.
 
 ## Следующий этап
 
-Этап 10 CLI или этап 11 view-model. Time travel, payload-aware simulation и полный context log перенесены в этапы 13-14.
+Этап 9 [`GRAPH-SIMULATOR-STAGE-9-SPEC.md`](GRAPH-SIMULATOR-STAGE-9-SPEC.md)
