@@ -4,16 +4,16 @@
 
 ## Точки входа
 
-| Импорт                                                       | Runtime exports                                                                                                                                   |
-| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@lite-fsm/core`                                                       | `createMachine`, `createConfig`, `createReducer`, `createEffect`, `createActorMeta`, `Machine`, `defineMachine`, `MachineManager`, `LiteFsmError` |
-| `@lite-fsm/persist`                                                    | `persistManager`, `createJsonStorage`                                                                                                             |
-| `@lite-fsm/persist/react`                                              | `usePersistStatus`, `useIsPersistRestoring`                                                                                                       |
-| `@lite-fsm/middleware`                                                 | `immerMiddleware`, `devToolsMiddleware`                                                                                                           |
-| `@lite-fsm/middleware/immer` · `@lite-fsm/middleware/devTools`         | per-feature entry points                                                                                                                          |
-| `@lite-fsm/react`                                                      | `FSMContext`, `FSMContextProvider`, `FSMHydrationBoundary`, `useHydrateSnapshot`, `useManager`, `useSelector`, `useTransition`, `defineMachine`   |
-| `@lite-fsm/graph`                                                      | experimental: `compileLiteFsmGraph`, `selectMachineGraph`, `analyzeLiteFsmGraph` и IR-типы для graph tooling                                      |
-| `@lite-fsm/graph/simulator`                                            | experimental: `createGraphSimulator` для headless-симуляции одной compiled machine                                                                |
+| Импорт                                                         | Runtime exports                                                                                                                                   |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@lite-fsm/core`                                               | `createMachine`, `createConfig`, `createReducer`, `createEffect`, `createActorMeta`, `Machine`, `defineMachine`, `MachineManager`, `LiteFsmError` |
+| `@lite-fsm/persist`                                            | `persistManager`, `createJsonStorage`                                                                                                             |
+| `@lite-fsm/persist/react`                                      | `usePersistStatus`, `useIsPersistRestoring`                                                                                                       |
+| `@lite-fsm/middleware`                                         | `immerMiddleware`, `devToolsMiddleware`                                                                                                           |
+| `@lite-fsm/middleware/immer` · `@lite-fsm/middleware/devTools` | per-feature entry points                                                                                                                          |
+| `@lite-fsm/react`                                              | `FSMContext`, `FSMContextProvider`, `FSMHydrationBoundary`, `useHydrateSnapshot`, `useManager`, `useSelector`, `useTransition`, `defineMachine`   |
+| `@lite-fsm/graph`                                              | experimental: `compileLiteFsmGraph`, `selectMachineGraph`, `analyzeLiteFsmGraph` и IR-типы для graph tooling                                      |
+|                                                                |
 
 `@lite-fsm/react` помечен `"use client"`. Импортировать можно из SSR/RSC, hooks/provider — только в client tree.
 
@@ -28,20 +28,17 @@ const result = compileLiteFsmGraph(source, {
 });
 ```
 
-| API                         | Назначение                                                                                  |
-| --------------------------- | ------------------------------------------------------------------------------------------- |
-| `compileLiteFsmGraph(src)`      | строит `LiteFsmGraphDocument`; компилирует machines/managers, refs, config/reducer transitions и effect emissions |
-| `selectMachineGraph(doc, sel?)` | выбирает одну machine по `index`, `id`, `variableName`, `exportName`, `managerKey` или `{ managerId, managerKey }` |
-| `analyzeLiteFsmGraph(doc, opts?)` | запускает semantic analyzer поверх готового IR; возвращает отдельные diagnostics `LFG_ANALYZER_*` |
-| `createGraphSimulator(machine)` | subpath `@lite-fsm/graph/simulator`; интерактивно симулирует одну machine по IR без исполнения reducer/effects |
-| `LiteFsmGraphDocument`          | универсальный IR для будущих визуализаторов, CLI, analyzer-а и simulator-а                  |
-| `GraphDiagnostic`               | diagnostic как часть результата; compiler не должен падать на частично неподдержанном коде  |
+| API                               | Назначение                                                                                                         |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `compileLiteFsmGraph(src)`        | строит `LiteFsmGraphDocument`; компилирует machines/managers, refs, config/reducer transitions и effect emissions  |
+| `selectMachineGraph(doc, sel?)`   | выбирает одну machine по `index`, `id`, `variableName`, `exportName`, `managerKey` или `{ managerId, managerKey }` |
+| `analyzeLiteFsmGraph(doc, opts?)` | запускает semantic analyzer поверх готового IR; возвращает отдельные diagnostics `LFG_ANALYZER_*`                  |
+| `LiteFsmGraphDocument`            | универсальный IR для будущих визуализаторов, CLI, analyzer-а и simulator-а                                         |
+| `GraphDiagnostic`                 | diagnostic как часть результата; compiler не должен падать на частично неподдержанном коде                         |
 
 Reducer branches в graph IR символические: compiler сохраняет `reducerCases` и отдельные `GraphTransition` со слоем `"reducer"`, не проверяя consistency с `config`. Effect emissions сохраняются как `GraphEmission`: это suggested events при входе в state, а не state transitions.
 
 `analyzeLiteFsmGraph` не запускается внутри `compileLiteFsmGraph` автоматически и не мутирует document. Правила v1: `unknown-target`, `unreachable-state`, `dead-end-state`, `actor-template-shape`, `reducer-config-consistency`, `effect-event-acceptance`, `wildcard-shadowing`.
-
-`createGraphSimulator` экспортируется только из `@lite-fsm/graph/simulator`, а не из root `@lite-fsm/graph`. Он показывает доступные события, guarded/reducer branches и suggested effect emissions. `followEmission` применяет только local/default-routing emission; actor/group/tag/unscoped routing остается visible, но не доставляется в simulator одной машины.
 
 ## Mental model
 
@@ -348,18 +345,18 @@ stop();
 
 `start()` не блокирует SSR/hydration. Пока restore в процессе, user transitions не пишутся сразу; если live state изменился во время restore, controller после restore сохраняет финальное состояние. `@@lite-fsm/HYDRATE` сам по себе save не планирует, а restore из `storage.subscribe()` не делает echo-save без live изменений.
 
-| Опция             | Назначение                                                               |
-| ----------------- | ------------------------------------------------------------------------ |
-| `storage`         | `{ get, set, remove, subscribe? }`                                       |
-| `machines?`       | те же snapshot-eligible keys, что в `dehydrate({ machines })`            |
-| `strategy?`       | strategy для `hydrate`, default `"merge"`                                |
-| `storageVersion?` | версия persist record; mismatch без `migrate` удаляет record. `undefined` vs определённое значение тоже считается mismatch |
-| `maxAge?`         | TTL в миллисекундах; expired record удаляется                            |
-| `throttleMs?`     | coalescing для saves; default `0`, для browser storage обычно `300-1000` |
-| `shouldSave?`     | фильтр manager transitions перед save                                    |
-| `migrate?`        | конвертация старого `PersistedRecord` в текущий `MachineManagerSnapshot` |
-| `onRestoreSettled?` | вызывается из restore-пути с `{ phase: "ready"; restored }` или `{ phase: "error"; error }` |
-| `onError?`        | `(err, "restore" \| "save" \| "clear") => void`                          |
+| Опция               | Назначение                                                                                                                 |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `storage`           | `{ get, set, remove, subscribe? }`                                                                                         |
+| `machines?`         | те же snapshot-eligible keys, что в `dehydrate({ machines })`                                                              |
+| `strategy?`         | strategy для `hydrate`, default `"merge"`                                                                                  |
+| `storageVersion?`   | версия persist record; mismatch без `migrate` удаляет record. `undefined` vs определённое значение тоже считается mismatch |
+| `maxAge?`           | TTL в миллисекундах; expired record удаляется                                                                              |
+| `throttleMs?`       | coalescing для saves; default `0`, для browser storage обычно `300-1000`                                                   |
+| `shouldSave?`       | фильтр manager transitions перед save                                                                                      |
+| `migrate?`          | конвертация старого `PersistedRecord` в текущий `MachineManagerSnapshot`                                                   |
+| `onRestoreSettled?` | вызывается из restore-пути с `{ phase: "ready"; restored }` или `{ phase: "error"; error }`                                |
+| `onError?`          | `(err, "restore" \| "save" \| "clear") => void`                                                                            |
 
 `restore()` удаляет invalid, expired и несовместимые records. `onRestoreSettled` вызывается и при успешном завершении restore, и при restore error; `clear()` его не вызывает. Background restore/save из `start()` проглатывают ошибки после `onError` и status update; прямые `await restore/save/flush/clear` пробрасывают ошибки.
 
@@ -521,15 +518,15 @@ function Counter() {
 }
 ```
 
-| API                                        | Назначение                                                                |
-| ------------------------------------------ | ------------------------------------------------------------------------- |
-| `FSMContextProvider`                       | кладёт manager в context; фиксирует `getServerSnapshot` для SSR/hydration |
-| `useManager<S, P>()`                       | manager из context                                                        |
-| `useTransition<P>()`                       | `manager.transition`                                                      |
-| `useSelector<S, R>(selector, equalityFn?)` | `useSyncExternalStoreWithSelector`-обёртка; default equality — `===`      |
+| API                                        | Назначение                                                                                    |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------- |
+| `FSMContextProvider`                       | кладёт manager в context; фиксирует `getServerSnapshot` для SSR/hydration                     |
+| `useManager<S, P>()`                       | manager из context                                                                            |
+| `useTransition<P>()`                       | `manager.transition`                                                                          |
+| `useSelector<S, R>(selector, equalityFn?)` | `useSyncExternalStoreWithSelector`-обёртка; default equality — `===`                          |
 | `FSMHydrationBoundary`                     | preview snapshot уже на render + apply в layout effect; может dispatch post-hydration actions |
-| `useHydrateSnapshot(snapshot, opts?)`      | apply snapshot в layout effect, без preview                               |
-| `defineMachine`                            | standalone machine как hook                                               |
+| `useHydrateSnapshot(snapshot, opts?)`      | apply snapshot в layout effect, без preview                                                   |
+| `defineMachine`                            | standalone machine как hook                                                                   |
 
 `FSMContextProvider` принимает `getServerSnapshot?: () => MachinesState<S>` и `persist?: { start(): () => void } | readonly { start(): () => void }[]`. Без `getServerSnapshot` он кеширует `machineManager.getState()` для текущего manager-а на первом render-е. Это root state для React `useSyncExternalStore`, не `MachineManagerSnapshot` envelope.
 
@@ -599,8 +596,8 @@ Hook-instance совмещает методы standalone machine (`transition`, 
 
 ## Команды
 
-| Проверка             | Команда                  |
-| -------------------- | ------------------------ |
+| Проверка             | Команда                   |
+| -------------------- | ------------------------- |
 | Unit tests           | `pnpm run test`           |
 | Type tests           | `pnpm run test:types`     |
 | Typecheck            | `pnpm run check-types`    |

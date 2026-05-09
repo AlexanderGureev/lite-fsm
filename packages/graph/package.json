@@ -19,19 +19,11 @@
         "types": "./dist/index.d.cts",
         "default": "./dist/index.cjs"
       }
-    },
-    "./simulator": {
-      "import": {
-        "types": "./dist/simulator/index.d.ts",
-        "default": "./dist/simulator/index.js"
-      },
-      "require": {
-        "types": "./dist/simulator/index.d.cts",
-        "default": "./dist/simulator/index.cjs"
-      }
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "dependencies": {
     "ts-morph": "^27.0.2"
   },

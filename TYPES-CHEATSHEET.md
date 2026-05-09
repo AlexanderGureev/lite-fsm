@@ -4,15 +4,15 @@
 
 ## Точки входа
 
-| Импорт                   | Типы                                                                                                                                                                                                                                                               |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Импорт                    | Типы                                                                                                                                                                                                                                                               |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `@lite-fsm/core`          | весь `types.ts` + `interfaces.ts`: `FSMEvent`, `MachineConfig`, `CFG`, `MachineReducer`, `MachineEffect`, `MachineManagerSnapshot`, `MachinesState`, `MachineEvents`, `MachineDependencies`, `IMachineManager`, `Middleware`, actor types, snapshot types, helpers |
-| `@lite-fsm/react`         | `FSMContextType`, `FSMContextProviderProps`, `FSMPersistLifecycle`, `FSMHydrationBoundaryProps`, typed hook aliases                                                                                                                                                 |
-| `@lite-fsm/persist`       | `MaybePromise`, `PersistedRecord`, `PersistStorage`, `PersistStatus`, `PersistRestoreSettledResult`, `PersistManagerOptions`, `PersistController`                                                                                                                   |
-| `@lite-fsm/persist/react` | runtime hooks only: `usePersistStatus`, `useIsPersistRestoring`                                                                                                                                                                                                     |
-| `@lite-fsm/middleware`    | только runtime middleware                                                                                                                                                                                                                                           |
-| `@lite-fsm/graph`         | experimental graph compiler/analyzer IR-типы                                                                                                                                                                                                                        |
-| `@lite-fsm/graph/simulator` | experimental simulator-типы: `GraphSimulator`, snapshot/result/transition/emission types                                                                                                                                                                           |
+| `@lite-fsm/react`         | `FSMContextType`, `FSMContextProviderProps`, `FSMPersistLifecycle`, `FSMHydrationBoundaryProps`, typed hook aliases                                                                                                                                                |
+| `@lite-fsm/persist`       | `MaybePromise`, `PersistedRecord`, `PersistStorage`, `PersistStatus`, `PersistRestoreSettledResult`, `PersistManagerOptions`, `PersistController`                                                                                                                  |
+| `@lite-fsm/persist/react` | runtime hooks only: `usePersistStatus`, `useIsPersistRestoring`                                                                                                                                                                                                    |
+| `@lite-fsm/middleware`    | только runtime middleware                                                                                                                                                                                                                                          |
+| `@lite-fsm/graph`         | experimental graph compiler/analyzer IR-типы                                                                                                                                                                                                                       |
+|                           |
 
 ## Generics
 
@@ -224,15 +224,15 @@ type AppDeps = MachineDependencies<Store>;
 
 `@lite-fsm/persist` типизируется от того же `S extends MachineStore`, что и `MachineManager`.
 
-| Тип                        | Форма / назначение                                                                                         |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `MaybePromise<T>`          | `T \| Promise<T>`                                                                                          |
-| `PersistedRecord<S>`       | `{ timestamp: number; storageVersion?: string \| number; snapshot: MachineManagerSnapshot<S> }`            |
-| `PersistStorage<S>`        | `{ get, set, remove, subscribe? }`, где value — typed `PersistedRecord<S>`                                 |
-| `PersistStatus`            | `{ phase: "idle" } \| { phase: "restoring" } \| { phase: "ready"; restored } \| { phase: "error"; error }` |
-| `PersistRestoreSettledResult` | `{ phase: "ready"; restored } \| { phase: "error"; error }`                                             |
-| `PersistManagerOptions<S>` | storage, `machines`, hydrate strategy, version/TTL/throttle, `shouldSave`, `migrate`, `onRestoreSettled`, `onError` |
-| `PersistController`        | `start`, `restore`, `save`, `flush`, `clear`, `getStatus`, `subscribeStatus`                               |
+| Тип                           | Форма / назначение                                                                                                  |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `MaybePromise<T>`             | `T \| Promise<T>`                                                                                                   |
+| `PersistedRecord<S>`          | `{ timestamp: number; storageVersion?: string \| number; snapshot: MachineManagerSnapshot<S> }`                     |
+| `PersistStorage<S>`           | `{ get, set, remove, subscribe? }`, где value — typed `PersistedRecord<S>`                                          |
+| `PersistStatus`               | `{ phase: "idle" } \| { phase: "restoring" } \| { phase: "ready"; restored } \| { phase: "error"; error }`          |
+| `PersistRestoreSettledResult` | `{ phase: "ready"; restored } \| { phase: "error"; error }`                                                         |
+| `PersistManagerOptions<S>`    | storage, `machines`, hydrate strategy, version/TTL/throttle, `shouldSave`, `migrate`, `onRestoreSettled`, `onError` |
+| `PersistController`           | `start`, `restore`, `save`, `flush`, `clear`, `getStatus`, `subscribeStatus`                                        |
 
 ```ts
 type Store = typeof machines;
@@ -323,48 +323,38 @@ export const defineEffect: TypedCreateEffectFn<AppEvent, Deps> = createEffect;
 `@lite-fsm/graph` экспортирует типы JSON-документа для tooling-слоя. Runtime-пакеты от него не зависят.
 
 ```ts
-import { analyzeLiteFsmGraph, compileLiteFsmGraph, selectMachineGraph, type LiteFsmGraphDocument } from "@lite-fsm/graph";
-import { createGraphSimulator, type GraphSimulator } from "@lite-fsm/graph/simulator";
+import {
+  analyzeLiteFsmGraph,
+  compileLiteFsmGraph,
+  selectMachineGraph,
+  type LiteFsmGraphDocument,
+} from "@lite-fsm/graph";
 
 const result = compileLiteFsmGraph(source);
 const document: LiteFsmGraphDocument = result.document;
 const selected = selectMachineGraph(document, { managerKey: "machineKey" });
 const analysis = analyzeLiteFsmGraph(document, { strict: true });
-const simulator: GraphSimulator | undefined = selected.ok ? createGraphSimulator(selected.machine) : undefined;
 ```
 
-| Тип                         | Форма                                                                                 |
-| --------------------------- | ------------------------------------------------------------------------------------- |
-| `LiteFsmGraphResult`        | `{ document: LiteFsmGraphDocument; diagnostics: GraphDiagnostic[] }`                  |
-| `GraphAnalysisResult`       | `{ diagnostics: GraphDiagnostic[] }` для semantic analyzer-а                          |
-| `LiteFsmGraphDocument`      | `{ version, source, machines, managers, diagnostics }`                                |
-| `LiteFsmGraphManager`       | manager metadata плюс `machineRefs: { key, machineId, loc? }[]`                       |
-| `LiteFsmGraphMachine`       | machine metadata плюс `states`, `transitions`, `emissions`, `reducerCases`            |
-| `GraphTransition`           | accepted event edge слоя `config` или `reducer`                                       |
-| `GraphReducerCase`          | symbolic reducer branch: event, guard, state-write targets, confidence                |
-| `GraphEmission`             | событие, которое может отправить effect при входе в state; не является transition     |
-| `GraphRouting`              | routing emission-а: `default`, `unscoped`, `actor`, `group`, `tag` или `unknown`      |
-| `GraphRoutingTarget`        | literal, array, `self.actorId/groupId/groupTag` или dynamic routing target            |
-| `GraphDiagnostic`           | `{ code, severity, message, machineId?, loc? }`                                       |
-| `MachineSelector`           | `{ index }`, `{ id }`, `{ variableName }`, `{ exportName }`, `{ managerKey }` или `{ managerId, managerKey }` |
-| `SelectMachineGraphResult`  | success `{ ok: true, machine, diagnostics }` или failure `{ ok: false, candidates, diagnostics }` |
-| `CompileLiteFsmGraphOptions` | `{ filename?, language?, parser?: "static", maxMachines? }`                           |
-| `AnalyzeLiteFsmGraphOptions` | `{ rules?: GraphAnalysisRuleId[], strict?: boolean, scope?: GraphAnalysisScope }`      |
-| `GraphAnalysisScope`        | `{ kind: "document" }`, `{ kind: "machine", machineId }` или `{ kind: "manager", managerId }` |
-| `GraphAnalysisRuleId`       | analyzer rule union: `unknown-target`, `unreachable-state`, `dead-end-state`, `actor-template-shape`, `reducer-config-consistency`, `effect-event-acceptance`, `wildcard-shadowing` |
-
-Simulator-типы экспортируются только из `@lite-fsm/graph/simulator`:
-
-| Тип                         | Форма                                                                                 |
-| --------------------------- | ------------------------------------------------------------------------------------- |
-| `GraphSimulator`            | `start`, `restart`, `getSnapshot`, `getAvailableTransitions`, `getSuggestedEmissions`, `send`, `choose`, `followEmission` |
-| `GraphSimulatorOptions`     | `{ actorMode?: "spawnLifecycle" \| "activeActor"; startState?: string }`             |
-| `GraphSimulationSnapshot`   | `{ machineId, stateId, stateKey, history }`                                           |
-| `GraphSimulationStep`       | событие, config acceptance id, effective transition id, cause и `from`/`to`            |
-| `GraphAvailableTransition`  | selectable config/reducer branch; unresolved targets имеют `canApply: false`          |
-| `GraphSuggestedEmission`    | suggested effect event; `canFollowLocally` true только для local/default accepted event |
-| `GraphSendResult`           | success со snapshot/step или controlled failure: not-started, not-accepted, ambiguity, unresolved/blocked target |
-| `GraphFollowEmissionResult` | как `send`, плюс `unknown-emission`, `non-local-routing` и ambiguity candidates        |
+| Тип                          | Форма                                                                                                                                                                               |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LiteFsmGraphResult`         | `{ document: LiteFsmGraphDocument; diagnostics: GraphDiagnostic[] }`                                                                                                                |
+| `GraphAnalysisResult`        | `{ diagnostics: GraphDiagnostic[] }` для semantic analyzer-а                                                                                                                        |
+| `LiteFsmGraphDocument`       | `{ version, source, machines, managers, diagnostics }`                                                                                                                              |
+| `LiteFsmGraphManager`        | manager metadata плюс `machineRefs: { key, machineId, loc? }[]`                                                                                                                     |
+| `LiteFsmGraphMachine`        | machine metadata плюс `states`, `transitions`, `emissions`, `reducerCases`                                                                                                          |
+| `GraphTransition`            | accepted event edge слоя `config` или `reducer`                                                                                                                                     |
+| `GraphReducerCase`           | symbolic reducer branch: event, guard, state-write targets, confidence                                                                                                              |
+| `GraphEmission`              | событие, которое может отправить effect при входе в state; не является transition                                                                                                   |
+| `GraphRouting`               | routing emission-а: `default`, `unscoped`, `actor`, `group`, `tag` или `unknown`                                                                                                    |
+| `GraphRoutingTarget`         | literal, array, `self.actorId/groupId/groupTag` или dynamic routing target                                                                                                          |
+| `GraphDiagnostic`            | `{ code, severity, message, machineId?, loc? }`                                                                                                                                     |
+| `MachineSelector`            | `{ index }`, `{ id }`, `{ variableName }`, `{ exportName }`, `{ managerKey }` или `{ managerId, managerKey }`                                                                       |
+| `SelectMachineGraphResult`   | success `{ ok: true, machine, diagnostics }` или failure `{ ok: false, candidates, diagnostics }`                                                                                   |
+| `CompileLiteFsmGraphOptions` | `{ filename?, language?, parser?: "static", maxMachines? }`                                                                                                                         |
+| `AnalyzeLiteFsmGraphOptions` | `{ rules?: GraphAnalysisRuleId[], strict?: boolean, scope?: GraphAnalysisScope }`                                                                                                   |
+| `GraphAnalysisScope`         | `{ kind: "document" }`, `{ kind: "machine", machineId }` или `{ kind: "manager", managerId }`                                                                                       |
+| `GraphAnalysisRuleId`        | analyzer rule union: `unknown-target`, `unreachable-state`, `dead-end-state`, `actor-template-shape`, `reducer-config-consistency`, `effect-event-acceptance`, `wildcard-shadowing` |
 
 `LiteFsmGraphDocument.diagnostics` содержит compiler diagnostics. Diagnostics analyzer-а возвращаются отдельно из `GraphAnalysisResult` и имеют коды `LFG_ANALYZER_*`.
 
@@ -385,15 +375,15 @@ const logger: Middleware<AppState, AppEvent> = (api) => (next) => (action) => ne
 
 ## React
 
-| Тип                                                       | Форма                                                                                    |
-| --------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `FSMContextType<S = MachineStore, P = AnyEvent>`          | `IMachineManager<S, P>`                                                                  |
-| `FSMPersistLifecycle`                                     | `{ start(): () => void }`                                                                |
-| `FSMContextProviderProps<S, P>`                           | `PropsWithChildren<{ machineManager; getServerSnapshot?; persist? }>`                    |
+| Тип                                                       | Форма                                                                                                                                                              |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `FSMContextType<S = MachineStore, P = AnyEvent>`          | `IMachineManager<S, P>`                                                                                                                                            |
+| `FSMPersistLifecycle`                                     | `{ start(): () => void }`                                                                                                                                          |
+| `FSMContextProviderProps<S, P>`                           | `PropsWithChildren<{ machineManager; getServerSnapshot?; persist? }>`                                                                                              |
 | `FSMHydrationBoundaryProps<S, P>`                         | `PropsWithChildren<{ snapshot: MachineManagerSnapshot<S>; strategy?: HydrateStrategy; transitionAfterHydrate?: ManagerAction<P> \| readonly ManagerAction<P>[] }>` |
-| `TypedUseManagerHook<S, P>` · `TypedUseMachineHook<S, P>` | `() => IMachineManager<S, P>`                                                            |
-| `TypedUseSelectorHook<S>`                                 | `<R>(selector: (state: MachinesState<S>) => R, equalityFn?) => R`                        |
-| `TypedUseTransitionHook<P>`                               | `() => (payload: ManagerAction<P>) => ManagerAction<P>`                                  |
+| `TypedUseManagerHook<S, P>` · `TypedUseMachineHook<S, P>` | `() => IMachineManager<S, P>`                                                                                                                                      |
+| `TypedUseSelectorHook<S>`                                 | `<R>(selector: (state: MachinesState<S>) => R, equalityFn?) => R`                                                                                                  |
+| `TypedUseTransitionHook<P>`                               | `() => (payload: ManagerAction<P>) => ManagerAction<P>`                                                                                                            |
 
 App-typed hooks:
 
@@ -461,8 +451,8 @@ export type AppManager = IMachineManager<Store, AppEvent>;
 
 ## Команды
 
-| Проверка                  | Команда                   |
-| ------------------------- | ------------------------- |
+| Проверка                  | Команда                    |
+| ------------------------- | -------------------------- |
 | Типы по source packages   | `pnpm run test:types`      |
 | Типы по собранным пакетам | `pnpm run test:types:dist` |
 | Полный type-loop          | `pnpm run test:types:all`  |
