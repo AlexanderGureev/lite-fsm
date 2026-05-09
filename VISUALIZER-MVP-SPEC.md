@@ -99,11 +99,11 @@ Layout: 3 колонки.
 - **Header**: kind, groupTag, имя, текущий `@STATE` (accent / terminal / initial styling), кнопка `</>` view source.
 - **State blocks** (по одному на каждый state из config):
   - State header: имя state, badge (`initial` / `spawn` / `terminal`), pulse-индикатор для current state.
-  - **Cfg-rows**: одна строка на каждую ветку (guarded edges разворачиваются в N строк). Формат: `cfg EVENT → TARGET · when_label`.
+  - **Transition rows** (`cfg` / `reducer`): одна строка на каждую эффективную ветку перехода (guarded/reducer branches разворачиваются в N строк). Формат: `cfg EVENT → TARGET · when_label`.
   - **Eff-rows**: одна строка на каждую ветку effect-эмиссии. Формат: `eff may emit EVENT · when_label [routing-pill]`.
 - Длинные state-блоки (>5 rows), не являющиеся current, автоматически collapsed; клик по header — раскрывает.
-- **Cfg-rows в current state**: кликабельны (accent-зелёный border) → инициируют transition.
-- **Eff-rows в current state**: кликабельны (accent-фиолетовый border) → эмитят выбранную ветку.
+- **Transition rows в current state**: кликабельны (accent-зелёный border), если simulator считает branch available → инициируют transition.
+- **Eff-rows в current state**: кликабельны (accent-фиолетовый border) только если simulator вернул emission из `getSuggestedEmissions()` → эмитят выбранную ветку. Initial-state effects до первого committed входа в это состояние показываются read-only.
 
 ### 8.3 Symbolic Simulator (правая)
 
@@ -136,9 +136,11 @@ Layout: 3 колонки.
 
 ### 10.1 Принцип
 
-Один пользовательский клик = один dispatch. Эффекты на enter state **не запускаются автоматически** — пользователь сам выбирает что эмитить дальше, кликая eff-rows в карточке текущего state.
+Один пользовательский клик = один dispatch. Эффекты на enter state **не запускаются автоматически** — пользователь сам выбирает что эмитить дальше, кликая eff-rows, которые simulator вернул как suggested emissions для текущего snapshot.
 
 Это упрощение MVP. В реальной семантике lite-fsm эффекты автоматически срабатывают на enter; manual-режим — это отладочный pause для пошагового исследования. Auto-cascade — расширение post-MVP (см. §11.1).
+
+Initial-state effects не предлагаются сразу после `start/reset`: они становятся кликабельными только после реального committed входа в состояние. UI не выводит dispatchability effect rows самостоятельно.
 
 ### 10.2 Routing semantics
 
@@ -152,7 +154,8 @@ Layout: 3 колонки.
 
 ### 10.3 Branches и overrides
 
-- При cfg-edge с reducer guards в auto-cascade выбирается первая ветка как default. Manual click пользователя по branch-row форсит конкретный target для этой машины; событие при этом рассылается всем остальным consumer'ам штатно.
+- При transition row с reducer guards в auto-cascade выбирается первая ветка как default. Manual click пользователя по branch-row форсит конкретный target для этой машины; событие при этом рассылается всем остальным consumer'ам штатно.
+- При external send из Send row нет origin-machine branch override: ambiguous consumers выбираются simulator-ом по default branch policy в стабильном порядке IR.
 - При eff-emission с alt-branches manual click — единственный способ выбрать ветку.
 
 ### 10.4 Timeline
@@ -165,14 +168,14 @@ Layout: 3 колонки.
 
 MVP-архитектура **должна не препятствовать** добавлению нижеследующих фич. Это не входит в скоуп MVP, но определяет границы дизайна.
 
-| Расширение                             | Что добавляется                                                                                                                                               | Критерий совместимости MVP                                                                                              |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ------------ |
-| **11.1 Auto-cascade mode**             | Toggle `cascade: auto / manual`. В auto эффекты на enter state queue'атся в очередь dispatch'а до пустой очереди.                                             | `sendEvent` принимает `overrides`; в auto просто игнорирует их и продолжает каскад. Manual click работает как override. |
-| **11.2 Scenarios**                     | Объект `SCENARIOS = { id: { label, requires, events } }` + кнопки в timeline-controls. Клик: auto-select машин + reset + последовательный send в forced-auto. | Сценарий = набор `sendEvent(...)` вызовов, никакой новой data shape.                                                    |
-| **11.3 Live re-compilation**           | Debounce при изменении textarea → перекомпиляция → UI обновляется.                                                                                            | UI инициализирован из IR; пере-инициализация — обычный rerender.                                                        |
-| **11.4 Diagnostics**                   | Compiler возвращает diagnostics; visualizer показывает в отдельной панели + inline-маркеры в редакторе.                                                       | IR уже содержит `diagnostics` массив (см. graph-compiler-spec).                                                         |
-| **11.5 Per-instance actor simulation** | Список actor-инстансов с actorId, отдельные `currentStates` на инстанс, точная routing-фильтрация.                                                            | `state.l3.currentStates` — Map; в MVP это flat по machineId, в расширении становится nested по `${machineId}            | ${actorId}`. |
-| **11.6 Persistence / sharing**         | Сохранение source в localStorage; shareable URL с base64-encoded source.                                                                                      | Source хранится в одном месте (`EDITOR_SOURCE`), сериализация тривиальна.                                               |
+| Расширение                             | Что добавляется                                                                                                                                               | Критерий совместимости MVP                                                                                                 |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| **11.1 Auto-cascade mode**             | Toggle `cascade: auto / manual`. В auto эффекты на enter state queue'атся в очередь dispatch'а до пустой очереди.                                             | Режим передается через service/simulator options; manual click остается explicit origin dispatch.                           |
+| **11.2 Scenarios**                     | Объект `SCENARIOS = { id: { label, requires, events } }` + кнопки в timeline-controls. Клик: auto-select машин + reset + последовательный send в forced-auto. | Сценарий = набор команд `GraphSimulationSession`, без отдельной simulation data shape.                                      |
+| **11.3 Live re-compilation**           | Debounce при изменении textarea → перекомпиляция → UI обновляется.                                                                                            | UI инициализирован из IR; пере-инициализация — обычный rerender.                                                           |
+| **11.4 Advanced diagnostics UX**        | Inline-маркеры в редакторе, группировка, быстрые переходы и richer diagnostic panel.                                                                            | MVP уже показывает базовую сводку/значки diagnostics из IR; расширение использует те же diagnostic refs и source anchors.  |
+| **11.5 Per-instance actor simulation** | Список actor-инстансов с actorId, отдельные `currentStates` на инстанс, точная routing-фильтрация.                                                            | Состояние simulator и L3-команды адресуются через slice ids/`GraphSimulationSliceRef`; MVP downcast к `machineId` локален. |
+| **11.6 Persistence / sharing**         | Сохранение source в localStorage; shareable URL с base64-encoded source.                                                                                      | Source хранится в одном месте (`EDITOR_SOURCE`), сериализация тривиальна.                                                  |
 
 ## 12. Out of MVP scope
 

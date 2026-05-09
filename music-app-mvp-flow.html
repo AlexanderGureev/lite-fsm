@@ -1320,7 +1320,7 @@ export const auth = createMachine({
   config: {
     LOGGED_OUT: { LOGIN_REQUEST: "AUTHENTICATING" },
     AUTHENTICATING: {
-      AUTH_RESPONSE: "LOGGED_OUT", // default; reducer overrides to LOGGED_IN on success
+      AUTH_RESPONSE: "LOGGED_IN", // default success path; reducer overrides failures to LOGGED_OUT
       CANCEL_LOGIN: "LOGGED_OUT",
     },
     LOGGED_IN: { LOGOUT: "LOGGED_OUT" },
@@ -1328,11 +1328,19 @@ export const auth = createMachine({
   initialState: "LOGGED_OUT",
   initialContext: { userId: null, error: null },
   reducer: (state, action, { nextState }) => {
-    state.state = nextState;
-    if (action.type === "AUTH_RESPONSE") {
-      if (action.payload.success) state.state = "LOGGED_IN";
-      else state.state = "LOGGED_OUT"; // invalid credentials / network error
+    if (action.type === "AUTH_RESPONSE" && action.payload.success) {
+      state.state = "LOGGED_IN";
+      return;
     }
+    if (action.type === "AUTH_RESPONSE" && action.payload.reason === "invalid_credentials") {
+      state.state = "LOGGED_OUT";
+      return;
+    }
+    if (action.type === "AUTH_RESPONSE" && action.payload.reason === "network_error") {
+      state.state = "LOGGED_OUT";
+      return;
+    }
+    state.state = nextState;
   },
 });
 
@@ -1389,7 +1397,7 @@ export const trackInstance = createMachine({
   },
 });
 
-export const manager = new MachineManager({
+export const manager = MachineManager({
   appShell,
   auth,
   player,
@@ -1421,7 +1429,7 @@ export const auth = createMachine({
   config: {
     LOGGED_OUT: { LOGIN_REQUEST: "AUTHENTICATING" },
     AUTHENTICATING: {
-      AUTH_RESPONSE: "LOGGED_OUT", // default; reducer overrides to LOGGED_IN on success
+      AUTH_RESPONSE: "LOGGED_IN", // default success path; reducer overrides failures to LOGGED_OUT
       CANCEL_LOGIN: "LOGGED_OUT",
     },
     LOGGED_IN: { LOGOUT: "LOGGED_OUT" },
@@ -1429,11 +1437,19 @@ export const auth = createMachine({
   initialState: "LOGGED_OUT",
   initialContext: { userId: null, error: null },
   reducer: (state, action, { nextState }) => {
-    state.state = nextState;
-    if (action.type === "AUTH_RESPONSE") {
-      if (action.payload.success) state.state = "LOGGED_IN";
-      else state.state = "LOGGED_OUT"; // invalid credentials / network error
+    if (action.type === "AUTH_RESPONSE" && action.payload.success) {
+      state.state = "LOGGED_IN";
+      return;
     }
+    if (action.type === "AUTH_RESPONSE" && action.payload.reason === "invalid_credentials") {
+      state.state = "LOGGED_OUT";
+      return;
+    }
+    if (action.type === "AUTH_RESPONSE" && action.payload.reason === "network_error") {
+      state.state = "LOGGED_OUT";
+      return;
+    }
+    state.state = nextState;
   },
 });`,
 
