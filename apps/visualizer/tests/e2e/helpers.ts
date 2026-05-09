@@ -4,4 +4,4 @@ export const openVisualizer = async (page: Page) => {
   await page.goto("/");
 };
 
-export const tabButton = (page: Page, name: string) => page.getByRole("button", { name: new RegExp(name) });
+export const tabButton = (page: Page, name: string) => page.getByRole("tab", { name: new RegExp(name) });

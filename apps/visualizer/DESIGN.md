@@ -91,6 +91,75 @@ diagnostics и source anchors. Интерфейс не является ленд
 
 ## Component Contracts
 
+## UI Kit
+
+Stage `12b-shadcn-foundation` uses an app-local shadcn setup in
+`apps/visualizer/components.json`. It is independent from
+`apps/playground/components.json`.
+
+- Framework: Vite SPA, React, TypeScript, Tailwind CSS v4.
+- shadcn base: Radix.
+- shadcn style: `radix-nova`.
+- Icon library: `lucide-react`.
+- CSS entrypoint: `src/styles.css`.
+- UI alias: `@/ui`.
+- Utils alias: `@/lib/utils`.
+- RSC: `false`.
+
+Installed baseline components:
+
+- `button` for topbar, panel actions, source actions and timeline actions.
+- `badge` for status, layer, routing, diagnostic and simulation markers.
+- `tabs` for the main Source/System/Events/Machines strip.
+- `input`, `textarea` and `select` for source/search/send fixture controls.
+- `card` only for graph-domain preview cards, not for every panel.
+- `separator` for console/timeline divisions.
+- `scroll-area` for source, workbench and console panes.
+- `tooltip` for compact icon-only actions.
+- `alert` for diagnostics and console entries.
+
+Ownership rules:
+
+- shadcn generated files live under `src/ui/*` and should stay generic.
+- Visualizer-specific wrappers live in `src/ui/visualizer.tsx`: `Panel`,
+  `PanelHeader`, `StatusBadge`, `LayerBadge`, `GraphRow`, `SourceSnippet`,
+  `SourceEditorShell`, `DiagnosticsAlert`, `PaneScrollArea` and `IconButton`.
+- Wrappers are presentational only. They do not import graph IR, simulator,
+  services, store reducers or selectors.
+- Standard controls use shadcn variants first. App-specific wrappers may add
+  graph semantic color roles and dense row grammar.
+- `SelectItem` always stays inside `SelectGroup`; `TabsTrigger` always stays
+  inside `TabsList`; icon buttons use `Tooltip`.
+
+Token policy:
+
+- `src/styles.css` is the only app-level CSS owner for Tailwind/shadcn theme
+  variables and visualizer graph semantic variables.
+- shadcn semantic variables map to visualizer OKLCH tokens:
+  `--background`, `--card`, `--popover`, `--border`, `--input`, `--ring`,
+  `--primary`, `--muted`, `--accent`, `--destructive`.
+- Graph-specific roles remain `--vf-*`: config, reducer, effect, routing,
+  warning, danger, domain, actor, surfaces and borders.
+- Feature components should prefer Tailwind utilities and shadcn variants.
+  New CSS selectors are allowed only for theme variables or repeated graph
+  grammar that cannot stay readable as utilities.
+
+Allowed variants:
+
+- `Button`: `outline`, `secondary`, `ghost` and `icon` sizes for fixture
+  controls; `default` only for future primary user actions.
+- `Badge`: `outline` plus wrapper tone classes; badges are not primary actions.
+- `Tabs`: default segmented list; no underline-only tab style in this app.
+- `Card`: only graph cards or card-like workbench previews, radius `8px`.
+- `Alert`: diagnostics and simulator notices, using semantic visualizer colors.
+
+Custom graph grammar that remains outside shadcn:
+
+- Layer tags: `cfg`, `red`, `eff`, `sim`.
+- Event/state/routing rows with stable columns and long-label wrapping.
+- Source snippets with line numbers and selected source anchors.
+- Timeline rows, relation chips and source-overlay fragments in later stages.
+
 ### App Shell
 
 - Full viewport product shell with topbar and tab strip.

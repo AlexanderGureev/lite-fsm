@@ -7,13 +7,13 @@
 | Поле             | Значение                                                                                                                                                                                                                                                                                                          |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Дата             | 2026-05-09                                                                                                                                                                                                                                                                                                        |
-| Готово           | Этапы 0-9 IR/API/harness, Source Catalog/Candidates, Partial Evaluator, ConfigGraphCompiler, ManagerLinker/select API, ReducerCompiler, EffectsCompiler, GraphAssembler, общий `compiler/ast.ts`, Semantic Analyzer, Simulator, этап 11 view-model projection, этапы 12a architecture foundation и 12b visual direction |
+| Готово           | Этапы 0-9 IR/API/harness, Source Catalog/Candidates, Partial Evaluator, ConfigGraphCompiler, ManagerLinker/select API, ReducerCompiler, EffectsCompiler, GraphAssembler, общий `compiler/ast.ts`, Semantic Analyzer, Simulator, этап 11 view-model projection, этапы 12a architecture foundation, 12b visual direction и 12b-shadcn-foundation |
 | Package          | `@lite-fsm/graph`, private/experimental                                                                                                                                                                                                                                                                           |
 | Public API       | `compileLiteFsmGraph(source, options?)`, `selectMachineGraph(document, selector?)`, `analyzeLiteFsmGraph(document, options?)`, `@lite-fsm/graph/simulator`, `@lite-fsm/graph/view-model` + IR/analyzer/simulator/view-model-типы |
 | Текущий output   | `LiteFsmGraphDocument`: source metadata, compiler diagnostics, machines, linked managers, config states/transitions, reducer cases/transitions, effect emissions, machine facts и `initialContextJson`; `GraphAnalysisResult`: analyzer diagnostics; `GraphSimulationSnapshot`: slices/timeline/choices/emissions |
 | Еще не строится  | CLI, полноценные Source/L1/L2/L3 visualizer flows, manual simulation UI и source overlay behavior                                                                                                                                                                                                                  |
 | Fixture contract | `tests/graph/fixtures/graph-sources.ts`: 28 machine candidates, 3 manager candidates, полный assembler snapshot                                                                                                                                                                                                   |
-| Coverage         | `apps/visualizer` pure logic на последнем 12b прогоне: 100% statements/branches/functions/lines                                                                                                                                                                                                                   |
+| Coverage         | `apps/visualizer` pure logic на последнем 12b-shadcn-foundation прогоне: 100% statements/branches/functions/lines                                                                                                                                                                                                 |
 
 ## Ключевые решения
 
@@ -50,10 +50,13 @@
 - Stage 12b зафиксировал отдельный app-local дизайн visualizer-а в `apps/visualizer/DESIGN.md`; root `DESIGN.md` остается спецификацией playground и не расширяется ради visualizer-а.
 - Visualizer shell теперь использует 12b dark dense tool tokens и static style fixture для tabs, source snippet, machine card rows, semantic badges, console diagnostics, timeline, focus-visible и long-label wrapping без реализации Source/L1/L2/L3 graph behavior.
 - `lucide-react` добавлен как зависимость `@lite-fsm/visualizer` для стандартных UI icon affordances; custom SVG icon system не вводился.
+- Stage 12b-shadcn-foundation добавил app-local shadcn/Tailwind v4 foundation внутри `apps/visualizer`: `components.json`, generated baseline components в `src/ui`, `cn` в `src/lib/utils` и semantic theme bridge в `src/styles.css`.
+- Visualizer shell пересобран на shadcn primitives (`Tabs`, `Button`, `Badge`, `Input`, `Textarea`, `Select`, `Card`, `Separator`, `ScrollArea`, `Tooltip`, `Alert`) и thin presentational wrappers для graph grammar без graph behavior/source pipeline/simulation logic.
+- `apps/visualizer/DESIGN.md` расширен разделом `UI kit`, который фиксирует shadcn ownership, allowed variants, Tailwind token policy, CSS ownership и custom graph-specific grammar.
 
 ## Проверки
 
-Последний успешный набор для Stage 12b:
+Последний успешный набор для Stage 12b-shadcn-foundation:
 
 ```txt
 pnpm --filter @lite-fsm/visualizer check-types
@@ -64,7 +67,9 @@ pnpm --filter @lite-fsm/visualizer test:e2e
 
 Root/docs build не запускался.
 
+Дополнительная visual QA: `agent-browser` screenshots для `1440x900`,
+`1280x560` и `360x720`; horizontal overflow во всех трех viewports отсутствует.
+
 ## Следующий этап
 
-Этап 12b-shadcn-foundation: shadcn/Tailwind UI kit и visual polish перед
-12c source pipeline.
+Этап 12c: source pipeline и console.
