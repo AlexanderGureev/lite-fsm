@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["vite/client", "vitest/globals", "node"],
+    "paths": {
+      "@/*": ["./src/*"],
+      "@lite-fsm/graph": ["../../packages/graph/src/index.ts"],
+      "@lite-fsm/graph/simulator": ["../../packages/graph/src/simulator/index.ts"],
+      "@lite-fsm/graph/view-model": ["../../packages/graph/src/view-model/index.ts"]
+    }
+  },
+  "include": ["src", "tests", "vite.config.ts", "vitest.config.ts", "playwright.config.ts"],
+  "exclude": ["dist", "coverage", "test-results", "playwright-report"]
+}

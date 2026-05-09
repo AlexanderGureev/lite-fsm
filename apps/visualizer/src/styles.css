@@ -1,0 +1,211 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: light;
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  background: oklch(0.968 0.008 220);
+  color: oklch(0.18 0.018 236);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+}
+
+button {
+  font: inherit;
+}
+
+.visualizer-shell {
+  min-height: 100vh;
+  padding: 24px;
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  gap: 16px;
+}
+
+.visualizer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.visualizer-header h1,
+.visualizer-header p,
+.empty-panel h2,
+.empty-panel p,
+.console-panel h2,
+.console-panel p {
+  margin: 0;
+}
+
+.eyebrow,
+.panel-kicker {
+  color: oklch(0.46 0.035 236);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.visualizer-header h1 {
+  font-size: clamp(28px, 4vw, 46px);
+  line-height: 1.08;
+  letter-spacing: 0;
+}
+
+.console-toggle,
+.tab-button,
+.console-panel button {
+  border: 1px solid oklch(0.78 0.018 236);
+  border-radius: 8px;
+  background: oklch(0.99 0.004 220);
+  color: oklch(0.2 0.02 236);
+  cursor: pointer;
+}
+
+.console-toggle {
+  min-height: 40px;
+  padding: 0 14px;
+}
+
+.tab-list {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.tab-button {
+  min-height: 38px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.tab-button[data-selected="true"] {
+  background: oklch(0.21 0.035 236);
+  border-color: oklch(0.21 0.035 236);
+  color: oklch(0.985 0.006 220);
+}
+
+.tab-count {
+  min-width: 22px;
+  border-radius: 999px;
+  padding: 2px 7px;
+  background: oklch(0.91 0.016 220);
+  color: oklch(0.28 0.028 236);
+  font-size: 12px;
+  text-align: center;
+}
+
+.tab-button[data-selected="true"] .tab-count {
+  background: oklch(0.985 0.006 220 / 0.14);
+  color: inherit;
+}
+
+.workspace-grid {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+  gap: 16px;
+}
+
+.empty-panel,
+.console-panel {
+  border: 1px solid oklch(0.82 0.016 236);
+  border-radius: 8px;
+  background: oklch(0.995 0.004 220);
+}
+
+.empty-panel {
+  min-height: 420px;
+  padding: clamp(20px, 5vw, 48px);
+  display: grid;
+  align-content: center;
+  gap: 10px;
+}
+
+.empty-panel h2 {
+  max-width: 680px;
+  font-size: clamp(26px, 5vw, 54px);
+  line-height: 1.04;
+  letter-spacing: 0;
+}
+
+.empty-panel p {
+  max-width: 62ch;
+  color: oklch(0.42 0.028 236);
+  font-size: 17px;
+  line-height: 1.55;
+}
+
+.console-panel {
+  min-height: 300px;
+  padding: 16px;
+  display: grid;
+  align-content: start;
+  gap: 14px;
+}
+
+.console-panel[data-open="false"] {
+  display: none;
+}
+
+.console-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.console-panel__header h2 {
+  font-size: 16px;
+}
+
+.console-panel button {
+  min-height: 32px;
+  padding: 0 10px;
+}
+
+.console-empty {
+  color: oklch(0.48 0.028 236);
+}
+
+.console-list {
+  margin: 0;
+  padding-left: 20px;
+}
+
+button:focus-visible {
+  outline: 3px solid oklch(0.62 0.13 225);
+  outline-offset: 2px;
+}
+
+@media (max-width: 800px) {
+  .visualizer-shell {
+    padding: 14px;
+  }
+
+  .visualizer-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .workspace-grid {
+    grid-template-columns: 1fr;
+  }
+}

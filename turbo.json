@@ -11,6 +11,16 @@
     "test": {
       "outputs": []
     },
+    "test:unit": {
+      "outputs": []
+    },
+    "test:coverage": {
+      "outputs": ["coverage/**"]
+    },
+    "test:e2e": {
+      "cache": false,
+      "outputs": []
+    },
     "test:types": {
       "outputs": []
     },

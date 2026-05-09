@@ -14,6 +14,10 @@ export default defineConfig([
   globalIgnores([
     "node_modules/",
     "dist/",
+    "apps/*/dist/",
+    "apps/*/coverage/",
+    "apps/*/test-results/",
+    "apps/*/playwright-report/",
     "packages/*/dist/",
     "coverage/",
     "apps/docs/",
@@ -67,6 +71,7 @@ export default defineConfig([
         },
       ],
       "react/prop-types": "off",
+      "react/react-in-jsx-scope": "off",
     },
   },
 ]);

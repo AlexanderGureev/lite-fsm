@@ -1003,6 +1003,12 @@ LiteFsmGraphDocument + selected machine ids
 React-компоненты только dispatch commands и читают selectors. Они не вызывают
 compiler, analyzer, `view-model` или simulator напрямую.
 
+React view слой этапа 12 по возможности остается простым read/dispatch слоем:
+компоненты читают готовый view state, отправляют пользовательские события и не
+содержат business logic. Любые правила выбора, трансформации, доступности
+действий, guards и side-effect orchestration выносятся в workbench/features,
+selectors, services или app-level effect runner.
+
 ### Архитектура приложения и границы слоев
 
 Этап 12 должен заложить внутреннюю архитектуру visualizer-а так, чтобы будущие
