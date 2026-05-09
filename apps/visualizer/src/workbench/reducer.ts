@@ -37,6 +37,23 @@ type Reduction = {
 
 const OK: VisualizerCommandResult = { ok: true };
 const NO_EFFECTS: readonly WorkbenchEffectDescriptor[] = [];
+const INTERNAL_COMMAND_TYPES = {
+  "compile.succeeded": true,
+  "compile.failed": true,
+  "analysis.succeeded": true,
+  "analysis.failed": true,
+  "model.succeeded": true,
+  "model.failed": true,
+  "validation.succeeded": true,
+  "validation.failed": true,
+  "simulation.snapshot.changed": true,
+  "codegen.plan.completed": true,
+  "codegen.plan.failed": true,
+} as const satisfies Record<VisualizerInternalCommand["type"], true>;
+
+const isInternalCommand = (
+  command: VisualizerCommand | VisualizerInternalCommand,
+): command is VisualizerInternalCommand => command.type in INTERNAL_COMMAND_TYPES;
 
 const bumpRevisions = (
   revisions: WorkbenchRevisionIndex,
@@ -499,9 +516,9 @@ export const reduceWorkbenchSnapshot = (
   snapshot: WorkbenchSnapshot,
   command: VisualizerCommand | VisualizerInternalCommand,
 ): WorkbenchCommandOutput & { snapshot: WorkbenchSnapshot } => {
-  const reduction = command.type.includes(".succeeded") || command.type.includes(".failed") || command.type === "simulation.snapshot.changed" || command.type === "codegen.plan.completed"
-    ? reduceInternalCommand(snapshot, command as VisualizerInternalCommand)
-    : reduceUserCommand(snapshot, command as VisualizerCommand);
+  const reduction = isInternalCommand(command)
+    ? reduceInternalCommand(snapshot, command)
+    : reduceUserCommand(snapshot, command);
 
   return {
     snapshot: reduction.snapshot,

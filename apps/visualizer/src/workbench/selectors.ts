@@ -13,15 +13,17 @@ export type EmptyPanelView = {
   body: string;
 };
 
-const shallowEqualObject = <Input>(left: Input, right: Input): boolean => {
+export const shallowEqualObject = <Input>(left: Input, right: Input): boolean => {
   if (Object.is(left, right)) return true;
   if (typeof left !== "object" || left === null || typeof right !== "object" || right === null) return false;
 
   const leftEntries = Object.entries(left);
+  if (leftEntries.length !== Object.keys(right).length) return false;
+
   return leftEntries.every(([key, value]) => Object.is(value, (right as Record<string, unknown>)[key]));
 };
 
-const createSelector = <Input, Output>(
+export const createSelector = <Input, Output>(
   read: WorkbenchSelector<Input>,
   build: (input: Input) => Output,
 ): WorkbenchSelector<Output> => {

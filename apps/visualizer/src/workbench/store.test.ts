@@ -3,7 +3,7 @@ import type { GraphVisualizerModel } from "@lite-fsm/graph/view-model";
 import { describe, expect, it, vi } from "vitest";
 import { createInitialWorkbenchSnapshot } from "./state";
 import { createWorkbenchStore } from "./store";
-import { selectConsolePanel, selectCurrentEmptyPanel, selectTabItems } from "./selectors";
+import { selectConsolePanel, selectCurrentEmptyPanel, selectTabItems, shallowEqualObject } from "./selectors";
 
 const documentFixture = { source: { filename: "sample.ts", language: "ts" }, diagnostics: [], machines: [], managers: [] } as unknown as LiteFsmGraphDocument;
 const modelFixture = { version: "lite-fsm.visualizer/v1", machines: [], managers: [], topics: [], diagnostics: [], workbenchMachines: {} } as unknown as GraphVisualizerModel;
@@ -56,6 +56,15 @@ describe("workbench store", () => {
     expect(secondTabs).toBe(firstTabs);
     expect(secondConsole).toBe(firstConsole);
     expect(selectCurrentEmptyPanel(store.getSnapshot())).toBe(selectCurrentEmptyPanel(store.getSnapshot()));
+  });
+
+  it("сравнивает selector inputs без stale совпадений при изменении формы объекта", () => {
+    expect(shallowEqualObject({ activeTab: "source" }, { activeTab: "source" })).toBe(true);
+    expect(shallowEqualObject("source", "source")).toBe(true);
+    expect(shallowEqualObject("source", "system")).toBe(false);
+    expect(shallowEqualObject(null, {})).toBe(false);
+    expect(shallowEqualObject({ activeTab: "source" }, { activeTab: "source", extra: true })).toBe(false);
+    expect(shallowEqualObject({ activeTab: "source" }, { activeTab: "system" })).toBe(false);
   });
 
   it("возвращает empty panel view для каждой вкладки", () => {

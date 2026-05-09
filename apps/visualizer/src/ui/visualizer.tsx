@@ -42,9 +42,9 @@ export const PanelKicker = ({ className, ...props }: ComponentProps<"p">) => (
 const statusToneClass = {
   ready: "border-[color:var(--vf-accent-border)] bg-[color:var(--vf-accent-soft)] text-[color:var(--vf-accent)]",
   muted: "border-border bg-muted text-muted-foreground",
-  actor: "border-[color:oklch(0.75_0.105_62/0.42)] bg-[color:oklch(0.75_0.105_62/0.1)] text-[color:var(--vf-actor)]",
+  actor: "border-[color:var(--vf-actor-border)] bg-[color:var(--vf-actor-soft)] text-[color:var(--vf-actor)]",
   routing: "border-[color:var(--vf-routing-border)] bg-[color:var(--vf-routing-soft)] text-[color:var(--vf-routing)]",
-  diagnostic: "border-[color:oklch(0.79_0.115_92/0.42)] bg-[color:var(--vf-warning-soft)] text-[color:var(--vf-warning)]",
+  diagnostic: "border-[color:var(--vf-warning-border)] bg-[color:var(--vf-warning-soft)] text-[color:var(--vf-warning)]",
 } as const;
 
 export type StatusBadgeTone = keyof typeof statusToneClass;
@@ -64,8 +64,8 @@ export const StatusBadge = ({
 const layerToneClass = {
   config: "border-[color:var(--vf-config-border)] bg-[color:var(--vf-config-soft)] text-[color:var(--vf-config)]",
   effect: "border-[color:var(--vf-effect-border)] bg-[color:var(--vf-effect-soft)] text-[color:var(--vf-effect)]",
-  simulation: "border-[color:oklch(0.79_0.115_92/0.42)] bg-[color:var(--vf-warning-soft)] text-[color:var(--vf-warning)]",
-  reducer: "border-[color:oklch(0.75_0.074_266/0.42)] bg-[color:oklch(0.75_0.074_266/0.1)] text-[color:var(--vf-reducer)]",
+  simulation: "border-[color:var(--vf-warning-border)] bg-[color:var(--vf-warning-soft)] text-[color:var(--vf-warning)]",
+  reducer: "border-[color:var(--vf-reducer-border)] bg-[color:var(--vf-reducer-soft)] text-[color:var(--vf-reducer)]",
 } as const;
 
 const layerLabel = {
@@ -102,7 +102,7 @@ export const GraphRow = ({ className, layer, event, target, meta, selected = fal
   <button
     type="button"
     className={cn(
-      "grid min-h-9 w-full grid-cols-[auto_minmax(0,1fr)_auto_minmax(0,0.8fr)_auto] items-center gap-2 border-t border-[color:var(--vf-border-soft)] px-2.5 py-2 text-left transition-colors first:border-t-0 hover:bg-[color:oklch(0.925_0.012_248/0.035)] focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+      "grid min-h-9 w-full grid-cols-[auto_minmax(0,1fr)_auto_minmax(0,0.8fr)_auto] items-center gap-2 border-t border-[color:var(--vf-border-soft)] px-2.5 py-2 text-left transition-colors first:border-t-0 hover:bg-[color:var(--vf-row-hover)] focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
       selected && "bg-[color:var(--vf-accent-soft)]",
       className,
     )}
@@ -122,13 +122,18 @@ export type SourceLine = {
   selected?: boolean;
 };
 
-export const SourceSnippet = ({ lines, className }: { lines: readonly SourceLine[]; className?: string }) => (
+export const SourceSnippet = ({
+  lines,
+  className,
+  ...props
+}: ComponentProps<"div"> & { lines: readonly SourceLine[] }) => (
   <div
     className={cn(
       "overflow-auto rounded-md border border-[color:var(--vf-border-soft)] bg-background py-2",
       className,
     )}
     aria-label="Representative source snippet"
+    {...props}
   >
     {lines.map((line) => (
       <div
@@ -148,15 +153,18 @@ export const SourceSnippet = ({ lines, className }: { lines: readonly SourceLine
 export const SourceEditorShell = ({
   label,
   value,
+  textareaTestId,
   children,
 }: {
   label: string;
   value: string;
+  textareaTestId?: string;
   children?: ReactNode;
 }) => (
   <div className="flex min-h-0 flex-col gap-2">
     <Textarea
       aria-label={label}
+      data-testid={textareaTestId}
       readOnly
       value={value}
       className="min-h-28 resize-none rounded-md bg-background font-mono text-[11px] leading-relaxed text-foreground shadow-none"
@@ -165,8 +173,14 @@ export const SourceEditorShell = ({
   </div>
 );
 
-export const DiagnosticsAlert = ({ children }: { children: ReactNode }) => (
-  <Alert className="border-[color:oklch(0.79_0.115_92/0.34)] bg-[color:var(--vf-warning-soft)] text-foreground">
+export const DiagnosticsAlert = ({ children, className, ...props }: ComponentProps<typeof Alert>) => (
+  <Alert
+    className={cn(
+      "border-[color:var(--vf-warning-border)] bg-[color:var(--vf-warning-soft)] text-foreground",
+      className,
+    )}
+    {...props}
+  >
     <AlertTitle className="font-mono text-[11px] text-[color:var(--vf-warning)]">analyzer</AlertTitle>
     <AlertDescription className="text-muted-foreground">{children}</AlertDescription>
   </Alert>

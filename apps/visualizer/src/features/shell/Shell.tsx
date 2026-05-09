@@ -28,6 +28,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { Separator } from "@/ui/separator";
 import { Tabs, TabsList, TabsTrigger } from "@/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/ui/tooltip";
+import { VISUALIZER_TEST_IDS } from "@/test-ids";
 import {
   DiagnosticsAlert,
   GraphRow,
@@ -83,9 +84,15 @@ export const Shell = () => {
   const consolePanel = useWorkbenchSelector(selectConsolePanel);
 
   return (
-    <main className="dark min-h-screen min-w-80 bg-background p-2 text-foreground sm:p-3.5">
+    <main
+      className="dark min-h-screen min-w-80 bg-background p-2 text-foreground sm:p-3.5"
+      data-testid={VISUALIZER_TEST_IDS.shell.root}
+    >
       <div className="grid min-h-[calc(100vh-16px)] grid-rows-[auto_auto_minmax(0,1fr)] gap-2.5 sm:min-h-[calc(100vh-28px)]">
-        <header className="flex min-h-12 flex-col gap-3 rounded-lg border bg-card px-2.5 py-2 sm:flex-row sm:items-center sm:justify-between">
+        <header
+          className="flex min-h-12 flex-col gap-3 rounded-lg border bg-card px-2.5 py-2 sm:flex-row sm:items-center sm:justify-between"
+          data-testid={VISUALIZER_TEST_IDS.shell.topbar}
+        >
           <div className="flex min-w-0 items-center gap-2.5">
             <span
               className="grid size-7 shrink-0 place-items-center rounded-md border border-[color:var(--vf-accent-border)] bg-[color:var(--vf-accent-soft)] font-mono text-[11px] font-bold text-primary"
@@ -101,17 +108,18 @@ export const Shell = () => {
 
           <div className="flex min-w-0 flex-wrap items-center gap-2 sm:justify-end">
             <StatusBadge tone="muted">
-              <FileCode className="size-3.5" aria-hidden="true" />
+              <FileCode data-icon="inline-start" aria-hidden="true" />
               sample.ts
             </StatusBadge>
             <StatusBadge tone="ready">
-              <Activity className="size-3.5" aria-hidden="true" />
+              <Activity data-icon="inline-start" aria-hidden="true" />
               shadcn ready
             </StatusBadge>
             <Button
               variant="outline"
               size="sm"
               aria-pressed={consolePanel.open}
+              data-testid={VISUALIZER_TEST_IDS.console.toggle}
               onClick={() => dispatch({ type: "panel.console.toggled" })}
             >
               <Terminal data-icon="inline-start" aria-hidden="true" />
@@ -125,16 +133,20 @@ export const Shell = () => {
           onValueChange={(value) => dispatch({ type: "tab.selected", tab: value as VisualizerTab })}
           className="min-w-0"
         >
-          <TabsList className="w-full max-w-full justify-start overflow-x-auto border bg-[color:var(--vf-surface-soft)]">
+          <TabsList
+            className="w-full max-w-full justify-start overflow-x-auto border bg-[color:var(--vf-surface-soft)]"
+            data-testid={VISUALIZER_TEST_IDS.tabs.root}
+          >
             {tabs.map((tab) => (
               <TabsTrigger
                 key={tab.tab}
                 value={tab.tab}
+                data-testid={VISUALIZER_TEST_IDS.tabs.trigger[tab.tab]}
                 className="min-w-fit px-3 data-active:bg-[color:var(--vf-surface-raised)]"
               >
                 <span>{tab.label}</span>
                 {tab.count ? (
-                  <span className="rounded-full bg-[color:oklch(0.925_0.012_248/0.08)] px-1.5 font-mono text-[10px] text-[color:var(--vf-text-quiet)]">
+                  <span className="rounded-full bg-[color:var(--vf-counter-surface)] px-1.5 font-mono text-[10px] text-[color:var(--vf-text-quiet)]">
                     {tab.count}
                   </span>
                 ) : null}
@@ -151,8 +163,9 @@ export const Shell = () => {
               : "lg:grid-cols-[minmax(280px,0.95fr)_minmax(340px,1.25fr)]",
           ].join(" ")}
           data-active-tab={activeTab}
+          data-testid={VISUALIZER_TEST_IDS.shell.workspace}
         >
-          <Panel aria-labelledby="source-fixture-title">
+          <Panel aria-labelledby="source-fixture-title" data-testid={VISUALIZER_TEST_IDS.source.panel}>
             <PanelHeader>
               <div className="min-w-0">
                 <PanelKicker>Source</PanelKicker>
@@ -165,6 +178,7 @@ export const Shell = () => {
                   <Search className="size-3.5 text-muted-foreground" aria-hidden="true" />
                   <Input
                     aria-label="Search source anchors"
+                    data-testid={VISUALIZER_TEST_IDS.source.search}
                     readOnly
                     value="AUTH_RESPONSE"
                     className="h-7 border-0 bg-transparent px-0 font-mono text-[11px] shadow-none dark:bg-transparent focus-visible:ring-0"
@@ -172,7 +186,7 @@ export const Shell = () => {
                 </div>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <IconButton aria-label="Reset source fixture">
+                    <IconButton aria-label="Reset source fixture" data-testid={VISUALIZER_TEST_IDS.source.reset}>
                       <RefreshCw aria-hidden="true" />
                     </IconButton>
                   </TooltipTrigger>
@@ -183,12 +197,16 @@ export const Shell = () => {
 
             <PaneScrollArea>
               <div className="flex min-h-full flex-col gap-3 p-3">
-                <SourceEditorShell label="Source draft fixture" value={SOURCE_FIXTURE}>
-                  <SourceSnippet lines={SOURCE_LINES} />
+                <SourceEditorShell
+                  label="Source draft fixture"
+                  value={SOURCE_FIXTURE}
+                  textareaTestId={VISUALIZER_TEST_IDS.source.editor}
+                >
+                  <SourceSnippet lines={SOURCE_LINES} data-testid={VISUALIZER_TEST_IDS.source.snippet} />
                 </SourceEditorShell>
                 <p className="max-w-[66ch] text-sm text-muted-foreground">{emptyPanel.body}</p>
                 <div className="flex flex-wrap items-center gap-2">
-                  <Button variant="secondary" size="sm">
+                  <Button variant="secondary" size="sm" data-testid={VISUALIZER_TEST_IDS.source.open}>
                     <FileText data-icon="inline-start" aria-hidden="true" />
                     Open visualizer
                   </Button>
@@ -198,7 +216,7 @@ export const Shell = () => {
             </PaneScrollArea>
           </Panel>
 
-          <Panel aria-labelledby="workbench-fixture-title">
+          <Panel aria-labelledby="workbench-fixture-title" data-testid={VISUALIZER_TEST_IDS.workbench.panel}>
             <PanelHeader>
               <div className="min-w-0">
                 <PanelKicker>{activeTab}</PanelKicker>
@@ -217,13 +235,18 @@ export const Shell = () => {
                     <Search className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
                     <Input
                       aria-label="Search event labels"
+                      data-testid={VISUALIZER_TEST_IDS.workbench.eventSearch}
                       readOnly
                       value={LONG_EVENT_LABEL}
                       className="h-8 min-w-0 border-0 bg-transparent px-0 font-mono text-[11px] shadow-none [overflow-wrap:anywhere] dark:bg-transparent focus-visible:ring-0"
                     />
                   </div>
                   <Select value="manual">
-                    <SelectTrigger aria-label="Select timeline source" className="w-full bg-background">
+                    <SelectTrigger
+                      aria-label="Select timeline source"
+                      className="w-full bg-background"
+                      data-testid={VISUALIZER_TEST_IDS.workbench.eventSourceSelect}
+                    >
                       <SelectValue placeholder="Event source" />
                     </SelectTrigger>
                     <SelectContent>
@@ -236,7 +259,11 @@ export const Shell = () => {
                   </Select>
                 </div>
 
-                <Card aria-label="Representative machine card" className="overflow-hidden rounded-lg border-[color:var(--vf-accent-border)] bg-[color:var(--vf-surface-soft)] py-0 shadow-none">
+                <Card
+                  aria-label="Representative machine card"
+                  className="overflow-hidden rounded-lg border-[color:var(--vf-accent-border)] bg-[color:var(--vf-surface-soft)] py-0 shadow-none"
+                  data-testid={VISUALIZER_TEST_IDS.workbench.machineCard}
+                >
                   <CardHeader className="flex flex-row items-center justify-between gap-3 border-b border-[color:var(--vf-border-soft)] px-3 py-3">
                     <div className="min-w-0">
                       <p className="font-mono text-[10px] font-bold uppercase text-[color:var(--vf-text-quiet)]">trackInstance</p>
@@ -244,7 +271,10 @@ export const Shell = () => {
                     </div>
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <IconButton aria-label="View source for trackInstance">
+                        <IconButton
+                          aria-label="View source for trackInstance"
+                          data-testid={VISUALIZER_TEST_IDS.workbench.sourceAction}
+                        >
                           <FileText aria-hidden="true" />
                         </IconButton>
                       </TooltipTrigger>
@@ -256,6 +286,7 @@ export const Shell = () => {
                     <section
                       className="overflow-hidden rounded-md border border-[color:var(--vf-accent-border)] bg-[color:var(--vf-accent-soft)]"
                       aria-label="Current state rows"
+                      data-testid={VISUALIZER_TEST_IDS.workbench.currentState}
                     >
                       <div className="flex min-w-0 flex-wrap items-center gap-2 border-b border-[color:var(--vf-border-soft)] px-2.5 py-2 font-mono">
                         <span className="size-2 shrink-0 rounded-full bg-primary" aria-hidden="true" />
@@ -273,12 +304,16 @@ export const Shell = () => {
                             target={row.target}
                             meta={row.meta}
                             selected={row.layer === "simulation"}
+                            data-testid={VISUALIZER_TEST_IDS.workbench.row[row.layer]}
                           />
                         ))}
                       </div>
                     </section>
 
-                    <div className="flex items-start gap-2 rounded-md border border-[color:var(--vf-border-soft)] bg-background p-2 font-mono text-[11px] text-muted-foreground">
+                    <div
+                      className="flex items-start gap-2 rounded-md border border-[color:var(--vf-border-soft)] bg-background p-2 font-mono text-[11px] text-muted-foreground"
+                      data-testid={VISUALIZER_TEST_IDS.workbench.longLabel}
+                    >
                       <Braces className="mt-0.5 size-3.5 shrink-0 text-primary" aria-hidden="true" />
                       <span className="min-w-0 [overflow-wrap:anywhere]">{LONG_EVENT_LABEL}</span>
                     </div>
@@ -300,6 +335,7 @@ export const Shell = () => {
             role="region"
             aria-label="Visualizer console"
             className={consolePanel.open ? "" : "hidden"}
+            data-testid={VISUALIZER_TEST_IDS.console.panel}
           >
             <PanelHeader className="justify-between">
               <div className="min-w-0">
@@ -310,6 +346,7 @@ export const Shell = () => {
                 type="button"
                 variant="outline"
                 size="sm"
+                data-testid={VISUALIZER_TEST_IDS.console.close}
                 onClick={() => dispatch({ type: "panel.console.toggled", open: false })}
               >
                 <X data-icon="inline-start" aria-hidden="true" />
@@ -320,9 +357,18 @@ export const Shell = () => {
             <PanelBody className="flex flex-col">
               <ScrollArea className="min-h-0 flex-1">
                 {consolePanel.entries.length === 0 ? (
-                  <div className="flex flex-col gap-2 p-3" aria-label="Representative console entries">
-                    <DiagnosticsAlert>Reducer branch is visible as a diagnostic badge.</DiagnosticsAlert>
-                    <Alert className="border-[color:var(--vf-accent-border)] bg-[color:var(--vf-accent-soft)]">
+                  <div
+                    className="flex flex-col gap-2 p-3"
+                    aria-label="Representative console entries"
+                    data-testid={VISUALIZER_TEST_IDS.console.entries}
+                  >
+                    <DiagnosticsAlert data-testid={VISUALIZER_TEST_IDS.console.analyzerAlert}>
+                      Reducer branch is visible as a diagnostic badge.
+                    </DiagnosticsAlert>
+                    <Alert
+                      className="border-[color:var(--vf-accent-border)] bg-[color:var(--vf-accent-soft)]"
+                      data-testid={VISUALIZER_TEST_IDS.console.simulatorAlert}
+                    >
                       <Radio className="size-4 text-primary" aria-hidden="true" />
                       <AlertTitle className="font-mono text-[11px] text-primary">simulator</AlertTitle>
                       <AlertDescription>Manual cascade waits for an explicit row click.</AlertDescription>
@@ -341,10 +387,19 @@ export const Shell = () => {
 
               <Separator />
 
-              <div className="m-3 overflow-hidden rounded-md border bg-[color:var(--vf-surface-soft)]" aria-label="Representative timeline">
+              <div
+                className="m-3 overflow-hidden rounded-md border bg-[color:var(--vf-surface-soft)]"
+                aria-label="Representative timeline"
+                data-testid={VISUALIZER_TEST_IDS.console.timeline}
+              >
                 <div className="flex items-center justify-between gap-2 border-b px-2.5 py-2 font-mono text-[11px] text-muted-foreground">
                   <span>Event timeline</span>
-                  <Button type="button" variant="secondary" size="sm">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    data-testid={VISUALIZER_TEST_IDS.console.timelineSend}
+                  >
                     <Send data-icon="inline-start" aria-hidden="true" />
                     send
                   </Button>
@@ -352,6 +407,7 @@ export const Shell = () => {
                 <button
                   className="grid min-h-10 w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 px-2.5 py-2 text-left hover:bg-[color:var(--vf-accent-soft)] focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                   type="button"
+                  data-testid={VISUALIZER_TEST_IDS.console.timelineStep}
                 >
                   <span className="font-mono text-[10px] font-bold uppercase text-[color:var(--vf-text-quiet)]">#1</span>
                   <span className="min-w-0 font-mono text-[11px] text-foreground [overflow-wrap:anywhere]">TRACK_LOAD</span>

@@ -45,25 +45,47 @@ diagnostics и source anchors. Интерфейс не является ленд
 
 | Token | Value | Use |
 | --- | --- | --- |
-| `--vf-bg` | `oklch(0.145 0.018 248)` | App background |
-| `--vf-surface` | `oklch(0.19 0.019 248)` | Panels and cards |
-| `--vf-surface-raised` | `oklch(0.235 0.021 248)` | Headers, active tabs |
-| `--vf-surface-soft` | `oklch(0.165 0.017 248)` | Inputs, nested list surfaces |
-| `--vf-border` | `oklch(0.335 0.026 248)` | Primary borders |
-| `--vf-border-soft` | `oklch(0.285 0.022 248)` | Row separators |
-| `--vf-text` | `oklch(0.925 0.012 248)` | Primary text |
-| `--vf-text-muted` | `oklch(0.68 0.027 248)` | Secondary labels |
-| `--vf-text-quiet` | `oklch(0.53 0.03 248)` | Counters, inactive text |
+| `--vf-bg` | `oklch(0.142 0.017 248)` | App background |
+| `--vf-bg-elevated` | `oklch(0.165 0.019 248)` | Reserved elevated app surface |
+| `--vf-surface` | `oklch(0.19 0.021 248)` | Panels and cards |
+| `--vf-surface-raised` | `oklch(0.235 0.025 248)` | Headers, active tabs |
+| `--vf-surface-soft` | `oklch(0.172 0.019 248)` | Inputs, nested list surfaces |
+| `--vf-surface-hot` | `oklch(0.265 0.03 248)` | shadcn accent hover surface |
+| `--vf-border` | `oklch(0.335 0.028 248)` | Primary borders |
+| `--vf-border-soft` | `oklch(0.285 0.023 248)` | Row separators |
+| `--vf-text` | `oklch(0.925 0.013 248)` | Primary text |
+| `--vf-text-muted` | `oklch(0.69 0.028 248)` | Secondary labels |
+| `--vf-text-quiet` | `oklch(0.54 0.031 248)` | Counters, inactive text |
 | `--vf-accent` | `oklch(0.79 0.105 185)` | Current selection, focus, ready state |
-| `--vf-accent-soft` | `oklch(0.79 0.105 185 / 0.13)` | Selected backgrounds |
-| `--vf-config` | `oklch(0.78 0.12 73)` | Config rows and counts |
-| `--vf-reducer` | `oklch(0.74 0.072 266)` | Reducer/self targets |
-| `--vf-effect` | `oklch(0.76 0.105 150)` | Effect rows and producers |
-| `--vf-routing` | `oklch(0.75 0.095 310)` | Routing badges |
-| `--vf-warning` | `oklch(0.78 0.115 92)` | Manual timeline source, warnings |
-| `--vf-danger` | `oklch(0.7 0.13 30)` | Errors, failed diagnostics |
-| `--vf-domain` | `oklch(0.73 0.105 235)` | Domain machine badges |
-| `--vf-actor` | `oklch(0.74 0.105 62)` | Actor machine badges |
+| `--vf-accent-strong` | `oklch(0.84 0.12 185)` | Strong focus/active accent when needed |
+| `--vf-accent-soft` | `oklch(0.79 0.105 185 / 0.14)` | Selected backgrounds |
+| `--vf-accent-border` | `oklch(0.79 0.105 185 / 0.42)` | Selected borders and ready badges |
+| `--vf-counter-surface` | `oklch(0.925 0.013 248 / 0.08)` | Compact counters inside tabs |
+| `--vf-row-hover` | `oklch(0.925 0.013 248 / 0.035)` | Dense row hover |
+| `--vf-config` | `oklch(0.8 0.12 73)` | Config rows and counts |
+| `--vf-config-soft` | `oklch(0.8 0.12 73 / 0.12)` | Config badge fill |
+| `--vf-config-border` | `oklch(0.8 0.12 73 / 0.42)` | Config badge border |
+| `--vf-reducer` | `oklch(0.75 0.074 266)` | Reducer/self targets |
+| `--vf-reducer-soft` | `oklch(0.75 0.074 266 / 0.1)` | Reducer badge fill |
+| `--vf-reducer-border` | `oklch(0.75 0.074 266 / 0.42)` | Reducer badge border |
+| `--vf-effect` | `oklch(0.77 0.105 150)` | Effect rows and producers |
+| `--vf-effect-soft` | `oklch(0.77 0.105 150 / 0.12)` | Effect badge fill |
+| `--vf-effect-border` | `oklch(0.77 0.105 150 / 0.42)` | Effect badge border |
+| `--vf-routing` | `oklch(0.76 0.098 310)` | Routing badges |
+| `--vf-routing-soft` | `oklch(0.76 0.098 310 / 0.12)` | Routing badge fill |
+| `--vf-routing-border` | `oklch(0.76 0.098 310 / 0.42)` | Routing badge border |
+| `--vf-warning` | `oklch(0.79 0.115 92)` | Manual timeline source, warnings |
+| `--vf-warning-soft` | `oklch(0.79 0.115 92 / 0.13)` | Warning/diagnostic fill |
+| `--vf-warning-border` | `oklch(0.79 0.115 92 / 0.42)` | Warning/diagnostic border |
+| `--vf-danger` | `oklch(0.71 0.13 30)` | Errors, failed diagnostics |
+| `--vf-danger-soft` | `oklch(0.71 0.13 30 / 0.11)` | Error fill |
+| `--vf-danger-border` | `oklch(0.71 0.13 30 / 0.42)` | Error border |
+| `--vf-domain` | `oklch(0.74 0.105 235)` | Domain machine badges |
+| `--vf-domain-soft` | `oklch(0.74 0.105 235 / 0.1)` | Domain badge fill |
+| `--vf-domain-border` | `oklch(0.74 0.105 235 / 0.42)` | Domain badge border |
+| `--vf-actor` | `oklch(0.75 0.105 62)` | Actor machine badges |
+| `--vf-actor-soft` | `oklch(0.75 0.105 62 / 0.1)` | Actor badge fill |
+| `--vf-actor-border` | `oklch(0.75 0.105 62 / 0.42)` | Actor badge border |
 
 ### Typography
 
@@ -159,6 +181,16 @@ Custom graph grammar that remains outside shadcn:
 - Event/state/routing rows with stable columns and long-label wrapping.
 - Source snippets with line numbers and selected source anchors.
 - Timeline rows, relation chips and source-overlay fragments in later stages.
+
+Testing hooks:
+
+- Stable `data-testid` values live in `src/test-ids.ts`.
+- Test ids are reserved for app shell anchors, tabs, primary controls, panels,
+  representative rows, console entries and timeline controls.
+- Accessibility names and roles remain the first user-facing contract. Test ids
+  are a stable e2e convenience for text that may change during later stages.
+- Do not derive test ids from display labels. Use domain ids (`machineId`,
+  `eventType`, `rowId`, `diagnosticId`, `stepId`) for future data-driven lists.
 
 ### App Shell
 
