@@ -29,6 +29,16 @@
         "types": "./dist/simulator/index.d.cts",
         "default": "./dist/simulator/index.cjs"
       }
+    },
+    "./view-model": {
+      "import": {
+        "types": "./dist/view-model/index.d.ts",
+        "default": "./dist/view-model/index.js"
+      },
+      "require": {
+        "types": "./dist/view-model/index.d.cts",
+        "default": "./dist/view-model/index.cjs"
+      }
     }
   },
   "files": [

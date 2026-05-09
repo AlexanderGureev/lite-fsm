@@ -12,6 +12,8 @@
 | `@lite-fsm/persist/react` | runtime hooks only: `usePersistStatus`, `useIsPersistRestoring`                                                                                                                                                                                                    |
 | `@lite-fsm/middleware`    | только runtime middleware                                                                                                                                                                                                                                          |
 | `@lite-fsm/graph`         | experimental graph compiler/analyzer IR-типы                                                                                                                                                                                                                       |
+| `@lite-fsm/graph/simulator` | experimental simulator-типы: snapshots, slices, timeline, choices, available transitions, suggested emissions                                                                                                                                                     |
+| `@lite-fsm/graph/view-model` | experimental visualizer projection-типы: summaries, topics, workbench rows, anchors, row mappings, overlay inputs                                                                                                                                                |
 |                           |
 
 ## Generics
@@ -381,6 +383,25 @@ const snapshot: GraphSimulationSnapshot | undefined = createGraphSimulator(docum
 | `GraphEvaluationPolicy`           | optional symbolic hooks `evaluateTransition` и `reduceContext`; default policy не исполняет user code                      |
 
 `sendFromTransition` принимает `payload`, но не принимает routing `meta`: routing override задается только через обычный `send({ event })` или через IR routing у `sendFromEmission`.
+
+## Experimental graph view-model types
+
+`@lite-fsm/graph/view-model` типизирует read-only данные для visualizer-а. Эти типы не содержат React, DOM, CodeMirror, layout или simulator runtime lifecycle.
+
+| Тип                                          | Назначение                                                                                         |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `GraphVisualizerModel`                       | root projection: machines, managers, topics, relations, diagnostics, row mappings, workbench models |
+| `GraphMachineSummary` / `GraphManagerSummary` | L1 inventory summaries с counts, topic types, source anchors и diagnostic ids                       |
+| `GraphTopicSummary`                          | L2 event catalog: producers, config consumers, reducer branches, routing kinds/values                |
+| `GraphMachineWorkbenchModel`                 | L3 state blocks, global behavior, rows, diagnostics и source anchors одной machine                   |
+| `GraphWorkbenchRow`                          | union строк `config`, `reducer`, `effect`, `diagnostic`, `unknown`                                  |
+| `GraphTargetView`                            | display-safe target: `state`, `self`, `terminal`, `dynamic`, `blocked`, `unknown`                    |
+| `GraphSourceAnchor`                          | read-only source binding; `editable` всегда `false`                                                 |
+| `GraphDiagnosticAnchor`                      | build-local diagnostic id + origin + optional graph/source binding                                   |
+| `GraphVisualizerRowMappingIndex`             | mapping transition/emission identifiers к `rowId`, включая folded reducer rows                       |
+| `GraphVisualizerSimulationOverlayInput`      | готовые simulation ids/flags для подсветки rows без запуска simulator-а                              |
+
+`GraphConfigRow.foldedReducerTransitionIds` показывает reducer branches, свернутые в config row. Для команд visualizer app использует `GraphConfigRow.transitionId` или `GraphReducerRow.transitionId`; ambiguous/no-match mapping виден через `GraphVisualizerRowMappingIndex.diagnostics`.
 
 ## Middleware
 

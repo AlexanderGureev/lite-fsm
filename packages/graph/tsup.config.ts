@@ -5,6 +5,7 @@ export default defineConfig({
   entry: {
     index: "src/index.ts",
     "simulator/index": "src/simulator/index.ts",
+    "view-model/index": "src/view-model/index.ts",
   },
   format: ["esm", "cjs"],
   outDir: "dist",

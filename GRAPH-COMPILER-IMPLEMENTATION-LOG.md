@@ -7,9 +7,9 @@
 | Поле             | Значение                                                                                                                                                                                                                                                                                                          |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Дата             | 2026-05-09                                                                                                                                                                                                                                                                                                        |
-| Готово           | Этапы 0-9 IR/API/harness, Source Catalog/Candidates, Partial Evaluator, ConfigGraphCompiler, ManagerLinker/select API, ReducerCompiler, EffectsCompiler, GraphAssembler, общий `compiler/ast.ts`, Semantic Analyzer, Simulator                                                                                    |
+| Готово           | Этапы 0-9 IR/API/harness, Source Catalog/Candidates, Partial Evaluator, ConfigGraphCompiler, ManagerLinker/select API, ReducerCompiler, EffectsCompiler, GraphAssembler, общий `compiler/ast.ts`, Semantic Analyzer, Simulator, этап 11 view-model projection |
 | Package          | `@lite-fsm/graph`, private/experimental                                                                                                                                                                                                                                                                           |
-| Public API       | `compileLiteFsmGraph(source, options?)`, `selectMachineGraph(document, selector?)`, `analyzeLiteFsmGraph(document, options?)`, `@lite-fsm/graph/simulator` + IR/analyzer/simulator-типы                                                                                                                           |
+| Public API       | `compileLiteFsmGraph(source, options?)`, `selectMachineGraph(document, selector?)`, `analyzeLiteFsmGraph(document, options?)`, `@lite-fsm/graph/simulator`, `@lite-fsm/graph/view-model` + IR/analyzer/simulator/view-model-типы |
 | Текущий output   | `LiteFsmGraphDocument`: source metadata, compiler diagnostics, machines, linked managers, config states/transitions, reducer cases/transitions, effect emissions, machine facts и `initialContextJson`; `GraphAnalysisResult`: analyzer diagnostics; `GraphSimulationSnapshot`: slices/timeline/choices/emissions |
 | Еще не строится  | CLI/UI                                                                                                                                                                                                                                                                                                            |
 | Fixture contract | `tests/graph/fixtures/graph-sources.ts`: 28 machine candidates, 3 manager candidates, полный assembler snapshot                                                                                                                                                                                                   |
@@ -43,6 +43,9 @@
 - `@lite-fsm/graph/simulator` добавлен как отдельный subpath export; root `@lite-fsm/graph` не реэкспортирует simulator runtime, но экспортирует общие `GraphJsonValue`/`GraphJsonObject` IR-типы.
 - Simulator реализован как headless symbolic runtime с document/manager/machines scope, deterministic domain/actorTemplate slices, immutable snapshot, timeline graph, manual effect emissions, object events with payload/meta, branch/evaluation policies и controlled `LFG_SIM_*` diagnostics.
 - Dispatch идет через общий bus: selected/routed consumers commit-ятся атомарно, reducer branches уточняют только accepted config edges, state-specific acceptance приоритетнее wildcard, external empty-consumption dispatch считается successful step.
+- `@lite-fsm/graph/view-model` добавлен как отдельный subpath export; root `@lite-fsm/graph` не реэкспортирует view-model.
+- View-model строит read-only visualizer projection: machine/manager summaries, event topic catalog, relation index, workbench rows, source/diagnostic anchors, simulation overlay flags и canonical row mappings.
+- Folded reducer branches, которые не добавляют информации к config edge, представлены через `GraphConfigRow.foldedReducerTransitionIds`; mapping simulator refs к `rowId` централизован в `GraphVisualizerRowMappingIndex`.
 
 ## Проверки
 
@@ -58,4 +61,4 @@ Root/docs build не запускался.
 
 ## Следующий этап
 
-Этап 11.
+Этап 12.

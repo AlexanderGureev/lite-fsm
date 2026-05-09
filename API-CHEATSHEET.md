@@ -14,6 +14,7 @@
 | `@lite-fsm/react`                                              | `FSMContext`, `FSMContextProvider`, `FSMHydrationBoundary`, `useHydrateSnapshot`, `useManager`, `useSelector`, `useTransition`, `defineMachine`   |
 | `@lite-fsm/graph`                                              | experimental: `compileLiteFsmGraph`, `selectMachineGraph`, `analyzeLiteFsmGraph` и IR-типы для graph tooling                                      |
 | `@lite-fsm/graph/simulator`                                    | experimental: `createGraphSimulator`, `createMachineGraphSimulator` для headless symbolic simulation поверх graph IR                               |
+| `@lite-fsm/graph/view-model`                                   | experimental: `buildGraphVisualizerModel`, `buildMachineWorkbenchModel` для read-only visualizer projection поверх graph IR                        |
 |                                                                |
 
 `@lite-fsm/react` помечен `"use client"`. Импортировать можно из SSR/RSC, hooks/provider — только в client tree.
@@ -68,6 +69,26 @@ const sent = simulator.send({ event: { type: "SUBMIT", payload: { id: 1 } } });
 | `GraphSimulationSnapshot.timeline`   | immutable timeline graph: `stepsById`, `childrenByStepId`, `linearStepIds` для будущего time travel |
 
 Simulator не исполняет user reducer/effect/guard code. Context берется из `initialContextJson`, initial overrides или summary/unknown fallback; `GraphValueSummary.text` не парсится.
+
+## Experimental graph view-model
+
+`@lite-fsm/graph/view-model` строит синхронную read-only projection поверх `LiteFsmGraphDocument` для будущего visualizer-а. Root import `@lite-fsm/graph` view-model не реэкспортирует.
+
+```ts
+const model = buildGraphVisualizerModel(document, {
+  analysisDiagnostics: analyzeLiteFsmGraph(document).diagnostics,
+});
+```
+
+| API                                  | Назначение                                                                                                   |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| `buildGraphVisualizerModel(doc,?)`   | строит L1/L2/L3 projection: machines, managers, topics, relation index, diagnostics, workbench rows          |
+| `buildMachineWorkbenchModel(m, ?)`   | isolated helper для workbench preview/unit tests одной machine                                               |
+| `GraphVisualizerModel.topics`        | каталог event topics с producers, consumers, reducer branches и routing summary                              |
+| `GraphVisualizerModel.rowMappings`   | canonical mapping simulator row refs / transition-emission ids к workbench `rowId` с diagnostics ambiguity   |
+| `GraphMachineWorkbenchModel.states`  | state blocks и строки `config` / `reducer` / `effect` / `diagnostic` без JSX, DOM, simulator runtime или UI state |
+
+View-model не запускает simulator и не исполняет пользовательский код. Simulation overlay принимает только готовые ids/flags (`currentStateIds*`, `availableTransitionIds*`, `suggestedEmissionIds*`, `firedRefs`, `inspectedRefs`) и проставляет display flags на rows.
 
 ## Mental model
 
