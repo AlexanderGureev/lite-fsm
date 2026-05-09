@@ -24,6 +24,16 @@ export type LiteFsmGraphResult = {
   diagnostics: GraphDiagnostic[];
 };
 
+export type GraphJsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | GraphJsonValue[]
+  | { [key: string]: GraphJsonValue };
+
+export type GraphJsonObject = { [key: string]: GraphJsonValue };
+
 export type GraphAnalysisRuleId =
   | "unknown-target"
   | "unreachable-state"
@@ -68,6 +78,7 @@ export type LiteFsmGraphMachine = {
   kind: "domain" | "actorTemplate" | "unknown";
   initialState?: string;
   initialContextSummary?: GraphValueSummary;
+  initialContextJson?: GraphJsonObject;
   groupTag?: string;
   persistence?: "runtime" | "snapshot" | "unknown";
   states: GraphState[];

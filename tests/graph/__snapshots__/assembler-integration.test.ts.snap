@@ -66,6 +66,7 @@ exports[`GraphAssembler интеграция этапа 7 > сохраняет s
       "groupTag": undefined,
       "id": "directObjectMachine",
       "index": 0,
+      "initialContextJson": {},
       "initialContextSummary": {
         "kind": "empty",
         "text": "{}",
@@ -252,6 +253,7 @@ exports[`GraphAssembler интеграция этапа 7 > сохраняет s
       "groupTag": undefined,
       "id": "renamedImportMachine",
       "index": 1,
+      "initialContextJson": {},
       "initialContextSummary": {
         "kind": "empty",
         "text": "{}",
@@ -388,6 +390,7 @@ exports[`GraphAssembler интеграция этапа 7 > сохраняет s
       "groupTag": undefined,
       "id": "localConstConfigMachine",
       "index": 2,
+      "initialContextJson": {},
       "initialContextSummary": {
         "kind": "empty",
         "text": "{}",
@@ -686,6 +689,9 @@ exports[`GraphAssembler интеграция этапа 7 > сохраняет s
       "groupTag": undefined,
       "id": "helperWrappedMachine",
       "index": 3,
+      "initialContextJson": {
+        "completed": false,
+      },
       "initialContextSummary": {
         "kind": "object",
         "text": "{
@@ -1088,6 +1094,7 @@ exports[`GraphAssembler интеграция этапа 7 > сохраняет s
       "groupTag": undefined,
       "id": "computedKeysMachine",
       "index": 4,
+      "initialContextJson": {},
       "initialContextSummary": {
         "kind": "empty",
         "text": "{}",
@@ -1224,6 +1231,7 @@ exports[`GraphAssembler интеграция этапа 7 > сохраняет s
       "groupTag": undefined,
       "id": "satisfiesMachine",
       "index": 5,
+      "initialContextJson": {},
       "initialContextSummary": {
         "kind": "empty",
         "text": "{}",
@@ -1460,6 +1468,7 @@ exports[`GraphAssembler интеграция этапа 7 > сохраняет s
       "groupTag": undefined,
       "id": "wildcardMachine",
       "index": 6,
+      "initialContextJson": {},
       "initialContextSummary": {
         "kind": "empty",
         "text": "{}",
@@ -1693,6 +1702,9 @@ exports[`GraphAssembler интеграция этапа 7 > сохраняет s
       "groupTag": undefined,
       "id": "switchReducerMachine",
       "index": 7,
+      "initialContextJson": {
+        "value": "",
+      },
       "initialContextSummary": {
         "kind": "object",
         "text": "{ value: "" }",
@@ -2082,6 +2094,7 @@ exports[`GraphAssembler интеграция этапа 7 > сохраняет s
       "groupTag": undefined,
       "id": "ifReducerMachine",
       "index": 8,
+      "initialContextJson": {},
       "initialContextSummary": {
         "kind": "empty",
         "text": "{}",
@@ -2510,6 +2523,7 @@ exports[`GraphAssembler интеграция этапа 7 > сохраняет s
       "groupTag": undefined,
       "id": "chainedIfReducerMachine",
       "index": 9,
+      "initialContextJson": {},
       "initialContextSummary": {
         "kind": "empty",
         "text": "{}",
@@ -3048,6 +3062,9 @@ exports[`GraphAssembler интеграция этапа 7 > сохраняет s
       "groupTag": undefined,
       "id": "returnObjectReducerMachine",
       "index": 10,
+      "initialContextJson": {
+        "count": 0,
+      },
       "initialContextSummary": {
         "kind": "object",
         "text": "{ count: 0 }",
@@ -3306,6 +3323,7 @@ exports[`GraphAssembler интеграция этапа 7 > сохраняет s
       "groupTag": undefined,
       "id": "plainEffectsMachine",
       "index": 11,
+      "initialContextJson": {},
       "initialContextSummary": {
         "kind": "empty",
         "text": "{}",
@@ -3573,6 +3591,7 @@ exports[`GraphAssembler интеграция этапа 7 > сохраняет s
       "groupTag": undefined,
       "id": "createEffectMachine",
       "index": 12,
+      "initialContextJson": {},
       "initialContextSummary": {
         "kind": "empty",
         "text": "{}",
@@ -3790,6 +3809,7 @@ exports[`GraphAssembler интеграция этапа 7 > сохраняет s
       "groupTag": undefined,
       "id": "renamedCreateEffectMachine",
       "index": 13,
+      "initialContextJson": {},
       "initialContextSummary": {
         "kind": "empty",
         "text": "{}",
@@ -4126,6 +4146,7 @@ exports[`GraphAssembler интеграция этапа 7 > сохраняет s
       "groupTag": undefined,
       "id": "localEffectsMachine",
       "index": 14,
+      "initialContextJson": {},
       "initialContextSummary": {
         "kind": "empty",
         "text": "{}",
@@ -4510,6 +4531,7 @@ exports[`GraphAssembler интеграция этапа 7 > сохраняет s
       "groupTag": undefined,
       "id": "localEffectsObjectMachine",
       "index": 15,
+      "initialContextJson": {},
       "initialContextSummary": {
         "kind": "empty",
         "text": "{}",
@@ -4836,6 +4858,7 @@ exports[`GraphAssembler интеграция этапа 7 > сохраняет s
       "groupTag": undefined,
       "id": "ifEffectMachine",
       "index": 16,
+      "initialContextJson": {},
       "initialContextSummary": {
         "kind": "empty",
         "text": "{}",
@@ -5208,6 +5231,7 @@ exports[`GraphAssembler интеграция этапа 7 > сохраняет s
       "groupTag": undefined,
       "id": "switchEffectMachine",
       "index": 17,
+      "initialContextJson": {},
       "initialContextSummary": {
         "kind": "empty",
         "text": "{}",
@@ -5528,6 +5552,7 @@ exports[`GraphAssembler интеграция этапа 7 > сохраняет s
       "groupTag": undefined,
       "id": "wildcardEffectMachine",
       "index": 18,
+      "initialContextJson": {},
       "initialContextSummary": {
         "kind": "empty",
         "text": "{}",
@@ -5797,6 +5822,7 @@ exports[`GraphAssembler интеграция этапа 7 > сохраняет s
       "groupTag": undefined,
       "id": "computedWildcardCreateEffectMachine",
       "index": 19,
+      "initialContextJson": {},
       "initialContextSummary": {
         "kind": "empty",
         "text": "{}",
@@ -6202,6 +6228,7 @@ exports[`GraphAssembler интеграция этапа 7 > сохраняет s
       "groupTag": undefined,
       "id": "domainWithMetaTransitionMachine",
       "index": 20,
+      "initialContextJson": {},
       "initialContextSummary": {
         "kind": "empty",
         "text": "{}",
@@ -6772,6 +6799,10 @@ exports[`GraphAssembler интеграция этапа 7 > сохраняет s
       "groupTag": "jobs",
       "id": "actorTemplate",
       "index": 21,
+      "initialContextJson": {
+        "id": "",
+        "progress": 0,
+      },
       "initialContextSummary": {
         "kind": "object",
         "text": "{
@@ -7687,6 +7718,9 @@ exports[`GraphAssembler интеграция этапа 7 > сохраняет s
       "groupTag": "actorWildcard",
       "id": "actorWildcardEffectTemplate",
       "index": 22,
+      "initialContextJson": {
+        "taskId": "",
+      },
       "initialContextSummary": {
         "kind": "object",
         "text": "{
@@ -8292,6 +8326,7 @@ exports[`GraphAssembler интеграция этапа 7 > сохраняет s
       "groupTag": undefined,
       "id": "inlineCreated",
       "index": 23,
+      "initialContextJson": {},
       "initialContextSummary": {
         "kind": "empty",
         "text": "{}",
@@ -8428,6 +8463,7 @@ exports[`GraphAssembler интеграция этапа 7 > сохраняет s
       "groupTag": undefined,
       "id": "default",
       "index": 24,
+      "initialContextJson": {},
       "initialContextSummary": {
         "kind": "empty",
         "text": "{}",
@@ -8581,6 +8617,7 @@ exports[`GraphAssembler интеграция этапа 7 > сохраняет s
       "groupTag": undefined,
       "id": "unresolvedConfigMachine",
       "index": 25,
+      "initialContextJson": {},
       "initialContextSummary": {
         "kind": "empty",
         "text": "{}",
@@ -8632,6 +8669,7 @@ exports[`GraphAssembler интеграция этапа 7 > сохраняет s
       "groupTag": undefined,
       "id": "dynamicTargetMachine",
       "index": 26,
+      "initialContextJson": {},
       "initialContextSummary": {
         "kind": "empty",
         "text": "{}",
@@ -8735,6 +8773,7 @@ exports[`GraphAssembler интеграция этапа 7 > сохраняет s
       "groupTag": undefined,
       "id": "escapedTransitionMachine",
       "index": 27,
+      "initialContextJson": {},
       "initialContextSummary": {
         "kind": "empty",
         "text": "{}",

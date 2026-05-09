@@ -11,6 +11,8 @@ export type {
   GraphDiagnostic,
   GraphEmission,
   GraphEventRef,
+  GraphJsonObject,
+  GraphJsonValue,
   GraphReducerCase,
   GraphRouting,
   GraphRoutingTarget,

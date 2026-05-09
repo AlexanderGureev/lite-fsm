@@ -141,6 +141,295 @@ diagnostics и source anchors строились из одной версии IR
 10. Dispatch или вычисление `available now`; это responsibility simulator-а и
     app adapter-а.
 
+### Архитектура и границы `view-model`
+
+`@lite-fsm/graph/view-model` - синхронный, чистый, UI-agnostic projection
+layer. Он принимает уже готовые IR, diagnostics и simulation facts, строит
+read-only данные для отображения и не владеет lifecycle приложения.
+
+Pipeline этапа 11:
+
+```txt
+LiteFsmGraphDocument
+  + analysisDiagnostics?
+  + simulation overlay facts?
+  -> normalize projection input
+  -> build document indexes
+  -> build source anchor map
+  -> normalize diagnostic anchors
+  -> build machine/manager summaries
+  -> build topic catalog and relation index
+  -> build machine workbench models
+  -> apply simulation overlay flags
+  -> finalize deterministic sorting
+  -> GraphVisualizerModel
+```
+
+Внутренний pipeline должен быть линейным: каждый шаг принимает immutable input
+и возвращает новый projection fragment или index. Шаг не должен читать React/UI
+state, запускать simulator, парсить source или мутировать `LiteFsmGraphDocument`.
+
+Границы ответственности:
+
+1. Compiler владеет AST parsing, IR, `SourceLocation`, `initialContextJson` и
+   compiler diagnostics.
+2. Analyzer владеет semantic diagnostics поверх IR.
+3. Simulator владеет scope, slices, current state, available transitions,
+   suggested emissions, branch policy, dispatch, routing, timeline и pending
+   choice.
+4. View-model владеет labels, stable projection refs, row ids, source anchors,
+   diagnostic anchors, summaries, relation indexes, workbench rows,
+   capabilities и overlay flags из готовых facts.
+5. App этапа 12 владеет sourceVersion, async clients, active tab, selection,
+   hover, filters/search, opened overlays, selected machines, row-to-slice
+   command adapter, manual simulation session и UI diagnostics.
+6. Renderer/layout adapter владеет DOM, canvas, coordinates, edge paths,
+   viewport, user layout preferences и concrete component props.
+7. Future codegen/edit layer владеет draft model, source patches, diff preview
+   и explicit apply; он не мутирует IR и не добавляет editing lifecycle в
+   `view-model`.
+
+Рекомендуемая внутренняя структура кода:
+
+```txt
+src/view-model/index.ts             public subpath exports only
+src/view-model/types.ts             public projection types
+src/view-model/build-model.ts       top-level orchestration only
+src/view-model/indexes.ts           machine/state/transition/emission indexes
+src/view-model/summaries.ts         machine and manager summaries
+src/view-model/topics.ts            event catalog, producers, consumers, routing values
+src/view-model/workbench.ts         state blocks and rows
+src/view-model/diagnostics.ts       diagnostic ids and graph/source binding
+src/view-model/source-anchors.ts    read-only source anchor helpers
+src/view-model/simulation.ts        overlay flags and row-ref mapping
+src/view-model/ids.ts               stable projection ids and row ids
+src/view-model/sort.ts              deterministic ordering helpers
+```
+
+Имена файлов можно уточнить по фактическому коду, но ownership должен
+сохраниться. `build-model.ts` не должен содержать business logic: он только
+вызывает passes pipeline-а и собирает финальный `GraphVisualizerModel`.
+`buildMachineWorkbenchModel(...)` должен использовать тот же workbench builder,
+что и `buildGraphVisualizerModel(...)`; отдельная реализация L3 для isolated
+preview запрещена.
+
+Правила расширяемости:
+
+1. Новая возможность добавляется как новый projection fragment или новый pass
+   pipeline-а, если она строится из IR/diagnostics/simulator facts.
+2. Если возможность требует UI state, async lifecycle, selection, filters,
+   timeline step, payload draft или source editing, она относится к app/codegen
+   layer, а не к `view-model`.
+3. Новые row kinds, badges, capabilities и graph refs добавляются только когда
+   есть устойчивый IR/source/simulator identifier. DOM ids, component keys и
+   renderer-specific ids не становятся domain ids.
+4. Derived summaries строятся один раз внутри `view-model` и передаются app как
+   готовые поля. App selectors могут фильтровать/группировать projection, но не
+   должны пересобирать semantic summary из raw IR.
+5. Детерминированная сортировка централизована в `sort.ts`; локальные
+   `array.sort(...)` в feature builders запрещены, кроме вызова shared helper-а.
+6. Row id generation централизован в `ids.ts`; строки не собирают id
+   ad hoc из display labels.
+7. Source anchors создаются только через `source-anchors.ts`, чтобы future
+   edit/codegen layer получил единый provenance contract.
+8. Diagnostics binding создается только через `diagnostics.ts`; feature builders
+   получают уже нормализованные diagnostic anchors/ids.
+9. Simulation overlay применяется последним pass-ом поверх готовых rows. Он не
+   меняет semantic rows, topics или relations.
+10. При изменении публичного API или типов projection нужно обновить
+    `API-CHEATSHEET.md` и `TYPES-CHEATSHEET.md`.
+
+Правила зависимостей:
+
+1. `view-model` может импортировать только типы и pure helpers из
+   `@lite-fsm/graph` internals, которые не тянут simulator runtime, UI, DOM,
+   CodeMirror, React Flow, ELK или app modules.
+2. `view-model` может импортировать simulator types только как `import type`,
+   если это нужно для совместимости overlay facts; runtime import simulator-а
+   запрещен.
+3. Root entrypoint `@lite-fsm/graph` не импортирует и не реэкспортирует
+   `view-model`.
+4. Тесты могут импортировать internal files только для проверки ownership
+   boundaries; public behavior tests должны предпочитать
+   `@lite-fsm/graph/view-model`.
+
+### Порядок реализации этапа 11
+
+Этап 11 реализуется последовательно. Контекстное окно LLM не является причиной
+для объединения работ: модель должна строить план по подэтапам ниже, закрывать
+каждый подэтап тестами и только затем переходить к следующему. Запрещено
+смешивать workbench rows, diagnostics и simulation overlay в одном начальном
+изменении, потому что эти части зависят от стабильных refs, row ids и
+сортировки.
+
+План реализации должен всегда начинаться с короткого чеклиста вида:
+
+```txt
+11a public surface: pending
+11b L1/L2 indexes: pending
+11c machine workbench: pending
+11d diagnostics and anchors: pending
+11e simulation overlay and row mapping: pending
+11f stabilization: pending
+```
+
+Во время работы агент обновляет статус подэтапов по мере выполнения. Если
+приходится временно добавить заглушку для следующего подэтапа, она должна быть
+минимальной, явно тестируемой и не должна имитировать завершенную логику.
+
+#### Этап 11a: public surface и базовые типы
+
+Состав:
+
+1. Добавить отдельный экспорт `@lite-fsm/graph/view-model`.
+2. Не реэкспортировать `view-model` из корневого `@lite-fsm/graph`.
+3. Добавить публичные типы projection layer.
+4. Добавить скелеты `buildGraphVisualizerModel(...)` и
+   `buildMachineWorkbenchModel(...)`.
+5. Добавить shared helpers только для уже нужных операций: stable refs,
+   source anchors, target labels и deterministic ordering.
+
+Проверка:
+
+1. TypeScript видит `@lite-fsm/graph/view-model`.
+2. Корневой импорт `@lite-fsm/graph` не содержит view-model API.
+3. `view-model` не импортирует React, DOM, CodeMirror, React Flow, ELK и
+   модули приложения.
+4. Базовые builders возвращают корректную версию модели и пустые/минимальные
+   структуры без падения на пустом документе.
+
+#### Этап 11b: L1/L2 indexes
+
+Состав:
+
+1. Построить `GraphMachineSummary`.
+2. Построить `GraphManagerSummary`.
+3. Построить `GraphTopicSummary` из `transitions`, `emissions` и
+   `reducerCases`.
+4. Построить producers, consumers и consumer branches.
+5. Построить `routingKinds` и `routingValues` только из producer routings.
+6. Построить `GraphRelationIndex`.
+7. Зафиксировать deterministic sorting для машин, менеджеров, топиков,
+   producers и consumers.
+
+Правила:
+
+1. Consumer создается только из `config` acceptance.
+2. Reducer branch уточняет уже принятый event и не создает отдельный consumer.
+3. App layer этапа 12 не должен пересобирать routing summary из raw IR.
+
+Проверка:
+
+1. Snapshot системного инвентаря.
+2. Snapshot каталога топиков.
+3. Snapshot `routingKinds` и `routingValues`.
+4. Snapshot relation index.
+5. Полный fixture с исходником строит L1/L2 projection для всех машин без
+   предварительного `selectMachineGraph`.
+
+#### Этап 11c: machine workbench model
+
+Состав:
+
+1. Реализовать `buildMachineWorkbenchModel(...)` как machine-local helper.
+2. Построить state blocks в порядке `machine.states`.
+3. Построить rows `config`, `reducer`, `effect`, `diagnostic`, `unknown`.
+4. Построить `GraphTargetView`.
+5. Построить badges и capabilities.
+6. Реализовать collapse policy.
+7. Реализовать folded reducer rows для сквозных reducer branches.
+8. Отразить wildcard и lifecycle-строки actor templates.
+
+Правила:
+
+1. Workbench model не импортирует simulator runtime.
+2. Transition rows используют `row.transitionId`, чтобы app мог передать
+   explicit branch в `sendFromTransition(...)`.
+3. Неразрешенные `dynamic`, `unknown` и `blocked` цели остаются видимыми
+   строками; projection не создает псевдосостояния.
+
+Проверка:
+
+1. Snapshot модели рабочей области машины.
+2. Snapshot свернутых сквозных reducer branches.
+3. Snapshot wildcard-поведения.
+4. Snapshot lifecycle-строк actor templates.
+5. Unit-тесты для `GraphTargetView`.
+
+#### Этап 11d: diagnostics и source anchors
+
+Состав:
+
+1. Нормализовать compiler diagnostics из `document.diagnostics`.
+2. Нормализовать analyzer diagnostics из `options.analysisDiagnostics`.
+3. Построить локальные `diagnosticId`.
+4. Привязать diagnostics к `GraphItemRef`, когда это возможно.
+5. Привязать diagnostics к `GraphSourceAnchor`, когда есть `loc`.
+6. Пробросить `diagnosticIds` в machines, managers, topics и state blocks.
+7. Добавить diagnostic rows в workbench model.
+
+Правила:
+
+1. `diagnosticId` стабилен только внутри одной сборки модели.
+2. Source anchors в этапе 11 всегда read-only: `editable: false`.
+3. Если diagnostic нельзя надежно связать с graph item, он все равно остается в
+   `GraphVisualizerModel.diagnostics`.
+
+Проверка:
+
+1. Snapshot привязок диагностик.
+2. Snapshot source anchors.
+3. Тесты compiler/analyzer origins.
+4. Тест на diagnostics без `loc` и без `machineId`.
+
+#### Этап 11e: simulation overlay и canonical row mapping
+
+Состав:
+
+1. Применить `currentStateId` к workbench state blocks.
+2. Проставить `simulation.available` для transition rows.
+3. Проставить `simulation.suggested` и `dispatchability` для effect rows.
+4. Проставить `simulation.recentlyFired` и `simulation.inspected`.
+5. Поддержать input по row ids и по graph-level row refs.
+6. Реализовать canonical mapping row refs к workbench row ids.
+7. Зафиксировать приоритет slice-level facts над machine-level facts.
+
+Правила:
+
+1. Projection не выбирает timeline step.
+2. Projection не вызывает simulator и не импортирует simulator runtime.
+3. Если graph-level ref не мапится однозначно, ambiguity должна быть видима для
+   app selector-а; projection не должна молча выбирать случайную row.
+4. Machine-level simulation input является MVP shortcut и не должен становиться
+   базой для future exact actor mode.
+
+Проверка:
+
+1. Snapshot slice-level overlay flags для available/suggested/recently
+   fired/inspected rows.
+2. Unit-тесты canonical mapping для config, reducer, folded reducer и effect
+   rows.
+3. Unit-тест приоритета slice-level над machine-level input.
+4. Unit-тест ambiguous/no-match mapping.
+
+#### Этап 11f: стабилизация
+
+Состав:
+
+1. Свести `buildGraphVisualizerModel(...)` так, чтобы L1/L2/L3, diagnostics и
+   source anchors строились из одной версии IR.
+2. Проверить deterministic sorting всех публичных списков.
+3. Убрать временные заглушки подэтапов.
+4. Проверить границы импорта и отсутствие UI/runtime зависимостей.
+5. Обновить cheatsheets, если публичный API или типы требуют документации.
+
+Проверка:
+
+```txt
+pnpm --filter @lite-fsm/graph check-types
+pnpm exec vitest run tests/graph
+```
+
 ### Базовая структура модели
 
 ```ts

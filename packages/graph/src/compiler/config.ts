@@ -1,5 +1,5 @@
 import type { Expression } from "ts-morph";
-import type { GraphDiagnostic, GraphTarget, GraphValueSummary, SourceLocation } from "../types";
+import type { GraphDiagnostic, GraphJsonObject, GraphJsonValue, GraphTarget, GraphValueSummary, SourceLocation } from "../types";
 import { readMachineOption, readMachineOptions } from "./ast";
 import type { MachineCandidate } from "./candidates";
 import type {
@@ -226,6 +226,58 @@ const summarizeInitialContext = (
   return { kind: "unknown", text: result.message };
 };
 
+const jsonValueFromEvaluated = (value: EvaluatedGraphValue): GraphJsonValue | undefined => {
+  switch (value.kind) {
+    case "null":
+      return null;
+    case "boolean":
+    case "number":
+    case "string":
+      return value.value;
+    case "array": {
+      const items: GraphJsonValue[] = [];
+      for (const item of value.items) {
+        const jsonItem = jsonValueFromEvaluated(item);
+        if (jsonItem === undefined) return undefined;
+
+        items.push(jsonItem);
+      }
+
+      return items;
+    }
+    case "object": {
+      const object: GraphJsonObject = {};
+      for (const property of value.properties) {
+        const jsonProperty = jsonValueFromEvaluated(property.value);
+        if (jsonProperty === undefined) return undefined;
+
+        object[property.key] = jsonProperty;
+      }
+
+      return object;
+    }
+    case "undefined":
+    case "function":
+    case "expression":
+    case "external":
+    case "dynamic":
+    case "unsupported":
+      return undefined;
+  }
+};
+
+const readInitialContextJson = (
+  expression: Expression | undefined,
+  context: CompilerContext,
+): GraphJsonObject | undefined => {
+  if (!expression) return undefined;
+
+  const result = context.evaluator.evaluateExpression(expression);
+  if (result.kind !== "known" || result.value.kind !== "object") return undefined;
+
+  return jsonValueFromEvaluated(result.value) as GraphJsonObject | undefined;
+};
+
 const readStringMetadata = (
   expression: Expression | undefined,
   diagnostics: GraphDiagnostic[],
@@ -301,6 +353,7 @@ export const compileConfigGraph = (
     "initialState must resolve to a string literal.",
   );
   const initialContextSummary = summarizeInitialContext(readMachineOption(options, "initialContext"), context);
+  const initialContextJson = readInitialContextJson(readMachineOption(options, "initialContext"), context);
   const groupTag = readStringMetadata(
     readMachineOption(options, "groupTag"),
     diagnostics,
@@ -322,6 +375,7 @@ export const compileConfigGraph = (
       kind: "unknown",
       initialState,
       initialContextSummary,
+      initialContextJson,
       groupTag,
       persistence,
       states: [],
@@ -348,6 +402,7 @@ export const compileConfigGraph = (
       kind: "unknown",
       initialState,
       initialContextSummary,
+      initialContextJson,
       groupTag,
       persistence,
       states: [],
@@ -363,6 +418,7 @@ export const compileConfigGraph = (
     kind: configBuild.stateKeys.has("__INIT") ? "actorTemplate" : "domain",
     initialState,
     initialContextSummary,
+    initialContextJson,
     groupTag,
     persistence,
     states: configBuild.states,

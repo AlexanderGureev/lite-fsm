@@ -184,6 +184,7 @@ export const createMachineFromSlice = (
     kind: config?.kind ?? "unknown",
     initialState: config?.initialState,
     initialContextSummary: config?.initialContextSummary,
+    initialContextJson: config?.initialContextJson,
     groupTag: config?.groupTag,
     persistence: config?.persistence,
     states,

@@ -327,13 +327,17 @@ import {
   analyzeLiteFsmGraph,
   compileLiteFsmGraph,
   selectMachineGraph,
+  type GraphJsonObject,
   type LiteFsmGraphDocument,
 } from "@lite-fsm/graph";
+import { createGraphSimulator, type GraphSimulationSnapshot } from "@lite-fsm/graph/simulator";
 
 const result = compileLiteFsmGraph(source);
 const document: LiteFsmGraphDocument = result.document;
+const json: GraphJsonObject = { count: 1 };
 const selected = selectMachineGraph(document, { managerKey: "machineKey" });
 const analysis = analyzeLiteFsmGraph(document, { strict: true });
+const snapshot: GraphSimulationSnapshot | undefined = createGraphSimulator(document).getSnapshot();
 ```
 
 | Тип                          | Форма                                                                                                                                                                               |
@@ -342,7 +346,8 @@ const analysis = analyzeLiteFsmGraph(document, { strict: true });
 | `GraphAnalysisResult`        | `{ diagnostics: GraphDiagnostic[] }` для semantic analyzer-а                                                                                                                        |
 | `LiteFsmGraphDocument`       | `{ version, source, machines, managers, diagnostics }`                                                                                                                              |
 | `LiteFsmGraphManager`        | manager metadata плюс `machineRefs: { key, machineId, loc? }[]`                                                                                                                     |
-| `LiteFsmGraphMachine`        | machine metadata плюс `states`, `transitions`, `emissions`, `reducerCases`                                                                                                          |
+| `LiteFsmGraphMachine`        | machine metadata плюс `states`, `transitions`, `emissions`, `reducerCases`, `initialContextSummary`, `initialContextJson?`                                                          |
+| `GraphJsonValue/Object`      | JSON-safe values для graph IR, simulator payload и initial context overrides                                                                                                          |
 | `GraphTransition`            | accepted event edge слоя `config` или `reducer`                                                                                                                                     |
 | `GraphReducerCase`           | symbolic reducer branch: event, guard, state-write targets, confidence                                                                                                              |
 | `GraphEmission`              | событие, которое может отправить effect при входе в state; не является transition                                                                                                   |
@@ -357,6 +362,25 @@ const analysis = analyzeLiteFsmGraph(document, { strict: true });
 | `GraphAnalysisRuleId`        | analyzer rule union: `unknown-target`, `unreachable-state`, `dead-end-state`, `actor-template-shape`, `reducer-config-consistency`, `effect-event-acceptance`, `wildcard-shadowing` |
 
 `LiteFsmGraphDocument.diagnostics` содержит compiler diagnostics. Diagnostics analyzer-а возвращаются отдельно из `GraphAnalysisResult` и имеют коды `LFG_ANALYZER_*`.
+
+## Experimental graph simulator types
+
+`@lite-fsm/graph/simulator` экспортирует типы headless simulation runtime. Они не зависят от DOM, React или app modules.
+
+| Тип                               | Форма/назначение                                                                                                            |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `CreateGraphSimulatorOptions`     | `scope`, `actorMode`, `effectMode`, branch/evaluation policies, initial state/context overrides                            |
+| `GraphSimulationScope`            | `{ kind: "document" }`, `{ kind: "manager", managerId }` или `{ kind: "machines", machineIds }`                            |
+| `GraphSimulationEvent`            | `{ type: string; payload?: GraphJsonValue; meta?: GraphSimulationEventMeta }`                                               |
+| `GraphSimulationSliceRef`         | domain, actorTemplate или future actor ref                                                                                  |
+| `GraphSimulationSnapshot`         | immutable текущие slices, slice indexes, diagnostics и `GraphSimulationTimeline`                                            |
+| `GraphAvailableTransition`        | accepted/effective transition candidate с `canApply`, layer, target, guard и confidence                                    |
+| `GraphSuggestedEmission`          | manual effect emission candidate последнего committed step                                                                  |
+| `GraphSendResult`                 | success `{ ok: true, snapshot, step }` или controlled failure `{ ok: false, reason, snapshot?, pendingChoice?, diagnostics }` |
+| `GraphSimulationPendingChoice`    | pending branch choice для `choose(...)`, keyed by `sliceId`                                                                 |
+| `GraphEvaluationPolicy`           | optional symbolic hooks `evaluateTransition` и `reduceContext`; default policy не исполняет user code                      |
+
+`sendFromTransition` принимает `payload`, но не принимает routing `meta`: routing override задается только через обычный `send({ event })` или через IR routing у `sendFromEmission`.
 
 ## Middleware
 

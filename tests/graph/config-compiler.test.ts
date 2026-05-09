@@ -326,6 +326,45 @@ describe("ConfigGraphCompiler shape contracts", () => {
       ["missingContext", undefined],
     ]);
   });
+
+  it("заполняет initialContextJson только для JSON-safe object", () => {
+    const result = compileLiteFsmGraph(
+      `
+        import { createMachine } from "@lite-fsm/core";
+
+        const localContext = { count: 1, nested: { ok: true }, list: [1, "x", null] };
+
+        export const jsonObject = createMachine({ config: {}, initialContext: localContext });
+        export const arrayContext = createMachine({ config: {}, initialContext: [] });
+        export const scalarContext = createMachine({ config: {}, initialContext: "value" });
+        export const functionContext = createMachine({ config: {}, initialContext: () => ({}) });
+        export const externalContextMachine = createMachine({ config: {}, initialContext: externalContext });
+        export const dynamicContextMachine = createMachine({ config: {}, initialContext: getContext() });
+        export const unsupportedContextMachine = createMachine({ config: {}, initialContext: 1 + 2 });
+        export const objectWithUndefined = createMachine({ config: {}, initialContext: { value: undefined } });
+        export const objectWithFunction = createMachine({ config: {}, initialContext: { fn: () => ({}) } });
+        export const objectWithBadArray = createMachine({ config: {}, initialContext: { items: [undefined] } });
+      `,
+      { filename: "initial-context-json.ts" },
+    );
+
+    expect(result.document.machines.map((machine) => [machine.id, machine.initialContextJson])).toEqual([
+      ["jsonObject", { count: 1, nested: { ok: true }, list: [1, "x", null] }],
+      ["arrayContext", undefined],
+      ["scalarContext", undefined],
+      ["functionContext", undefined],
+      ["externalContextMachine", undefined],
+      ["dynamicContextMachine", undefined],
+      ["unsupportedContextMachine", undefined],
+      ["objectWithUndefined", undefined],
+      ["objectWithFunction", undefined],
+      ["objectWithBadArray", undefined],
+    ]);
+    expect(getMachine(result.document.machines, "jsonObject").initialContextSummary).toMatchObject({
+      kind: "object",
+      text: "localContext",
+    });
+  });
 });
 
 describe("ConfigGraphCompiler diagnostics", () => {

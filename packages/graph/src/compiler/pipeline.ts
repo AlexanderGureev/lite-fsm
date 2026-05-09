@@ -2,6 +2,7 @@ import type {
   GraphCondition,
   GraphDiagnostic,
   GraphEventRef,
+  GraphJsonObject,
   GraphRouting,
   GraphState,
   GraphTarget,
@@ -46,6 +47,7 @@ export type ConfigGraphSlice = {
   transitions: ConfigTransitionSlice[];
   initialState?: string;
   initialContextSummary?: GraphValueSummary;
+  initialContextJson?: GraphJsonObject;
   groupTag?: string;
   persistence?: "runtime" | "snapshot" | "unknown";
   kind?: "domain" | "actorTemplate" | "unknown";

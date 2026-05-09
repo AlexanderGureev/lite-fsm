@@ -6,14 +6,14 @@
 
 | Поле             | Значение                                                                                                                                                                                                                       |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Дата             | 2026-05-08                                                                                                                                                                                                                     |
-| Готово           | Этапы 0-8 IR/API/harness, Source Catalog/Candidates, Partial Evaluator, ConfigGraphCompiler, ManagerLinker/select API, ReducerCompiler, EffectsCompiler, GraphAssembler, общий `compiler/ast.ts`, Semantic Analyzer            |
+| Дата             | 2026-05-09                                                                                                                                                                                                                     |
+| Готово           | Этапы 0-9 IR/API/harness, Source Catalog/Candidates, Partial Evaluator, ConfigGraphCompiler, ManagerLinker/select API, ReducerCompiler, EffectsCompiler, GraphAssembler, общий `compiler/ast.ts`, Semantic Analyzer, Simulator |
 | Package          | `@lite-fsm/graph`, private/experimental                                                                                                                                                                                        |
-| Public API       | `compileLiteFsmGraph(source, options?)`, `selectMachineGraph(document, selector?)`, `analyzeLiteFsmGraph(document, options?)` + IR/analyzer-типы;`                                                                             |
-| Текущий output   | `LiteFsmGraphDocument`: source metadata, compiler diagnostics, machines, linked managers, config states/transitions, reducer cases/transitions, effect emissions и machine facts; `GraphAnalysisResult`: analyzer diagnostics; |
+| Public API       | `compileLiteFsmGraph(source, options?)`, `selectMachineGraph(document, selector?)`, `analyzeLiteFsmGraph(document, options?)`, `@lite-fsm/graph/simulator` + IR/analyzer/simulator-типы                                      |
+| Текущий output   | `LiteFsmGraphDocument`: source metadata, compiler diagnostics, machines, linked managers, config states/transitions, reducer cases/transitions, effect emissions, machine facts и `initialContextJson`; `GraphAnalysisResult`: analyzer diagnostics; `GraphSimulationSnapshot`: slices/timeline/choices/emissions |
 | Еще не строится  | CLI/UI                                                                                                                                                                                                                         |
 | Fixture contract | `tests/graph/fixtures/graph-sources.ts`: 28 machine candidates, 3 manager candidates, полный assembler snapshot                                                                                                                |
-| Coverage         | `packages/graph/src/**/*.ts`, кроме `types.ts`: 100% statements/branches/functions/lines                                                                                                                                       |
+| Coverage         | Последний полный coverage был до simulator; для этапа 9 прогнаны required package/type/runtime checks                                                                                                                         |
 
 ## Ключевые решения
 
@@ -39,18 +39,18 @@
 - `analyzeLiteFsmGraph` добавлен как отдельный semantic layer поверх `LiteFsmGraphDocument`; compiler не запускает analyzer автоматически и не мутирует document.
 - Analyzer использует внутренний `GraphAnalysisIndex`, `scope` как discriminated union и registry v1 rules: `unknown-target`, `unreachable-state`, `dead-end-state`, `actor-template-shape`, `reducer-config-consistency`, `effect-event-acceptance`, `wildcard-shadowing`.
 - Analyzer diagnostics отделены кодами `LFG_ANALYZER_*`; `document.diagnostics` остается слоем compiler diagnostics.
+- Compiler теперь заполняет `LiteFsmGraphMachine.initialContextJson` только для JSON-safe object initial context; simulator использует его как стартовый context и не реконструирует данные из `initialContextSummary.text`.
+- `@lite-fsm/graph/simulator` добавлен как отдельный subpath export; root `@lite-fsm/graph` не реэкспортирует simulator runtime, но экспортирует общие `GraphJsonValue`/`GraphJsonObject` IR-типы.
+- Simulator реализован как headless symbolic runtime с document/manager/machines scope, deterministic domain/actorTemplate slices, immutable snapshot, timeline graph, manual effect emissions, object events with payload/meta, branch/evaluation policies и controlled `LFG_SIM_*` diagnostics.
+- Dispatch идет через общий bus: selected/routed consumers commit-ятся атомарно, reducer branches уточняют только accepted config edges, state-specific acceptance приоритетнее wildcard, external empty-consumption dispatch считается successful step.
 
 ## Проверки
 
 Последний успешный набор:
 
 ```txt
-pnpm exec vitest run tests/graph
-pnpm exec vitest run tests/graph --coverage --coverage.include 'packages/graph/src/**/*.ts' --coverage.exclude 'packages/graph/src/types.ts'
 pnpm --filter @lite-fsm/graph check-types
-pnpm --filter @lite-fsm/graph build
-pnpm exec tsc --noEmit -p tsconfig.test.json
-pnpm run lint
+pnpm exec vitest run tests/graph
 pnpm run test:types
 ```
 
@@ -58,4 +58,4 @@ Root/docs build не запускался.
 
 ## Следующий этап
 
-Этап 9 [`GRAPH-SIMULATOR-STAGE-9-SPEC.md`](GRAPH-SIMULATOR-STAGE-9-SPEC.md)
+Этап 10.

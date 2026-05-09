@@ -13,6 +13,7 @@
 | `@lite-fsm/middleware/immer` · `@lite-fsm/middleware/devTools` | per-feature entry points                                                                                                                          |
 | `@lite-fsm/react`                                              | `FSMContext`, `FSMContextProvider`, `FSMHydrationBoundary`, `useHydrateSnapshot`, `useManager`, `useSelector`, `useTransition`, `defineMachine`   |
 | `@lite-fsm/graph`                                              | experimental: `compileLiteFsmGraph`, `selectMachineGraph`, `analyzeLiteFsmGraph` и IR-типы для graph tooling                                      |
+| `@lite-fsm/graph/simulator`                                    | experimental: `createGraphSimulator`, `createMachineGraphSimulator` для headless symbolic simulation поверх graph IR                               |
 |                                                                |
 
 `@lite-fsm/react` помечен `"use client"`. Импортировать можно из SSR/RSC, hooks/provider — только в client tree.
@@ -39,6 +40,34 @@ const result = compileLiteFsmGraph(source, {
 Reducer branches в graph IR символические: compiler сохраняет `reducerCases` и отдельные `GraphTransition` со слоем `"reducer"`, не проверяя consistency с `config`. Effect emissions сохраняются как `GraphEmission`: это suggested events при входе в state, а не state transitions.
 
 `analyzeLiteFsmGraph` не запускается внутри `compileLiteFsmGraph` автоматически и не мутирует document. Правила v1: `unknown-target`, `unreachable-state`, `dead-end-state`, `actor-template-shape`, `reducer-config-consistency`, `effect-event-acceptance`, `wildcard-shadowing`.
+
+## Experimental graph simulator
+
+`@lite-fsm/graph/simulator` запускает headless symbolic simulation поверх готового `LiteFsmGraphDocument`. Root import `@lite-fsm/graph` simulator runtime не реэкспортирует.
+
+```ts
+const simulator = createGraphSimulator(document, {
+  scope: { kind: "machines", machineIds: ["checkout", "audit"] },
+});
+
+const started = simulator.start();
+const sent = simulator.send({ event: { type: "SUBMIT", payload: { id: 1 } } });
+```
+
+| API                                  | Назначение                                                                                           |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------- |
+| `createGraphSimulator(doc, opts?)`   | создает simulator для document/manager/machines scope                                                |
+| `createMachineGraphSimulator(...)`   | wrapper для scope из одной machine                                                                   |
+| `start()` / `reset()`                | создает initial immutable snapshot; effects initial states не запускаются                            |
+| `getAvailableTransitions(filter?)`   | возвращает применимые config/reducer candidates для текущих slices                                   |
+| `getSuggestedEmissions(filter?)`     | возвращает manual effect emissions последнего committed step                                         |
+| `send({ event })`                    | dispatch object event через общую event bus                                                          |
+| `sendFromTransition(...)`            | отправляет event выбранного transition; origin branch фиксируется явно                               |
+| `sendFromEmission(...)`              | отправляет event выбранной effect emission с routing из IR                                           |
+| `choose(...)`                        | commit ранее возвращенного pending branch choice                                                     |
+| `GraphSimulationSnapshot.timeline`   | immutable timeline graph: `stepsById`, `childrenByStepId`, `linearStepIds` для будущего time travel |
+
+Simulator не исполняет user reducer/effect/guard code. Context берется из `initialContextJson`, initial overrides или summary/unknown fallback; `GraphValueSummary.text` не парсится.
 
 ## Mental model
 
