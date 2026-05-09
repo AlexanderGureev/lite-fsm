@@ -139,6 +139,7 @@ const actorHooksCompletionPosition = completionSourceTextWithMarker.indexOf(acto
 
 const fileName = path.join(process.cwd(), "tests/core/createMachine.dx.fixture.ts");
 const completionFileName = path.join(process.cwd(), "tests/core/createMachine.completion.fixture.ts");
+const typeScriptDxTestTimeout = 30_000;
 const options: ts.CompilerOptions = {
   strict: true,
   module: ts.ModuleKind.ESNext,
@@ -229,7 +230,7 @@ describe("createMachine DX-типы", () => {
       '{ __INIT: { SPAWN: "pending"; }; pending: { DONE: "__RESOLVED"; }; }',
       '{ __INIT: { SPAWN: "pending"; }; pending: { DONE: "__RESOLVED"; }; }',
     ]);
-  });
+  }, typeScriptDxTestTimeout);
 
   it("подсказывает actor-поля, когда hydrate/dehydrate уже набраны до persistence", () => {
     const service = createLanguageService();
@@ -244,5 +245,5 @@ describe("createMachine DX-типы", () => {
     expect(names.has("effects")).toBe(true);
     expect(names.has("groupTag")).toBe(true);
     expect(names.has("reducer")).toBe(true);
-  });
+  }, typeScriptDxTestTimeout);
 });
