@@ -133,7 +133,8 @@ Installed baseline components:
 - `button` for topbar, panel actions, source actions and timeline actions.
 - `badge` for status, layer, routing, diagnostic and simulation markers.
 - `tabs` for the main Source/System/Events/Machines strip.
-- `input`, `textarea` and `select` for source/search/send fixture controls.
+- `input` and `select` for search/send fixture controls; the Source editor is
+  owned by the CodeMirror-backed `SourceEditorShell`.
 - `card` only for graph-domain preview cards, not for every panel.
 - `separator` for console/timeline divisions.
 - `scroll-area` for source, workbench and console panes.
@@ -180,7 +181,8 @@ Custom graph grammar that remains outside shadcn:
 
 - Layer tags: `cfg`, `red`, `eff`, `sim`.
 - Event/state/routing rows with stable columns and long-label wrapping.
-- Source snippets with line numbers and selected source anchors.
+- Source snippets use the CodeMirror-backed `SourceEditorShell` in read-only
+  mode when they need syntax highlighting, line numbers and selected anchors.
 - Source-overlay fragments with line clipping and fallback rows when anchors have
   no source location.
 - Timeline rows and relation chips in later stages.
@@ -192,6 +194,8 @@ Testing hooks:
   representative rows, console entries and timeline controls.
 - Accessibility names and roles remain the first user-facing contract. Test ids
   are a stable e2e convenience for text that may change during later stages.
+- UI assertions should target stable hooks such as `data-status`, `data-count`,
+  `data-machine-id`, `data-event-type` and `data-row-id`, not display copy.
 - Do not derive test ids from display labels. Use domain ids (`machineId`,
   `eventType`, `rowId`, `diagnosticId`, `stepId`) for future data-driven lists.
 
@@ -263,8 +267,9 @@ Testing hooks:
 - Source overlay uses app-local shadcn `Dialog` and opens from L1 rows, L2 rows
   and console targets with a concise title and prioritized source anchors.
 - Overlay snippets are derived from the current `SourceSession.source`,
-  `sourceVersion` and `GraphSourceAnchor[]`; they include line numbers, clipped
-  context and fallback rows when a source location is missing.
+  `sourceVersion` and `GraphSourceAnchor[]`; they render as read-only
+  CodeMirror fragments with original line numbers, clipped context and fallback
+  rows when a source location is missing.
 - Close behavior is the standard Dialog close button, Escape and backdrop.
   Source edits/recompile clear the overlay through app state.
 

@@ -51,18 +51,24 @@
 - Visualizer shell теперь использует 12b dark dense tool tokens и static style fixture для tabs, source snippet, machine card rows, semantic badges, console diagnostics, timeline, focus-visible и long-label wrapping без реализации Source/L1/L2/L3 graph behavior.
 - `lucide-react` добавлен как зависимость `@lite-fsm/visualizer` для стандартных UI icon affordances; custom SVG icon system не вводился.
 - Stage 12b-shadcn-foundation добавил app-local shadcn/Tailwind v4 foundation внутри `apps/visualizer`: `components.json`, generated baseline components в `src/ui`, `cn` в `src/lib/utils` и semantic theme bridge в `src/styles.css`.
-- Visualizer shell пересобран на shadcn primitives (`Tabs`, `Button`, `Badge`, `Input`, `Textarea`, `Select`, `Card`, `Separator`, `ScrollArea`, `Tooltip`, `Alert`) и thin presentational wrappers для graph grammar без graph behavior/source pipeline/simulation logic.
+- Visualizer shell пересобран на shadcn primitives (`Tabs`, `Button`, `Badge`, `Input`, `Textarea`, `Select`, `Card`, `Separator`, `ScrollArea`, `Tooltip`, `Alert`) и thin presentational wrappers для graph grammar без graph behavior/source pipeline/simulation logic; Source editor позже переведен на CodeMirror-backed wrapper.
 - `apps/visualizer/DESIGN.md` расширен разделом `UI kit`, который фиксирует shadcn ownership, allowed variants, Tailwind token policy, CSS ownership и custom graph-specific grammar.
 - Stage 12c заменил unimplemented visualizer clients на Promise-based local clients поверх `compileLiteFsmGraph`, `analyzeLiteFsmGraph` и `buildGraphVisualizerModel`; Vite aliases теперь резолвят graph subpaths до root alias.
-- Source tab стал настоящим controlled source pipeline UI: editable shadcn `Textarea`, `Open visualizer`, `reset to sample`, source version/hash/status summary и invalidation derived compile/analyze/model/validation/simulation state при source edit.
+- Source tab стал настоящим controlled source pipeline UI: editable CodeMirror 6 `SourceEditorShell`, `Open visualizer`, `reset to sample`, source version/hash/status summary и invalidation derived compile/analyze/model/validation/simulation state при source edit.
 - Workbench reducer сохраняет latest-wins guards по `requestId/sourceVersion`, запускает цепочку compile -> analyze -> view-model -> validation через descriptors и нормализует model diagnostics в app diagnostics/console без блокировки analyzer diagnostics.
 - Console стала общей 12c panel с каналами `all/system/diagnostics/debug`, normalized entries, origin/severity/navigation target metadata и real Source pipeline diagnostics вместо 12b representative fixture.
 - Stage 12d добавил реальные L1/L2 read-only tabs поверх готового `GraphVisualizerModel`: `System` показывает машины, topics, relation highlight и detail panel; `Events` показывает topic catalog, routing values, producers, consumers, branch/dynamic/unknown labels и empty states.
 - Derived logic для L1/L2 вынесена в pure selectors/helpers; React-компоненты остаются thin read/dispatch layer и не пересобирают raw IR, layout graph, canvas edges или simulation state.
-- Source overlay реализован через app-local shadcn `Dialog`: команды получают `title` и `GraphSourceAnchor[]`, snippets строятся из текущего source/session version, machine anchors сортируются по priority, anchors без loc получают fallback.
+- Source overlay реализован через app-local shadcn `Dialog`: команды получают `title` и `GraphSourceAnchor[]`, snippets строятся из текущего source/session version, machine anchors сортируются по priority, anchors без loc получают fallback; code fragment рендерится read-only CodeMirror с оригинальными line numbers.
 - Console navigation теперь открывает source overlay для source targets, выбирает L1/L2 item для graph targets и оставляет обычное выделение entry для targets типа `none`.
 - Stage 12d UX polish перевел shell на full-width peer tabs: Source больше не является постоянной левой колонкой, System/Events получают всю рабочую ширину, а Console открывается закрытым по умолчанию right-side overlay drawer без изменения layout активной вкладки.
-- Coverage scope для visualizer расширен на 12d React wiring/UI (`features/shell`, `features/system`, `features/events`, `features/source`) поверх уже покрытой pure workbench logic; thresholds остаются strict 100%.
+- Coverage scope для visualizer расширен на 12d React wiring/UI (`features/shell`, `features/system`, `features/events`, `features/source`, `features/machines`) поверх уже покрытой pure workbench logic; thresholds остаются strict 100%.
+- Stage 12 audit hardening добавил отдельный `features/machines` boundary
+  для L3 placeholder, усилил Playwright matrix прямыми проверками CodeMirror,
+  source edit invalidation, reset-to-sample, hover/selection relation highlight,
+  source overlay close on source edit и open-in-workbench action, а UI assertions
+  перевел на стабильные `data-testid`/domain data attributes вместо изменяемого
+  display text.
 
 ## Проверки
 

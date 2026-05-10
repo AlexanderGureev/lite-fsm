@@ -10,11 +10,30 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/ui/dialog";
-import { SourceSnippet } from "@/ui/visualizer";
+import { SourceEditorShell } from "@/ui/visualizer";
 import { VISUALIZER_TEST_IDS } from "@/test-ids";
 
 export const sourceOverlayOpenChange = (open: boolean, onClose: () => void): void => {
   if (!open) onClose();
+};
+
+const SourceOverlayCode = ({ lines }: { lines: Extract<SourceOverlayView, { open: true }>["lines"] }) => {
+  const firstLineNumber = lines[0]!.line;
+  const highlightedLineNumbers = lines.filter((line) => line.selected).map((line) => line.line - firstLineNumber + 1);
+
+  return (
+    <SourceEditorShell
+      key={`${firstLineNumber}:${lines.length}:${highlightedLineNumbers.join(",")}`}
+      label="Source overlay snippet"
+      value={lines.map((line) => line.code).join("\n")}
+      textareaTestId={VISUALIZER_TEST_IDS.source.snippet}
+      className="h-full"
+      textareaClassName="h-full min-h-full"
+      readOnly
+      firstLineNumber={firstLineNumber}
+      highlightedLineNumbers={highlightedLineNumbers}
+    />
+  );
 };
 
 export const SourceOverlay = ({
@@ -35,8 +54,15 @@ export const SourceOverlay = ({
           <DialogHeader className="border-b bg-[color:var(--vf-surface-raised)] px-4 py-3">
             <div className="flex min-w-0 items-start justify-between gap-3">
               <div className="min-w-0">
-                <DialogTitle className="truncate text-sm">{view.title}</DialogTitle>
-                <DialogDescription className="font-mono text-[11px]">
+                <DialogTitle className="truncate text-sm" data-testid={VISUALIZER_TEST_IDS.source.overlayTitle}>
+                  {view.title}
+                </DialogTitle>
+                <DialogDescription
+                  className="font-mono text-[11px]"
+                  data-testid={VISUALIZER_TEST_IDS.source.overlayDescription}
+                  data-source-version={view.sourceVersion}
+                  data-anchor-count={view.anchorCount}
+                >
                   source v{view.sourceVersion} · anchors {view.anchorCount}
                 </DialogDescription>
               </div>
@@ -59,17 +85,18 @@ export const SourceOverlay = ({
               <p
                 className="h-full overflow-auto rounded-md border bg-background p-3 text-sm text-muted-foreground"
                 data-testid={VISUALIZER_TEST_IDS.source.overlayFallback}
+                data-fallback="true"
               >
                 {view.fallback}
               </p>
             ) : (
-              <SourceSnippet className="h-full" lines={view.lines} data-testid={VISUALIZER_TEST_IDS.source.snippet} />
+              <SourceOverlayCode lines={view.lines} />
             )}
           </div>
 
           <DialogFooter className="mx-0 mb-0 rounded-none border-t bg-[color:var(--vf-surface-soft)] px-4 py-3">
             <DialogClose asChild>
-              <Button type="button" variant="outline" size="sm">
+              <Button type="button" variant="outline" size="sm" data-testid={VISUALIZER_TEST_IDS.source.overlayFooterClose}>
                 Close
               </Button>
             </DialogClose>

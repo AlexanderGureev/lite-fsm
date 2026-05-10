@@ -2,8 +2,9 @@ import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { javascript } from "@codemirror/lang-javascript";
 import { bracketMatching, HighlightStyle, indentOnInput, syntaxHighlighting } from "@codemirror/language";
-import { EditorState } from "@codemirror/state";
+import { EditorState, type Extension } from "@codemirror/state";
 import {
+  Decoration,
   drawSelection,
   dropCursor,
   EditorView,
@@ -200,6 +201,9 @@ const sourceEditorTheme = EditorView.theme(
     ".cm-activeLine": {
       backgroundColor: "var(--vf-row-hover)",
     },
+    ".cm-sourceOverlaySelectedLine": {
+      backgroundColor: "var(--vf-accent-soft)",
+    },
     ".cm-activeLineGutter": {
       backgroundColor: "var(--vf-row-hover)",
       color: "var(--foreground)",
@@ -236,8 +240,30 @@ const sourceHighlightStyle = HighlightStyle.define([
   { tag: tags.invalid, color: "var(--vf-danger)" },
 ]);
 
-const sourceEditorExtensions = (label: string, readOnly: boolean, onValueChange: (value: string) => void) => [
-  lineNumbers(),
+const sourceEditorSelectedLineHighlight = (highlightedLineNumbers: readonly number[] | undefined): Extension => {
+  const selectedLineNumbers = new Set(highlightedLineNumbers ?? []);
+  if (selectedLineNumbers.size === 0) return [];
+
+  return EditorView.decorations.of((view) =>
+    Decoration.set(
+      [...selectedLineNumbers]
+        .filter((lineNumber) => lineNumber >= 1 && lineNumber <= view.state.doc.lines)
+        .map((lineNumber) => Decoration.line({ class: "cm-sourceOverlaySelectedLine" }).range(view.state.doc.line(lineNumber).from)),
+      true,
+    ),
+  );
+};
+
+const sourceEditorExtensions = (
+  label: string,
+  readOnly: boolean,
+  onValueChange: (value: string) => void,
+  firstLineNumber: number,
+  highlightedLineNumbers: readonly number[] | undefined,
+) => [
+  lineNumbers({
+    formatNumber: (lineNumber) => String(lineNumber + firstLineNumber - 1),
+  }),
   highlightActiveLineGutter(),
   history(),
   drawSelection(),
@@ -257,6 +283,7 @@ const sourceEditorExtensions = (label: string, readOnly: boolean, onValueChange:
     if (update.docChanged) onValueChange(update.state.doc.toString());
   }),
   keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap]),
+  sourceEditorSelectedLineHighlight(highlightedLineNumbers),
   sourceEditorTheme,
 ];
 
@@ -267,6 +294,8 @@ export const SourceEditorShell = ({
   className,
   textareaClassName,
   readOnly = false,
+  firstLineNumber = 1,
+  highlightedLineNumbers,
   onValueChange,
   children,
 }: {
@@ -276,6 +305,8 @@ export const SourceEditorShell = ({
   className?: string;
   textareaClassName?: string;
   readOnly?: boolean;
+  firstLineNumber?: number;
+  highlightedLineNumbers?: readonly number[];
   onValueChange?: (value: string) => void;
   children?: ReactNode;
 }) => {
@@ -290,13 +321,11 @@ export const SourceEditorShell = ({
   }, [onValueChange]);
 
   useEffect(() => {
-    if (!editorElement.current) return;
-
     const extensions = sourceEditorExtensions(label, readOnly, (nextValue) => {
       if (!suppressChange.current) valueChangeHandler.current?.(nextValue);
-    });
+    }, firstLineNumber, highlightedLineNumbers);
     const view = new EditorView({
-      parent: editorElement.current,
+      parent: editorElement.current!,
       state: EditorState.create({ doc: initialValue, extensions }),
     });
 
@@ -306,11 +335,10 @@ export const SourceEditorShell = ({
       view.destroy();
       editorView.current = null;
     };
-  }, [initialValue, label, readOnly]);
+  }, [firstLineNumber, highlightedLineNumbers, initialValue, label, readOnly]);
 
   useEffect(() => {
-    const view = editorView.current;
-    if (!view) return;
+    const view = editorView.current!;
 
     const currentValue = view.state.doc.toString();
     if (currentValue === value) return;
@@ -328,6 +356,9 @@ export const SourceEditorShell = ({
       <div
         ref={editorElement}
         data-testid={textareaTestId}
+        data-readonly={readOnly}
+        data-first-line-number={firstLineNumber}
+        data-highlighted-line-numbers={highlightedLineNumbers?.join(",") ?? ""}
         className={cn(
           "min-h-28 overflow-hidden rounded-md border bg-background text-foreground shadow-none",
           textareaClassName,

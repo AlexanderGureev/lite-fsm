@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { VISUALIZER_TEST_IDS } from "../../test-ids";
 import type {
   EventCatalogPanelView,
   EventCatalogTopicRowView,
@@ -9,7 +10,16 @@ import type {
 } from "../../workbench";
 import { EventCatalogPanel } from "./EventCatalogPanel";
 
+const ids = VISUALIZER_TEST_IDS;
+
 const dispatchOf = () => vi.fn<(command: VisualizerCommand) => void>();
+
+const byData = <ElementType extends HTMLElement>(testId: string, attr: string, value: string): ElementType => {
+  const element = document.querySelector<ElementType>(`[data-testid="${testId}"][${attr}="${value}"]`);
+  if (!element) throw new Error(`Missing ${testId} with ${attr}=${value}`);
+
+  return element;
+};
 
 const topic = (overrides: Partial<EventCatalogTopicRowView> & Pick<EventCatalogTopicRowView, "eventType">): EventCatalogTopicRowView => {
   const { eventType, ...rest } = overrides;
@@ -110,15 +120,16 @@ describe("EventCatalogPanel", () => {
 
     render(<EventCatalogPanel view={view} dispatch={dispatch} />);
 
-    expect(screen.getByText("diag 1")).toBeTruthy();
-    expect(screen.getByText("tag:reviewers · exact")).toBeTruthy();
-    expect(screen.getByText("action.meta · unknown")).toBeTruthy();
-    expect(screen.getByText("if: action.ready")).toBeTruthy();
-    expect(screen.getByText("from idle to unknown")).toBeTruthy();
+    expect(byData(ids.events.topicRow, "data-event-type", "DONE").getAttribute("data-diagnostics")).toBe("1");
+    expect(byData(ids.events.routingValue, "data-label", "tag:reviewers").getAttribute("data-confidence")).toBe("exact");
+    expect(byData(ids.events.routingValue, "data-label", "action.meta").getAttribute("data-confidence")).toBe("unknown");
+    expect(byData(ids.events.producerRow, "data-row-id", "producer:exact").getAttribute("data-routing-label")).toBe("tag:reviewers");
+    expect(byData(ids.events.consumerRow, "data-row-id", "consumer:unknown").getAttribute("data-target-summary")).toBe("");
+    expect(byData(ids.events.consumerBranch, "data-row-id", "branch:reducer").getAttribute("data-layer")).toBe("reducer");
 
-    fireEvent.change(screen.getByLabelText("Search events"), { target: { value: "route" } });
-    fireEvent.click(screen.getByText("RESET").closest("button")!);
-    for (const button of screen.getAllByTestId("visualizer-events-view-source")) {
+    fireEvent.change(screen.getByTestId(ids.events.search), { target: { value: "route" } });
+    fireEvent.click(byData<HTMLButtonElement>(ids.events.topicRow, "data-event-type", "RESET"));
+    for (const button of screen.getAllByTestId(ids.events.viewSource)) {
       fireEvent.click(button);
     }
 
@@ -154,9 +165,9 @@ describe("EventCatalogPanel", () => {
 
     render(<EventCatalogPanel view={view} dispatch={dispatchOf()} />);
 
-    expect(screen.getByText("No producer routing values.")).toBeTruthy();
-    expect(screen.getByText("No producers for this topic.")).toBeTruthy();
-    expect(screen.getByText("No consumers for this topic.")).toBeTruthy();
+    expect(screen.getByTestId(ids.events.routingValues).getAttribute("data-empty")).toBe("true");
+    expect(screen.getByTestId(ids.events.producers).getAttribute("data-empty")).toBe("true");
+    expect(screen.getByTestId(ids.events.consumers).getAttribute("data-empty")).toBe("true");
   });
 
   it("рендерит empty detail и empty search list", () => {
@@ -174,8 +185,8 @@ describe("EventCatalogPanel", () => {
 
     render(<EventCatalogPanel view={view} dispatch={dispatchOf()} />);
 
-    expect(screen.getByText("No events match this search.")).toBeTruthy();
-    expect(screen.getByText("No matching events")).toBeTruthy();
-    expect(screen.getByText("No event topics match the current search.")).toBeTruthy();
+    expect(screen.getByTestId(ids.events.listEmpty)).toBeTruthy();
+    expect(screen.getByTestId(ids.events.detailEmpty)).toBeTruthy();
+    expect(screen.getByTestId(ids.events.details).getAttribute("data-detail-kind")).toBe("empty");
   });
 });

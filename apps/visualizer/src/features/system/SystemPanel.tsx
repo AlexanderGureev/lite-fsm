@@ -42,6 +42,10 @@ const MachineRow = ({
     <button
       type="button"
       className={rowClass(state)}
+      data-testid={VISUALIZER_TEST_IDS.system.machineRow}
+      data-machine-id={machine.machineId}
+      data-machine-kind={machine.kind}
+      data-diagnostics={machine.counts.diagnostics}
       data-relation-state={state}
       onClick={() => dispatch({ type: "l1.machine.selected", machineId: machine.machineId })}
       onMouseEnter={() => dispatch({ type: "l1.machine.hovered", machineId: machine.machineId })}
@@ -77,6 +81,11 @@ const TopicRow = ({
     <button
       type="button"
       className={rowClass(state)}
+      data-testid={VISUALIZER_TEST_IDS.system.topicRow}
+      data-event-type={topic.eventType}
+      data-producer-count={topic.producerCount}
+      data-consumer-count={topic.consumerCount}
+      data-diagnostics={topic.diagnosticCount}
       data-relation-state={state}
       onClick={() => dispatch({ type: "l1.topic.selected", eventType: topic.eventType })}
       onMouseEnter={() => dispatch({ type: "l1.topic.hovered", eventType: topic.eventType })}
@@ -102,6 +111,8 @@ const TopicChip = ({
   <button
     type="button"
     className="rounded-full border bg-background px-2 py-1 font-mono text-[10px] text-muted-foreground hover:bg-[color:var(--vf-row-hover)] focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+    data-testid={VISUALIZER_TEST_IDS.system.topicChip}
+    data-event-type={eventType}
     onClick={() => dispatch({ type: "l1.topic.selected", eventType })}
   >
     {eventType}
@@ -115,7 +126,12 @@ const MachineDetail = ({
   detail: Extract<SystemDetailView, { kind: "machine" }>;
   dispatch: (command: VisualizerCommand) => void;
 }) => (
-  <div className="flex flex-col gap-3">
+  <div
+    className="flex flex-col gap-3"
+    data-testid={VISUALIZER_TEST_IDS.system.detailMachine}
+    data-detail-kind="machine"
+    data-machine-id={detail.machine.machineId}
+  >
     <div>
       <PanelKicker>Machine</PanelKicker>
       <h3 className="mt-1 min-w-0 font-mono text-sm font-semibold [overflow-wrap:anywhere]">{detail.machine.machineId}</h3>
@@ -150,7 +166,12 @@ const MachineDetail = ({
 
     <section className="flex flex-col gap-2">
       <PanelKicker>Consumed topics</PanelKicker>
-      <div className="flex flex-wrap gap-1.5">
+      <div
+        className="flex flex-wrap gap-1.5"
+        data-testid={VISUALIZER_TEST_IDS.system.detailConsumedTopics}
+        data-empty={detail.consumedTopics.length === 0}
+        data-values={detail.consumedTopics.join("|")}
+      >
         {detail.consumedTopics.length === 0 ? (
           <span className="text-sm text-muted-foreground">No consumed topics.</span>
         ) : (
@@ -161,7 +182,12 @@ const MachineDetail = ({
 
     <section className="flex flex-col gap-2">
       <PanelKicker>Produced topics</PanelKicker>
-      <div className="flex flex-wrap gap-1.5">
+      <div
+        className="flex flex-wrap gap-1.5"
+        data-testid={VISUALIZER_TEST_IDS.system.detailProducedTopics}
+        data-empty={detail.producedTopics.length === 0}
+        data-values={detail.producedTopics.join("|")}
+      >
         {detail.producedTopics.length === 0 ? (
           <span className="text-sm text-muted-foreground">No produced topics.</span>
         ) : (
@@ -179,7 +205,12 @@ const TopicDetail = ({
   detail: Extract<SystemDetailView, { kind: "topic" }>;
   dispatch: (command: VisualizerCommand) => void;
 }) => (
-  <div className="flex flex-col gap-3">
+  <div
+    className="flex flex-col gap-3"
+    data-testid={VISUALIZER_TEST_IDS.system.detailTopic}
+    data-detail-kind="topic"
+    data-event-type={detail.topic.eventType}
+  >
     <div>
       <PanelKicker>Topic</PanelKicker>
       <h3 className="mt-1 min-w-0 font-mono text-sm font-semibold [overflow-wrap:anywhere]">{detail.topic.eventType}</h3>
@@ -203,13 +234,23 @@ const TopicDetail = ({
     <section className="grid gap-2 sm:grid-cols-2">
       <div className="rounded-md border bg-background p-2">
         <PanelKicker>Producers</PanelKicker>
-        <p className="mt-1 min-w-0 font-mono text-[11px] text-muted-foreground [overflow-wrap:anywhere]">
+        <p
+          className="mt-1 min-w-0 font-mono text-[11px] text-muted-foreground [overflow-wrap:anywhere]"
+          data-testid={VISUALIZER_TEST_IDS.system.detailProducers}
+          data-empty={detail.producers.length === 0}
+          data-values={detail.producers.join("|")}
+        >
           {detail.producers.length === 0 ? "No producers" : detail.producers.join(", ")}
         </p>
       </div>
       <div className="rounded-md border bg-background p-2">
         <PanelKicker>Consumers</PanelKicker>
-        <p className="mt-1 min-w-0 font-mono text-[11px] text-muted-foreground [overflow-wrap:anywhere]">
+        <p
+          className="mt-1 min-w-0 font-mono text-[11px] text-muted-foreground [overflow-wrap:anywhere]"
+          data-testid={VISUALIZER_TEST_IDS.system.detailConsumers}
+          data-empty={detail.consumers.length === 0}
+          data-values={detail.consumers.join("|")}
+        >
           {detail.consumers.length === 0 ? "No consumers" : detail.consumers.join(", ")}
         </p>
       </div>
@@ -228,7 +269,11 @@ const DetailPanel = ({
   if (detail.kind === "topic") return <TopicDetail detail={detail} dispatch={dispatch} />;
 
   return (
-    <div className="flex min-h-40 flex-col justify-center gap-2 text-sm text-muted-foreground">
+    <div
+      className="flex min-h-40 flex-col justify-center gap-2 text-sm text-muted-foreground"
+      data-testid={VISUALIZER_TEST_IDS.system.detailEmpty}
+      data-detail-kind="empty"
+    >
       <PanelKicker>Details</PanelKicker>
       <h3 className="text-sm font-semibold text-foreground">{detail.title}</h3>
       <p>{detail.body}</p>
@@ -271,7 +316,9 @@ export const SystemPanel = ({
         <PaneScrollArea onMouseLeave={() => dispatch({ type: "l1.hover.cleared" })}>
           <div className="flex flex-col gap-2" data-testid={VISUALIZER_TEST_IDS.system.machineList}>
             {view.machines.length === 0 ? (
-              <p className="p-2 text-sm text-muted-foreground">No machines match this search.</p>
+              <p className="p-2 text-sm text-muted-foreground" data-testid={VISUALIZER_TEST_IDS.system.machineEmpty}>
+                No machines match this search.
+              </p>
             ) : (
               view.machines.map((machine) => <MachineRow key={machine.machineId} machine={machine} dispatch={dispatch} />)
             )}
@@ -293,7 +340,9 @@ export const SystemPanel = ({
         <PaneScrollArea onMouseLeave={() => dispatch({ type: "l1.hover.cleared" })}>
           <div className="flex flex-col gap-2" data-testid={VISUALIZER_TEST_IDS.system.topicList}>
             {view.topics.length === 0 ? (
-              <p className="p-2 text-sm text-muted-foreground">No topics match this search.</p>
+              <p className="p-2 text-sm text-muted-foreground" data-testid={VISUALIZER_TEST_IDS.system.topicEmpty}>
+                No topics match this search.
+              </p>
             ) : (
               view.topics.map((topic) => <TopicRow key={topic.eventType} topic={topic} dispatch={dispatch} />)
             )}
@@ -303,6 +352,7 @@ export const SystemPanel = ({
 
       <section
         className="min-h-0 rounded-md border bg-[color:var(--vf-surface-soft)] p-3"
+        data-detail-kind={view.detail.kind}
         data-testid={VISUALIZER_TEST_IDS.system.details}
       >
         <DetailPanel detail={view.detail} dispatch={dispatch} />

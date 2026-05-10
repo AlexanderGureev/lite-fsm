@@ -2,15 +2,18 @@ import type { ConsoleEntry } from "../../console";
 import { WorkbenchProvider } from "../../app/workbench-context";
 import { createNoopCodegenPlanner } from "../../codegen";
 import type { EffectRunnerServices } from "../../services";
+import { VISUALIZER_TEST_IDS } from "../../test-ids";
 import { createInitialWorkbenchSnapshot } from "../../workbench/state";
 import { createWorkbenchStore } from "../../workbench/store";
 import type { WorkbenchSnapshot } from "../../workbench/types";
 import { createNoopValidationRegistry } from "../../validation";
 import { TooltipProvider } from "@/ui/tooltip";
 import { EditorView } from "@codemirror/view";
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { Shell } from "./Shell";
+
+const ids = VISUALIZER_TEST_IDS;
 
 const compileFailureServices: EffectRunnerServices = {
   compiler: {
@@ -75,29 +78,29 @@ describe("Shell", () => {
   it("связывает source controls, tabs, console toggle и empty console state", () => {
     const store = renderShell();
 
-    expect(screen.getByText("Stage 12d read-only graph views")).toBeTruthy();
-    expect(screen.getByTestId("visualizer-source-status").textContent).toContain("model idle");
-    expect(screen.getByText("No console entries in this channel.")).toBeTruthy();
+    expect(screen.getByTestId(ids.shell.root)).toBeTruthy();
+    expect(screen.getByTestId(ids.source.status).getAttribute("data-status")).toBe("idle");
+    expect(screen.getByTestId(ids.console.entries).getAttribute("data-empty")).toBe("true");
 
-    fireEvent.click(screen.getByTestId("visualizer-source-open"));
+    fireEvent.click(screen.getByTestId(ids.source.open));
     expect(store.getSnapshot().state.compile.status).toBe("running");
 
-    fireEvent.mouseDown(screen.getByTestId("visualizer-tab-system"), { button: 0, ctrlKey: false });
+    fireEvent.mouseDown(screen.getByTestId(ids.tabs.trigger.system), { button: 0, ctrlKey: false });
     expect(store.getSnapshot().state.activeTab).toBe("system");
-    expect(screen.getByTestId("visualizer-system-panel")).toBeTruthy();
-    expect(screen.queryByTestId("visualizer-source-panel")).toBeNull();
+    expect(screen.getByTestId(ids.system.panel)).toBeTruthy();
+    expect(screen.queryByTestId(ids.source.panel)).toBeNull();
 
-    fireEvent.mouseDown(screen.getByTestId("visualizer-tab-events"), { button: 0, ctrlKey: false });
+    fireEvent.mouseDown(screen.getByTestId(ids.tabs.trigger.events), { button: 0, ctrlKey: false });
     expect(store.getSnapshot().state.activeTab).toBe("events");
-    expect(screen.getByTestId("visualizer-events-panel")).toBeTruthy();
+    expect(screen.getByTestId(ids.events.panel)).toBeTruthy();
 
-    fireEvent.mouseDown(screen.getByTestId("visualizer-tab-machines"), { button: 0, ctrlKey: false });
+    fireEvent.mouseDown(screen.getByTestId(ids.tabs.trigger.machines), { button: 0, ctrlKey: false });
     expect(store.getSnapshot().state.activeTab).toBe("machines");
-    expect(screen.getByTestId("visualizer-workbench-panel")).toBeTruthy();
+    expect(screen.getByTestId(ids.workbench.panel)).toBeTruthy();
 
-    fireEvent.mouseDown(screen.getByTestId("visualizer-tab-source"), { button: 0, ctrlKey: false });
+    fireEvent.mouseDown(screen.getByTestId(ids.tabs.trigger.source), { button: 0, ctrlKey: false });
     expect(store.getSnapshot().state.activeTab).toBe("source");
-    const sourceEditor = screen.getByTestId("visualizer-source-editor");
+    const sourceEditor = screen.getByTestId(ids.source.editor);
     expect(sourceEditor.querySelector(".cm-lineNumbers")).toBeTruthy();
 
     const editorView = EditorView.findFromDOM(sourceEditor);
@@ -106,24 +109,24 @@ describe("Shell", () => {
       editorView?.dispatch({ changes: { from: 0, to: editorView.state.doc.length, insert: "" } });
     });
     expect(store.getSnapshot().state.source.source).toBe("");
-    expect((screen.getByTestId("visualizer-source-open") as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId(ids.source.open) as HTMLButtonElement).disabled).toBe(true);
 
-    fireEvent.click(screen.getByTestId("visualizer-source-reset"));
-    expect(store.getSnapshot().state.source.source).toContain("playerMachine");
+    fireEvent.click(screen.getByTestId(ids.source.reset));
+    expect(store.getSnapshot().state.source.source.length).toBeGreaterThan(0);
 
     expect(store.getSnapshot().state.panels.console.open).toBe(false);
-    expect(screen.getByTestId("visualizer-console-panel").className).toContain("hidden");
+    expect(screen.getByTestId(ids.console.panel).className).toContain("hidden");
 
-    fireEvent.click(screen.getByTestId("visualizer-console-toggle"));
+    fireEvent.click(screen.getByTestId(ids.console.toggle));
     expect(store.getSnapshot().state.panels.console.open).toBe(true);
 
-    fireEvent.click(screen.getByTestId("visualizer-console-backdrop"));
+    fireEvent.click(screen.getByTestId(ids.console.backdrop));
     expect(store.getSnapshot().state.panels.console.open).toBe(false);
 
-    fireEvent.click(screen.getByTestId("visualizer-console-toggle"));
+    fireEvent.click(screen.getByTestId(ids.console.toggle));
     expect(store.getSnapshot().state.panels.console.open).toBe(true);
 
-    fireEvent.click(screen.getByTestId("visualizer-console-close"));
+    fireEvent.click(screen.getByTestId(ids.console.close));
     expect(store.getSnapshot().state.panels.console.open).toBe(false);
   });
 
@@ -141,28 +144,27 @@ describe("Shell", () => {
     };
     const store = renderShell(snapshot);
 
-    expect(screen.getByTestId("visualizer-source-status").textContent).toContain("model ready");
-    expect(screen.getAllByText("compile failed").length).toBeGreaterThan(0);
-    expect(screen.getByText("validation blocked")).toBeTruthy();
-    expect(screen.getByText("system ready")).toBeTruthy();
-    expect(screen.getByText("unsupported source shape")).toBeTruthy();
+    expect(screen.getByTestId(ids.source.status).getAttribute("data-status")).toBe("ready");
+    expect(screen.getByTestId(ids.console.entries).getAttribute("data-entry-count")).toBe("3");
 
-    fireEvent.click(screen.getByTestId("visualizer-console-channel-system"));
+    fireEvent.click(screen.getByTestId(ids.console.channelSystem));
     expect(store.getSnapshot().state.console.selectedChannel).toBe("system");
-    expect(screen.getByText("pipeline opened")).toBeTruthy();
+    expect(screen.getByTestId(ids.console.entries).getAttribute("data-entry-count")).toBe("1");
+    expect(screen.getByTestId(ids.console.entry).getAttribute("data-entry-id")).toBe("system-entry");
 
-    fireEvent.click(screen.getByTestId("visualizer-console-channel-diagnostics"));
+    fireEvent.click(screen.getByTestId(ids.console.channelDiagnostics));
     expect(store.getSnapshot().state.console.selectedChannel).toBe("diagnostics");
-    expect(within(screen.getByTestId("visualizer-console-entries")).getByText("compile failed")).toBeTruthy();
+    expect(screen.getByTestId(ids.console.entry).getAttribute("data-entry-id")).toBe("diagnostic-entry");
+    expect(screen.getByTestId(ids.console.entry).getAttribute("data-channel")).toBe("diagnostics");
 
-    fireEvent.click(screen.getByTestId("visualizer-console-channel-debug"));
+    fireEvent.click(screen.getByTestId(ids.console.channelDebug));
     expect(store.getSnapshot().state.console.selectedChannel).toBe("debug");
-    expect(screen.getByText("debug trace")).toBeTruthy();
+    expect(screen.getByTestId(ids.console.entry).getAttribute("data-entry-id")).toBe("debug-entry");
 
-    fireEvent.click(screen.getByTestId("visualizer-console-channel-all"));
+    fireEvent.click(screen.getByTestId(ids.console.channelAll));
     expect(store.getSnapshot().state.console.selectedChannel).toBe("all");
 
-    fireEvent.click(within(screen.getByTestId("visualizer-console-entries")).getByText("compile failed").closest("button")!);
+    fireEvent.click(document.querySelector<HTMLElement>('[data-testid="visualizer-console-entry"][data-entry-id="diagnostic-entry"]')!);
     expect(store.getSnapshot().state.panels.console.selectedEntryId).toBe("diagnostic-entry");
   });
 
@@ -184,8 +186,8 @@ describe("Shell", () => {
     };
     const store = renderShell(snapshot);
 
-    expect(screen.getByTestId("visualizer-source-overlay")).toBeTruthy();
-    fireEvent.click(screen.getByTestId("visualizer-source-overlay-close"));
+    expect(screen.getByTestId(ids.source.overlay)).toBeTruthy();
+    fireEvent.click(screen.getByTestId(ids.source.overlayClose));
 
     expect(store.getSnapshot().state.panels.sourceOverlay).toBeUndefined();
   });

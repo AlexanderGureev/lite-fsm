@@ -3,6 +3,7 @@ import type { ConsolePanelView } from "../../console";
 import { useWorkbenchContext } from "../../app/workbench-context";
 import { useWorkbenchSelector } from "../../app/use-workbench-selector";
 import { EventCatalogPanel } from "../events/EventCatalogPanel";
+import { MachinesPanel } from "../machines/MachinesPanel";
 import { SourceOverlay } from "../source/SourceOverlay";
 import { SystemPanel } from "../system/SystemPanel";
 import {
@@ -14,12 +15,10 @@ import {
   selectSourcePanel,
   selectSystemPanel,
   selectTabItems,
-  type EmptyPanelView,
   type SourcePanelView,
   type VisualizerCommand,
   type VisualizerTab,
 } from "../../workbench";
-import { Alert, AlertDescription, AlertTitle } from "@/ui/alert";
 import { Button } from "@/ui/button";
 import { Separator } from "@/ui/separator";
 import { Tabs, TabsList, TabsTrigger } from "@/ui/tabs";
@@ -99,6 +98,14 @@ const SourceWorkspace = ({
         <div
           className="grid gap-2 rounded-md border bg-background p-2.5 font-mono text-[11px] text-muted-foreground"
           data-testid={VISUALIZER_TEST_IDS.source.summary}
+          data-version={sourcePanel.version}
+          data-compile-status={sourcePanel.compileStatus}
+          data-analysis-status={sourcePanel.analysisStatus}
+          data-model-status={sourcePanel.modelStatus}
+          data-validation-status={sourcePanel.validationStatus}
+          data-diagnostic-count={sourcePanel.diagnosticCount}
+          data-machine-count={sourcePanel.machineCount}
+          data-topic-count={sourcePanel.topicCount}
         >
           <span>version {sourcePanel.version}</span>
           <span className="min-w-0 [overflow-wrap:anywhere]">hash {sourcePanel.hash}</span>
@@ -139,53 +146,6 @@ const SourceWorkspace = ({
         </div>
       </aside>
     </PanelBody>
-  </Panel>
-);
-
-const EmptyWorkbenchPanel = ({
-  activeTab,
-  emptyPanel,
-  sourcePanel,
-}: {
-  activeTab: VisualizerTab;
-  emptyPanel: EmptyPanelView;
-  sourcePanel: SourcePanelView;
-}) => (
-  <Panel aria-labelledby="workbench-status-title" className="h-full" data-testid={VISUALIZER_TEST_IDS.workbench.panel}>
-    <PanelHeader>
-      <div className="min-w-0">
-        <PanelKicker>{activeTab}</PanelKicker>
-        <h2 id="workbench-status-title" className="truncate text-xs font-semibold">
-          {emptyPanel.title}
-        </h2>
-      </div>
-      <StatusBadge tone={statusTone(emptyPanel.status)}>{emptyPanel.status}</StatusBadge>
-    </PanelHeader>
-
-    <PaneScrollArea>
-      <div className="flex min-h-full flex-col gap-3 p-3">
-        <Alert className="border-[color:var(--vf-accent-border)] bg-[color:var(--vf-accent-soft)]">
-          <Activity className="text-primary" aria-hidden="true" />
-          <AlertTitle className="font-mono text-[11px] text-primary">source pipeline</AlertTitle>
-          <AlertDescription className="text-muted-foreground">{emptyPanel.body}</AlertDescription>
-        </Alert>
-
-        <div className="grid gap-2 sm:grid-cols-3">
-          <div className="rounded-md border bg-background p-3">
-            <p className="font-mono text-[10px] font-bold uppercase text-[color:var(--vf-text-quiet)]">Machines</p>
-            <p className="mt-1 font-mono text-lg text-foreground">{sourcePanel.machineCount}</p>
-          </div>
-          <div className="rounded-md border bg-background p-3">
-            <p className="font-mono text-[10px] font-bold uppercase text-[color:var(--vf-text-quiet)]">Topics</p>
-            <p className="mt-1 font-mono text-lg text-foreground">{sourcePanel.topicCount}</p>
-          </div>
-          <div className="rounded-md border bg-background p-3">
-            <p className="font-mono text-[10px] font-bold uppercase text-[color:var(--vf-text-quiet)]">Diagnostics</p>
-            <p className="mt-1 font-mono text-lg text-foreground">{sourcePanel.diagnosticCount}</p>
-          </div>
-        </div>
-      </div>
-    </PaneScrollArea>
   </Panel>
 );
 
@@ -257,17 +217,29 @@ const ConsoleDrawer = ({
             <div
               className="flex min-h-36 flex-col items-start justify-center gap-2 p-3 text-sm text-muted-foreground"
               data-testid={VISUALIZER_TEST_IDS.console.entries}
+              data-empty="true"
+              data-entry-count="0"
             >
               <AlertCircle className="text-[color:var(--vf-text-quiet)]" aria-hidden="true" />
               <p>No console entries in this channel.</p>
             </div>
           ) : (
-            <ol className="flex flex-col gap-2 p-3" data-testid={VISUALIZER_TEST_IDS.console.entries}>
+            <ol
+              className="flex flex-col gap-2 p-3"
+              data-testid={VISUALIZER_TEST_IDS.console.entries}
+              data-empty="false"
+              data-entry-count={consolePanel.entries.length}
+            >
               {consolePanel.entries.map((entry) => (
                 <li key={entry.entryId}>
                   <button
                     type="button"
                     className="w-full rounded-md border bg-background p-2 text-left hover:bg-[color:var(--vf-row-hover)] focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                    data-testid={VISUALIZER_TEST_IDS.console.entry}
+                    data-entry-id={entry.entryId}
+                    data-channel={entry.channel}
+                    data-severity={entry.severity ?? ""}
+                    data-origin={entry.origin ?? ""}
                     onClick={() => dispatch({ type: "console.entry.selected", entryId: entry.entryId })}
                   >
                     <span className="flex min-w-0 flex-wrap items-center gap-2">
@@ -347,6 +319,8 @@ export const Shell = () => {
                 <TabsTrigger
                   key={tab.tab}
                   value={tab.tab}
+                  data-tab={tab.tab}
+                  data-count={tab.count}
                   data-testid={VISUALIZER_TEST_IDS.tabs.trigger[tab.tab]}
                   className="min-w-fit px-3 data-active:bg-[color:var(--vf-surface-raised)]"
                 >
@@ -366,7 +340,12 @@ export const Shell = () => {
               <FileCode data-icon="inline-start" aria-hidden="true" />
               {sourcePanel.filename}
             </StatusBadge>
-            <StatusBadge tone={statusTone(sourcePanel.modelStatus)} data-testid={VISUALIZER_TEST_IDS.source.status}>
+            <StatusBadge
+              tone={statusTone(sourcePanel.modelStatus)}
+              data-testid={VISUALIZER_TEST_IDS.source.status}
+              data-status={sourcePanel.modelStatus}
+            >
+              <span className="sr-only">model status</span>
               <Activity data-icon="inline-start" aria-hidden="true" />
               model {sourcePanel.modelStatus}
             </StatusBadge>
@@ -395,7 +374,7 @@ export const Shell = () => {
           ) : activeTab === "events" ? (
             <EventCatalogPanel view={eventCatalogPanel} dispatch={dispatch} />
           ) : (
-            <EmptyWorkbenchPanel activeTab={activeTab} emptyPanel={emptyPanel} sourcePanel={sourcePanel} />
+            <MachinesPanel view={emptyPanel} sourcePanel={sourcePanel} />
           )}
         </section>
       </div>

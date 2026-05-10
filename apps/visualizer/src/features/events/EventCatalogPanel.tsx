@@ -30,6 +30,11 @@ const TopicRow = ({
     type="button"
     className={topicRowClass(topic.selected)}
     aria-pressed={topic.selected}
+    data-testid={VISUALIZER_TEST_IDS.events.topicRow}
+    data-event-type={topic.eventType}
+    data-producer-count={topic.producerCount}
+    data-consumer-count={topic.consumerCount}
+    data-diagnostics={topic.diagnosticCount}
     onClick={() => dispatch({ type: "l2.topic.selected", eventType: topic.eventType })}
   >
     <strong className="block min-w-0 font-mono text-[11px] text-foreground [overflow-wrap:anywhere]">{topic.eventType}</strong>
@@ -67,7 +72,15 @@ const ProducerRow = ({
   producer: EventProducerRowView;
   dispatch: (command: VisualizerCommand) => void;
 }) => (
-  <li className="rounded-md border bg-background p-2">
+  <li
+    className="rounded-md border bg-background p-2"
+    data-testid={VISUALIZER_TEST_IDS.events.producerRow}
+    data-row-id={producer.rowId}
+    data-machine-id={producer.machineId}
+    data-source-state={producer.sourceStateKey}
+    data-routing-label={producer.routingLabel}
+    data-confidence={producer.confidence}
+  >
     <div className="flex min-w-0 flex-wrap items-center gap-1.5">
       <LayerBadge layer="effect" />
       <strong className="min-w-0 font-mono text-[11px] [overflow-wrap:anywhere]">{producer.machineId}</strong>
@@ -89,7 +102,16 @@ const ConsumerRow = ({
   consumer: EventConsumerRowView;
   dispatch: (command: VisualizerCommand) => void;
 }) => (
-  <li className="rounded-md border bg-background p-2">
+  <li
+    className="rounded-md border bg-background p-2"
+    data-testid={VISUALIZER_TEST_IDS.events.consumerRow}
+    data-row-id={consumer.rowId}
+    data-machine-id={consumer.machineId}
+    data-source-state={consumer.sourceStateKey}
+    data-target-summary={consumer.targetSummary}
+    data-branch-count={consumer.branchCount}
+    data-confidence={consumer.confidence}
+  >
     <div className="flex min-w-0 flex-wrap items-center gap-1.5">
       <LayerBadge layer="config" />
       <strong className="min-w-0 font-mono text-[11px] [overflow-wrap:anywhere]">{consumer.machineId}</strong>
@@ -104,7 +126,15 @@ const ConsumerRow = ({
     ) : null}
     <ol className="mt-2 flex flex-col gap-1.5">
       {consumer.branches.map((branch) => (
-        <li key={branch.rowId} className="rounded-md border border-[color:var(--vf-border-soft)] bg-[color:var(--vf-surface-soft)] p-2">
+        <li
+          key={branch.rowId}
+          className="rounded-md border border-[color:var(--vf-border-soft)] bg-[color:var(--vf-surface-soft)] p-2"
+          data-testid={VISUALIZER_TEST_IDS.events.consumerBranch}
+          data-row-id={branch.rowId}
+          data-layer={branch.layer}
+          data-target-label={branch.targetLabel}
+          data-confidence={branch.confidence}
+        >
           <span className="flex min-w-0 flex-wrap items-center gap-1.5">
             <LayerBadge layer={branch.layer === "config" ? "config" : "reducer"} />
             <span className="min-w-0 font-mono text-[11px] [overflow-wrap:anywhere]">{branch.targetLabel}</span>
@@ -127,7 +157,12 @@ const TopicDetail = ({
   detail: Extract<EventCatalogDetailView, { kind: "topic" }>;
   dispatch: (command: VisualizerCommand) => void;
 }) => (
-  <div className="grid min-h-0 gap-3 lg:grid-cols-2">
+  <div
+    className="grid min-h-0 gap-3 lg:grid-cols-2"
+    data-testid={VISUALIZER_TEST_IDS.events.detailTopic}
+    data-detail-kind="topic"
+    data-event-type={detail.eventType}
+  >
     <section className="flex min-h-0 flex-col gap-3 lg:col-span-2">
       <div>
         <PanelKicker>Topic</PanelKicker>
@@ -142,14 +177,28 @@ const TopicDetail = ({
           </StatusBadge>
         ))}
       </div>
-      <div className="rounded-md border bg-background p-2" data-testid={VISUALIZER_TEST_IDS.events.routingValues}>
+      <div
+        className="rounded-md border bg-background p-2"
+        data-testid={VISUALIZER_TEST_IDS.events.routingValues}
+        data-empty={detail.routingValues.length === 0}
+      >
         <PanelKicker>Routing values</PanelKicker>
         {detail.routingValues.length === 0 ? (
-          <p className="mt-1 text-sm text-muted-foreground">No producer routing values.</p>
+          <p className="mt-1 text-sm text-muted-foreground" data-empty="true">
+            No producer routing values.
+          </p>
         ) : (
           <div className="mt-2 flex flex-wrap gap-1.5">
             {detail.routingValues.map((value) => (
-              <StatusBadge key={`${value.kind}:${value.label}:${value.value ?? ""}`} tone="routing">
+              <StatusBadge
+                key={`${value.kind}:${value.label}:${value.value ?? ""}`}
+                tone="routing"
+                data-testid={VISUALIZER_TEST_IDS.events.routingValue}
+                data-kind={value.kind}
+                data-label={value.label}
+                data-value={value.value ?? ""}
+                data-confidence={value.confidence}
+              >
                 {value.label} · {value.confidence}
               </StatusBadge>
             ))}
@@ -161,11 +210,15 @@ const TopicDetail = ({
     <section className="flex min-h-0 flex-col gap-2">
       <PanelKicker>Producers</PanelKicker>
       {detail.producers.length === 0 ? (
-        <p className="rounded-md border bg-background p-2 text-sm text-muted-foreground" data-testid={VISUALIZER_TEST_IDS.events.producers}>
+        <p
+          className="rounded-md border bg-background p-2 text-sm text-muted-foreground"
+          data-testid={VISUALIZER_TEST_IDS.events.producers}
+          data-empty="true"
+        >
           No producers for this topic.
         </p>
       ) : (
-        <ol className="flex flex-col gap-2" data-testid={VISUALIZER_TEST_IDS.events.producers}>
+        <ol className="flex flex-col gap-2" data-testid={VISUALIZER_TEST_IDS.events.producers} data-empty="false">
           {detail.producers.map((producer) => (
             <ProducerRow key={producer.rowId} producer={producer} dispatch={dispatch} />
           ))}
@@ -176,11 +229,15 @@ const TopicDetail = ({
     <section className="flex min-h-0 flex-col gap-2">
       <PanelKicker>Consumers</PanelKicker>
       {detail.consumers.length === 0 ? (
-        <p className="rounded-md border bg-background p-2 text-sm text-muted-foreground" data-testid={VISUALIZER_TEST_IDS.events.consumers}>
+        <p
+          className="rounded-md border bg-background p-2 text-sm text-muted-foreground"
+          data-testid={VISUALIZER_TEST_IDS.events.consumers}
+          data-empty="true"
+        >
           No consumers for this topic.
         </p>
       ) : (
-        <ol className="flex flex-col gap-2" data-testid={VISUALIZER_TEST_IDS.events.consumers}>
+        <ol className="flex flex-col gap-2" data-testid={VISUALIZER_TEST_IDS.events.consumers} data-empty="false">
           {detail.consumers.map((consumer) => (
             <ConsumerRow key={consumer.rowId} consumer={consumer} dispatch={dispatch} />
           ))}
@@ -191,7 +248,11 @@ const TopicDetail = ({
 );
 
 const EmptyDetail = ({ detail }: { detail: Extract<EventCatalogDetailView, { kind: "empty" }> }) => (
-  <div className="flex min-h-48 flex-col justify-center gap-2 text-sm text-muted-foreground">
+  <div
+    className="flex min-h-48 flex-col justify-center gap-2 text-sm text-muted-foreground"
+    data-testid={VISUALIZER_TEST_IDS.events.detailEmpty}
+    data-detail-kind="empty"
+  >
     <PanelKicker>Events</PanelKicker>
     <h3 className="text-sm font-semibold text-foreground">{detail.title}</h3>
     <p>{detail.body}</p>
@@ -231,7 +292,9 @@ export const EventCatalogPanel = ({
         <PaneScrollArea>
           <div className="flex flex-col gap-2" data-testid={VISUALIZER_TEST_IDS.events.list}>
             {view.topics.length === 0 ? (
-              <p className="p-2 text-sm text-muted-foreground">No events match this search.</p>
+              <p className="p-2 text-sm text-muted-foreground" data-testid={VISUALIZER_TEST_IDS.events.listEmpty}>
+                No events match this search.
+              </p>
             ) : (
               view.topics.map((topic) => <TopicRow key={topic.eventType} topic={topic} dispatch={dispatch} />)
             )}
@@ -241,6 +304,7 @@ export const EventCatalogPanel = ({
 
       <section
         className="min-h-0 overflow-auto rounded-md border bg-[color:var(--vf-surface-soft)] p-3"
+        data-detail-kind={view.detail.kind}
         data-testid={VISUALIZER_TEST_IDS.events.details}
       >
         {view.detail.kind === "topic" ? <TopicDetail detail={view.detail} dispatch={dispatch} /> : <EmptyDetail detail={view.detail} />}

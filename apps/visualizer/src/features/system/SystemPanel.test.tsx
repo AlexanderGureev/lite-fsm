@@ -1,7 +1,17 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { SystemMachineRowView, SystemPanelView, SystemTopicRowView, VisualizerCommand } from "../../workbench";
+import { VISUALIZER_TEST_IDS } from "../../test-ids";
 import { SystemPanel } from "./SystemPanel";
+
+const ids = VISUALIZER_TEST_IDS;
+
+const byData = <ElementType extends HTMLElement>(testId: string, attr: string, value: string): ElementType => {
+  const element = document.querySelector<ElementType>(`[data-testid="${testId}"][${attr}="${value}"]`);
+  if (!element) throw new Error(`Missing ${testId} with ${attr}=${value}`);
+
+  return element;
+};
 
 const counts = (diagnostics = 0): SystemMachineRowView["counts"] => ({
   states: 2,
@@ -86,29 +96,35 @@ describe("SystemPanel", () => {
     };
 
     render(<SystemPanel view={view} dispatch={dispatch} />);
-    const machineList = screen.getByTestId("visualizer-system-machine-list");
-    const topicList = screen.getByTestId("visualizer-system-topic-list");
+    const machineList = screen.getByTestId(ids.system.machineList);
+    const topicList = screen.getByTestId(ids.system.topicList);
+    const selectedMachineRow = byData<HTMLButtonElement>(ids.system.machineRow, "data-machine-id", "selectedMachine");
+    const relatedMachineRow = byData<HTMLButtonElement>(ids.system.machineRow, "data-machine-id", "relatedActor");
+    const idleMachineRow = byData<HTMLButtonElement>(ids.system.machineRow, "data-machine-id", "idleMachine");
+    const selectedTopicRow = byData<HTMLButtonElement>(ids.system.topicRow, "data-event-type", "SELECTED");
+    const relatedTopicRow = byData<HTMLButtonElement>(ids.system.topicRow, "data-event-type", "RELATED");
+    const idleTopicRow = byData<HTMLButtonElement>(ids.system.topicRow, "data-event-type", "IDLE");
 
-    expect(within(machineList).getByText("selectedMachine").closest("button")?.getAttribute("data-relation-state")).toBe("selected");
-    expect(within(machineList).getByText("relatedActor").closest("button")?.getAttribute("data-relation-state")).toBe("related");
-    expect(within(machineList).getByText("dimmedMachine").closest("button")?.getAttribute("data-relation-state")).toBe("dimmed");
-    expect(within(machineList).getByText("idleMachine").closest("button")?.getAttribute("data-relation-state")).toBe("idle");
-    expect(screen.getByText("diag 2")).toBeTruthy();
-    expect(screen.getByText("No produced topics.")).toBeTruthy();
+    expect(selectedMachineRow.getAttribute("data-relation-state")).toBe("selected");
+    expect(relatedMachineRow.getAttribute("data-relation-state")).toBe("related");
+    expect(byData(ids.system.machineRow, "data-machine-id", "dimmedMachine").getAttribute("data-relation-state")).toBe("dimmed");
+    expect(idleMachineRow.getAttribute("data-relation-state")).toBe("idle");
+    expect(relatedMachineRow.getAttribute("data-diagnostics")).toBe("2");
+    expect(screen.getByTestId(ids.system.detailProducedTopics).getAttribute("data-empty")).toBe("true");
 
-    fireEvent.change(screen.getByLabelText("Search machines"), { target: { value: "actor" } });
-    fireEvent.change(screen.getByLabelText("Search topics"), { target: { value: "done" } });
-    fireEvent.click(within(machineList).getByText("selectedMachine").closest("button")!);
-    fireEvent.mouseEnter(within(machineList).getByText("relatedActor").closest("button")!);
-    fireEvent.focus(within(machineList).getByText("idleMachine").closest("button")!);
-    fireEvent.click(within(topicList).getByText("SELECTED").closest("button")!);
-    fireEvent.mouseEnter(within(topicList).getByText("RELATED").closest("button")!);
-    fireEvent.focus(within(topicList).getByText("IDLE").closest("button")!);
+    fireEvent.change(screen.getByTestId(ids.system.machineSearch), { target: { value: "actor" } });
+    fireEvent.change(screen.getByTestId(ids.system.topicSearch), { target: { value: "done" } });
+    fireEvent.click(selectedMachineRow);
+    fireEvent.mouseEnter(relatedMachineRow);
+    fireEvent.focus(idleMachineRow);
+    fireEvent.click(selectedTopicRow);
+    fireEvent.mouseEnter(relatedTopicRow);
+    fireEvent.focus(idleTopicRow);
     fireEvent.mouseLeave(machineList.parentElement!.parentElement!);
     fireEvent.mouseLeave(topicList.parentElement!.parentElement!);
-    fireEvent.click(screen.getByText("START"));
-    fireEvent.click(screen.getByTestId("visualizer-system-open-workbench"));
-    fireEvent.click(screen.getByTestId("visualizer-system-view-source"));
+    fireEvent.click(byData<HTMLButtonElement>(ids.system.topicChip, "data-event-type", "START"));
+    fireEvent.click(screen.getByTestId(ids.system.openInWorkbench));
+    fireEvent.click(screen.getByTestId(ids.system.viewSource));
 
     expect(dispatch.mock.calls.map(([command]) => command)).toEqual(
       expect.arrayContaining([
@@ -149,12 +165,12 @@ describe("SystemPanel", () => {
 
     const { rerender } = render(<SystemPanel view={view} dispatch={dispatch} />);
 
-    expect(screen.getByText("No machines match this search.")).toBeTruthy();
-    expect(screen.getByText("No topics match this search.")).toBeTruthy();
-    expect(screen.getByText("No producers")).toBeTruthy();
-    expect(screen.getByText("workerMachine")).toBeTruthy();
+    expect(screen.getByTestId(ids.system.machineEmpty)).toBeTruthy();
+    expect(screen.getByTestId(ids.system.topicEmpty)).toBeTruthy();
+    expect(screen.getByTestId(ids.system.detailProducers).getAttribute("data-empty")).toBe("true");
+    expect(screen.getByTestId(ids.system.detailConsumers).getAttribute("data-values")).toBe("workerMachine");
 
-    fireEvent.click(screen.getByTestId("visualizer-system-open-events"));
+    fireEvent.click(screen.getByTestId(ids.system.openInEvents));
 
     expect(dispatch).toHaveBeenCalledWith({ type: "l1.topic.opened-in-event-catalog", eventType: "DONE" });
 
@@ -173,8 +189,8 @@ describe("SystemPanel", () => {
       />,
     );
 
-    expect(screen.getByText("flowMachine")).toBeTruthy();
-    expect(screen.getByText("No consumers")).toBeTruthy();
+    expect(screen.getByTestId(ids.system.detailProducers).getAttribute("data-values")).toBe("flowMachine");
+    expect(screen.getByTestId(ids.system.detailConsumers).getAttribute("data-empty")).toBe("true");
   });
 
   it("рендерит empty detail и produced topic chips", () => {
@@ -197,8 +213,8 @@ describe("SystemPanel", () => {
     };
     const { rerender } = render(<SystemPanel view={view} dispatch={dispatch} />);
 
-    expect(screen.getByText("No consumed topics.")).toBeTruthy();
-    fireEvent.click(screen.getByText("DONE"));
+    expect(screen.getByTestId(ids.system.detailConsumedTopics).getAttribute("data-empty")).toBe("true");
+    fireEvent.click(byData<HTMLButtonElement>(ids.system.topicChip, "data-event-type", "DONE"));
     expect(dispatch).toHaveBeenCalledWith({ type: "l1.topic.selected", eventType: "DONE" });
 
     rerender(
@@ -212,6 +228,6 @@ describe("SystemPanel", () => {
       />,
     );
 
-    expect(screen.getByText("Select something.")).toBeTruthy();
+    expect(screen.getByTestId(ids.system.detailEmpty)).toBeTruthy();
   });
 });
