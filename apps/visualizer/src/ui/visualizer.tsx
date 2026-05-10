@@ -1,9 +1,23 @@
-import type { ComponentProps, ReactNode } from "react";
+import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from "react";
+import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
+import { javascript } from "@codemirror/lang-javascript";
+import { bracketMatching, HighlightStyle, indentOnInput, syntaxHighlighting } from "@codemirror/language";
+import { EditorState } from "@codemirror/state";
+import {
+  drawSelection,
+  dropCursor,
+  EditorView,
+  highlightActiveLine,
+  highlightActiveLineGutter,
+  keymap,
+  lineNumbers,
+  rectangularSelection,
+} from "@codemirror/view";
+import { tags } from "@lezer/highlight";
 import { Alert, AlertDescription, AlertTitle } from "@/ui/alert";
 import { Badge } from "@/ui/badge";
 import { Button } from "@/ui/button";
 import { ScrollArea } from "@/ui/scroll-area";
-import { Textarea } from "@/ui/textarea";
 import { cn } from "@/lib/utils";
 
 export type PanelProps = ComponentProps<"section"> & {
@@ -151,6 +165,101 @@ export const SourceSnippet = ({
   </div>
 );
 
+const sourceEditorTheme = EditorView.theme(
+  {
+    "&": {
+      height: "100%",
+      minHeight: "100%",
+      backgroundColor: "var(--vf-bg)",
+      color: "var(--foreground)",
+      fontFamily: "var(--vf-mono)",
+      fontSize: "13px",
+    },
+    ".cm-scroller": {
+      fontFamily: "var(--vf-mono)",
+      lineHeight: "1.72",
+      overflow: "auto",
+    },
+    ".cm-content": {
+      minHeight: "100%",
+      padding: "12px 0",
+      caretColor: "var(--primary)",
+    },
+    ".cm-line": {
+      padding: "0 14px 0 12px",
+    },
+    ".cm-gutters": {
+      backgroundColor: "var(--vf-surface-soft)",
+      borderRight: "1px solid var(--vf-border-soft)",
+      color: "var(--vf-text-quiet)",
+    },
+    ".cm-lineNumbers .cm-gutterElement": {
+      minWidth: "48px",
+      padding: "0 12px 0 10px",
+    },
+    ".cm-activeLine": {
+      backgroundColor: "var(--vf-row-hover)",
+    },
+    ".cm-activeLineGutter": {
+      backgroundColor: "var(--vf-row-hover)",
+      color: "var(--foreground)",
+    },
+    ".cm-selectionBackground, &.cm-focused .cm-selectionBackground": {
+      backgroundColor: "color-mix(in oklch, var(--primary) 24%, transparent)",
+    },
+    "&.cm-focused": {
+      outline: "none",
+    },
+    "&.cm-focused .cm-scroller": {
+      outline: "2px solid var(--ring)",
+      outlineOffset: "-2px",
+    },
+  },
+  { dark: true },
+);
+
+const sourceHighlightStyle = HighlightStyle.define([
+  { tag: tags.keyword, color: "var(--vf-accent)" },
+  { tag: tags.operatorKeyword, color: "var(--vf-accent)" },
+  { tag: tags.definitionKeyword, color: "var(--vf-accent)" },
+  { tag: tags.moduleKeyword, color: "var(--vf-accent)" },
+  { tag: tags.definition(tags.variableName), color: "var(--vf-domain)" },
+  { tag: tags.function(tags.variableName), color: "var(--vf-domain)" },
+  { tag: tags.function(tags.propertyName), color: "var(--vf-domain)" },
+  { tag: tags.variableName, color: "var(--vf-text)" },
+  { tag: tags.propertyName, color: "var(--vf-effect)" },
+  { tag: [tags.string, tags.special(tags.string)], color: "var(--vf-warning)" },
+  { tag: [tags.number, tags.bool, tags.atom], color: "var(--vf-config)" },
+  { tag: [tags.typeName, tags.className], color: "var(--vf-routing)" },
+  { tag: [tags.operator, tags.punctuation, tags.bracket], color: "var(--vf-text-muted)" },
+  { tag: tags.comment, color: "var(--vf-text-quiet)", fontStyle: "italic" },
+  { tag: tags.invalid, color: "var(--vf-danger)" },
+]);
+
+const sourceEditorExtensions = (label: string, readOnly: boolean, onValueChange: (value: string) => void) => [
+  lineNumbers(),
+  highlightActiveLineGutter(),
+  history(),
+  drawSelection(),
+  dropCursor(),
+  rectangularSelection(),
+  indentOnInput(),
+  bracketMatching(),
+  syntaxHighlighting(sourceHighlightStyle),
+  javascript({ typescript: true, jsx: true }),
+  highlightActiveLine(),
+  EditorState.tabSize.of(2),
+  EditorState.readOnly.of(readOnly),
+  EditorView.editable.of(!readOnly),
+  EditorView.lineWrapping,
+  EditorView.contentAttributes.of({ "aria-label": label }),
+  EditorView.updateListener.of((update) => {
+    if (update.docChanged) onValueChange(update.state.doc.toString());
+  }),
+  keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap]),
+  sourceEditorTheme,
+];
+
 export const SourceEditorShell = ({
   label,
   value,
@@ -158,7 +267,7 @@ export const SourceEditorShell = ({
   className,
   textareaClassName,
   readOnly = false,
-  onChange,
+  onValueChange,
   children,
 }: {
   label: string;
@@ -167,24 +276,67 @@ export const SourceEditorShell = ({
   className?: string;
   textareaClassName?: string;
   readOnly?: boolean;
-  onChange?: ComponentProps<typeof Textarea>["onChange"];
+  onValueChange?: (value: string) => void;
   children?: ReactNode;
-}) => (
-  <div className={cn("flex min-h-0 flex-col gap-2", className)}>
-    <Textarea
-      aria-label={label}
-      data-testid={textareaTestId}
-      readOnly={readOnly}
-      value={value}
-      onChange={onChange}
-      className={cn(
-        "min-h-28 resize-none rounded-md bg-background font-mono text-[11px] leading-relaxed text-foreground shadow-none",
-        textareaClassName,
-      )}
-    />
-    {children}
-  </div>
-);
+}) => {
+  const editorElement = useRef<HTMLDivElement | null>(null);
+  const editorView = useRef<EditorView | null>(null);
+  const suppressChange = useRef(false);
+  const valueChangeHandler = useRef(onValueChange);
+  const [initialValue] = useState(value);
+
+  useEffect(() => {
+    valueChangeHandler.current = onValueChange;
+  }, [onValueChange]);
+
+  useEffect(() => {
+    if (!editorElement.current) return;
+
+    const extensions = sourceEditorExtensions(label, readOnly, (nextValue) => {
+      if (!suppressChange.current) valueChangeHandler.current?.(nextValue);
+    });
+    const view = new EditorView({
+      parent: editorElement.current,
+      state: EditorState.create({ doc: initialValue, extensions }),
+    });
+
+    editorView.current = view;
+
+    return () => {
+      view.destroy();
+      editorView.current = null;
+    };
+  }, [initialValue, label, readOnly]);
+
+  useEffect(() => {
+    const view = editorView.current;
+    if (!view) return;
+
+    const currentValue = view.state.doc.toString();
+    if (currentValue === value) return;
+
+    try {
+      suppressChange.current = true;
+      view.dispatch({ changes: { from: 0, to: currentValue.length, insert: value } });
+    } finally {
+      suppressChange.current = false;
+    }
+  }, [value]);
+
+  return (
+    <div className={cn("flex min-h-0 flex-col gap-2", className)}>
+      <div
+        ref={editorElement}
+        data-testid={textareaTestId}
+        className={cn(
+          "min-h-28 overflow-hidden rounded-md border bg-background text-foreground shadow-none",
+          textareaClassName,
+        )}
+      />
+      {children}
+    </div>
+  );
+};
 
 export const DiagnosticsAlert = ({ children, className, ...props }: ComponentProps<typeof Alert>) => (
   <Alert

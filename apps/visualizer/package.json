@@ -13,6 +13,12 @@
     "test:e2e": "playwright test --config playwright.config.ts"
   },
   "dependencies": {
+    "@codemirror/commands": "^6.10.3",
+    "@codemirror/lang-javascript": "^6.2.5",
+    "@codemirror/language": "^6.12.3",
+    "@codemirror/state": "^6.6.0",
+    "@codemirror/view": "6.42.1",
+    "@lezer/highlight": "^1.2.3",
     "@lite-fsm/graph": "workspace:*",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

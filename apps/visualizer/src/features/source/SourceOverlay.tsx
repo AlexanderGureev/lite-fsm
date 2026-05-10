@@ -26,7 +26,7 @@ export const SourceOverlay = ({
 }) => (
   <Dialog open={view.open} onOpenChange={(open) => sourceOverlayOpenChange(open, onClose)}>
     <DialogContent
-      className="max-h-[min(760px,calc(100vh-2rem))] max-w-[min(920px,calc(100vw-2rem))] overflow-hidden border bg-card p-0"
+      className="grid h-[min(860px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[min(1280px,calc(100vw-1.5rem))] max-w-[min(1280px,calc(100vw-1.5rem))] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden border bg-card p-0 sm:max-w-[min(1280px,calc(100vw-1.5rem))]"
       showCloseButton={false}
       data-testid={VISUALIZER_TEST_IDS.source.overlay}
     >
@@ -54,20 +54,20 @@ export const SourceOverlay = ({
             </div>
           </DialogHeader>
 
-          <div className="min-h-0 overflow-auto p-4">
+          <div className="min-h-0 overflow-hidden p-4">
             {view.fallback ? (
               <p
-                className="rounded-md border bg-background p-3 text-sm text-muted-foreground"
+                className="h-full overflow-auto rounded-md border bg-background p-3 text-sm text-muted-foreground"
                 data-testid={VISUALIZER_TEST_IDS.source.overlayFallback}
               >
                 {view.fallback}
               </p>
             ) : (
-              <SourceSnippet lines={view.lines} data-testid={VISUALIZER_TEST_IDS.source.snippet} />
+              <SourceSnippet className="h-full" lines={view.lines} data-testid={VISUALIZER_TEST_IDS.source.snippet} />
             )}
           </div>
 
-          <DialogFooter className="border-t bg-[color:var(--vf-surface-soft)]">
+          <DialogFooter className="mx-0 mb-0 rounded-none border-t bg-[color:var(--vf-surface-soft)] px-4 py-3">
             <DialogClose asChild>
               <Button type="button" variant="outline" size="sm">
                 Close

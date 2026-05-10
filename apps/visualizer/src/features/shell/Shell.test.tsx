@@ -7,7 +7,8 @@ import { createWorkbenchStore } from "../../workbench/store";
 import type { WorkbenchSnapshot } from "../../workbench/types";
 import { createNoopValidationRegistry } from "../../validation";
 import { TooltipProvider } from "@/ui/tooltip";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { EditorView } from "@codemirror/view";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { Shell } from "./Shell";
 
@@ -96,8 +97,14 @@ describe("Shell", () => {
 
     fireEvent.mouseDown(screen.getByTestId("visualizer-tab-source"), { button: 0, ctrlKey: false });
     expect(store.getSnapshot().state.activeTab).toBe("source");
+    const sourceEditor = screen.getByTestId("visualizer-source-editor");
+    expect(sourceEditor.querySelector(".cm-lineNumbers")).toBeTruthy();
 
-    fireEvent.change(screen.getByTestId("visualizer-source-editor"), { target: { value: "" } });
+    const editorView = EditorView.findFromDOM(sourceEditor);
+    expect(editorView).toBeTruthy();
+    act(() => {
+      editorView?.dispatch({ changes: { from: 0, to: editorView.state.doc.length, insert: "" } });
+    });
     expect(store.getSnapshot().state.source.source).toBe("");
     expect((screen.getByTestId("visualizer-source-open") as HTMLButtonElement).disabled).toBe(true);
 

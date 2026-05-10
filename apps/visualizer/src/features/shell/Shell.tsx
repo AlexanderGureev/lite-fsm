@@ -92,7 +92,7 @@ const SourceWorkspace = ({
         textareaTestId={VISUALIZER_TEST_IDS.source.editor}
         className="min-h-[420px] lg:min-h-0"
         textareaClassName="min-h-[420px] lg:min-h-0 lg:flex-1"
-        onChange={(event) => dispatch({ type: "source.changed", source: event.currentTarget.value })}
+        onValueChange={(source) => dispatch({ type: "source.changed", source })}
       />
 
       <aside className="flex min-h-fit flex-col gap-3 rounded-md border bg-[color:var(--vf-surface-soft)] p-3 lg:min-h-0">
