@@ -6,14 +6,14 @@
 
 | Поле             | Значение                                                                                                                                                                                                                                                                                                          |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Дата             | 2026-05-10                                                                                                                                                                                                                                                                                                        |
-| Готово           | Этапы 0-9 IR/API/harness, Source Catalog/Candidates, Partial Evaluator, ConfigGraphCompiler, ManagerLinker/select API, ReducerCompiler, EffectsCompiler, GraphAssembler, общий `compiler/ast.ts`, Semantic Analyzer, Simulator, этап 11 view-model projection, этапы 12a architecture foundation, 12b visual direction, 12b-shadcn-foundation и 12c source pipeline/console |
+| Дата             | 2026-05-11                                                                                                                                                                                                                                                                                                        |
+| Готово           | Этапы 0-9 IR/API/harness, Source Catalog/Candidates, Partial Evaluator, ConfigGraphCompiler, ManagerLinker/select API, ReducerCompiler, EffectsCompiler, GraphAssembler, общий `compiler/ast.ts`, Semantic Analyzer, Simulator, этап 11 view-model projection, этапы 12a architecture foundation, 12b visual direction, 12b-shadcn-foundation, 12c source pipeline/console и 12d L1/L2 read-only views |
 | Package          | `@lite-fsm/graph`, private/experimental                                                                                                                                                                                                                                                                           |
 | Public API       | `compileLiteFsmGraph(source, options?)`, `selectMachineGraph(document, selector?)`, `analyzeLiteFsmGraph(document, options?)`, `@lite-fsm/graph/simulator`, `@lite-fsm/graph/view-model` + IR/analyzer/simulator/view-model-типы |
 | Текущий output   | `LiteFsmGraphDocument`: source metadata, compiler diagnostics, machines, linked managers, config states/transitions, reducer cases/transitions, effect emissions, machine facts и `initialContextJson`; `GraphAnalysisResult`: analyzer diagnostics; `GraphSimulationSnapshot`: slices/timeline/choices/emissions |
-| Еще не строится  | CLI, полноценные L1/L2 read-only views, L3/manual simulation UI, source overlay behavior и codegen/edit flows                                                                                                                                                                                                      |
+| Еще не строится  | CLI, L3/manual simulation UI и codegen/edit flows                                                                                                                                                                                                                                                                  |
 | Fixture contract | `tests/graph/fixtures/graph-sources.ts`: 28 machine candidates, 3 manager candidates, полный assembler snapshot                                                                                                                                                                                                   |
-| Coverage         | `apps/visualizer` pure logic на последнем 12c прогоне: 100% statements/branches/functions/lines                                                                                                                                                                                                                   |
+| Coverage         | `apps/visualizer` pure logic + 12d Shell/System/Events/SourceOverlay UI на последнем 12d прогоне: 100% statements/branches/functions/lines                                                                                                                                                                       |
 
 ## Ключевые решения
 
@@ -57,10 +57,16 @@
 - Source tab стал настоящим controlled source pipeline UI: editable shadcn `Textarea`, `Open visualizer`, `reset to sample`, source version/hash/status summary и invalidation derived compile/analyze/model/validation/simulation state при source edit.
 - Workbench reducer сохраняет latest-wins guards по `requestId/sourceVersion`, запускает цепочку compile -> analyze -> view-model -> validation через descriptors и нормализует model diagnostics в app diagnostics/console без блокировки analyzer diagnostics.
 - Console стала общей 12c panel с каналами `all/system/diagnostics/debug`, normalized entries, origin/severity/navigation target metadata и real Source pipeline diagnostics вместо 12b representative fixture.
+- Stage 12d добавил реальные L1/L2 read-only tabs поверх готового `GraphVisualizerModel`: `System` показывает машины, topics, relation highlight и detail panel; `Events` показывает topic catalog, routing values, producers, consumers, branch/dynamic/unknown labels и empty states.
+- Derived logic для L1/L2 вынесена в pure selectors/helpers; React-компоненты остаются thin read/dispatch layer и не пересобирают raw IR, layout graph, canvas edges или simulation state.
+- Source overlay реализован через app-local shadcn `Dialog`: команды получают `title` и `GraphSourceAnchor[]`, snippets строятся из текущего source/session version, machine anchors сортируются по priority, anchors без loc получают fallback.
+- Console navigation теперь открывает source overlay для source targets, выбирает L1/L2 item для graph targets и оставляет обычное выделение entry для targets типа `none`.
+- Stage 12d UX polish перевел shell на full-width peer tabs: Source больше не является постоянной левой колонкой, System/Events получают всю рабочую ширину, а Console открывается закрытым по умолчанию right-side overlay drawer без изменения layout активной вкладки.
+- Coverage scope для visualizer расширен на 12d React wiring/UI (`features/shell`, `features/system`, `features/events`, `features/source`) поверх уже покрытой pure workbench logic; thresholds остаются strict 100%.
 
 ## Проверки
 
-Последний успешный набор для Stage 12c:
+Последний успешный набор для Stage 12d:
 
 ```txt
 pnpm --filter @lite-fsm/visualizer check-types
@@ -71,9 +77,9 @@ pnpm --filter @lite-fsm/visualizer test:e2e
 
 Root/docs build не запускался.
 
-Дополнительная visual QA: `agent-browser` screenshots для `1440x900`,
-`1280x560` и `360x720`; horizontal overflow во всех трех viewports отсутствует.
+Playwright e2e включает responsive/focus/no-overflow проверки для `1440x900`,
+`1280x560` и `360x720`.
 
 ## Следующий этап
 
-Этап 12d: L1/L2 read-only views.
+Этап 12e: L3 cards и manual simulation.

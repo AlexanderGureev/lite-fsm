@@ -82,7 +82,7 @@ export const createInitialSimulationState = (): VisualizerSimulationState => ({
 });
 
 export const createInitialPanelState = (): VisualizerPanelState => ({
-  console: { open: true },
+  console: { open: false },
 });
 
 export const createIdleCodegenState = (): CodegenState => ({

@@ -1,5 +1,6 @@
 import type { GraphDiagnostic, LiteFsmGraphDocument } from "@lite-fsm/graph";
-import type { GraphVisualizerModel } from "@lite-fsm/graph/view-model";
+import type { GraphSourceAnchor, GraphVisualizerModel } from "@lite-fsm/graph/view-model";
+import type { ConsoleEntry } from "../console";
 import { describe, expect, it, vi } from "vitest";
 import { createInitialWorkbenchSnapshot } from "./state";
 import { createWorkbenchStore } from "./store";
@@ -536,7 +537,7 @@ describe("workbench store", () => {
     store.dispatch({ type: "l1.machine.selected", machineId: "player" });
     store.dispatch({ type: "l1.topic.selected", eventType: "PLAY" });
     store.dispatch({ type: "l2.topic.selected", eventType: "STOP" });
-    store.dispatch({ type: "source.overlay.opened", machineId: "player" });
+    store.dispatch({ type: "source.overlay.opened", title: "player", anchors: [] });
     store.dispatch({ type: "console.entry.selected", entryId: "diagnostic:old" });
 
     store.dispatch({ type: "source.changed", source: "export const next = 1;" });
@@ -582,15 +583,28 @@ describe("workbench store", () => {
   it("покрывает selection, overlay и panel commands", () => {
     const store = createWorkbenchStore();
     store.dispatch({ type: "l1.machine.selected", machineId: "player" });
+    const beforeSameMachineSelection = store.getSnapshot();
+    store.dispatch({ type: "l1.machine.selected", machineId: "player" });
+    expect(store.getSnapshot()).toBe(beforeSameMachineSelection);
     store.dispatch({ type: "l1.topic.selected", eventType: "PLAY" });
+    const beforeSameTopicSelection = store.getSnapshot();
+    store.dispatch({ type: "l1.topic.selected", eventType: "PLAY" });
+    expect(store.getSnapshot()).toBe(beforeSameTopicSelection);
+    store.dispatch({ type: "l1.machine.selected", machineId: "player" });
     store.dispatch({ type: "l2.topic.selected", eventType: "PAUSE" });
     store.dispatch({ type: "l3.machine.toggled", machineId: "player" });
     store.dispatch({ type: "l3.machine.toggled", machineId: "player" });
     store.dispatch({ type: "l3.machine.toggled", machineId: "player" });
     store.dispatch({ type: "l3.selection.cleared" });
     store.dispatch({ type: "l3.timeline.step.selected", stepId: "step:1" });
-    store.dispatch({ type: "source.overlay.opened", machineId: "player" });
+    store.dispatch({ type: "source.overlay.opened", title: "player", anchors: [] });
     store.dispatch({ type: "source.overlay.closed" });
+    const beforeClosedOverlay = store.getSnapshot();
+    store.dispatch({ type: "source.overlay.closed" });
+    expect(store.getSnapshot()).toBe(beforeClosedOverlay);
+    const beforeClosedConsole = store.getSnapshot();
+    store.dispatch({ type: "panel.console.toggled", open: false });
+    expect(store.getSnapshot()).toBe(beforeClosedConsole);
     store.dispatch({ type: "panel.console.toggled", open: true });
     store.dispatch({ type: "panel.console.toggled" });
     store.dispatch({ type: "console.channel.selected", channel: "diagnostics" });
@@ -601,7 +615,7 @@ describe("workbench store", () => {
 
     const state = store.getSnapshot().state;
     expect(state.l1.selectedMachineId).toBe("player");
-    expect(state.l1.selectedTopic).toBe("PLAY");
+    expect(state.l1.selectedTopic).toBeUndefined();
     expect(state.l2.selectedTopic).toBe("PAUSE");
     expect(state.l3.selectedMachineIds).toEqual([]);
     expect(state.simulation.inspectedStepId).toBe("step:1");
@@ -609,6 +623,173 @@ describe("workbench store", () => {
     expect(state.console.selectedChannel).toBe("diagnostics");
     expect(state.panels.console.selectedEntryId).toBe("diagnostic:1");
     expect(store.getSnapshot()).toBe(beforeSameEntry);
+  });
+
+  it("обрабатывает 12d L1/L2 navigation, hover и console targets", () => {
+    const sourceAnchor: GraphSourceAnchor = {
+      kind: "machine",
+      editable: false,
+      loc: {
+        start: { line: 1, column: 1, offset: 0 },
+        end: { line: 1, column: 7, offset: 6 },
+      },
+    };
+    const entries: readonly ConsoleEntry[] = [
+      {
+        entryId: "source-entry",
+        sourceVersion: 1,
+        channel: "diagnostics",
+        title: "source diagnostic",
+        message: "source",
+        target: { kind: "source", anchor: sourceAnchor },
+      },
+      {
+        entryId: "topic-entry",
+        sourceVersion: 1,
+        channel: "diagnostics",
+        title: "topic diagnostic",
+        message: "topic",
+        target: { kind: "graph", ref: { kind: "topic", eventType: "DONE" } },
+      },
+      {
+        entryId: "machine-entry",
+        sourceVersion: 1,
+        channel: "diagnostics",
+        title: "machine diagnostic",
+        message: "machine",
+        target: { kind: "graph", ref: { kind: "machine", machineId: "root" } },
+      },
+      {
+        entryId: "state-entry",
+        sourceVersion: 1,
+        channel: "diagnostics",
+        title: "state diagnostic",
+        message: "state",
+        target: { kind: "graph", ref: { kind: "state", machineId: "flow", stateId: "idle" } },
+      },
+      {
+        entryId: "transition-entry",
+        sourceVersion: 1,
+        channel: "diagnostics",
+        title: "transition diagnostic",
+        message: "transition",
+        target: { kind: "graph", ref: { kind: "transition", machineId: "flow", transitionId: "t1" } },
+      },
+      {
+        entryId: "emission-entry",
+        sourceVersion: 1,
+        channel: "diagnostics",
+        title: "emission diagnostic",
+        message: "emission",
+        target: { kind: "graph", ref: { kind: "emission", machineId: "effects", emissionId: "e1" } },
+      },
+      {
+        entryId: "reducer-entry",
+        sourceVersion: 1,
+        channel: "diagnostics",
+        title: "reducer diagnostic",
+        message: "reducer",
+        target: { kind: "graph", ref: { kind: "reducerCase", machineId: "reducers", reducerCaseId: "r1" } },
+      },
+      {
+        entryId: "manager-entry",
+        sourceVersion: 1,
+        channel: "diagnostics",
+        title: "manager diagnostic",
+        message: "manager",
+        target: { kind: "graph", ref: { kind: "manager", managerId: "manager" } },
+      },
+      {
+        entryId: "none-entry",
+        sourceVersion: 1,
+        channel: "diagnostics",
+        title: "none diagnostic",
+        message: "none",
+        target: { kind: "none", reason: "no-anchor" },
+      },
+    ];
+    const snapshot = createInitialWorkbenchSnapshot();
+    const store = createWorkbenchStore({
+      ...snapshot,
+      state: {
+        ...snapshot.state,
+        console: { ...snapshot.state.console, entries },
+      },
+    });
+
+    store.dispatch({ type: "l1.machine-query.changed", query: "flow" });
+    const sameMachineQuery = store.getSnapshot();
+    store.dispatch({ type: "l1.machine-query.changed", query: "flow" });
+    expect(store.getSnapshot()).toBe(sameMachineQuery);
+    store.dispatch({ type: "l1.topic-query.changed", query: "done" });
+    const sameTopicQuery = store.getSnapshot();
+    store.dispatch({ type: "l1.topic-query.changed", query: "done" });
+    expect(store.getSnapshot()).toBe(sameTopicQuery);
+    store.dispatch({ type: "l2.query.changed", query: "route" });
+    const sameL2Query = store.getSnapshot();
+    store.dispatch({ type: "l2.query.changed", query: "route" });
+    expect(store.getSnapshot()).toBe(sameL2Query);
+    store.dispatch({ type: "l1.machine.hovered", machineId: "flow" });
+    const sameMachineHover = store.getSnapshot();
+    store.dispatch({ type: "l1.machine.hovered", machineId: "flow" });
+    expect(store.getSnapshot()).toBe(sameMachineHover);
+    store.dispatch({ type: "l1.topic.hovered", eventType: "DONE" });
+    const sameTopicHover = store.getSnapshot();
+    store.dispatch({ type: "l1.topic.hovered", eventType: "DONE" });
+    expect(store.getSnapshot()).toBe(sameTopicHover);
+    store.dispatch({ type: "l1.hover.cleared" });
+    const sameClear = store.getSnapshot();
+    store.dispatch({ type: "l1.hover.cleared" });
+    expect(store.getSnapshot()).toBe(sameClear);
+
+    store.dispatch({ type: "l1.topic.opened-in-event-catalog", eventType: "DONE" });
+    expect(store.getSnapshot().state.activeTab).toBe("events");
+    expect(store.getSnapshot().state.l1.selectedMachineId).toBeUndefined();
+    expect(store.getSnapshot().state.l1.selectedTopic).toBe("DONE");
+    expect(store.getSnapshot().state.l2.selectedTopic).toBe("DONE");
+
+    store.dispatch({ type: "l1.machine.opened-in-workbench", machineId: "flow" });
+    expect(store.getSnapshot().state.activeTab).toBe("machines");
+    expect(store.getSnapshot().state.l3.selectedMachineIds).toEqual(["flow"]);
+    expect(store.getSnapshot().state.simulation.scope).toEqual({ kind: "machines", machineIds: ["flow"] });
+
+    store.dispatch({ type: "console.entry.selected", entryId: "source-entry" });
+    expect(store.getSnapshot().state.panels.sourceOverlay).toEqual({
+      sourceVersion: 1,
+      title: "source diagnostic",
+      anchors: [sourceAnchor],
+    });
+
+    store.dispatch({ type: "console.entry.selected", entryId: "topic-entry" });
+    expect(store.getSnapshot().state.activeTab).toBe("events");
+    expect(store.getSnapshot().state.l1.selectedMachineId).toBeUndefined();
+    expect(store.getSnapshot().state.l1.selectedTopic).toBe("DONE");
+    expect(store.getSnapshot().state.l2.selectedTopic).toBe("DONE");
+
+    store.dispatch({ type: "console.entry.selected", entryId: "machine-entry" });
+    expect(store.getSnapshot().state.activeTab).toBe("system");
+    expect(store.getSnapshot().state.l1.selectedMachineId).toBe("root");
+    expect(store.getSnapshot().state.l1.selectedTopic).toBeUndefined();
+
+    store.dispatch({ type: "console.entry.selected", entryId: "state-entry" });
+    expect(store.getSnapshot().state.l1.selectedMachineId).toBe("flow");
+
+    store.dispatch({ type: "console.entry.selected", entryId: "transition-entry" });
+    expect(store.getSnapshot().state.l1.selectedMachineId).toBe("flow");
+
+    store.dispatch({ type: "console.entry.selected", entryId: "emission-entry" });
+    expect(store.getSnapshot().state.l1.selectedMachineId).toBe("effects");
+
+    store.dispatch({ type: "console.entry.selected", entryId: "reducer-entry" });
+    expect(store.getSnapshot().state.l1.selectedMachineId).toBe("reducers");
+
+    store.dispatch({ type: "console.entry.selected", entryId: "manager-entry" });
+    expect(store.getSnapshot().state.panels.console.selectedEntryId).toBe("manager-entry");
+
+    store.dispatch({ type: "console.entry.selected", entryId: "none-entry" });
+    const beforeSameNone = store.getSnapshot();
+    store.dispatch({ type: "console.entry.selected", entryId: "none-entry" });
+    expect(store.getSnapshot()).toBe(beforeSameNone);
   });
 
   it("отклоняет simulation user commands до появления session", () => {

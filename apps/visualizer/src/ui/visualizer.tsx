@@ -42,6 +42,7 @@ export const PanelKicker = ({ className, ...props }: ComponentProps<"p">) => (
 const statusToneClass = {
   ready: "border-[color:var(--vf-accent-border)] bg-[color:var(--vf-accent-soft)] text-[color:var(--vf-accent)]",
   muted: "border-border bg-muted text-muted-foreground",
+  domain: "border-[color:var(--vf-domain-border)] bg-[color:var(--vf-domain-soft)] text-[color:var(--vf-domain)]",
   actor: "border-[color:var(--vf-actor-border)] bg-[color:var(--vf-actor-soft)] text-[color:var(--vf-actor)]",
   routing: "border-[color:var(--vf-routing-border)] bg-[color:var(--vf-routing-soft)] text-[color:var(--vf-routing)]",
   diagnostic: "border-[color:var(--vf-warning-border)] bg-[color:var(--vf-warning-soft)] text-[color:var(--vf-warning)]",
@@ -154,6 +155,8 @@ export const SourceEditorShell = ({
   label,
   value,
   textareaTestId,
+  className,
+  textareaClassName,
   readOnly = false,
   onChange,
   children,
@@ -161,18 +164,23 @@ export const SourceEditorShell = ({
   label: string;
   value: string;
   textareaTestId?: string;
+  className?: string;
+  textareaClassName?: string;
   readOnly?: boolean;
   onChange?: ComponentProps<typeof Textarea>["onChange"];
   children?: ReactNode;
 }) => (
-  <div className="flex min-h-0 flex-col gap-2">
+  <div className={cn("flex min-h-0 flex-col gap-2", className)}>
     <Textarea
       aria-label={label}
       data-testid={textareaTestId}
       readOnly={readOnly}
       value={value}
       onChange={onChange}
-      className="min-h-28 resize-none rounded-md bg-background font-mono text-[11px] leading-relaxed text-foreground shadow-none"
+      className={cn(
+        "min-h-28 resize-none rounded-md bg-background font-mono text-[11px] leading-relaxed text-foreground shadow-none",
+        textareaClassName,
+      )}
     />
     {children}
   </div>

@@ -1,4 +1,5 @@
 import type { ConsoleChannelFilter, ConsoleChannelView, ConsolePanelView } from "../console";
+import { buildSourceOverlayView, type SourceOverlayView } from "./source-overlay";
 import type { VisualizerTab, WorkbenchSelector } from "./types";
 
 export type TabItemView = {
@@ -154,6 +155,14 @@ export const selectSourcePanel = createSelector(
   },
 );
 
+export const selectSourceOverlay = createSelector(
+  (snapshot) => ({
+    source: snapshot.state.source.source,
+    overlay: snapshot.state.panels.sourceOverlay,
+  }),
+  ({ source, overlay }): SourceOverlayView => buildSourceOverlayView(source, overlay),
+);
+
 export const selectCurrentEmptyPanel = createSelector(
   (snapshot) => ({
     activeTab: snapshot.state.activeTab,
@@ -175,8 +184,8 @@ export const selectCurrentEmptyPanel = createSelector(
         title: "System inventory",
         body:
           modelStatus === "ready"
-            ? `Model ready with ${machines} machines. L1 inventory rendering starts in stage 12d.`
-            : "Open the visualizer from Source to build the model before L1 rendering starts in stage 12d.",
+            ? `Model ready with ${machines} machines. Use System to inspect L1 inventory.`
+            : "Open the visualizer from Source to build the model before inspecting L1 inventory.",
         status: modelStatus,
       };
     }
@@ -186,8 +195,8 @@ export const selectCurrentEmptyPanel = createSelector(
         title: "Event catalog",
         body:
           modelStatus === "ready"
-            ? `Model ready with ${topics} topics. L2 event catalog rendering starts in stage 12d.`
-            : "Open the visualizer from Source to build the topic catalog before L2 rendering starts in stage 12d.",
+            ? `Model ready with ${topics} topics. Use Events to inspect L2 routing.`
+            : "Open the visualizer from Source to build the topic catalog before inspecting L2 routing.",
         status: modelStatus,
       };
     }

@@ -139,6 +139,7 @@ Installed baseline components:
 - `scroll-area` for source, workbench and console panes.
 - `tooltip` for compact icon-only actions.
 - `alert` for diagnostics and console entries.
+- `dialog` for source overlay anchors opened from System, Events and Console.
 
 Ownership rules:
 
@@ -180,7 +181,9 @@ Custom graph grammar that remains outside shadcn:
 - Layer tags: `cfg`, `red`, `eff`, `sim`.
 - Event/state/routing rows with stable columns and long-label wrapping.
 - Source snippets with line numbers and selected source anchors.
-- Timeline rows, relation chips and source-overlay fragments in later stages.
+- Source-overlay fragments with line clipping and fallback rows when anchors have
+  no source location.
+- Timeline rows and relation chips in later stages.
 
 Testing hooks:
 
@@ -194,10 +197,15 @@ Testing hooks:
 
 ### App Shell
 
-- Full viewport product shell with topbar and tab strip.
-- Topbar contains brand mark, current source/status pill and console toggle.
+- Full viewport product shell with one compact topbar and one full-width active
+  workspace pane. Source, System, Events and Machines are peer tabs; Source is
+  not a permanent side rail.
+- Topbar contains brand mark, segmented tabs, current source/status pills and
+  console toggle.
 - Tabs are segmented buttons with counters. Active tab uses raised surface and
   accent counter, not a colored underline.
+- Active tab content owns the available width. L1/L2 panels must not share
+  horizontal space with Source or Console.
 - Mobile layout stacks topbar content and turns workspace panes into a single
   column.
 
@@ -219,6 +227,26 @@ Testing hooks:
   `overflow-wrap:anywhere`; columns must not stretch the viewport.
 - Counts use arrows consistently: producers `↑`, consumers `↓`.
 
+### L1/L2 Read-Only Views
+
+- `System` is the L1 system view. It is split into machines, topics and
+  details zones inside the workbench panel; narrow viewports stack the zones in
+  one column.
+- L1 machine/topic filters are case-insensitive text queries over ids, titles,
+  kind/group tags, topic names and visible semantic labels.
+- L1 relation state is shown with row tint, border and dimming. Do not draw
+  persistent edges, routes or canvas layers.
+- Machine details can open source anchors or prepare the Machines placeholder
+  with the selected machine for Stage 12e.
+- Topic details can open the selected topic in the L2 `Events` catalog.
+- `Events` is the L2 topic catalog. It is split into topic list and details;
+  narrow viewports stack list above detail.
+- L2 details show producers, consumers, routing values, source state, guard,
+  confidence, branch targets and dynamic/unknown labels from the visualizer
+  model only.
+- Empty states must distinguish no model, no search matches, no selected topic
+  and no producers/consumers.
+
 ### Badges
 
 - Badges are mono, compact and stable in height.
@@ -229,11 +257,16 @@ Testing hooks:
 
 ### Source Editor And Overlay
 
-- Source editor uses dark code surface, mono text and explicit action row.
-- Source overlay is reserved for selected machine/source anchors. Stage 12b may
-  show a static representative source block only as fixture content.
-- Escape/backdrop close belongs to later behavior stages, but visual states
-  must already be specified.
+- Source editor is a full-width tab with dark code surface, mono text, explicit
+  action row and a compact projection summary. It does not remain mounted beside
+  System/Events after the source pipeline opens the model.
+- Source overlay uses app-local shadcn `Dialog` and opens from L1 rows, L2 rows
+  and console targets with a concise title and prioritized source anchors.
+- Overlay snippets are derived from the current `SourceSession.source`,
+  `sourceVersion` and `GraphSourceAnchor[]`; they include line numbers, clipped
+  context and fallback rows when a source location is missing.
+- Close behavior is the standard Dialog close button, Escape and backdrop.
+  Source edits/recompile clear the overlay through app state.
 
 ### L3 Cards And Timeline
 
@@ -246,7 +279,9 @@ Testing hooks:
 
 ### Console And Diagnostics
 
-- Console is a right rail or bottom rail depending on responsive space.
+- Console is a right-side overlay drawer. It is closed by default, opens above
+  the active workspace, dims the underlying pane and never changes the active
+  tab layout width.
 - Entries include origin, severity, message and optional graph/source target.
 - Diagnostics colors are semantic, not decorative. Error, warning and info must
   remain readable on the dark surface.
@@ -257,8 +292,8 @@ Testing hooks:
 - `:focus-visible` is mandatory for tabs, buttons, chips, source actions and
   console rows.
 - Contrast must remain sufficient for muted text and semantic badges.
-- Keyboard navigation follows document order: console toggle, tabs, primary
-  fixture actions, console controls.
+- Keyboard navigation follows document order: tabs, topbar actions, active pane
+  controls, console controls when the drawer is open.
 - Labels such as event types and machine ids may be English/API terms; concise
   UI copy may stay English while specs remain Russian.
 
@@ -268,7 +303,8 @@ Testing hooks:
 - At narrow widths, workspace panes stack vertically, tab strip scrolls
   horizontally and cards keep stable row spacing.
 - Long labels wrap instead of causing horizontal page overflow.
-- Console remains reachable and does not overlap the active pane.
+- Console remains reachable as an overlay drawer; when open it may cover the
+  right side of the active pane and must provide an obvious close control.
 
 ## Prohibited
 

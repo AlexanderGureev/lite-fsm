@@ -474,6 +474,127 @@ const toggleMachine = (snapshot: WorkbenchSnapshot, machineId: string): Reductio
   );
 };
 
+const selectMachineForWorkbench = (snapshot: WorkbenchSnapshot, machineId: string): Reduction => {
+  const selectedMachineIds = [machineId];
+
+  return changed(
+    snapshot,
+    {
+      ...snapshot.state,
+      activeTab: "machines",
+      l3: { selectedMachineIds },
+      simulation: {
+        ...createInitialSimulationState(),
+        selectedMachineIds,
+        scope: { kind: "machines", machineIds: selectedMachineIds },
+      },
+    },
+    ["activeTab", "l3", "simulation"],
+  );
+};
+
+const openTopicInEventCatalog = (snapshot: WorkbenchSnapshot, eventType: string): Reduction =>
+  changed(
+    snapshot,
+    {
+      ...snapshot.state,
+      activeTab: "events",
+      l1: { ...snapshot.state.l1, selectedMachineId: undefined, selectedTopic: eventType },
+      l2: { ...snapshot.state.l2, selectedTopic: eventType },
+    },
+    ["activeTab", "l1", "l2"],
+  );
+
+const selectSystemMachine = (snapshot: WorkbenchSnapshot, machineId: string): Reduction => {
+  if (snapshot.state.l1.selectedMachineId === machineId && !snapshot.state.l1.selectedTopic) return unchanged(snapshot);
+
+  return changed(
+    snapshot,
+    { ...snapshot.state, l1: { ...snapshot.state.l1, selectedMachineId: machineId, selectedTopic: undefined } },
+    ["l1"],
+  );
+};
+
+const selectSystemTopic = (snapshot: WorkbenchSnapshot, eventType: string): Reduction => {
+  if (snapshot.state.l1.selectedTopic === eventType && !snapshot.state.l1.selectedMachineId) return unchanged(snapshot);
+
+  return changed(
+    snapshot,
+    { ...snapshot.state, l1: { ...snapshot.state.l1, selectedMachineId: undefined, selectedTopic: eventType } },
+    ["l1"],
+  );
+};
+
+const machineIdFromGraphTarget = (target: NonNullable<VisualizerWorkbenchState["diagnostics"][number]["graphItemRef"]>): string | undefined => {
+  if ("machineId" in target) return target.machineId;
+
+  return undefined;
+};
+
+const selectConsoleEntry = (snapshot: WorkbenchSnapshot, entryId: string): Reduction => {
+  const entry = snapshot.state.console.entries.find((candidate) => candidate.entryId === entryId);
+  const basePanels = {
+    ...snapshot.state.panels,
+    console: { ...snapshot.state.panels.console, selectedEntryId: entryId },
+  };
+
+  if (!entry?.target) {
+    if (entryId === snapshot.state.panels.console.selectedEntryId) return unchanged(snapshot);
+    return changed(snapshot, { ...snapshot.state, panels: basePanels }, ["panels"]);
+  }
+
+  if (entry.target.kind === "source") {
+    return changed(
+      snapshot,
+      {
+        ...snapshot.state,
+        panels: {
+          ...basePanels,
+          sourceOverlay: {
+            sourceVersion: snapshot.state.source.version,
+            title: entry.title,
+            anchors: [entry.target.anchor],
+          },
+        },
+      },
+      ["panels"],
+    );
+  }
+
+  if (entry.target.kind === "graph") {
+    if (entry.target.ref.kind === "topic") {
+      return changed(
+        snapshot,
+        {
+          ...snapshot.state,
+          activeTab: "events",
+          panels: basePanels,
+          l1: { ...snapshot.state.l1, selectedMachineId: undefined, selectedTopic: entry.target.ref.eventType },
+          l2: { ...snapshot.state.l2, selectedTopic: entry.target.ref.eventType },
+        },
+        ["activeTab", "panels", "l1", "l2"],
+      );
+    }
+
+    const machineId = machineIdFromGraphTarget(entry.target.ref);
+    if (machineId) {
+      return changed(
+        snapshot,
+        {
+          ...snapshot.state,
+          activeTab: "system",
+          panels: basePanels,
+          l1: { ...snapshot.state.l1, selectedMachineId: machineId, selectedTopic: undefined },
+        },
+        ["activeTab", "panels", "l1"],
+      );
+    }
+  }
+
+  if (entryId === snapshot.state.panels.console.selectedEntryId) return unchanged(snapshot);
+  return changed(snapshot, { ...snapshot.state, panels: basePanels }, ["panels"]);
+};
+
 const reduceUserCommand = (snapshot: WorkbenchSnapshot, command: VisualizerCommand): Reduction => {
   switch (command.type) {
     case "source.changed":
@@ -484,10 +605,40 @@ const reduceUserCommand = (snapshot: WorkbenchSnapshot, command: VisualizerComma
       return openVisualizer(snapshot);
     case "tab.selected":
       return selectTab(snapshot, command.tab);
+    case "l1.machine-query.changed":
+      if (command.query === snapshot.state.l1.machineQuery) return unchanged(snapshot);
+      return changed(snapshot, { ...snapshot.state, l1: { ...snapshot.state.l1, machineQuery: command.query } }, ["l1"]);
+    case "l1.topic-query.changed":
+      if (command.query === snapshot.state.l1.topicQuery) return unchanged(snapshot);
+      return changed(snapshot, { ...snapshot.state, l1: { ...snapshot.state.l1, topicQuery: command.query } }, ["l1"]);
     case "l1.machine.selected":
-      return changed(snapshot, { ...snapshot.state, l1: { ...snapshot.state.l1, selectedMachineId: command.machineId } }, ["l1"]);
+      return selectSystemMachine(snapshot, command.machineId);
+    case "l1.machine.hovered":
+      if (command.machineId === snapshot.state.l1.hoveredMachineId) return unchanged(snapshot);
+      return changed(
+        snapshot,
+        { ...snapshot.state, l1: { ...snapshot.state.l1, hoveredMachineId: command.machineId, hoveredTopic: undefined } },
+        ["l1"],
+      );
     case "l1.topic.selected":
-      return changed(snapshot, { ...snapshot.state, l1: { ...snapshot.state.l1, selectedTopic: command.eventType } }, ["l1"]);
+      return selectSystemTopic(snapshot, command.eventType);
+    case "l1.topic.hovered":
+      if (command.eventType === snapshot.state.l1.hoveredTopic) return unchanged(snapshot);
+      return changed(
+        snapshot,
+        { ...snapshot.state, l1: { ...snapshot.state.l1, hoveredMachineId: undefined, hoveredTopic: command.eventType } },
+        ["l1"],
+      );
+    case "l1.hover.cleared":
+      if (!snapshot.state.l1.hoveredMachineId && !snapshot.state.l1.hoveredTopic) return unchanged(snapshot);
+      return changed(snapshot, { ...snapshot.state, l1: { ...snapshot.state.l1, hoveredMachineId: undefined, hoveredTopic: undefined } }, ["l1"]);
+    case "l1.topic.opened-in-event-catalog":
+      return openTopicInEventCatalog(snapshot, command.eventType);
+    case "l1.machine.opened-in-workbench":
+      return selectMachineForWorkbench(snapshot, command.machineId);
+    case "l2.query.changed":
+      if (command.query === snapshot.state.l2.query) return unchanged(snapshot);
+      return changed(snapshot, { ...snapshot.state, l2: { ...snapshot.state.l2, query: command.query } }, ["l2"]);
     case "l2.topic.selected":
       return changed(snapshot, { ...snapshot.state, l2: { ...snapshot.state.l2, selectedTopic: command.eventType } }, ["l2"]);
     case "l3.machine.toggled":
@@ -507,11 +658,19 @@ const reduceUserCommand = (snapshot: WorkbenchSnapshot, command: VisualizerComma
         snapshot,
         {
           ...snapshot.state,
-          panels: { ...snapshot.state.panels, sourceOverlay: { machineId: command.machineId, sourceVersion: snapshot.state.source.version } },
+          panels: {
+            ...snapshot.state.panels,
+            sourceOverlay: {
+              title: command.title,
+              anchors: command.anchors,
+              sourceVersion: snapshot.state.source.version,
+            },
+          },
         },
         ["panels"],
       );
     case "source.overlay.closed":
+      if (!snapshot.state.panels.sourceOverlay) return unchanged(snapshot);
       return changed(snapshot, { ...snapshot.state, panels: { ...snapshot.state.panels, sourceOverlay: undefined } }, ["panels"]);
     case "panel.console.toggled": {
       const open = command.open ?? !snapshot.state.panels.console.open;
@@ -526,12 +685,7 @@ const reduceUserCommand = (snapshot: WorkbenchSnapshot, command: VisualizerComma
       return changed(snapshot, { ...snapshot.state, console }, ["console"]);
     }
     case "console.entry.selected":
-      if (command.entryId === snapshot.state.panels.console.selectedEntryId) return unchanged(snapshot);
-      return changed(
-        snapshot,
-        { ...snapshot.state, panels: { ...snapshot.state.panels, console: { ...snapshot.state.panels.console, selectedEntryId: command.entryId } } },
-        ["panels"],
-      );
+      return selectConsoleEntry(snapshot, command.entryId);
     case "codegen.intent.created":
       return codegenStarted(snapshot, command);
     case "l3.event.sent":

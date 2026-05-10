@@ -7,7 +7,7 @@ import type {
   GraphSimulationScope,
   GraphSimulationSnapshot,
 } from "@lite-fsm/graph/simulator";
-import type { GraphVisualizerModel, GraphVisualizerSimulationOverlayInput } from "@lite-fsm/graph/view-model";
+import type { GraphSourceAnchor, GraphVisualizerModel, GraphVisualizerSimulationOverlayInput } from "@lite-fsm/graph/view-model";
 import type { CanvasState } from "../canvas";
 import type { CodegenPlanResult, CodegenState, SourceEditIntent } from "../codegen";
 import type { ConsoleChannelFilter, ConsoleState } from "../console";
@@ -42,7 +42,9 @@ export type ViewModelState = {
 
 export type SystemViewState = {
   selectedMachineId?: string;
+  hoveredMachineId?: string;
   selectedTopic?: string;
+  hoveredTopic?: string;
   machineQuery: string;
   topicQuery: string;
 };
@@ -70,7 +72,8 @@ export type VisualizerSimulationState = {
 
 export type SourceOverlayState = {
   sourceVersion: number;
-  machineId: string;
+  title: string;
+  anchors: readonly GraphSourceAnchor[];
 };
 
 export type VisualizerPanelState = {
@@ -128,8 +131,16 @@ export type VisualizerCommand =
   | { type: "source.reset-to-sample" }
   | { type: "source.open-visualizer" }
   | { type: "tab.selected"; tab: VisualizerTab }
+  | { type: "l1.machine-query.changed"; query: string }
+  | { type: "l1.topic-query.changed"; query: string }
   | { type: "l1.machine.selected"; machineId: string }
+  | { type: "l1.machine.hovered"; machineId: string }
   | { type: "l1.topic.selected"; eventType: string }
+  | { type: "l1.topic.hovered"; eventType: string }
+  | { type: "l1.hover.cleared" }
+  | { type: "l1.topic.opened-in-event-catalog"; eventType: string }
+  | { type: "l1.machine.opened-in-workbench"; machineId: string }
+  | { type: "l2.query.changed"; query: string }
   | { type: "l2.topic.selected"; eventType: string }
   | { type: "l3.machine.toggled"; machineId: string }
   | { type: "l3.selection.cleared" }
@@ -142,7 +153,7 @@ export type VisualizerCommand =
       initialContextOverrides?: readonly GraphInitialContextOverride[];
     }
   | { type: "l3.timeline.step.selected"; stepId: string }
-  | { type: "source.overlay.opened"; machineId: string }
+  | { type: "source.overlay.opened"; title: string; anchors: readonly GraphSourceAnchor[] }
   | { type: "source.overlay.closed" }
   | { type: "panel.console.toggled"; open?: boolean }
   | { type: "console.channel.selected"; channel: ConsoleChannelFilter }
