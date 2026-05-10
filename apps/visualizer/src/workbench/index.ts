@@ -10,8 +10,8 @@ export {
   EMPTY_ARRAY,
 } from "./state";
 export { createWorkbenchStore } from "./store";
-export { selectActiveTab, selectConsolePanel, selectCurrentEmptyPanel, selectTabItems } from "./selectors";
-export type { EmptyPanelView, TabItemView } from "./selectors";
+export { selectActiveTab, selectConsolePanel, selectCurrentEmptyPanel, selectSourcePanel, selectTabItems } from "./selectors";
+export type { EmptyPanelView, SourcePanelView, TabItemView } from "./selectors";
 export type {
   AnalysisState,
   CompileState,

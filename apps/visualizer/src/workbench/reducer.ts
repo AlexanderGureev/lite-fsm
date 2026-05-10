@@ -1,4 +1,12 @@
-import { appendConsoleEntries, createConsoleEntryFromDiagnostic } from "../console";
+import {
+  appendConsoleEntries,
+  createConsoleEntryFromDiagnostic,
+  createInitialConsoleState,
+  createSystemConsoleEntry,
+  resetConsoleEntries,
+  selectConsoleChannel,
+} from "../console";
+import { normalizeGraphDiagnostics } from "../diagnostics";
 import { SAMPLE_SOURCE, updateSourceSession } from "../source";
 import {
   createIdleAnalysisState,
@@ -105,6 +113,17 @@ const appendDiagnostics = (
   };
 };
 
+const clearPipelinePanelSelection = (
+  panels: VisualizerWorkbenchState["panels"],
+): VisualizerWorkbenchState["panels"] => ({
+  ...panels,
+  sourceOverlay: undefined,
+  console: {
+    ...panels.console,
+    selectedEntryId: undefined,
+  },
+});
+
 const resetDerivedForSource = (state: VisualizerWorkbenchState): VisualizerWorkbenchState => ({
   ...state,
   compile: createIdleCompileState(),
@@ -116,7 +135,8 @@ const resetDerivedForSource = (state: VisualizerWorkbenchState): VisualizerWorkb
   l3: createInitialMachineWorkbenchViewState(),
   simulation: createInitialSimulationState(),
   diagnostics: [],
-  panels: { ...state.panels, sourceOverlay: undefined },
+  console: createInitialConsoleState(),
+  panels: clearPipelinePanelSelection(state.panels),
 });
 
 const sourceChanged = (snapshot: WorkbenchSnapshot, source: string): Reduction => {
@@ -138,6 +158,7 @@ const sourceChanged = (snapshot: WorkbenchSnapshot, source: string): Reduction =
     "l3",
     "simulation",
     "diagnostics",
+    "console",
     "panels",
   ]);
 };
@@ -153,11 +174,32 @@ const openVisualizer = (snapshot: WorkbenchSnapshot): Reduction => {
     sequence,
     diagnostics: [],
   };
+  const console = appendConsoleEntries(resetConsoleEntries(snapshot.state.console), [
+    createSystemConsoleEntry(
+      snapshot.state.source.version,
+      `open:${sequence}`,
+      "Source pipeline started",
+      `Compiling ${snapshot.state.source.filename ?? "source"} at version ${snapshot.state.source.version}.`,
+    ),
+  ]);
 
   return changed(
     snapshot,
-    { ...snapshot.state, compile },
-    ["compile"],
+    {
+      ...snapshot.state,
+      compile,
+      analysis: createIdleAnalysisState(),
+      model: createIdleModelState(),
+      validation: createIdleValidationState(),
+      l1: createInitialSystemViewState(),
+      l2: createInitialEventCatalogViewState(),
+      l3: createInitialMachineWorkbenchViewState(),
+      simulation: createInitialSimulationState(),
+      diagnostics: [],
+      console,
+      panels: clearPipelinePanelSelection(snapshot.state.panels),
+    },
+    ["compile", "analysis", "model", "validation", "l1", "l2", "l3", "simulation", "diagnostics", "console", "panels"],
     [{ kind: "compile", requestId, source: snapshot.state.source }],
   );
 };
@@ -278,16 +320,24 @@ const modelSucceeded = (
     status: "running",
     requestId,
   };
-
-  return changed(
-    snapshot,
+  const diagnostics = normalizeGraphDiagnostics({
+    sourceVersion: command.sourceVersion,
+    diagnostics: command.model.diagnostics,
+  });
+  const state = appendDiagnostics(
     {
       ...snapshot.state,
       activeTab: "system",
-      model: { status: "ready", model: command.model, diagnostics: [] },
+      model: { status: "ready", model: command.model, diagnostics },
       validation,
     },
-    ["model", "validation", "panels"],
+    diagnostics,
+  );
+
+  return changed(
+    snapshot,
+    state,
+    ["model", "validation", "activeTab", "diagnostics", "console"],
     [
       {
         kind: "run-validation",
@@ -401,7 +451,7 @@ const codegenCompleted = (
 const selectTab = (snapshot: WorkbenchSnapshot, tab: VisualizerTab): Reduction => {
   if (tab === snapshot.state.activeTab) return unchanged(snapshot);
 
-  return changed(snapshot, { ...snapshot.state, activeTab: tab }, ["panels"]);
+  return changed(snapshot, { ...snapshot.state, activeTab: tab }, ["activeTab"]);
 };
 
 const toggleMachine = (snapshot: WorkbenchSnapshot, machineId: string): Reduction => {
@@ -470,7 +520,13 @@ const reduceUserCommand = (snapshot: WorkbenchSnapshot, command: VisualizerComma
         "panels",
       ]);
     }
+    case "console.channel.selected": {
+      const console = selectConsoleChannel(snapshot.state.console, command.channel);
+      if (console === snapshot.state.console) return unchanged(snapshot);
+      return changed(snapshot, { ...snapshot.state, console }, ["console"]);
+    }
     case "console.entry.selected":
+      if (command.entryId === snapshot.state.panels.console.selectedEntryId) return unchanged(snapshot);
       return changed(
         snapshot,
         { ...snapshot.state, panels: { ...snapshot.state.panels, console: { ...snapshot.state.panels.console, selectedEntryId: command.entryId } } },

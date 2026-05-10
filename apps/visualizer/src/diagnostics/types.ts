@@ -1,5 +1,5 @@
 import type { GraphDiagnostic } from "@lite-fsm/graph";
-import type { GraphItemRef, GraphSourceAnchor } from "@lite-fsm/graph/view-model";
+import type { GraphDiagnosticAnchor, GraphItemRef, GraphSourceAnchor } from "@lite-fsm/graph/view-model";
 
 export type WorkbenchDiagnosticOrigin =
   | "compiler"
@@ -36,4 +36,12 @@ export type WorkbenchDiagnosticInput = {
   code: string;
   severity: GraphDiagnostic["severity"];
   message: string;
+  graphItemRef?: GraphItemRef;
+  sourceAnchors?: readonly GraphSourceAnchor[];
+  primaryTarget?: WorkbenchDiagnosticNavigationTarget;
+};
+
+export type NormalizeGraphDiagnosticsInput = {
+  sourceVersion: number;
+  diagnostics: readonly GraphDiagnosticAnchor[];
 };

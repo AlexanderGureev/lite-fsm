@@ -10,7 +10,7 @@ import type {
 import type { GraphVisualizerModel, GraphVisualizerSimulationOverlayInput } from "@lite-fsm/graph/view-model";
 import type { CanvasState } from "../canvas";
 import type { CodegenPlanResult, CodegenState, SourceEditIntent } from "../codegen";
-import type { ConsoleState } from "../console";
+import type { ConsoleChannelFilter, ConsoleState } from "../console";
 import type { WorkbenchDiagnosticRef } from "../diagnostics";
 import type { SourceSession } from "../source";
 import type { VisualizerHostState, VisualizerWorkbenchRowCommandTarget } from "../services";
@@ -106,6 +106,7 @@ export type WorkbenchRevisionIndex = {
   analysis: number;
   model: number;
   validation: number;
+  activeTab: number;
   l1: number;
   l2: number;
   l3: number;
@@ -144,6 +145,7 @@ export type VisualizerCommand =
   | { type: "source.overlay.opened"; machineId: string }
   | { type: "source.overlay.closed" }
   | { type: "panel.console.toggled"; open?: boolean }
+  | { type: "console.channel.selected"; channel: ConsoleChannelFilter }
   | { type: "console.entry.selected"; entryId: string }
   | { type: "codegen.intent.created"; intent: SourceEditIntent };
 

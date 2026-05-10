@@ -1,4 +1,4 @@
-import type { ConsolePanelView } from "../console";
+import type { ConsoleChannelFilter, ConsoleChannelView, ConsolePanelView } from "../console";
 import type { VisualizerTab, WorkbenchSelector } from "./types";
 
 export type TabItemView = {
@@ -11,6 +11,24 @@ export type TabItemView = {
 export type EmptyPanelView = {
   title: string;
   body: string;
+  status: string;
+};
+
+export type SourcePanelView = {
+  source: string;
+  filename: string;
+  language: string;
+  version: number;
+  hash: string;
+  compileStatus: string;
+  analysisStatus: string;
+  modelStatus: string;
+  validationStatus: string;
+  diagnosticCount: number;
+  machineCount: number;
+  topicCount: number;
+  canOpen: boolean;
+  running: boolean;
 };
 
 export const shallowEqualObject = <Input>(left: Input, right: Input): boolean => {
@@ -59,45 +77,128 @@ export const selectTabItems = createSelector(
   ],
 );
 
+const channelLabel = (channel: ConsoleChannelFilter): string => {
+  if (channel === "all") return "All";
+  if (channel === "system") return "System";
+  if (channel === "diagnostics") return "Diagnostics";
+
+  return "Debug";
+};
+
+const buildChannelViews = (
+  entries: ConsolePanelView["entries"],
+  selectedChannel: ConsoleChannelFilter,
+  channels: readonly Exclude<ConsoleChannelFilter, "all">[],
+): readonly ConsoleChannelView[] =>
+  (["all", ...channels] as const).map((channel) => ({
+    channel,
+    label: channelLabel(channel),
+    count: channel === "all" ? entries.length : entries.filter((entry) => entry.channel === channel).length,
+    selected: channel === selectedChannel,
+  }));
+
 export const selectConsolePanel = createSelector(
   (snapshot) => ({
     console: snapshot.state.console,
     panel: snapshot.state.panels.console,
   }),
-  ({ console, panel }): ConsolePanelView => ({
-    open: panel.open,
-    selectedEntryId: panel.selectedEntryId,
-    entries: console.entries,
+  ({ console, panel }): ConsolePanelView => {
+    const entries =
+      console.selectedChannel === "all"
+        ? console.entries
+        : console.entries.filter((entry) => entry.channel === console.selectedChannel);
+
+    return {
+      open: panel.open,
+      selectedEntryId: panel.selectedEntryId,
+      selectedChannel: console.selectedChannel,
+      channels: buildChannelViews(console.entries, console.selectedChannel, console.channels),
+      entries,
+      totalEntries: console.entries.length,
+    };
+  },
+);
+
+export const selectSourcePanel = createSelector(
+  (snapshot) => ({
+    source: snapshot.state.source,
+    compile: snapshot.state.compile,
+    analysis: snapshot.state.analysis,
+    model: snapshot.state.model,
+    validation: snapshot.state.validation,
+    diagnosticCount: snapshot.state.diagnostics.length,
   }),
+  ({ source, compile, analysis, model, validation, diagnosticCount }): SourcePanelView => {
+    const running =
+      compile.status === "running" ||
+      analysis.status === "running" ||
+      model.status === "running" ||
+      validation.status === "running";
+
+    return {
+      source: source.source,
+      filename: source.filename ?? "source",
+      language: source.language,
+      version: source.version,
+      hash: source.hash,
+      compileStatus: compile.status,
+      analysisStatus: analysis.status,
+      modelStatus: model.status,
+      validationStatus: validation.status,
+      diagnosticCount,
+      machineCount: model.model?.machines.length ?? 0,
+      topicCount: model.model?.topics.length ?? 0,
+      canOpen: source.source.trim().length > 0 && !running,
+      running,
+    };
+  },
 );
 
 export const selectCurrentEmptyPanel = createSelector(
-  selectActiveTab,
-  (activeTab): EmptyPanelView => {
+  (snapshot) => ({
+    activeTab: snapshot.state.activeTab,
+    modelStatus: snapshot.state.model.status,
+    machines: snapshot.state.model.model?.machines.length ?? 0,
+    topics: snapshot.state.model.model?.topics.length ?? 0,
+  }),
+  ({ activeTab, modelStatus, machines, topics }): EmptyPanelView => {
     if (activeTab === "source") {
       return {
-        title: "Source session",
-        body: "The stage 12a shell keeps source state ready for the compiler pipeline.",
+        title: "Source pipeline",
+        body: "Edit the source and open the visualizer to compile, analyze and project the graph model.",
+        status: modelStatus,
       };
     }
 
     if (activeTab === "system") {
       return {
         title: "System inventory",
-        body: "L1 inventory rendering starts in stage 12d.",
+        body:
+          modelStatus === "ready"
+            ? `Model ready with ${machines} machines. L1 inventory rendering starts in stage 12d.`
+            : "Open the visualizer from Source to build the model before L1 rendering starts in stage 12d.",
+        status: modelStatus,
       };
     }
 
     if (activeTab === "events") {
       return {
         title: "Event catalog",
-        body: "L2 event catalog rendering starts in stage 12d.",
+        body:
+          modelStatus === "ready"
+            ? `Model ready with ${topics} topics. L2 event catalog rendering starts in stage 12d.`
+            : "Open the visualizer from Source to build the topic catalog before L2 rendering starts in stage 12d.",
+        status: modelStatus,
       };
     }
 
     return {
       title: "Machine workbench",
-      body: "L3 cards and manual simulation start in stage 12e.",
+      body:
+        modelStatus === "ready"
+          ? `Model ready with ${machines} machines. L3 cards and manual simulation start in stage 12e.`
+          : "Open the visualizer from Source before selecting machines in stage 12e.",
+      status: modelStatus,
     };
   },
 );

@@ -1,80 +1,46 @@
-import {
-  Activity,
-  Braces,
-  FileCode,
-  FileText,
-  Radio,
-  RefreshCw,
-  Search,
-  Send,
-  Terminal,
-  X,
-} from "lucide-react";
+import { Activity, AlertCircle, FileCode, FileText, RefreshCw, Terminal, X } from "lucide-react";
 import { useWorkbenchContext } from "../../app/workbench-context";
 import { useWorkbenchSelector } from "../../app/use-workbench-selector";
 import {
   selectActiveTab,
   selectConsolePanel,
   selectCurrentEmptyPanel,
+  selectSourcePanel,
   selectTabItems,
   type VisualizerTab,
 } from "../../workbench";
 import { Alert, AlertDescription, AlertTitle } from "@/ui/alert";
 import { Button } from "@/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/ui/card";
-import { Input } from "@/ui/input";
-import { ScrollArea } from "@/ui/scroll-area";
-import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/ui/select";
 import { Separator } from "@/ui/separator";
 import { Tabs, TabsList, TabsTrigger } from "@/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/ui/tooltip";
 import { VISUALIZER_TEST_IDS } from "@/test-ids";
 import {
-  DiagnosticsAlert,
-  GraphRow,
   IconButton,
-  LayerBadge,
   PaneScrollArea,
   Panel,
   PanelBody,
   PanelHeader,
   PanelKicker,
   SourceEditorShell,
-  SourceSnippet,
   StatusBadge,
-  type SourceLine,
 } from "@/ui/visualizer";
+import { cn } from "@/lib/utils";
 
-const STYLE_FIXTURE_ROWS = [
-  {
-    layer: "config",
-    event: "AUTH_RESPONSE",
-    target: "LOGGED_IN | LOGGED_OUT",
-    meta: "2 reducer branches",
-  },
-  {
-    layer: "effect",
-    event: "TRACK_LOAD",
-    target: "actor:track",
-    meta: "routing actor",
-  },
-  {
-    layer: "simulation",
-    event: "QUEUE_EMPTY",
-    target: "STOPPED",
-    meta: "available now",
-  },
-] as const;
+const consoleChannelTestId = (channel: string): string => {
+  if (channel === "system") return VISUALIZER_TEST_IDS.console.channelSystem;
+  if (channel === "diagnostics") return VISUALIZER_TEST_IDS.console.channelDiagnostics;
+  if (channel === "debug") return VISUALIZER_TEST_IDS.console.channelDebug;
 
-const SOURCE_LINES: readonly SourceLine[] = [
-  { line: 12, code: 'AUTHENTICATING: { AUTH_RESPONSE: "LOGGED_IN" }' },
-  { line: 13, code: 'if (action.payload.reason === "network_error") state.state = "LOGGED_OUT";', selected: true },
-  { line: 14, code: 'transition({ type: "TRACK_LOAD", meta: { actorId: trackId } });' },
-];
+  return VISUALIZER_TEST_IDS.console.channelAll;
+};
 
-const SOURCE_FIXTURE = SOURCE_LINES.map((line) => `${line.line.toString().padStart(2, " ")}  ${line.code}`).join("\n");
+const statusTone = (status: string): "ready" | "muted" | "diagnostic" => {
+  if (status === "ready") return "ready";
+  if (status === "failed" || status === "blocked") return "diagnostic";
 
-const LONG_EVENT_LABEL = "PLAYER_TRACK_BUFFERING_PROGRESS_REPORTED_FROM_ACTOR_TEMPLATE_INSTANCE";
+  return "muted";
+};
 
 export const Shell = () => {
   const { dispatch } = useWorkbenchContext();
@@ -82,6 +48,7 @@ export const Shell = () => {
   const tabs = useWorkbenchSelector(selectTabItems);
   const emptyPanel = useWorkbenchSelector(selectCurrentEmptyPanel);
   const consolePanel = useWorkbenchSelector(selectConsolePanel);
+  const sourcePanel = useWorkbenchSelector(selectSourcePanel);
 
   return (
     <main
@@ -102,18 +69,18 @@ export const Shell = () => {
             </span>
             <div className="min-w-0">
               <p className="font-mono text-[10px] font-bold uppercase text-[color:var(--vf-text-quiet)]">lite-fsm visualizer</p>
-              <h1 className="truncate text-base font-semibold leading-tight">Stage 12b shadcn foundation</h1>
+              <h1 className="truncate text-base font-semibold leading-tight">Stage 12c source pipeline</h1>
             </div>
           </div>
 
           <div className="flex min-w-0 flex-wrap items-center gap-2 sm:justify-end">
             <StatusBadge tone="muted">
               <FileCode data-icon="inline-start" aria-hidden="true" />
-              sample.ts
+              {sourcePanel.filename}
             </StatusBadge>
-            <StatusBadge tone="ready">
+            <StatusBadge tone={statusTone(sourcePanel.modelStatus)} data-testid={VISUALIZER_TEST_IDS.source.status}>
               <Activity data-icon="inline-start" aria-hidden="true" />
-              shadcn ready
+              model {sourcePanel.modelStatus}
             </StatusBadge>
             <Button
               variant="outline"
@@ -156,41 +123,35 @@ export const Shell = () => {
         </Tabs>
 
         <section
-          className={[
+          className={cn(
             "grid min-h-0 gap-2.5",
             consolePanel.open
-              ? "lg:grid-cols-[minmax(280px,0.95fr)_minmax(340px,1.2fr)] xl:grid-cols-[minmax(280px,0.95fr)_minmax(340px,1.2fr)_minmax(280px,360px)]"
-              : "lg:grid-cols-[minmax(280px,0.95fr)_minmax(340px,1.25fr)]",
-          ].join(" ")}
+              ? "lg:grid-cols-[minmax(280px,0.9fr)_minmax(340px,1.15fr)] xl:grid-cols-[minmax(300px,0.9fr)_minmax(360px,1.1fr)_minmax(300px,380px)]"
+              : "lg:grid-cols-[minmax(300px,0.9fr)_minmax(360px,1.2fr)]",
+          )}
           data-active-tab={activeTab}
           data-testid={VISUALIZER_TEST_IDS.shell.workspace}
         >
-          <Panel aria-labelledby="source-fixture-title" data-testid={VISUALIZER_TEST_IDS.source.panel}>
+          <Panel aria-labelledby="source-pipeline-title" data-testid={VISUALIZER_TEST_IDS.source.panel}>
             <PanelHeader>
               <div className="min-w-0">
                 <PanelKicker>Source</PanelKicker>
-                <h2 id="source-fixture-title" className="truncate text-xs font-semibold">
-                  {emptyPanel.title}
+                <h2 id="source-pipeline-title" className="truncate text-xs font-semibold">
+                  {sourcePanel.filename}
                 </h2>
               </div>
               <div className="ml-auto flex items-center gap-2">
-                <div className="hidden min-w-44 items-center gap-1.5 rounded-md border bg-background px-2 md:flex">
-                  <Search className="size-3.5 text-muted-foreground" aria-hidden="true" />
-                  <Input
-                    aria-label="Search source anchors"
-                    data-testid={VISUALIZER_TEST_IDS.source.search}
-                    readOnly
-                    value="AUTH_RESPONSE"
-                    className="h-7 border-0 bg-transparent px-0 font-mono text-[11px] shadow-none dark:bg-transparent focus-visible:ring-0"
-                  />
-                </div>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <IconButton aria-label="Reset source fixture" data-testid={VISUALIZER_TEST_IDS.source.reset}>
+                    <IconButton
+                      aria-label="Reset source to sample"
+                      data-testid={VISUALIZER_TEST_IDS.source.reset}
+                      onClick={() => dispatch({ type: "source.reset-to-sample" })}
+                    >
                       <RefreshCw aria-hidden="true" />
                     </IconButton>
                   </TooltipTrigger>
-                  <TooltipContent>Reset source fixture</TooltipContent>
+                  <TooltipContent>Reset to sample</TooltipContent>
                 </Tooltip>
               </div>
             </PanelHeader>
@@ -198,134 +159,75 @@ export const Shell = () => {
             <PaneScrollArea>
               <div className="flex min-h-full flex-col gap-3 p-3">
                 <SourceEditorShell
-                  label="Source draft fixture"
-                  value={SOURCE_FIXTURE}
+                  label="Source editor"
+                  value={sourcePanel.source}
                   textareaTestId={VISUALIZER_TEST_IDS.source.editor}
+                  onChange={(event) => dispatch({ type: "source.changed", source: event.currentTarget.value })}
+                />
+
+                <div
+                  className="grid gap-2 rounded-md border bg-background p-2.5 font-mono text-[11px] text-muted-foreground sm:grid-cols-2"
+                  data-testid={VISUALIZER_TEST_IDS.source.summary}
                 >
-                  <SourceSnippet lines={SOURCE_LINES} data-testid={VISUALIZER_TEST_IDS.source.snippet} />
-                </SourceEditorShell>
-                <p className="max-w-[66ch] text-sm text-muted-foreground">{emptyPanel.body}</p>
+                  <span>version {sourcePanel.version}</span>
+                  <span className="min-w-0 [overflow-wrap:anywhere]">hash {sourcePanel.hash}</span>
+                  <span>compile {sourcePanel.compileStatus}</span>
+                  <span>analyze {sourcePanel.analysisStatus}</span>
+                  <span>model {sourcePanel.modelStatus}</span>
+                  <span>diagnostics {sourcePanel.diagnosticCount}</span>
+                </div>
+
                 <div className="flex flex-wrap items-center gap-2">
-                  <Button variant="secondary" size="sm" data-testid={VISUALIZER_TEST_IDS.source.open}>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    data-testid={VISUALIZER_TEST_IDS.source.open}
+                    disabled={!sourcePanel.canOpen}
+                    onClick={() => dispatch({ type: "source.open-visualizer" })}
+                  >
                     <FileText data-icon="inline-start" aria-hidden="true" />
                     Open visualizer
                   </Button>
-                  <StatusBadge tone="muted">static fixture</StatusBadge>
+                  <StatusBadge tone={statusTone(sourcePanel.compileStatus)}>compile {sourcePanel.compileStatus}</StatusBadge>
+                  <StatusBadge tone={statusTone(sourcePanel.validationStatus)}>validation {sourcePanel.validationStatus}</StatusBadge>
                 </div>
               </div>
             </PaneScrollArea>
           </Panel>
 
-          <Panel aria-labelledby="workbench-fixture-title" data-testid={VISUALIZER_TEST_IDS.workbench.panel}>
+          <Panel aria-labelledby="workbench-status-title" data-testid={VISUALIZER_TEST_IDS.workbench.panel}>
             <PanelHeader>
               <div className="min-w-0">
                 <PanelKicker>{activeTab}</PanelKicker>
-                <h2 id="workbench-fixture-title" className="truncate text-xs font-semibold">
-                  Machine card grammar
+                <h2 id="workbench-status-title" className="truncate text-xs font-semibold">
+                  {emptyPanel.title}
                 </h2>
               </div>
-              <StatusBadge tone="actor">actor</StatusBadge>
-              <StatusBadge tone="routing">@ BUFFERING</StatusBadge>
+              <StatusBadge tone={statusTone(emptyPanel.status)}>{emptyPanel.status}</StatusBadge>
             </PanelHeader>
 
             <PaneScrollArea>
               <div className="flex min-h-full flex-col gap-3 p-3">
-                <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_12rem]">
-                  <div className="flex items-center gap-1.5 rounded-md border bg-background px-2">
-                    <Search className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-                    <Input
-                      aria-label="Search event labels"
-                      data-testid={VISUALIZER_TEST_IDS.workbench.eventSearch}
-                      readOnly
-                      value={LONG_EVENT_LABEL}
-                      className="h-8 min-w-0 border-0 bg-transparent px-0 font-mono text-[11px] shadow-none [overflow-wrap:anywhere] dark:bg-transparent focus-visible:ring-0"
-                    />
+                <Alert className="border-[color:var(--vf-accent-border)] bg-[color:var(--vf-accent-soft)]">
+                  <Activity className="text-primary" aria-hidden="true" />
+                  <AlertTitle className="font-mono text-[11px] text-primary">source pipeline</AlertTitle>
+                  <AlertDescription className="text-muted-foreground">{emptyPanel.body}</AlertDescription>
+                </Alert>
+
+                <div className="grid gap-2 sm:grid-cols-3">
+                  <div className="rounded-md border bg-background p-3">
+                    <p className="font-mono text-[10px] font-bold uppercase text-[color:var(--vf-text-quiet)]">Machines</p>
+                    <p className="mt-1 font-mono text-lg text-foreground">{sourcePanel.machineCount}</p>
                   </div>
-                  <Select value="manual">
-                    <SelectTrigger
-                      aria-label="Select timeline source"
-                      className="w-full bg-background"
-                      data-testid={VISUALIZER_TEST_IDS.workbench.eventSourceSelect}
-                    >
-                      <SelectValue placeholder="Event source" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        <SelectItem value="manual">manual cascade</SelectItem>
-                        <SelectItem value="external">external event</SelectItem>
-                        <SelectItem value="effect">effect emission</SelectItem>
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
+                  <div className="rounded-md border bg-background p-3">
+                    <p className="font-mono text-[10px] font-bold uppercase text-[color:var(--vf-text-quiet)]">Topics</p>
+                    <p className="mt-1 font-mono text-lg text-foreground">{sourcePanel.topicCount}</p>
+                  </div>
+                  <div className="rounded-md border bg-background p-3">
+                    <p className="font-mono text-[10px] font-bold uppercase text-[color:var(--vf-text-quiet)]">Diagnostics</p>
+                    <p className="mt-1 font-mono text-lg text-foreground">{sourcePanel.diagnosticCount}</p>
+                  </div>
                 </div>
-
-                <Card
-                  aria-label="Representative machine card"
-                  className="overflow-hidden rounded-lg border-[color:var(--vf-accent-border)] bg-[color:var(--vf-surface-soft)] py-0 shadow-none"
-                  data-testid={VISUALIZER_TEST_IDS.workbench.machineCard}
-                >
-                  <CardHeader className="flex flex-row items-center justify-between gap-3 border-b border-[color:var(--vf-border-soft)] px-3 py-3">
-                    <div className="min-w-0">
-                      <p className="font-mono text-[10px] font-bold uppercase text-[color:var(--vf-text-quiet)]">trackInstance</p>
-                      <CardTitle className="truncate text-sm">Grouped state rows</CardTitle>
-                    </div>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <IconButton
-                          aria-label="View source for trackInstance"
-                          data-testid={VISUALIZER_TEST_IDS.workbench.sourceAction}
-                        >
-                          <FileText aria-hidden="true" />
-                        </IconButton>
-                      </TooltipTrigger>
-                      <TooltipContent>View source for trackInstance</TooltipContent>
-                    </Tooltip>
-                  </CardHeader>
-
-                  <CardContent className="flex flex-col gap-3 p-3">
-                    <section
-                      className="overflow-hidden rounded-md border border-[color:var(--vf-accent-border)] bg-[color:var(--vf-accent-soft)]"
-                      aria-label="Current state rows"
-                      data-testid={VISUALIZER_TEST_IDS.workbench.currentState}
-                    >
-                      <div className="flex min-w-0 flex-wrap items-center gap-2 border-b border-[color:var(--vf-border-soft)] px-2.5 py-2 font-mono">
-                        <span className="size-2 shrink-0 rounded-full bg-primary" aria-hidden="true" />
-                        <strong className="min-w-0 [overflow-wrap:anywhere]">BUFFERING</strong>
-                        <StatusBadge tone="muted">current</StatusBadge>
-                        <StatusBadge tone="routing">routing actor</StatusBadge>
-                      </div>
-
-                      <div className="grid">
-                        {STYLE_FIXTURE_ROWS.map((row) => (
-                          <GraphRow
-                            key={`${row.layer}-${row.event}`}
-                            layer={row.layer}
-                            event={row.event}
-                            target={row.target}
-                            meta={row.meta}
-                            selected={row.layer === "simulation"}
-                            data-testid={VISUALIZER_TEST_IDS.workbench.row[row.layer]}
-                          />
-                        ))}
-                      </div>
-                    </section>
-
-                    <div
-                      className="flex items-start gap-2 rounded-md border border-[color:var(--vf-border-soft)] bg-background p-2 font-mono text-[11px] text-muted-foreground"
-                      data-testid={VISUALIZER_TEST_IDS.workbench.longLabel}
-                    >
-                      <Braces className="mt-0.5 size-3.5 shrink-0 text-primary" aria-hidden="true" />
-                      <span className="min-w-0 [overflow-wrap:anywhere]">{LONG_EVENT_LABEL}</span>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-2">
-                      <LayerBadge layer="config" />
-                      <LayerBadge layer="effect" />
-                      <LayerBadge layer="simulation" />
-                      <StatusBadge tone="diagnostic">diagnostic</StatusBadge>
-                    </div>
-                  </CardContent>
-                </Card>
               </div>
             </PaneScrollArea>
           </Panel>
@@ -355,66 +257,63 @@ export const Shell = () => {
             </PanelHeader>
 
             <PanelBody className="flex flex-col">
-              <ScrollArea className="min-h-0 flex-1">
+              <div className="flex flex-wrap gap-1.5 border-b p-2" data-testid={VISUALIZER_TEST_IDS.console.channels}>
+                {consolePanel.channels.map((channel) => (
+                  <Button
+                    key={channel.channel}
+                    type="button"
+                    variant={channel.selected ? "secondary" : "outline"}
+                    size="sm"
+                    aria-pressed={channel.selected}
+                    data-testid={consoleChannelTestId(channel.channel)}
+                    onClick={() => dispatch({ type: "console.channel.selected", channel: channel.channel })}
+                  >
+                    {channel.label}
+                    <span className="font-mono text-[10px] text-muted-foreground">{channel.count}</span>
+                  </Button>
+                ))}
+              </div>
+
+              <PaneScrollArea>
                 {consolePanel.entries.length === 0 ? (
                   <div
-                    className="flex flex-col gap-2 p-3"
-                    aria-label="Representative console entries"
+                    className="flex min-h-36 flex-col items-start justify-center gap-2 p-3 text-sm text-muted-foreground"
                     data-testid={VISUALIZER_TEST_IDS.console.entries}
                   >
-                    <DiagnosticsAlert data-testid={VISUALIZER_TEST_IDS.console.analyzerAlert}>
-                      Reducer branch is visible as a diagnostic badge.
-                    </DiagnosticsAlert>
-                    <Alert
-                      className="border-[color:var(--vf-accent-border)] bg-[color:var(--vf-accent-soft)]"
-                      data-testid={VISUALIZER_TEST_IDS.console.simulatorAlert}
-                    >
-                      <Radio className="size-4 text-primary" aria-hidden="true" />
-                      <AlertTitle className="font-mono text-[11px] text-primary">simulator</AlertTitle>
-                      <AlertDescription>Manual cascade waits for an explicit row click.</AlertDescription>
-                    </Alert>
+                    <AlertCircle className="text-[color:var(--vf-text-quiet)]" aria-hidden="true" />
+                    <p>No console entries in this channel.</p>
                   </div>
                 ) : (
-                  <ol className="flex flex-col gap-2 p-3">
+                  <ol className="flex flex-col gap-2 p-3" data-testid={VISUALIZER_TEST_IDS.console.entries}>
                     {consolePanel.entries.map((entry) => (
-                      <li key={entry.entryId} className="rounded-md border bg-background p-2">
-                        {entry.message}
+                      <li key={entry.entryId}>
+                        <button
+                          type="button"
+                          className="w-full rounded-md border bg-background p-2 text-left hover:bg-[color:var(--vf-row-hover)] focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                          onClick={() => dispatch({ type: "console.entry.selected", entryId: entry.entryId })}
+                        >
+                          <span className="flex min-w-0 flex-wrap items-center gap-2">
+                            <StatusBadge tone={entry.channel === "diagnostics" ? "diagnostic" : "muted"}>{entry.channel}</StatusBadge>
+                            {entry.severity ? <StatusBadge tone={statusTone(entry.severity)}>{entry.severity}</StatusBadge> : null}
+                            {entry.origin ? <span className="font-mono text-[10px] text-[color:var(--vf-text-quiet)]">{entry.origin}</span> : null}
+                          </span>
+                          <strong className="mt-1 block min-w-0 font-mono text-[11px] text-foreground [overflow-wrap:anywhere]">
+                            {entry.title}
+                          </strong>
+                          <span className="mt-1 block min-w-0 text-sm text-muted-foreground [overflow-wrap:anywhere]">
+                            {entry.message}
+                          </span>
+                        </button>
                       </li>
                     ))}
                   </ol>
                 )}
-              </ScrollArea>
+              </PaneScrollArea>
 
               <Separator />
 
-              <div
-                className="m-3 overflow-hidden rounded-md border bg-[color:var(--vf-surface-soft)]"
-                aria-label="Representative timeline"
-                data-testid={VISUALIZER_TEST_IDS.console.timeline}
-              >
-                <div className="flex items-center justify-between gap-2 border-b px-2.5 py-2 font-mono text-[11px] text-muted-foreground">
-                  <span>Event timeline</span>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    data-testid={VISUALIZER_TEST_IDS.console.timelineSend}
-                  >
-                    <Send data-icon="inline-start" aria-hidden="true" />
-                    send
-                  </Button>
-                </div>
-                <button
-                  className="grid min-h-10 w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 px-2.5 py-2 text-left hover:bg-[color:var(--vf-accent-soft)] focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-                  type="button"
-                  data-testid={VISUALIZER_TEST_IDS.console.timelineStep}
-                >
-                  <span className="font-mono text-[10px] font-bold uppercase text-[color:var(--vf-text-quiet)]">#1</span>
-                  <span className="min-w-0 font-mono text-[11px] text-foreground [overflow-wrap:anywhere]">TRACK_LOAD</span>
-                  <span className="min-w-0 text-right font-mono text-[10px] text-[color:var(--vf-warning)] [overflow-wrap:anywhere]">
-                    manual · player
-                  </span>
-                </button>
+              <div className="p-3 font-mono text-[11px] text-[color:var(--vf-text-quiet)]">
+                {consolePanel.totalEntries} entries · filter {consolePanel.selectedChannel}
               </div>
             </PanelBody>
           </Panel>

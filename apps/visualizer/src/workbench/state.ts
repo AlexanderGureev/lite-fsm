@@ -26,6 +26,7 @@ export const createInitialRevisions = (): WorkbenchRevisionIndex => ({
   analysis: 0,
   model: 0,
   validation: 0,
+  activeTab: 0,
   l1: 0,
   l2: 0,
   l3: 0,

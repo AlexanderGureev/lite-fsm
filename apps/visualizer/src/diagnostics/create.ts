@@ -1,4 +1,22 @@
-import type { WorkbenchDiagnosticInput, WorkbenchDiagnosticRef } from "./types";
+import type {
+  NormalizeGraphDiagnosticsInput,
+  WorkbenchDiagnosticInput,
+  WorkbenchDiagnosticNavigationTarget,
+  WorkbenchDiagnosticRef,
+} from "./types";
+
+const primaryTargetFor = (
+  graphItemRef: WorkbenchDiagnosticRef["graphItemRef"],
+  sourceAnchors: WorkbenchDiagnosticRef["sourceAnchors"],
+): WorkbenchDiagnosticNavigationTarget => {
+  if (graphItemRef) return { kind: "graph", ref: graphItemRef };
+  if (sourceAnchors.length === 1) return { kind: "source", anchor: sourceAnchors[0] };
+
+  return {
+    kind: "none",
+    reason: sourceAnchors.length === 0 ? "no-anchor" : "ambiguous-anchor",
+  };
+};
 
 export const createWorkbenchDiagnostic = ({
   diagnosticId,
@@ -7,13 +25,17 @@ export const createWorkbenchDiagnostic = ({
   code,
   severity,
   message,
+  graphItemRef,
+  sourceAnchors = [],
+  primaryTarget,
 }: WorkbenchDiagnosticInput): WorkbenchDiagnosticRef => ({
   diagnosticId,
   sourceVersion,
   origin,
   diagnostic: { code, severity, message },
-  sourceAnchors: [],
-  primaryTarget: { kind: "console" },
+  ...(graphItemRef ? { graphItemRef } : {}),
+  sourceAnchors,
+  primaryTarget: primaryTarget ?? primaryTargetFor(graphItemRef, sourceAnchors),
 });
 
 export const createControlledDiagnostic = (
@@ -29,4 +51,25 @@ export const createControlledDiagnostic = (
     code,
     severity: "warning",
     message,
+    sourceAnchors: [],
+    primaryTarget: { kind: "console" },
+  });
+
+export const normalizeGraphDiagnostics = ({
+  sourceVersion,
+  diagnostics,
+}: NormalizeGraphDiagnosticsInput): WorkbenchDiagnosticRef[] =>
+  diagnostics.map((anchor) => {
+    const sourceAnchors = anchor.sourceAnchor ? [anchor.sourceAnchor] : [];
+
+    return createWorkbenchDiagnostic({
+      diagnosticId: anchor.diagnosticId,
+      sourceVersion,
+      origin: anchor.origin,
+      code: anchor.diagnostic.code,
+      severity: anchor.diagnostic.severity,
+      message: anchor.diagnostic.message,
+      ...(anchor.graphItemRef ? { graphItemRef: anchor.graphItemRef } : {}),
+      sourceAnchors,
+    });
   });

@@ -3,10 +3,33 @@ import type { GraphVisualizerModel } from "@lite-fsm/graph/view-model";
 import { describe, expect, it, vi } from "vitest";
 import { createInitialWorkbenchSnapshot } from "./state";
 import { createWorkbenchStore } from "./store";
-import { selectConsolePanel, selectCurrentEmptyPanel, selectTabItems, shallowEqualObject } from "./selectors";
+import {
+  selectActiveTab,
+  selectConsolePanel,
+  selectCurrentEmptyPanel,
+  selectSourcePanel,
+  selectTabItems,
+  shallowEqualObject,
+} from "./selectors";
 
 const documentFixture = { source: { filename: "sample.ts", language: "ts" }, diagnostics: [], machines: [], managers: [] } as unknown as LiteFsmGraphDocument;
 const modelFixture = { version: "lite-fsm.visualizer/v1", machines: [], managers: [], topics: [], diagnostics: [], workbenchMachines: {} } as unknown as GraphVisualizerModel;
+const modelWithDiagnosticsFixture = {
+  ...modelFixture,
+  diagnostics: [
+    {
+      diagnosticId: "analyzer:player:warn:0",
+      origin: "analyzer" as const,
+      diagnostic: { code: "warn", severity: "warning" as const, message: "Analyzer warning" },
+      graphItemRef: { kind: "machine" as const, machineId: "player" },
+    },
+  ],
+} as unknown as GraphVisualizerModel;
+const countedModelFixture = {
+  ...modelFixture,
+  machines: [{ machineId: "one" }, { machineId: "two" }],
+  topics: [{ eventType: "PLAY" }, { eventType: "STOP" }, { eventType: "PAUSE" }],
+} as unknown as GraphVisualizerModel;
 const analysisDiagnostics: readonly GraphDiagnostic[] = [{ code: "info", severity: "info", message: "ready" }];
 const diagnostic = {
   diagnosticId: "compiler:1:bad",
@@ -39,10 +62,11 @@ describe("workbench store", () => {
     const after = store.getSnapshot();
 
     expect(after).not.toBe(before);
-    expect(after.state.activeTab).toBe("events");
+    expect(selectActiveTab(after)).toBe("events");
     expect(after.state.source).toBe(before.state.source);
     expect(after.state.model).toBe(before.state.model);
-    expect(after.revisions.panels).toBe(before.revisions.panels + 1);
+    expect(after.revisions.activeTab).toBe(before.revisions.activeTab + 1);
+    expect(after.revisions.panels).toBe(before.revisions.panels);
     expect(after.revisions.model).toBe(before.revisions.model);
   });
 
@@ -52,9 +76,12 @@ describe("workbench store", () => {
     const secondTabs = selectTabItems(store.getSnapshot());
     const firstConsole = selectConsolePanel(store.getSnapshot());
     const secondConsole = selectConsolePanel(store.getSnapshot());
+    const firstSource = selectSourcePanel(store.getSnapshot());
+    const secondSource = selectSourcePanel(store.getSnapshot());
 
     expect(secondTabs).toBe(firstTabs);
     expect(secondConsole).toBe(firstConsole);
+    expect(secondSource).toBe(firstSource);
     expect(selectCurrentEmptyPanel(store.getSnapshot())).toBe(selectCurrentEmptyPanel(store.getSnapshot()));
   });
 
@@ -70,13 +97,133 @@ describe("workbench store", () => {
   it("возвращает empty panel view для каждой вкладки", () => {
     const store = createWorkbenchStore();
 
-    expect(selectCurrentEmptyPanel(store.getSnapshot()).title).toBe("Source session");
+    expect(selectCurrentEmptyPanel(store.getSnapshot()).title).toBe("Source pipeline");
     store.dispatch({ type: "tab.selected", tab: "system" });
     expect(selectCurrentEmptyPanel(store.getSnapshot()).title).toBe("System inventory");
     store.dispatch({ type: "tab.selected", tab: "events" });
     expect(selectCurrentEmptyPanel(store.getSnapshot()).title).toBe("Event catalog");
     store.dispatch({ type: "tab.selected", tab: "machines" });
     expect(selectCurrentEmptyPanel(store.getSnapshot()).title).toBe("Machine workbench");
+
+    const snapshot = createInitialWorkbenchSnapshot();
+    const readyStore = createWorkbenchStore({
+      ...snapshot,
+      state: {
+        ...snapshot.state,
+        model: { status: "ready", model: countedModelFixture, diagnostics: [] },
+      },
+    });
+    readyStore.dispatch({ type: "tab.selected", tab: "system" });
+    expect(selectCurrentEmptyPanel(readyStore.getSnapshot()).body).toContain("2 machines");
+    readyStore.dispatch({ type: "tab.selected", tab: "events" });
+    expect(selectCurrentEmptyPanel(readyStore.getSnapshot()).body).toContain("3 topics");
+    readyStore.dispatch({ type: "tab.selected", tab: "machines" });
+    expect(selectCurrentEmptyPanel(readyStore.getSnapshot()).body).toContain("2 machines");
+  });
+
+  it("строит tab counters для ready model и выбранных L3 машин", () => {
+    const snapshot = createInitialWorkbenchSnapshot();
+    const store = createWorkbenchStore({
+      ...snapshot,
+      state: {
+        ...snapshot.state,
+        model: { status: "ready", model: countedModelFixture, diagnostics: [] },
+        l3: { selectedMachineIds: ["one"] },
+      },
+    });
+
+    expect(selectTabItems(store.getSnapshot())).toEqual([
+      { tab: "source", label: "Source", count: "", selected: true },
+      { tab: "system", label: "System", count: "2", selected: false },
+      { tab: "events", label: "Events", count: "3", selected: false },
+      { tab: "machines", label: "Machines", count: "1/2", selected: false },
+    ]);
+  });
+
+  it("строит source и console selectors для pipeline state", () => {
+    const store = createWorkbenchStore();
+    expect(selectSourcePanel(store.getSnapshot())).toMatchObject({
+      filename: "sample.ts",
+      compileStatus: "idle",
+      modelStatus: "idle",
+      canOpen: true,
+      running: false,
+    });
+
+    store.dispatch({ type: "source.open-visualizer" });
+    expect(selectSourcePanel(store.getSnapshot())).toMatchObject({
+      compileStatus: "running",
+      canOpen: false,
+      running: true,
+    });
+    expect(selectConsolePanel(store.getSnapshot()).channels).toEqual([
+      { channel: "all", label: "All", count: 1, selected: true },
+      { channel: "system", label: "System", count: 1, selected: false },
+      { channel: "diagnostics", label: "Diagnostics", count: 0, selected: false },
+      { channel: "debug", label: "Debug", count: 0, selected: false },
+    ]);
+
+    store.dispatch({ type: "compile.failed", requestId: "compile:1:1", sourceVersion: 1, diagnostics: [diagnostic] });
+    store.dispatch({ type: "console.channel.selected", channel: "diagnostics" });
+
+    expect(selectConsolePanel(store.getSnapshot())).toMatchObject({
+      selectedChannel: "diagnostics",
+      totalEntries: 2,
+      entries: [{ channel: "diagnostics", message: "Bad source" }],
+    });
+  });
+
+  it("блокирует Open visualizer для пустого source и для running стадий", () => {
+    const snapshot = createInitialWorkbenchSnapshot();
+    const emptySource = createWorkbenchStore({
+      ...snapshot,
+      state: {
+        ...snapshot.state,
+        source: { ...snapshot.state.source, source: "   ", hash: "lfg1:blank" },
+      },
+    });
+    const runningAnalysis = createWorkbenchStore({
+      ...snapshot,
+      state: {
+        ...snapshot.state,
+        analysis: { status: "running", requestId: "analyze:1:1", diagnostics: [], appDiagnostics: [] },
+      },
+    });
+    const runningModel = createWorkbenchStore({
+      ...snapshot,
+      state: {
+        ...snapshot.state,
+        model: { status: "running", requestId: "model:1:1", diagnostics: [] },
+      },
+    });
+    const runningValidation = createWorkbenchStore({
+      ...snapshot,
+      state: {
+        ...snapshot.state,
+        validation: { status: "running", requestId: "validation:1:1", providers: [], diagnostics: [] },
+      },
+    });
+
+    expect(selectSourcePanel(emptySource.getSnapshot())).toMatchObject({ canOpen: false, running: false });
+    expect(selectSourcePanel(runningAnalysis.getSnapshot())).toMatchObject({ canOpen: false, running: true });
+    expect(selectSourcePanel(runningModel.getSnapshot())).toMatchObject({ canOpen: false, running: true });
+    expect(selectSourcePanel(runningValidation.getSnapshot())).toMatchObject({ canOpen: false, running: true });
+  });
+
+  it("использует fallback source filename в selectors и system console entry", () => {
+    const snapshot = createInitialWorkbenchSnapshot();
+    const store = createWorkbenchStore({
+      ...snapshot,
+      state: {
+        ...snapshot.state,
+        source: { source: "export const value = 1;", language: "ts", version: 1, hash: "lfg1:none" },
+      },
+    });
+
+    store.dispatch({ type: "source.open-visualizer" });
+
+    expect(selectSourcePanel(store.getSnapshot()).filename).toBe("source");
+    expect(store.getSnapshot().state.console.entries[0]?.message).toBe("Compiling source at version 1.");
   });
 
   it("создает compile descriptor вместо прямого async вызова", () => {
@@ -91,6 +238,32 @@ describe("workbench store", () => {
       },
     ]);
     expect(store.getSnapshot().state.compile.status).toBe("running");
+    expect(store.getSnapshot().state.console.entries[0]).toMatchObject({ channel: "system", title: "Source pipeline started" });
+  });
+
+  it("open visualizer очищает старые diagnostics/console и увеличивает sequence", () => {
+    const store = createWorkbenchStore();
+    store.dispatch({ type: "source.open-visualizer" });
+    store.dispatch({ type: "compile.failed", requestId: "compile:1:1", sourceVersion: 1, diagnostics: [diagnostic] });
+    store.dispatch({ type: "console.channel.selected", channel: "diagnostics" });
+    store.dispatch({ type: "console.entry.selected", entryId: "diagnostic:compiler:1:bad" });
+
+    const output = store.dispatch({ type: "source.open-visualizer" });
+
+    expect(output.effects).toEqual([
+      {
+        kind: "compile",
+        requestId: "compile:1:2",
+        source: store.getSnapshot().state.source,
+      },
+    ]);
+    expect(store.getSnapshot().state.compile.sequence).toBe(2);
+    expect(store.getSnapshot().state.diagnostics).toEqual([]);
+    expect(store.getSnapshot().state.console.selectedChannel).toBe("diagnostics");
+    expect(store.getSnapshot().state.console.entries).toEqual([
+      expect.objectContaining({ entryId: "system:1:open:2", channel: "system" }),
+    ]);
+    expect(store.getSnapshot().state.panels.console.selectedEntryId).toBeUndefined();
   });
 
   it("игнорирует stale async response без уведомления", () => {
@@ -109,6 +282,46 @@ describe("workbench store", () => {
     expect(output.result).toEqual({ ok: false, reason: "stale-source-version", diagnostics: [] });
     expect(store.getSnapshot()).toBe(before);
     expect(listener).not.toHaveBeenCalled();
+  });
+
+  it("игнорирует responses с правильной sourceVersion, но устаревшим requestId", () => {
+    const store = createWorkbenchStore();
+    store.dispatch({ type: "source.open-visualizer" });
+    const beforeCompile = store.getSnapshot();
+
+    expect(
+      store.dispatch({
+        type: "compile.failed",
+        requestId: "compile:1:old",
+        sourceVersion: 1,
+        diagnostics: [diagnostic],
+      }).result,
+    ).toEqual({ ok: false, reason: "stale-source-version", diagnostics: [] });
+    expect(store.getSnapshot()).toBe(beforeCompile);
+
+    store.dispatch({ type: "compile.succeeded", requestId: "compile:1:1", sourceVersion: 1, document: documentFixture });
+    const beforeAnalysis = store.getSnapshot();
+    expect(
+      store.dispatch({
+        type: "analysis.failed",
+        requestId: "analyze:1:old",
+        sourceVersion: 1,
+        diagnostics: [diagnostic],
+      }).result,
+    ).toEqual({ ok: false, reason: "stale-source-version", diagnostics: [] });
+    expect(store.getSnapshot()).toBe(beforeAnalysis);
+
+    store.dispatch({ type: "analysis.succeeded", requestId: "analyze:1:1", sourceVersion: 1, diagnostics: [] });
+    const beforeModel = store.getSnapshot();
+    expect(
+      store.dispatch({
+        type: "model.failed",
+        requestId: "model:1:old",
+        sourceVersion: 1,
+        diagnostics: [diagnostic],
+      }).result,
+    ).toEqual({ ok: false, reason: "stale-source-version", diagnostics: [] });
+    expect(store.getSnapshot()).toBe(beforeModel);
   });
 
   it("ведет successful compile к analysis descriptor", () => {
@@ -171,6 +384,32 @@ describe("workbench store", () => {
     });
   });
 
+  it("нормализует model diagnostics как неблокирующее состояние", () => {
+    const store = createWorkbenchStore();
+    store.dispatch({ type: "source.open-visualizer" });
+    store.dispatch({ type: "compile.succeeded", requestId: "compile:1:1", sourceVersion: 1, document: documentFixture });
+    store.dispatch({ type: "analysis.succeeded", requestId: "analyze:1:1", sourceVersion: 1, diagnostics: analysisDiagnostics });
+
+    store.dispatch({
+      type: "model.succeeded",
+      requestId: "model:1:1",
+      sourceVersion: 1,
+      model: modelWithDiagnosticsFixture,
+    });
+
+    expect(store.getSnapshot().state.model.status).toBe("ready");
+    expect(store.getSnapshot().state.model.diagnostics).toMatchObject([
+      {
+        diagnosticId: "analyzer:player:warn:0",
+        sourceVersion: 1,
+        origin: "analyzer",
+        graphItemRef: { kind: "machine", machineId: "player" },
+        primaryTarget: { kind: "graph", ref: { kind: "machine", machineId: "player" } },
+      },
+    ]);
+    expect(store.getSnapshot().state.console.entries.some((entry) => entry.message === "Analyzer warning")).toBe(true);
+  });
+
   it("пишет diagnostics и console entries для failed responses", () => {
     const store = createWorkbenchStore();
     store.dispatch({ type: "source.open-visualizer" });
@@ -178,7 +417,29 @@ describe("workbench store", () => {
     store.dispatch({ type: "compile.failed", requestId: "compile:1:1", sourceVersion: 1, diagnostics: [diagnostic] });
 
     expect(store.getSnapshot().state.diagnostics).toEqual([diagnostic]);
-    expect(store.getSnapshot().state.console.entries[0]?.message).toBe("Bad source");
+    expect(store.getSnapshot().state.console.entries.map((entry) => entry.message)).toContain("Bad source");
+  });
+
+  it("failed responses завершают текущую стадию без последующих effects", () => {
+    const store = createWorkbenchStore();
+    store.dispatch({ type: "source.open-visualizer" });
+
+    expect(
+      store.dispatch({ type: "compile.failed", requestId: "compile:1:1", sourceVersion: 1, diagnostics: [diagnostic] }),
+    ).toMatchObject({ result: { ok: true }, effects: [] });
+
+    store.dispatch({ type: "source.open-visualizer" });
+    store.dispatch({ type: "compile.succeeded", requestId: "compile:1:2", sourceVersion: 1, document: documentFixture });
+    expect(
+      store.dispatch({ type: "analysis.failed", requestId: "analyze:1:1", sourceVersion: 1, diagnostics: [diagnostic] }),
+    ).toMatchObject({ result: { ok: true }, effects: [] });
+
+    store.dispatch({ type: "source.open-visualizer" });
+    store.dispatch({ type: "compile.succeeded", requestId: "compile:1:3", sourceVersion: 1, document: documentFixture });
+    store.dispatch({ type: "analysis.succeeded", requestId: "analyze:1:1", sourceVersion: 1, diagnostics: [] });
+    expect(
+      store.dispatch({ type: "model.failed", requestId: "model:1:1", sourceVersion: 1, diagnostics: [diagnostic] }),
+    ).toMatchObject({ result: { ok: true }, effects: [] });
   });
 
   it("применяет failed responses для analysis, model и validation", () => {
@@ -212,7 +473,22 @@ describe("workbench store", () => {
     store.dispatch({ type: "validation.succeeded", requestId: "validation:1:1", sourceVersion: 1, diagnostics: [] });
 
     expect(store.getSnapshot().state.validation.status).toBe("ready");
-    expect(store.getSnapshot().state.console.entries).toEqual([]);
+    expect(store.getSnapshot().state.console.entries).toHaveLength(1);
+    expect(store.getSnapshot().state.console.entries[0]?.channel).toBe("system");
+  });
+
+  it("добавляет validation diagnostics в validation/global diagnostics/console", () => {
+    const store = createWorkbenchStore();
+    store.dispatch({ type: "source.open-visualizer" });
+    store.dispatch({ type: "compile.succeeded", requestId: "compile:1:1", sourceVersion: 1, document: documentFixture });
+    store.dispatch({ type: "analysis.succeeded", requestId: "analyze:1:1", sourceVersion: 1, diagnostics: [] });
+    store.dispatch({ type: "model.succeeded", requestId: "model:1:1", sourceVersion: 1, model: modelFixture });
+
+    store.dispatch({ type: "validation.succeeded", requestId: "validation:1:1", sourceVersion: 1, diagnostics: [diagnostic] });
+
+    expect(store.getSnapshot().state.validation).toMatchObject({ status: "ready", diagnostics: [diagnostic] });
+    expect(store.getSnapshot().state.diagnostics).toContain(diagnostic);
+    expect(store.getSnapshot().state.console.entries.map((entry) => entry.message)).toContain("Bad source");
   });
 
   it("запускает no-op codegen через descriptor и применяет diagnostic response", () => {
@@ -255,13 +531,24 @@ describe("workbench store", () => {
 
   it("сбрасывает derived state при изменении source", () => {
     const store = createWorkbenchStore();
+    store.dispatch({ type: "source.open-visualizer" });
     store.dispatch({ type: "l3.machine.toggled", machineId: "player" });
+    store.dispatch({ type: "l1.machine.selected", machineId: "player" });
+    store.dispatch({ type: "l1.topic.selected", eventType: "PLAY" });
+    store.dispatch({ type: "l2.topic.selected", eventType: "STOP" });
+    store.dispatch({ type: "source.overlay.opened", machineId: "player" });
+    store.dispatch({ type: "console.entry.selected", entryId: "diagnostic:old" });
 
     store.dispatch({ type: "source.changed", source: "export const next = 1;" });
 
     expect(store.getSnapshot().state.source.version).toBe(2);
+    expect(store.getSnapshot().state.l1).toEqual({ machineQuery: "", topicQuery: "" });
+    expect(store.getSnapshot().state.l2).toEqual({ query: "" });
     expect(store.getSnapshot().state.l3.selectedMachineIds).toEqual([]);
     expect(store.getSnapshot().state.simulation.snapshot).toBeUndefined();
+    expect(store.getSnapshot().state.panels.sourceOverlay).toBeUndefined();
+    expect(store.getSnapshot().state.panels.console.selectedEntryId).toBeUndefined();
+    expect(store.getSnapshot().state.console.entries).toEqual([]);
   });
 
   it("оставляет snapshot прежним при source.changed с тем же текстом", () => {
@@ -282,6 +569,16 @@ describe("workbench store", () => {
     expect(store.getSnapshot().state.source.version).toBe(3);
   });
 
+  it("reset to sample остается no-op если source уже sample", () => {
+    const store = createWorkbenchStore();
+    const before = store.getSnapshot();
+
+    const output = store.dispatch({ type: "source.reset-to-sample" });
+
+    expect(output).toEqual({ result: { ok: true }, effects: [] });
+    expect(store.getSnapshot()).toBe(before);
+  });
+
   it("покрывает selection, overlay и panel commands", () => {
     const store = createWorkbenchStore();
     store.dispatch({ type: "l1.machine.selected", machineId: "player" });
@@ -296,6 +593,10 @@ describe("workbench store", () => {
     store.dispatch({ type: "source.overlay.closed" });
     store.dispatch({ type: "panel.console.toggled", open: true });
     store.dispatch({ type: "panel.console.toggled" });
+    store.dispatch({ type: "console.channel.selected", channel: "diagnostics" });
+    store.dispatch({ type: "console.channel.selected", channel: "diagnostics" });
+    store.dispatch({ type: "console.entry.selected", entryId: "diagnostic:1" });
+    const beforeSameEntry = store.getSnapshot();
     store.dispatch({ type: "console.entry.selected", entryId: "diagnostic:1" });
 
     const state = store.getSnapshot().state;
@@ -305,7 +606,9 @@ describe("workbench store", () => {
     expect(state.l3.selectedMachineIds).toEqual([]);
     expect(state.simulation.inspectedStepId).toBe("step:1");
     expect(state.panels.console.open).toBe(false);
+    expect(state.console.selectedChannel).toBe("diagnostics");
     expect(state.panels.console.selectedEntryId).toBe("diagnostic:1");
+    expect(store.getSnapshot()).toBe(beforeSameEntry);
   });
 
   it("отклоняет simulation user commands до появления session", () => {
@@ -378,6 +681,31 @@ describe("workbench store", () => {
 
     expect(output.result).toEqual({ ok: false, reason: "codegen-not-implemented", diagnostics: [diagnostic] });
     expect(store.getSnapshot().state.codegen.diagnostics).toEqual([diagnostic]);
+  });
+
+  it("игнорирует codegen completed response с устаревшим requestId текущей sourceVersion", () => {
+    const store = createWorkbenchStore();
+    store.dispatch({ type: "codegen.intent.created", intent: { kind: "add-machine", template: "domain" } });
+    const before = store.getSnapshot();
+
+    expect(
+      store.dispatch({
+        type: "codegen.plan.completed",
+        requestId: "codegen:1:old",
+        sourceVersion: 1,
+        result: {
+          plan: {
+            sourceVersion: 1,
+            sourceHash: before.state.source.hash,
+            edits: [],
+            expectedGraphChange: { kind: "not-evaluated" },
+            diagnostics: [diagnostic.diagnostic],
+          },
+          diagnostics: [diagnostic],
+        },
+      }).result,
+    ).toEqual({ ok: false, reason: "stale-source-version", diagnostics: [] });
+    expect(store.getSnapshot()).toBe(before);
   });
 
   it("игнорирует stale model, validation и codegen responses", () => {

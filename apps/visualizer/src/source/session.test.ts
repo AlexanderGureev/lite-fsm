@@ -17,4 +17,27 @@ describe("сессия исходника", () => {
     expect(second.version).toBe(5);
     expect(second.hash).toBe(first.hash);
   });
+
+  it("задает language/version defaults и сохраняет file metadata при update", () => {
+    const first = createSourceSession({
+      source: "export const a = 1;",
+      filePath: "/project/src/a.tsx",
+      filename: "a.tsx",
+    });
+    const second = updateSourceSession(first, "export const a = 2;", "jsx");
+
+    expect(first).toMatchObject({
+      filePath: "/project/src/a.tsx",
+      filename: "a.tsx",
+      language: "ts",
+      version: 1,
+    });
+    expect(second).toMatchObject({
+      filePath: "/project/src/a.tsx",
+      filename: "a.tsx",
+      language: "jsx",
+      version: 2,
+    });
+    expect(second.hash).toBe(hashSource("export const a = 2;"));
+  });
 });

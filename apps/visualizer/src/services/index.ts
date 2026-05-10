@@ -1,5 +1,11 @@
 export { createDefaultEffectRunnerServices } from "./default-services";
 export { runWorkbenchEffect, runWorkbenchEffects } from "./effect-runner";
+export {
+  createLocalAnalyzerClient,
+  createLocalCompilerClient,
+  createLocalVisualizerModelClient,
+} from "./local-graph-clients";
+export type { LocalGraphClientDependencies } from "./local-graph-clients";
 export { createStaticHostAdapter, STATIC_HOST_CAPABILITIES } from "./static-host";
 export {
   createUnimplementedAnalyzerClient,

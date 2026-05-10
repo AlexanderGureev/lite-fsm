@@ -2,8 +2,10 @@ import type { LiteFsmGraphDocument } from "@lite-fsm/graph";
 import type { GraphVisualizerModel } from "@lite-fsm/graph/view-model";
 import { describe, expect, it, vi } from "vitest";
 import { createNoopCodegenPlanner } from "../codegen";
+import { createSourceSession } from "../source";
 import { createWorkbenchStore } from "../workbench";
 import { createNoopValidationRegistry } from "../validation";
+import { createDefaultEffectRunnerServices } from "./default-services";
 import { runWorkbenchEffect, runWorkbenchEffects } from "./effect-runner";
 import {
   createUnimplementedAnalyzerClient,
@@ -96,6 +98,29 @@ describe("effect runner", () => {
     );
 
     expect(codegen).toMatchObject({ type: "codegen.plan.completed", requestId: "codegen:1:1", sourceVersion: 1 });
+  });
+
+  it("передает document/model в validation registry", async () => {
+    const services = createServices();
+    services.validation.run = vi.fn(async () => []);
+
+    await expect(
+      runWorkbenchEffect(
+        {
+          kind: "run-validation",
+          requestId: "validation:1:1",
+          sourceVersion: 1,
+          document: documentFixture,
+          model: modelFixture,
+        },
+        services,
+      ),
+    ).resolves.toEqual({ type: "validation.succeeded", requestId: "validation:1:1", sourceVersion: 1, diagnostics: [] });
+    expect(services.validation.run).toHaveBeenCalledWith({
+      sourceVersion: 1,
+      document: documentFixture,
+      model: modelFixture,
+    });
   });
 
   it("возвращает controlled failure при исключении сервиса", async () => {
@@ -224,6 +249,51 @@ describe("effect runner", () => {
     await vi.waitFor(() => expect(store.getSnapshot().state.model.status).toBe("ready"));
   });
 
+  it("исполняет полный source pipeline через default local graph services", async () => {
+    const services = createDefaultEffectRunnerServices();
+    const store = createWorkbenchStore();
+    const output = store.dispatch({ type: "source.open-visualizer" });
+
+    runWorkbenchEffects(output.effects, services, store);
+
+    await vi.waitFor(() => expect(store.getSnapshot().state.validation.status).toBe("ready"));
+    expect(store.getSnapshot().state.compile.document?.machines).toHaveLength(1);
+    expect(store.getSnapshot().state.model.model?.topics.map((topic) => topic.eventType)).toEqual(["PAUSE", "PLAY", "STOP"]);
+    expect(store.getSnapshot().state.console.entries).toEqual([
+      expect.objectContaining({ channel: "system", title: "Source pipeline started" }),
+    ]);
+  });
+
+  it("не применяет async response, если source изменился до завершения effect", async () => {
+    let resolveCompile: (value: Awaited<ReturnType<EffectRunnerServices["compiler"]["compile"]>>) => void = () => {};
+    const compilePromise = new Promise<Awaited<ReturnType<EffectRunnerServices["compiler"]["compile"]>>>((resolve) => {
+      resolveCompile = resolve;
+    });
+    const services = createServices();
+    services.compiler.compile = vi.fn(() => compilePromise);
+    services.analyzer.analyze = vi.fn(async (input) => ({
+      ok: true as const,
+      sourceVersion: input.sourceVersion,
+      diagnostics: [],
+    }));
+    const store = createWorkbenchStore();
+    const output = store.dispatch({ type: "source.open-visualizer" });
+
+    runWorkbenchEffects(output.effects, services, store);
+    store.dispatch({ type: "source.changed", source: "export const changed = 1;" });
+    resolveCompile({
+      ok: true,
+      sourceVersion: 1,
+      document: documentFixture,
+      diagnostics: [],
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(store.getSnapshot().state.source.source).toBe("export const changed = 1;");
+    expect(store.getSnapshot().state.compile.status).toBe("idle");
+    expect(services.analyzer.analyze).not.toHaveBeenCalled();
+  });
+
   it("пропускает undefined command в async chain", async () => {
     const services = createServices();
     const store = createWorkbenchStore();
@@ -253,5 +323,20 @@ describe("effect runner", () => {
         analysisDiagnostics: [],
       }),
     ).resolves.toMatchObject({ ok: false, diagnostics: [{ diagnostic: { code: "model-client-not-connected" } }] });
+  });
+
+  it("default services возвращают diagnostics для source без machines без падения chain", async () => {
+    const services = createDefaultEffectRunnerServices();
+    const source = createSourceSession({ source: "export const value = 1;", filename: "empty.ts" });
+    const compile = await services.compiler.compile({ requestId: "compile:1:1", sourceVersion: 1, source });
+
+    expect(compile).toMatchObject({ ok: true, sourceVersion: 1 });
+    if (!compile.ok) throw new Error("Compile failed.");
+    const analysis = await services.analyzer.analyze({
+      requestId: "analyze:1:1",
+      sourceVersion: 1,
+      document: compile.document,
+    });
+    expect(analysis).toMatchObject({ ok: true, sourceVersion: 1 });
   });
 });

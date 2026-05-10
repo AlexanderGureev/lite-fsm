@@ -6,14 +6,14 @@
 
 | Поле             | Значение                                                                                                                                                                                                                                                                                                          |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Дата             | 2026-05-09                                                                                                                                                                                                                                                                                                        |
-| Готово           | Этапы 0-9 IR/API/harness, Source Catalog/Candidates, Partial Evaluator, ConfigGraphCompiler, ManagerLinker/select API, ReducerCompiler, EffectsCompiler, GraphAssembler, общий `compiler/ast.ts`, Semantic Analyzer, Simulator, этап 11 view-model projection, этапы 12a architecture foundation, 12b visual direction и 12b-shadcn-foundation |
+| Дата             | 2026-05-10                                                                                                                                                                                                                                                                                                        |
+| Готово           | Этапы 0-9 IR/API/harness, Source Catalog/Candidates, Partial Evaluator, ConfigGraphCompiler, ManagerLinker/select API, ReducerCompiler, EffectsCompiler, GraphAssembler, общий `compiler/ast.ts`, Semantic Analyzer, Simulator, этап 11 view-model projection, этапы 12a architecture foundation, 12b visual direction, 12b-shadcn-foundation и 12c source pipeline/console |
 | Package          | `@lite-fsm/graph`, private/experimental                                                                                                                                                                                                                                                                           |
 | Public API       | `compileLiteFsmGraph(source, options?)`, `selectMachineGraph(document, selector?)`, `analyzeLiteFsmGraph(document, options?)`, `@lite-fsm/graph/simulator`, `@lite-fsm/graph/view-model` + IR/analyzer/simulator/view-model-типы |
 | Текущий output   | `LiteFsmGraphDocument`: source metadata, compiler diagnostics, machines, linked managers, config states/transitions, reducer cases/transitions, effect emissions, machine facts и `initialContextJson`; `GraphAnalysisResult`: analyzer diagnostics; `GraphSimulationSnapshot`: slices/timeline/choices/emissions |
-| Еще не строится  | CLI, полноценные Source/L1/L2/L3 visualizer flows, manual simulation UI и source overlay behavior                                                                                                                                                                                                                  |
+| Еще не строится  | CLI, полноценные L1/L2 read-only views, L3/manual simulation UI, source overlay behavior и codegen/edit flows                                                                                                                                                                                                      |
 | Fixture contract | `tests/graph/fixtures/graph-sources.ts`: 28 machine candidates, 3 manager candidates, полный assembler snapshot                                                                                                                                                                                                   |
-| Coverage         | `apps/visualizer` pure logic на последнем 12b-shadcn-foundation прогоне: 100% statements/branches/functions/lines                                                                                                                                                                                                 |
+| Coverage         | `apps/visualizer` pure logic на последнем 12c прогоне: 100% statements/branches/functions/lines                                                                                                                                                                                                                   |
 
 ## Ключевые решения
 
@@ -53,10 +53,14 @@
 - Stage 12b-shadcn-foundation добавил app-local shadcn/Tailwind v4 foundation внутри `apps/visualizer`: `components.json`, generated baseline components в `src/ui`, `cn` в `src/lib/utils` и semantic theme bridge в `src/styles.css`.
 - Visualizer shell пересобран на shadcn primitives (`Tabs`, `Button`, `Badge`, `Input`, `Textarea`, `Select`, `Card`, `Separator`, `ScrollArea`, `Tooltip`, `Alert`) и thin presentational wrappers для graph grammar без graph behavior/source pipeline/simulation logic.
 - `apps/visualizer/DESIGN.md` расширен разделом `UI kit`, который фиксирует shadcn ownership, allowed variants, Tailwind token policy, CSS ownership и custom graph-specific grammar.
+- Stage 12c заменил unimplemented visualizer clients на Promise-based local clients поверх `compileLiteFsmGraph`, `analyzeLiteFsmGraph` и `buildGraphVisualizerModel`; Vite aliases теперь резолвят graph subpaths до root alias.
+- Source tab стал настоящим controlled source pipeline UI: editable shadcn `Textarea`, `Open visualizer`, `reset to sample`, source version/hash/status summary и invalidation derived compile/analyze/model/validation/simulation state при source edit.
+- Workbench reducer сохраняет latest-wins guards по `requestId/sourceVersion`, запускает цепочку compile -> analyze -> view-model -> validation через descriptors и нормализует model diagnostics в app diagnostics/console без блокировки analyzer diagnostics.
+- Console стала общей 12c panel с каналами `all/system/diagnostics/debug`, normalized entries, origin/severity/navigation target metadata и real Source pipeline diagnostics вместо 12b representative fixture.
 
 ## Проверки
 
-Последний успешный набор для Stage 12b-shadcn-foundation:
+Последний успешный набор для Stage 12c:
 
 ```txt
 pnpm --filter @lite-fsm/visualizer check-types
@@ -72,4 +76,4 @@ Root/docs build не запускался.
 
 ## Следующий этап
 
-Этап 12c: source pipeline и console.
+Этап 12d: L1/L2 read-only views.

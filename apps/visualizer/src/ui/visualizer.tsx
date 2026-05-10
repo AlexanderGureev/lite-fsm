@@ -154,19 +154,24 @@ export const SourceEditorShell = ({
   label,
   value,
   textareaTestId,
+  readOnly = false,
+  onChange,
   children,
 }: {
   label: string;
   value: string;
   textareaTestId?: string;
+  readOnly?: boolean;
+  onChange?: ComponentProps<typeof Textarea>["onChange"];
   children?: ReactNode;
 }) => (
   <div className="flex min-h-0 flex-col gap-2">
     <Textarea
       aria-label={label}
       data-testid={textareaTestId}
-      readOnly
+      readOnly={readOnly}
       value={value}
+      onChange={onChange}
       className="min-h-28 resize-none rounded-md bg-background font-mono text-[11px] leading-relaxed text-foreground shadow-none"
     />
     {children}
