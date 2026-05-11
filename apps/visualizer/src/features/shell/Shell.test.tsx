@@ -63,6 +63,7 @@ const consoleEntries: readonly ConsoleEntry[] = [
     message: "unsupported source shape",
     origin: "compiler",
     severity: "error",
+    locationLabel: "line 3, column 7",
     target: { kind: "none", reason: "no-anchor" },
   },
   {
@@ -140,6 +141,25 @@ describe("оболочка Shell", () => {
         compile: { ...base.state.compile, status: "failed" },
         model: { ...base.state.model, status: "ready" },
         validation: { ...base.state.validation, status: "blocked" },
+        diagnostics: [
+          {
+            diagnosticId: "compiler:1:bad",
+            sourceVersion: 1,
+            origin: "compiler",
+            diagnostic: { code: "bad", severity: "error", message: "Bad source" },
+            sourceAnchors: [],
+            primaryTarget: { kind: "console" },
+          },
+          {
+            diagnosticId: "analyzer:1:warn",
+            sourceVersion: 1,
+            origin: "analyzer",
+            diagnostic: { code: "warn", severity: "warning", message: "Machine warning" },
+            graphItemRef: { kind: "machine", machineId: "player" },
+            sourceAnchors: [],
+            primaryTarget: { kind: "graph", ref: { kind: "machine", machineId: "player" } },
+          },
+        ],
         console: { ...base.state.console, entries: consoleEntries },
       },
     };
@@ -157,6 +177,15 @@ describe("оболочка Shell", () => {
     expect(store.getSnapshot().state.console.selectedChannel).toBe("diagnostics");
     expect(screen.getByTestId(ids.console.entry).getAttribute("data-entry-id")).toBe("diagnostic-entry");
     expect(screen.getByTestId(ids.console.entry).getAttribute("data-channel")).toBe("diagnostics");
+    expect(screen.getByTestId(ids.console.entry).textContent).toContain("line 3, column 7");
+    expect(screen.getByTestId(ids.tabs.trigger.source).getAttribute("data-diagnostic-count")).toBe("1");
+    expect(screen.getByTestId(ids.tabs.trigger.source).getAttribute("data-has-error")).toBe("true");
+    expect(screen.getByTestId(ids.tabs.trigger.system).getAttribute("data-diagnostic-count")).toBe("1");
+    expect(screen.getByTestId(ids.tabs.trigger.system).getAttribute("data-has-error")).toBe("false");
+    expect(screen.getAllByTestId(ids.tabs.diagnosticBadge).map((badge) => [badge.getAttribute("data-tab"), badge.getAttribute("data-has-error")])).toEqual([
+      ["source", "true"],
+      ["system", "false"],
+    ]);
 
     fireEvent.click(screen.getByTestId(ids.console.channelDebug));
     expect(store.getSnapshot().state.console.selectedChannel).toBe("debug");

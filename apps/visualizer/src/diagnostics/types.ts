@@ -36,6 +36,7 @@ export type WorkbenchDiagnosticInput = {
   code: string;
   severity: GraphDiagnostic["severity"];
   message: string;
+  loc?: GraphDiagnostic["loc"];
   graphItemRef?: GraphItemRef;
   sourceAnchors?: readonly GraphSourceAnchor[];
   primaryTarget?: WorkbenchDiagnosticNavigationTarget;

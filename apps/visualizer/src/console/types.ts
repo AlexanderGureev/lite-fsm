@@ -3,6 +3,13 @@ import type { WorkbenchDiagnosticRef } from "../diagnostics";
 export type ConsoleChannel = "system" | "diagnostics" | "debug";
 export type ConsoleChannelFilter = "all" | ConsoleChannel;
 
+const diagnosticLocationLabel = (diagnostic: WorkbenchDiagnosticRef): string | undefined => {
+  const loc = diagnostic.sourceAnchors.find((anchor) => anchor.loc)?.loc ?? diagnostic.diagnostic.loc;
+  if (!loc) return undefined;
+
+  return `line ${loc.start.line}, column ${loc.start.column}`;
+};
+
 export type ConsoleEntry = {
   entryId: string;
   sourceVersion: number;
@@ -12,6 +19,7 @@ export type ConsoleEntry = {
   diagnosticId?: string;
   origin?: WorkbenchDiagnosticRef["origin"];
   severity?: WorkbenchDiagnosticRef["diagnostic"]["severity"];
+  locationLabel?: string;
   target?: WorkbenchDiagnosticRef["primaryTarget"];
 };
 
@@ -39,17 +47,22 @@ export type ConsolePanelView = {
 
 export const EMPTY_CONSOLE_ENTRIES: readonly ConsoleEntry[] = [];
 
-export const createConsoleEntryFromDiagnostic = (diagnostic: WorkbenchDiagnosticRef): ConsoleEntry => ({
-  entryId: `diagnostic:${diagnostic.diagnosticId}`,
-  sourceVersion: diagnostic.sourceVersion,
-  channel: "diagnostics",
-  title: diagnostic.diagnostic.code,
-  message: diagnostic.diagnostic.message,
-  diagnosticId: diagnostic.diagnosticId,
-  origin: diagnostic.origin,
-  severity: diagnostic.diagnostic.severity,
-  target: diagnostic.primaryTarget,
-});
+export const createConsoleEntryFromDiagnostic = (diagnostic: WorkbenchDiagnosticRef): ConsoleEntry => {
+  const locationLabel = diagnosticLocationLabel(diagnostic);
+
+  return {
+    entryId: `diagnostic:${diagnostic.diagnosticId}`,
+    sourceVersion: diagnostic.sourceVersion,
+    channel: "diagnostics",
+    title: diagnostic.diagnostic.code,
+    message: diagnostic.diagnostic.message,
+    diagnosticId: diagnostic.diagnosticId,
+    origin: diagnostic.origin,
+    severity: diagnostic.diagnostic.severity,
+    ...(locationLabel ? { locationLabel } : {}),
+    target: diagnostic.primaryTarget,
+  };
+};
 
 export const createSystemConsoleEntry = (
   sourceVersion: number,

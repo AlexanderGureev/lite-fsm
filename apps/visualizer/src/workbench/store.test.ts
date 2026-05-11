@@ -1,6 +1,7 @@
 import type { GraphDiagnostic, LiteFsmGraphDocument } from "@lite-fsm/graph";
 import type { GraphSourceAnchor, GraphVisualizerModel } from "@lite-fsm/graph/view-model";
 import type { ConsoleEntry } from "../console";
+import type { WorkbenchDiagnosticRef } from "../diagnostics";
 import { describe, expect, it, vi } from "vitest";
 import { createInitialWorkbenchSnapshot } from "./state";
 import { createWorkbenchStore } from "./store";
@@ -135,10 +136,82 @@ describe("store workbench визуализатора", () => {
     });
 
     expect(selectTabItems(store.getSnapshot())).toEqual([
-      { tab: "source", label: "Source", count: "", selected: true },
-      { tab: "system", label: "System", count: "2", selected: false },
-      { tab: "events", label: "Events", count: "3", selected: false },
-      { tab: "machines", label: "Machines", count: "1/2", selected: false },
+      { tab: "source", label: "Source", count: "", diagnosticCount: 0, hasError: false, selected: true },
+      { tab: "system", label: "System", count: "2", diagnosticCount: 0, hasError: false, selected: false },
+      { tab: "events", label: "Events", count: "3", diagnosticCount: 0, hasError: false, selected: false },
+      { tab: "machines", label: "Machines", count: "1/2", diagnosticCount: 0, hasError: false, selected: false },
+    ]);
+  });
+
+  it("строит diagnostic badges вкладок из source, graph, event и simulation targets", () => {
+    const anchor: GraphSourceAnchor = {
+      kind: "diagnostic",
+      editable: false,
+      loc: { start: { line: 7, column: 5, offset: 70 }, end: { line: 7, column: 11, offset: 76 } },
+    };
+    const model = {
+      ...modelFixture,
+      machines: [{ machineId: "player" }, { machineId: "other" }],
+      topics: [{ eventType: "PLAY" }],
+      workbenchMachines: {
+        player: {
+          globalBehavior: [
+            { kind: "config", transitionId: "config-t", foldedReducerTransitionIds: ["folded-t"] },
+            { kind: "reducer", transitionId: "reducer-t", reducerCaseId: "case-a" },
+            { kind: "effect", emissionId: "emit-a" },
+          ],
+          states: [{ rows: [{ kind: "effect", emissionId: "state-emit" }] }],
+        },
+      },
+    } as unknown as GraphVisualizerModel;
+    const diagnosticRef = (
+      diagnosticId: string,
+      origin: WorkbenchDiagnosticRef["origin"],
+      severity: GraphDiagnostic["severity"],
+      graphItemRef?: NonNullable<WorkbenchDiagnosticRef["graphItemRef"]>,
+      primaryTarget: WorkbenchDiagnosticRef["primaryTarget"] = { kind: "console" },
+      sourceAnchors: readonly GraphSourceAnchor[] = [],
+    ): WorkbenchDiagnosticRef => ({
+      diagnosticId,
+      sourceVersion: 1,
+      origin,
+      diagnostic: { code: diagnosticId, severity, message: diagnosticId },
+      ...(graphItemRef ? { graphItemRef } : {}),
+      sourceAnchors,
+      primaryTarget,
+    });
+    const snapshot = createInitialWorkbenchSnapshot();
+    const store = createWorkbenchStore({
+      ...snapshot,
+      state: {
+        ...snapshot.state,
+        model: { status: "ready", model, diagnostics: [] },
+        l3: { selectedMachineIds: ["player"] },
+        diagnostics: [
+          diagnosticRef("source-anchor", "analyzer", "error", undefined, { kind: "source", anchor }, [anchor]),
+          diagnosticRef("host", "host", "warning"),
+          diagnosticRef("topic", "analyzer", "warning", { kind: "topic", eventType: "PLAY" }),
+          diagnosticRef("config", "analyzer", "warning", { kind: "transition", machineId: "player", transitionId: "config-t" }),
+          diagnosticRef("folded", "analyzer", "warning", { kind: "transition", machineId: "player", transitionId: "folded-t" }),
+          diagnosticRef("reducer", "analyzer", "error", { kind: "transition", machineId: "player", transitionId: "reducer-t" }),
+          diagnosticRef("emission", "analyzer", "warning", { kind: "emission", machineId: "player", emissionId: "emit-a" }),
+          diagnosticRef("state-emission", "analyzer", "warning", { kind: "emission", machineId: "player", emissionId: "state-emit" }),
+          diagnosticRef("case", "analyzer", "warning", { kind: "reducerCase", machineId: "player", reducerCaseId: "case-a" }),
+          diagnosticRef("machine", "analyzer", "warning", { kind: "machine", machineId: "player" }),
+          diagnosticRef("state-other", "analyzer", "warning", { kind: "state", machineId: "other", stateId: "idle" }),
+          diagnosticRef("manager", "analyzer", "warning", { kind: "manager", managerId: "manager" }),
+          diagnosticRef("diagnostic-ref", "layout", "warning", { kind: "diagnostic", diagnosticId: "layout" }),
+          diagnosticRef("simulator", "simulator", "warning"),
+          diagnosticRef("codegen", "codegen", "warning"),
+        ],
+      },
+    });
+
+    expect(selectTabItems(store.getSnapshot()).map((tab) => [tab.tab, tab.diagnosticCount, tab.hasError])).toEqual([
+      ["source", 2, true],
+      ["system", 10, true],
+      ["events", 7, true],
+      ["machines", 9, true],
     ]);
   });
 

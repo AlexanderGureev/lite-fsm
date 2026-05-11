@@ -72,7 +72,13 @@ const MachinePickerRow = ({
       {machine.groupTag ? <StatusBadge tone="routing">{machine.groupTag}</StatusBadge> : null}
       {machine.diagnosticCount > 0 ? <StatusBadge tone="diagnostic">diag {machine.diagnosticCount}</StatusBadge> : null}
     </span>
-    <strong className="mt-1 block min-w-0 font-mono text-[11px] [overflow-wrap:anywhere]">{machine.machineId}</strong>
+    <strong
+      className="mt-1 block min-w-0 font-mono text-[11px] [overflow-wrap:anywhere]"
+      data-testid={VISUALIZER_TEST_IDS.workbench.longLabel}
+      data-label-kind="machine"
+    >
+      {machine.machineId}
+    </strong>
     <span className="mt-1 block font-mono text-[10px] text-[color:var(--vf-text-quiet)]">states {machine.stateCount}</span>
   </button>
 );
@@ -109,9 +115,27 @@ const RowButton = ({
       onClick={activate}
     >
       <LayerBadge layer={row.layer} />
-      <span className="min-w-0 font-mono text-[11px] [overflow-wrap:anywhere]">{row.eventType}</span>
-      <span className="min-w-0 font-mono text-[11px] text-primary [overflow-wrap:anywhere]">{row.targetLabel}</span>
-      <span className="justify-self-end font-mono text-[10px] text-[color:var(--vf-text-quiet)]">{row.metaLabel}</span>
+      <span
+        className="min-w-0 font-mono text-[11px] [overflow-wrap:anywhere]"
+        data-testid={VISUALIZER_TEST_IDS.workbench.longLabel}
+        data-label-kind="event"
+      >
+        {row.eventType}
+      </span>
+      <span
+        className="min-w-0 font-mono text-[11px] text-primary [overflow-wrap:anywhere]"
+        data-testid={VISUALIZER_TEST_IDS.workbench.longLabel}
+        data-label-kind="target"
+      >
+        {row.targetLabel}
+      </span>
+      <span
+        className="justify-self-end font-mono text-[10px] text-[color:var(--vf-text-quiet)]"
+        data-testid={VISUALIZER_TEST_IDS.workbench.longLabel}
+        data-label-kind="guard"
+      >
+        {row.metaLabel}
+      </span>
     </button>
   );
 };
@@ -137,7 +161,9 @@ const StateBlock = ({
         className="min-w-0 font-mono text-[11px] [overflow-wrap:anywhere]"
         data-testid={state.current ? VISUALIZER_TEST_IDS.workbench.currentState : undefined}
       >
-        {state.stateKey}
+        <span data-testid={VISUALIZER_TEST_IDS.workbench.longLabel} data-label-kind="state">
+          {state.stateKey}
+        </span>
       </strong>
       <div className="flex min-w-0 flex-wrap gap-1">
         {state.badges.map((badge) => (
@@ -177,7 +203,13 @@ const MachineCard = ({
     <header className="flex min-w-0 flex-wrap items-start gap-2">
       <div className="min-w-0 flex-1">
         <PanelKicker>{card.kind}</PanelKicker>
-        <h3 className="mt-1 min-w-0 font-mono text-sm font-semibold [overflow-wrap:anywhere]">{card.machineId}</h3>
+        <h3
+          className="mt-1 min-w-0 font-mono text-sm font-semibold [overflow-wrap:anywhere]"
+          data-testid={VISUALIZER_TEST_IDS.workbench.longLabel}
+          data-label-kind="machine"
+        >
+          {card.machineId}
+        </h3>
       </div>
       <StatusBadge tone="ready">state {card.currentStateKey ?? "unknown"}</StatusBadge>
       {card.groupTag ? <StatusBadge tone="routing">{card.groupTag}</StatusBadge> : null}
@@ -316,7 +348,13 @@ const TimelineStep = ({
   >
     <span className="flex min-w-0 items-center gap-2">
       <StatusBadge tone={step.empty ? "diagnostic" : "muted"}>#{step.index}</StatusBadge>
-      <strong className="min-w-0 font-mono text-[11px] [overflow-wrap:anywhere]">{step.eventType}</strong>
+      <strong
+        className="min-w-0 font-mono text-[11px] [overflow-wrap:anywhere]"
+        data-testid={VISUALIZER_TEST_IDS.workbench.longLabel}
+        data-label-kind="timeline-event"
+      >
+        {step.eventType}
+      </strong>
     </span>
     <span className="mt-1 block font-mono text-[10px] text-[color:var(--vf-text-quiet)]">
       {step.sourceLabel} · accepted {step.acceptedMachines.length} · refs {step.rowRefCount}

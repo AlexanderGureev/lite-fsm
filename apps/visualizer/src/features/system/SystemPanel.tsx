@@ -56,7 +56,11 @@ const MachineRow = ({
         {machine.groupTag ? <StatusBadge tone="routing">{machine.groupTag}</StatusBadge> : null}
         {machine.counts.diagnostics > 0 ? <StatusBadge tone="diagnostic">diag {machine.counts.diagnostics}</StatusBadge> : null}
       </span>
-      <strong className="mt-1 block min-w-0 font-mono text-[11px] text-foreground [overflow-wrap:anywhere]">
+      <strong
+        className="mt-1 block min-w-0 font-mono text-[11px] text-foreground [overflow-wrap:anywhere]"
+        data-testid={VISUALIZER_TEST_IDS.workbench.longLabel}
+        data-label-kind="machine"
+      >
         {machine.machineId}
       </strong>
       <span className="mt-1 grid grid-cols-3 gap-1 font-mono text-[10px] text-[color:var(--vf-text-quiet)]">
@@ -91,7 +95,13 @@ const TopicRow = ({
       onMouseEnter={() => dispatch({ type: "l1.topic.hovered", eventType: topic.eventType })}
       onFocus={() => dispatch({ type: "l1.topic.hovered", eventType: topic.eventType })}
     >
-      <strong className="block min-w-0 font-mono text-[11px] text-foreground [overflow-wrap:anywhere]">{topic.eventType}</strong>
+      <strong
+        className="block min-w-0 font-mono text-[11px] text-foreground [overflow-wrap:anywhere]"
+        data-testid={VISUALIZER_TEST_IDS.workbench.longLabel}
+        data-label-kind="event"
+      >
+        {topic.eventType}
+      </strong>
       <span className="mt-1 flex flex-wrap items-center gap-1.5 font-mono text-[10px] text-[color:var(--vf-text-quiet)]">
         <span>↑ {topic.producerCount}</span>
         <span>↓ {topic.consumerCount}</span>
@@ -115,7 +125,9 @@ const TopicChip = ({
     data-event-type={eventType}
     onClick={() => dispatch({ type: "l1.topic.selected", eventType })}
   >
-    {eventType}
+    <span data-testid={VISUALIZER_TEST_IDS.workbench.longLabel} data-label-kind="event">
+      {eventType}
+    </span>
   </button>
 );
 
@@ -134,7 +146,13 @@ const MachineDetail = ({
   >
     <div>
       <PanelKicker>Machine</PanelKicker>
-      <h3 className="mt-1 min-w-0 font-mono text-sm font-semibold [overflow-wrap:anywhere]">{detail.machine.machineId}</h3>
+      <h3
+        className="mt-1 min-w-0 font-mono text-sm font-semibold [overflow-wrap:anywhere]"
+        data-testid={VISUALIZER_TEST_IDS.workbench.longLabel}
+        data-label-kind="machine"
+      >
+        {detail.machine.machineId}
+      </h3>
       <p className="mt-1 text-sm text-muted-foreground">
         {detail.machine.counts.states} states, {detail.machine.counts.configTransitions} config edges,{" "}
         {detail.machine.counts.effectEmissions} emissions
@@ -213,7 +231,13 @@ const TopicDetail = ({
   >
     <div>
       <PanelKicker>Topic</PanelKicker>
-      <h3 className="mt-1 min-w-0 font-mono text-sm font-semibold [overflow-wrap:anywhere]">{detail.topic.eventType}</h3>
+      <h3
+        className="mt-1 min-w-0 font-mono text-sm font-semibold [overflow-wrap:anywhere]"
+        data-testid={VISUALIZER_TEST_IDS.workbench.longLabel}
+        data-label-kind="event"
+      >
+        {detail.topic.eventType}
+      </h3>
       <p className="mt-1 text-sm text-muted-foreground">
         {detail.topic.producerCount} producers, {detail.topic.consumerCount} consumers
       </p>

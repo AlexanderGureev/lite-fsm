@@ -7,13 +7,13 @@
 | Поле             | Значение                                                                                                                                                                                                                                                                                                          |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Дата             | 2026-05-11                                                                                                                                                                                                                                                                                                        |
-| Готово           | Этапы 0-9 IR/API/harness, Source Catalog/Candidates, Partial Evaluator, ConfigGraphCompiler, ManagerLinker/select API, ReducerCompiler, EffectsCompiler, GraphAssembler, общий `compiler/ast.ts`, Semantic Analyzer, Simulator, этап 11 view-model projection, этапы 12a architecture foundation, 12b visual direction, 12b-shadcn-foundation, 12c source pipeline/console и 12d L1/L2 read-only views |
+| Готово           | Этапы 0-9 IR/API/harness, Source Catalog/Candidates, Partial Evaluator, ConfigGraphCompiler, ManagerLinker/select API, ReducerCompiler, EffectsCompiler, GraphAssembler, общий `compiler/ast.ts`, Semantic Analyzer, Simulator, этап 11 view-model projection, этап 12 MVP visualizer: 12a architecture foundation, 12b visual direction, 12b-shadcn-foundation, 12c source pipeline/console, 12d L1/L2 read-only views, 12e L3 cards/manual simulation и 12f stabilization |
 | Package          | `@lite-fsm/graph`, private/experimental                                                                                                                                                                                                                                                                           |
 | Public API       | `compileLiteFsmGraph(source, options?)`, `selectMachineGraph(document, selector?)`, `analyzeLiteFsmGraph(document, options?)`, `@lite-fsm/graph/simulator`, `@lite-fsm/graph/view-model` + IR/analyzer/simulator/view-model-типы |
 | Текущий output   | `LiteFsmGraphDocument`: source metadata, compiler diagnostics, machines, linked managers, config states/transitions, reducer cases/transitions, effect emissions, machine facts и `initialContextJson`; `GraphAnalysisResult`: analyzer diagnostics; `GraphSimulationSnapshot`: slices/timeline/choices/emissions |
-| Еще не строится  | CLI, L3/manual simulation UI и codegen/edit flows                                                                                                                                                                                                                                                                  |
+| Еще не строится  | CLI и codegen/edit flows                                                                                                                                                                                                                                                                                           |
 | Fixture contract | `tests/graph/fixtures/graph-sources.ts`: 28 machine candidates, 3 manager candidates, полный assembler snapshot                                                                                                                                                                                                   |
-| Coverage         | `apps/visualizer` pure logic + 12d Shell/System/Events/SourceOverlay UI на последнем 12d прогоне: 100% statements/branches/functions/lines                                                                                                                                                                       |
+| Coverage         | `apps/visualizer` pure logic + Stage 12 Shell/System/Events/Machines/SourceOverlay UI на последнем 12f прогоне: 100% statements/branches/functions/lines                                                                                                                                                         |
 
 ## Ключевые решения
 
@@ -69,14 +69,25 @@
   source overlay close on source edit и open-in-workbench action, а UI assertions
   перевел на стабильные `data-testid`/domain data attributes вместо изменяемого
   display text.
+- Stage 12e реализовал L3 machine workbench: выбор машин из L1/L2, app-level
+  `WorkbenchCardModel`, state blocks, config/reducer/effect row actions,
+  manual external send, simulator session lifecycle, timeline inspect/reset,
+  actor-template approximation notice и disabled/no-op source edit capability.
+- Stage 12f стабилизировал MVP: diagnostic badges во вкладках Source/System/
+  Events/Machines, line/column labels в console/source overlay, long-label
+  anchors для L1/L2/L3, e2e regression matrix для полного пути
+  source -> L1 -> L2 -> L3 -> simulation -> diagnostics/source overlay,
+  controlled loading/empty/error coverage и static boundary audit для запрета
+  React Flow/ELK/fs/direct graph imports в React components.
 
 ## Проверки
 
-Последний успешный набор для Stage 12d:
+Последний успешный набор для Stage 12f:
 
 ```txt
 pnpm --filter @lite-fsm/visualizer check-types
 pnpm --filter @lite-fsm/visualizer build
+pnpm --filter @lite-fsm/visualizer test:unit
 pnpm --filter @lite-fsm/visualizer test:coverage
 pnpm --filter @lite-fsm/visualizer test:e2e
 ```
@@ -84,8 +95,9 @@ pnpm --filter @lite-fsm/visualizer test:e2e
 Root/docs build не запускался.
 
 Playwright e2e включает responsive/focus/no-overflow проверки для `1440x900`,
-`1280x560` и `360x720`.
+`1280x560`, `768x1024` и `360x720`.
 
 ## Следующий этап
 
-Этап 12e: L3 cards и manual simulation.
+Этап 12 завершен по MVP-спеке; следующие этапы после 12 в текущей Stage 11-12
+спецификации не описаны. Codegen/edit flows остаются будущей работой.

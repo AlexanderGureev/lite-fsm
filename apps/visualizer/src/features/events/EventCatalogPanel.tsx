@@ -37,7 +37,13 @@ const TopicRow = ({
     data-diagnostics={topic.diagnosticCount}
     onClick={() => dispatch({ type: "l2.topic.selected", eventType: topic.eventType })}
   >
-    <strong className="block min-w-0 font-mono text-[11px] text-foreground [overflow-wrap:anywhere]">{topic.eventType}</strong>
+    <strong
+      className="block min-w-0 font-mono text-[11px] text-foreground [overflow-wrap:anywhere]"
+      data-testid={VISUALIZER_TEST_IDS.workbench.longLabel}
+      data-label-kind="event"
+    >
+      {topic.eventType}
+    </strong>
     <span className="mt-1 flex flex-wrap items-center gap-1.5 font-mono text-[10px] text-[color:var(--vf-text-quiet)]">
       <span>↑ {topic.producerCount}</span>
       <span>↓ {topic.consumerCount}</span>
@@ -83,12 +89,24 @@ const ProducerRow = ({
   >
     <div className="flex min-w-0 flex-wrap items-center gap-1.5">
       <LayerBadge layer="effect" />
-      <strong className="min-w-0 font-mono text-[11px] [overflow-wrap:anywhere]">{producer.machineId}</strong>
-      <StatusBadge tone="routing">{producer.routingLabel}</StatusBadge>
+      <strong
+        className="min-w-0 font-mono text-[11px] [overflow-wrap:anywhere]"
+        data-testid={VISUALIZER_TEST_IDS.workbench.longLabel}
+        data-label-kind="machine"
+      >
+        {producer.machineId}
+      </strong>
+      <StatusBadge tone="routing" data-testid={VISUALIZER_TEST_IDS.workbench.longLabel} data-label-kind="routing">
+        {producer.routingLabel}
+      </StatusBadge>
       <StatusBadge tone={producer.confidence === "exact" ? "ready" : "diagnostic"}>{producer.confidence}</StatusBadge>
     </div>
     <p className="mt-1 font-mono text-[10px] text-[color:var(--vf-text-quiet)]">from {producer.sourceStateKey}</p>
-    {producer.guardLabel ? <p className="mt-1 text-sm text-muted-foreground">{producer.guardLabel}</p> : null}
+    {producer.guardLabel ? (
+      <p className="mt-1 text-sm text-muted-foreground" data-testid={VISUALIZER_TEST_IDS.workbench.longLabel} data-label-kind="guard">
+        {producer.guardLabel}
+      </p>
+    ) : null}
     <div className="mt-2">
       <SourceButton action={producer.sourceAction} dispatch={dispatch} />
     </div>
@@ -114,7 +132,13 @@ const ConsumerRow = ({
   >
     <div className="flex min-w-0 flex-wrap items-center gap-1.5">
       <LayerBadge layer="config" />
-      <strong className="min-w-0 font-mono text-[11px] [overflow-wrap:anywhere]">{consumer.machineId}</strong>
+      <strong
+        className="min-w-0 font-mono text-[11px] [overflow-wrap:anywhere]"
+        data-testid={VISUALIZER_TEST_IDS.workbench.longLabel}
+        data-label-kind="machine"
+      >
+        {consumer.machineId}
+      </strong>
       <StatusBadge tone={consumer.confidence === "exact" ? "ready" : "diagnostic"}>{consumer.confidence}</StatusBadge>
       <StatusBadge tone="muted">branches {consumer.branchCount}</StatusBadge>
     </div>
@@ -122,7 +146,9 @@ const ConsumerRow = ({
       from {consumer.sourceStateKey} to {consumer.targetSummary || "unknown"}
     </p>
     {consumer.guardLabels.length > 0 ? (
-      <p className="mt-1 text-sm text-muted-foreground">{consumer.guardLabels.join(", ")}</p>
+      <p className="mt-1 text-sm text-muted-foreground" data-testid={VISUALIZER_TEST_IDS.workbench.longLabel} data-label-kind="guard">
+        {consumer.guardLabels.join(", ")}
+      </p>
     ) : null}
     <ol className="mt-2 flex flex-col gap-1.5">
       {consumer.branches.map((branch) => (
@@ -137,10 +163,24 @@ const ConsumerRow = ({
         >
           <span className="flex min-w-0 flex-wrap items-center gap-1.5">
             <LayerBadge layer={branch.layer === "config" ? "config" : "reducer"} />
-            <span className="min-w-0 font-mono text-[11px] [overflow-wrap:anywhere]">{branch.targetLabel}</span>
+            <span
+              className="min-w-0 font-mono text-[11px] [overflow-wrap:anywhere]"
+              data-testid={VISUALIZER_TEST_IDS.workbench.longLabel}
+              data-label-kind="target"
+            >
+              {branch.targetLabel}
+            </span>
             <StatusBadge tone={branch.confidence === "exact" ? "ready" : "diagnostic"}>{branch.confidence}</StatusBadge>
           </span>
-          {branch.guardLabel ? <span className="mt-1 block text-sm text-muted-foreground">{branch.guardLabel}</span> : null}
+          {branch.guardLabel ? (
+            <span
+              className="mt-1 block text-sm text-muted-foreground"
+              data-testid={VISUALIZER_TEST_IDS.workbench.longLabel}
+              data-label-kind="guard"
+            >
+              {branch.guardLabel}
+            </span>
+          ) : null}
         </li>
       ))}
     </ol>
@@ -166,7 +206,13 @@ const TopicDetail = ({
     <section className="flex min-h-0 flex-col gap-3 lg:col-span-2">
       <div>
         <PanelKicker>Topic</PanelKicker>
-        <h3 className="mt-1 min-w-0 font-mono text-sm font-semibold [overflow-wrap:anywhere]">{detail.eventType}</h3>
+        <h3
+          className="mt-1 min-w-0 font-mono text-sm font-semibold [overflow-wrap:anywhere]"
+          data-testid={VISUALIZER_TEST_IDS.workbench.longLabel}
+          data-label-kind="event"
+        >
+          {detail.eventType}
+        </h3>
       </div>
       <div className="flex flex-wrap gap-1.5">
         <StatusBadge tone="muted">producers {detail.producerCount}</StatusBadge>

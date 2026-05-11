@@ -248,6 +248,9 @@ const ConsoleDrawer = ({
                       {entry.origin ? (
                         <span className="font-mono text-[10px] text-[color:var(--vf-text-quiet)]">{entry.origin}</span>
                       ) : null}
+                      {entry.locationLabel ? (
+                        <span className="font-mono text-[10px] text-[color:var(--vf-text-quiet)]">{entry.locationLabel}</span>
+                      ) : null}
                     </span>
                     <strong className="mt-1 block min-w-0 font-mono text-[11px] text-foreground [overflow-wrap:anywhere]">
                       {entry.title}
@@ -321,6 +324,8 @@ export const Shell = () => {
                   value={tab.tab}
                   data-tab={tab.tab}
                   data-count={tab.count}
+                  data-diagnostic-count={tab.diagnosticCount}
+                  data-has-error={tab.hasError}
                   data-testid={VISUALIZER_TEST_IDS.tabs.trigger[tab.tab]}
                   className="min-w-fit px-3 data-active:bg-[color:var(--vf-surface-raised)]"
                 >
@@ -328,6 +333,22 @@ export const Shell = () => {
                   {tab.count ? (
                     <span className="rounded-full bg-[color:var(--vf-counter-surface)] px-1.5 font-mono text-[10px] text-[color:var(--vf-text-quiet)]">
                       {tab.count}
+                    </span>
+                  ) : null}
+                  {tab.diagnosticCount > 0 ? (
+                    <span
+                      className={cn(
+                        "rounded-full px-1.5 font-mono text-[10px]",
+                        tab.hasError
+                          ? "bg-[color:var(--vf-danger-soft)] text-[color:var(--vf-danger)]"
+                          : "bg-[color:var(--vf-warning-soft)] text-[color:var(--vf-warning)]",
+                      )}
+                      data-testid={VISUALIZER_TEST_IDS.tabs.diagnosticBadge}
+                      data-tab={tab.tab}
+                      data-count={tab.diagnosticCount}
+                      data-has-error={tab.hasError}
+                    >
+                      diag {tab.diagnosticCount}
                     </span>
                   ) : null}
                 </TabsTrigger>

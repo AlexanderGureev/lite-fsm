@@ -32,6 +32,39 @@ describe("состояние консоли", () => {
     });
   });
 
+  it("добавляет line/column label из source anchors или diagnostic loc", () => {
+    const withAnchor = createConsoleEntryFromDiagnostic({
+      diagnosticId: "compiler:1:anchor",
+      sourceVersion: 1,
+      origin: "compiler",
+      diagnostic: { code: "anchor", severity: "error", message: "Anchor" },
+      sourceAnchors: [
+        {
+          kind: "diagnostic",
+          editable: false,
+          loc: { start: { line: 4, column: 9, offset: 40 }, end: { line: 4, column: 12, offset: 43 } },
+        },
+      ],
+      primaryTarget: { kind: "none", reason: "no-anchor" },
+    });
+    const withDiagnosticLoc = createConsoleEntryFromDiagnostic({
+      diagnosticId: "compiler:1:loc",
+      sourceVersion: 1,
+      origin: "compiler",
+      diagnostic: {
+        code: "loc",
+        severity: "warning",
+        message: "Loc",
+        loc: { start: { line: 8, column: 3, offset: 80 }, end: { line: 8, column: 6, offset: 83 } },
+      },
+      sourceAnchors: [],
+      primaryTarget: { kind: "console" },
+    });
+
+    expect(withAnchor.locationLabel).toBe("line 4, column 9");
+    expect(withDiagnosticLoc.locationLabel).toBe("line 8, column 3");
+  });
+
   it("добавляет, очищает и фильтрует состояние консоли без лишних ссылок", () => {
     const initial = createInitialConsoleState();
     const unchangedAppend = appendConsoleEntries(initial, []);

@@ -25,6 +25,7 @@ export type SourceOverlayView =
       title: string;
       sourceVersion: number;
       anchorCount: number;
+      locationLabel?: string;
       lines: readonly SourceOverlayLineView[];
       fallback?: string;
     };
@@ -41,6 +42,9 @@ export const prioritizeMachineSourceAnchors = (
 
 const sourceLines = (source: string): readonly string[] => source.split(/\r?\n/);
 
+const sourceLocationLabel = (loc: NonNullable<GraphSourceAnchor["loc"]>): string =>
+  `line ${loc.start.line}, column ${loc.start.column}`;
+
 export const buildSourceOverlayView = (
   source: string,
   overlay: SourceOverlayState | undefined,
@@ -54,6 +58,7 @@ export const buildSourceOverlayView = (
       title: overlay.title,
       sourceVersion: overlay.sourceVersion,
       anchorCount: overlay.anchors.length,
+      locationLabel: undefined,
       lines: [],
       fallback: "Source range is not available for this graph item.",
     };
@@ -81,6 +86,7 @@ export const buildSourceOverlayView = (
     title: overlay.title,
     sourceVersion: overlay.sourceVersion,
     anchorCount: overlay.anchors.length,
+    locationLabel: sourceLocationLabel(anchor.loc),
     lines: viewLines,
   };
 };

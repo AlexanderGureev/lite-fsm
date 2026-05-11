@@ -62,8 +62,10 @@ export const SourceOverlay = ({
                   data-testid={VISUALIZER_TEST_IDS.source.overlayDescription}
                   data-source-version={view.sourceVersion}
                   data-anchor-count={view.anchorCount}
+                  data-location-label={view.locationLabel ?? ""}
                 >
                   source v{view.sourceVersion} · anchors {view.anchorCount}
+                  {view.locationLabel ? ` · ${view.locationLabel}` : ""}
                 </DialogDescription>
               </div>
               <DialogClose asChild>

@@ -40,6 +40,7 @@ describe("компонент SourceOverlay", () => {
     expect(screen.getByTestId(ids.source.overlayTitle)).toBeTruthy();
     expect(screen.getByTestId(ids.source.overlayDescription).getAttribute("data-source-version")).toBe("3");
     expect(screen.getByTestId(ids.source.overlayDescription).getAttribute("data-anchor-count")).toBe("2");
+    expect(screen.getByTestId(ids.source.overlayDescription).getAttribute("data-location-label")).toBe("");
     expect(screen.getByTestId(ids.source.overlayFallback).getAttribute("data-fallback")).toBe("true");
 
     fireEvent.click(screen.getByTestId(ids.source.overlayClose));
@@ -56,6 +57,7 @@ describe("компонент SourceOverlay", () => {
           title: "flowMachine",
           sourceVersion: 4,
           anchorCount: 1,
+          locationLabel: "line 10, column 1",
           lines: [
             { line: 10, code: "const flowMachine = createMachine({", selected: true },
             { line: 11, code: "});", selected: false },
@@ -67,6 +69,8 @@ describe("компонент SourceOverlay", () => {
 
     const snippet = screen.getByTestId(ids.source.snippet);
 
+    expect(screen.getByTestId(ids.source.overlayDescription).textContent).toContain("line 10, column 1");
+    expect(screen.getByTestId(ids.source.overlayDescription).getAttribute("data-location-label")).toBe("line 10, column 1");
     expect(snippet.querySelector(".cm-editor")).toBeTruthy();
     expect(snippet.querySelector(".cm-lineNumbers")).toBeTruthy();
     expect(snippet.querySelector(".cm-sourceOverlaySelectedLine")).toBeTruthy();

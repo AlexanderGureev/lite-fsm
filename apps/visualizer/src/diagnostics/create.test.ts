@@ -17,7 +17,7 @@ describe("нормализация diagnostics", () => {
       {
         diagnosticId: "compiler:machine:bad:0",
         origin: "compiler",
-        diagnostic: { code: "bad", severity: "warning", message: "Bad machine" },
+        diagnostic: { code: "bad", severity: "warning", message: "Bad machine", loc: anchor.loc },
         graphItemRef: { kind: "machine", machineId: "player" },
         sourceAnchor: anchor,
       },
@@ -28,7 +28,7 @@ describe("нормализация diagnostics", () => {
         diagnosticId: "compiler:machine:bad:0",
         sourceVersion: 3,
         origin: "compiler",
-        diagnostic: { code: "bad", severity: "warning", message: "Bad machine" },
+        diagnostic: { code: "bad", severity: "warning", message: "Bad machine", loc: anchor.loc },
         graphItemRef: { kind: "machine", machineId: "player" },
         sourceAnchors: [anchor],
         primaryTarget: { kind: "graph", ref: { kind: "machine", machineId: "player" } },

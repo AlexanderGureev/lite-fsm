@@ -6,6 +6,7 @@ export const VISUALIZER_TEST_IDS = {
   },
   tabs: {
     root: "visualizer-tabs",
+    diagnosticBadge: "visualizer-tab-diagnostic-badge",
     trigger: {
       source: "visualizer-tab-source",
       system: "visualizer-tab-system",

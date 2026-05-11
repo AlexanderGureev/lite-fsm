@@ -26,6 +26,7 @@ describe("helpers source overlay для исходника", () => {
       title: "missing",
       sourceVersion: 1,
       anchorCount: 1,
+      locationLabel: undefined,
       lines: [],
       fallback: "Source range is not available for this graph item.",
     });
@@ -43,6 +44,7 @@ describe("helpers source overlay для исходника", () => {
       title: "flow",
       sourceVersion: 2,
       anchorCount: 1,
+      locationLabel: "line 3, column 1",
       lines: [
         { line: 1, code: "one", selected: false },
         { line: 2, code: "two", selected: false },
