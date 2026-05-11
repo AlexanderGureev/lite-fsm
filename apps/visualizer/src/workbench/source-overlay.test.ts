@@ -109,6 +109,33 @@ describe("helpers source overlay для исходника", () => {
     }
   });
 
+  it("не обрезает выбранный range лимитом контекстного fragment", () => {
+    const source = Array.from({ length: 40 }, (_, index) => `line ${index + 1}`).join("\n");
+    const view = buildSourceOverlayView(source, {
+      sourceVersion: 5,
+      title: "appShell",
+      anchors: [
+        {
+          kind: "machine",
+          editable: false,
+          loc: {
+            start: { line: 7, column: 1, offset: 70 },
+            end: { line: 21, column: 4, offset: 214 },
+          },
+        },
+      ],
+    });
+
+    expect(view.open).toBe(true);
+    if (view.open) {
+      expect(view.lines[0]).toMatchObject({ line: 5, selected: false });
+      expect(view.lines[view.lines.length - 1]).toMatchObject({ line: 21, selected: true });
+      expect(view.lines.filter((line) => line.selected).map((line) => line.line)).toEqual([
+        7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
+      ]);
+    }
+  });
+
   it("упорядочивает machine anchors по приоритету", () => {
     expect(
       prioritizeMachineSourceAnchors([

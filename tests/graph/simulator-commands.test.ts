@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { GraphTransition } from "@lite-fsm/graph";
 import { createGraphSimulator } from "@lite-fsm/graph/simulator";
 import { configTransition, documentFromMachines, domainRef, machine, state, stateId } from "./simulator-test-utils";
 
@@ -126,6 +127,46 @@ describe("GraphSimulator: проверка команд", () => {
     expect(mutated.sendFromTransition({ slice: domainRef("flow"), transitionId: knownId })).toMatchObject({
       ok: false,
       reason: "unknown-transition",
+    });
+  });
+
+  it("sendFromTransition принимает accepted config id для свернутого reducer transition", () => {
+    const accepted = configTransition("flow", "idle", "GO", { kind: "state", stateId: stateId("flow", "ready") });
+    const reducer: GraphTransition = {
+      id: "flow:transition:reducer:idle:GO:ready:0",
+      machineId: "flow",
+      source: accepted.source,
+      event: { type: "GO", source: "reducer" },
+      target: { kind: "state", stateId: stateId("flow", "ready") },
+      layer: "reducer",
+      reducerCaseId: "flow:reducer:GO:0",
+      order: 1,
+      confidence: "exact",
+    };
+    const foldedDoc = documentFromMachines([
+      machine({
+        id: "flow",
+        initialState: "idle",
+        states: [state("flow", "idle"), state("flow", "ready")],
+        transitions: [accepted, reducer],
+      }),
+    ]);
+    const simulator = createGraphSimulator(foldedDoc);
+    expect(simulator.start()).toMatchObject({ ok: true });
+    expect(simulator.getAvailableTransitions({ slice: domainRef("flow"), eventType: "GO" }).map((transition) => transition.transitionId)).toEqual([
+      reducer.id,
+    ]);
+
+    const result = simulator.sendFromTransition({ slice: domainRef("flow"), transitionId: accepted.id });
+
+    expect(result).toMatchObject({
+      ok: true,
+      snapshot: { slices: { "domain:flow": expect.objectContaining({ stateKey: "ready" }) } },
+      step: {
+        source: { kind: "manual-config", transitionId: accepted.id },
+        choices: [expect.objectContaining({ selectedTransitionId: reducer.id })],
+        rowRefs: [expect.objectContaining({ transitionId: reducer.id })],
+      },
     });
   });
 });

@@ -3,7 +3,7 @@ import type { GraphVisualizerModel } from "@lite-fsm/graph/view-model";
 import { describe, expect, it, vi } from "vitest";
 import { createNoopCodegenPlanner } from "../codegen";
 import { createSourceSession } from "../source";
-import { createWorkbenchStore } from "../workbench";
+import { createWorkbenchStore, selectMachineWorkbenchPanel } from "../workbench";
 import { createNoopValidationRegistry } from "../validation";
 import { createDefaultEffectRunnerServices } from "./default-services";
 import { runWorkbenchEffect, runWorkbenchEffects } from "./effect-runner";
@@ -641,11 +641,70 @@ describe("исполнитель эффектов", () => {
     runWorkbenchEffects(output.effects, services, store);
 
     await vi.waitFor(() => expect(store.getSnapshot().state.validation.status).toBe("ready"));
-    expect(store.getSnapshot().state.compile.document?.machines).toHaveLength(1);
-    expect(store.getSnapshot().state.model.model?.topics.map((topic) => topic.eventType)).toEqual(["PAUSE", "PLAY", "STOP"]);
+    expect(store.getSnapshot().state.compile.document?.machines.map((machine) => machine.id)).toEqual([
+      "appShell",
+      "auth",
+      "player",
+      "trackInstance",
+    ]);
+    expect(store.getSnapshot().state.model.model?.topics.map((topic) => topic.eventType)).toEqual([
+      "APP_READY",
+      "APP_RESET",
+      "AUTH_RESPONSE",
+      "BUFFER_DONE",
+      "BUFFER_ERROR",
+      "CANCEL_LOGIN",
+      "DISCARD",
+      "LOGIN_REQUEST",
+      "LOGOUT",
+      "NEXT_TRACK",
+      "PAUSE",
+      "PLAY",
+      "QUEUE_EMPTY",
+      "RESUME",
+      "STOP",
+      "THEME_TOGGLE",
+      "TRACK_END",
+      "TRACK_LOAD",
+    ]);
     expect(store.getSnapshot().state.console.entries).toEqual([
       expect.objectContaining({ channel: "system", title: "Source pipeline started" }),
     ]);
+  });
+
+  it("исполняет self-routed effect из actor template строки music-app", async () => {
+    const services = createDefaultEffectRunnerServices();
+    const store = createWorkbenchStore();
+
+    let output = store.dispatch({ type: "source.open-visualizer" });
+    runWorkbenchEffects(output.effects, services, store);
+    await vi.waitFor(() => expect(store.getSnapshot().state.validation.status).toBe("ready"));
+
+    output = store.dispatch({ type: "l3.machine.toggled", machineId: "trackInstance" });
+    runWorkbenchEffects(output.effects, services, store);
+    await vi.waitFor(() => expect(store.getSnapshot().state.simulation.status).toBe("running"));
+
+    const trackCard = () =>
+      selectMachineWorkbenchPanel(store.getSnapshot()).cards.find((card) => card.machineId === "trackInstance");
+    const trackRows = () => trackCard()?.states.flatMap((state) => state.rows) ?? [];
+
+    const trackLoad = trackRows().find((row) => row.kind === "config" && row.eventType === "TRACK_LOAD");
+    if (!trackLoad?.action.target || trackLoad.action.target.kind !== "transition") throw new Error("TRACK_LOAD target missing.");
+
+    output = store.dispatch({ type: "l3.transition-row.sent", target: trackLoad.action.target });
+    runWorkbenchEffects(output.effects, services, store);
+    await vi.waitFor(() => expect(trackCard()?.currentStateKey).toBe("BUFFERING"));
+
+    const bufferDone = trackRows().find((row) => row.kind === "effect" && row.eventType === "BUFFER_DONE");
+    expect(bufferDone?.action.enabled).toBe(true);
+    if (!bufferDone?.action.target || bufferDone.action.target.kind !== "emission") throw new Error("BUFFER_DONE target missing.");
+
+    output = store.dispatch({ type: "l3.effect-row.followed", target: bufferDone.action.target });
+    runWorkbenchEffects(output.effects, services, store);
+
+    await vi.waitFor(() => expect(trackCard()?.currentStateKey).toBe("PLAYING"));
+    expect(store.getSnapshot().state.simulation.status).toBe("running");
+    expect(store.getSnapshot().state.simulation.diagnostics).toEqual([]);
   });
 
   it("не применяет async response, если исходник изменился до завершения эффекта", async () => {

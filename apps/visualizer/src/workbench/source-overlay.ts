@@ -60,16 +60,19 @@ export const buildSourceOverlayView = (
   }
 
   const lines = sourceLines(source);
-  const startLine = Math.max(1, anchor.loc.start.line - SOURCE_CONTEXT_LINES);
-  const unclippedEndLine = Math.min(lines.length, anchor.loc.end.line + SOURCE_CONTEXT_LINES);
-  const endLine = Math.min(unclippedEndLine, startLine + SOURCE_MAX_LINES - 1);
+  const selectedStartLine = Math.max(1, Math.min(lines.length, anchor.loc.start.line));
+  const selectedEndLine = Math.max(selectedStartLine, Math.min(lines.length, anchor.loc.end.line));
+  const startLine = Math.max(1, selectedStartLine - SOURCE_CONTEXT_LINES);
+  const unclippedEndLine = Math.min(lines.length, selectedEndLine + SOURCE_CONTEXT_LINES);
+  const clippedEndLine = Math.min(unclippedEndLine, startLine + SOURCE_MAX_LINES - 1);
+  const endLine = Math.max(clippedEndLine, selectedEndLine);
   const viewLines: SourceOverlayLineView[] = [];
 
   for (let line = startLine; line <= endLine; line += 1) {
     viewLines.push({
       line,
       code: lines[line - 1],
-      selected: line >= anchor.loc.start.line && line <= anchor.loc.end.line,
+      selected: line >= selectedStartLine && line <= selectedEndLine,
     });
   }
 

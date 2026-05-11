@@ -602,7 +602,7 @@ describe("store workbench визуализатора", () => {
     store.dispatch({ type: "source.changed", source: "export const changed = 1;" });
     store.dispatch({ type: "source.reset-to-sample" });
 
-    expect(store.getSnapshot().state.source.source).toContain("playerMachine");
+    expect(store.getSnapshot().state.source.source).toContain("trackInstance");
     expect(store.getSnapshot().state.source.version).toBe(3);
   });
 

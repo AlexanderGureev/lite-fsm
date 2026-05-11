@@ -220,10 +220,10 @@ test("12d пример исходника открывает System inventory с
 
   await expect(tabButton(page, "system")).toHaveAttribute("aria-selected", "true");
   await expect(page.getByTestId(ids.system.panel)).toBeVisible();
-  await expect(page.getByTestId(ids.system.machineRow)).toHaveCount(1);
-  await expect(page.getByTestId(ids.system.topicRow)).toHaveCount(3);
-  await expect(page.getByTestId(ids.tabs.trigger.system)).toHaveAttribute("data-count", "1");
-  await expect(page.getByTestId(ids.tabs.trigger.events)).toHaveAttribute("data-count", "3");
+  await expect(page.getByTestId(ids.system.machineRow)).toHaveCount(4);
+  await expect(page.getByTestId(ids.system.topicRow)).toHaveCount(18);
+  await expect(page.getByTestId(ids.tabs.trigger.system)).toHaveAttribute("data-count", "4");
+  await expect(page.getByTestId(ids.tabs.trigger.events)).toHaveAttribute("data-count", "18");
 
   const firstMachineId = await page.getByTestId(ids.system.machineRow).first().getAttribute("data-machine-id");
   const firstTopicType = await page.getByTestId(ids.system.topicRow).first().getAttribute("data-event-type");
@@ -268,6 +268,14 @@ test("12d пример исходника открывает System inventory с
   await expect(tabButton(page, "machines")).toHaveAttribute("aria-selected", "true");
   await expect(page.getByTestId(ids.workbench.panel)).toBeVisible();
   await expect(page.getByTestId(ids.tabs.trigger.machines)).toHaveAttribute("data-count", `1/${machineCount}`);
+
+  await workbenchMachine(page, "auth").click();
+  await expect(page.getByTestId(ids.tabs.trigger.machines)).toHaveAttribute("data-count", `2/${machineCount}`);
+  await workbenchRow(page, ids.workbench.row.config, "APP_READY").click();
+  await expect(
+    page.locator(`[data-testid="${ids.workbench.machineCard}"][data-machine-id="appShell"] [data-testid="${ids.workbench.currentState}"]`),
+  ).toHaveText("READY");
+  await expect(timelineStep(page, "APP_READY")).toHaveAttribute("data-source", "manual cfg");
 });
 
 test("12d контролируемый fixture показывает L1/L2 навигацию, routing, branches и unknown rows", async ({ page }) => {

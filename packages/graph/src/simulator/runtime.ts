@@ -139,7 +139,12 @@ export const createGraphSimulatorInternal = (
       );
     }
 
-    const originCandidate = candidatesForSlice(document, originSlice).find((candidate) => candidate.transitionId === input.transitionId);
+    const originCandidates = candidatesForSlice(document, originSlice);
+    const exactOriginCandidate = originCandidates.find((candidate) => candidate.transitionId === input.transitionId);
+    const acceptedOriginCandidates = exactOriginCandidate
+      ? []
+      : originCandidates.filter((candidate) => candidate.acceptedTransitionId === input.transitionId);
+    const originCandidate = exactOriginCandidate ?? acceptedOriginCandidates[0];
     if (!originCandidate) {
       return fail(
         "event-not-accepted",
@@ -159,9 +164,11 @@ export const createGraphSimulatorInternal = (
       return fail("invalid-payload", [diagnosticForSendFailure("invalid-payload", "Transition payload must be JSON-safe.")], snapshot);
     }
 
+    const resolvedTransitionId =
+      exactOriginCandidate || acceptedOriginCandidates.length === 1 ? originCandidate.transitionId : undefined;
     const choices: GraphTransitionChoiceOverride[] = [
       ...(input.choices ?? []),
-      { slice: input.slice, transitionId: input.transitionId },
+      ...(resolvedTransitionId ? [{ slice: input.slice, transitionId: resolvedTransitionId }] : []),
     ];
     const event: GraphSimulationEvent = {
       type: originCandidate.event.type,

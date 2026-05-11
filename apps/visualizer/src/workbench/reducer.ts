@@ -7,7 +7,7 @@ import {
   selectConsoleChannel,
 } from "../console";
 import { normalizeGraphDiagnostics } from "../diagnostics";
-import { SAMPLE_SOURCE, updateSourceSession } from "../source";
+import { MUSIC_APP_SAMPLE_SOURCE, updateSourceSession } from "../source";
 import {
   createIdleAnalysisState,
   createIdleCompileState,
@@ -229,7 +229,7 @@ const sourceChanged = (snapshot: WorkbenchSnapshot, source: string): Reduction =
   );
 };
 
-const resetToSample = (snapshot: WorkbenchSnapshot): Reduction => sourceChanged(snapshot, SAMPLE_SOURCE);
+const resetToSample = (snapshot: WorkbenchSnapshot): Reduction => sourceChanged(snapshot, MUSIC_APP_SAMPLE_SOURCE);
 
 const openVisualizer = (snapshot: WorkbenchSnapshot): Reduction => {
   const sequence = snapshot.state.compile.sequence + 1;

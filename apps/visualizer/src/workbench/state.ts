@@ -1,7 +1,7 @@
 import { createInitialCanvasState } from "../canvas";
 import { createInitialConsoleState } from "../console";
 import { createStaticHostAdapter } from "../services";
-import { SAMPLE_SOURCE, createSourceSession } from "../source";
+import { MUSIC_APP_SAMPLE_SOURCE, createSourceSession } from "../source";
 import type {
   AnalysisState,
   CodegenState,
@@ -93,7 +93,7 @@ export const createIdleCodegenState = (): CodegenState => ({
 
 export const createInitialWorkbenchState = (): VisualizerWorkbenchState => ({
   host: { capabilities: createStaticHostAdapter().getCapabilities() },
-  source: createSourceSession({ source: SAMPLE_SOURCE, filename: "sample.ts" }),
+  source: createSourceSession({ source: MUSIC_APP_SAMPLE_SOURCE, filename: "sample.ts" }),
   compile: createIdleCompileState(),
   analysis: createIdleAnalysisState(),
   model: createIdleModelState(),

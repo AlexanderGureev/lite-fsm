@@ -24,6 +24,9 @@ export const normalizeRoutingTargetValues = (
     if (target.field === "groupTag" && sourceMachine?.groupTag) return [sourceMachine.groupTag];
     /* v8 ignore next -- exact actor slice metadata is reserved for future actorMode. */
     if (sourceSlice?.actor) return [sourceSlice.actor[target.field]];
+    if (sourceSlice?.kind === "actorTemplate" && sourceMachine?.kind === "actorTemplate") {
+      return [`${sourceSlice.machineId}:self.${target.field}`];
+    }
 
     return undefined;
   }

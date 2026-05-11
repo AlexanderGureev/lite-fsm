@@ -102,9 +102,17 @@ describe("GraphSimulator: routing actorTemplate", () => {
     expect(simulator.send({ event: { type: "START" } })).toMatchObject({ ok: true });
     expect(simulator.getSuggestedEmissions().map((item) => [item.emissionId, item.canDispatch, item.blockedReason])).toEqual([
       ["worker:emission:running:TAG", true, undefined],
-      ["worker:emission:running:ACTOR", false, "unknown-routing"],
+      ["worker:emission:running:ACTOR", true, undefined],
     ]);
     expect(simulator.sendFromEmission({ slice: actorTemplateRef("worker"), emissionId: "worker:emission:running:TAG" })).toMatchObject({
+      ok: true,
+      snapshot: { slices: { "domain:consumer": expect.objectContaining({ stateKey: "seen" }) } },
+    });
+
+    const actorSelf = createGraphSimulator(documentFromMachines([actor, consumer]));
+    expect(actorSelf.start()).toMatchObject({ ok: true });
+    expect(actorSelf.send({ event: { type: "START" } })).toMatchObject({ ok: true });
+    expect(actorSelf.sendFromEmission({ slice: actorTemplateRef("worker"), emissionId: "worker:emission:running:ACTOR" })).toMatchObject({
       ok: true,
       snapshot: { slices: { "domain:consumer": expect.objectContaining({ stateKey: "seen" }) } },
     });

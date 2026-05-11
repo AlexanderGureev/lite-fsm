@@ -1,7 +1,7 @@
 import type { LiteFsmGraphDocument } from "@lite-fsm/graph";
 import type { GraphVisualizerModel } from "@lite-fsm/graph/view-model";
 import { describe, expect, it, vi } from "vitest";
-import { SAMPLE_SOURCE, createSourceSession } from "../source";
+import { MUSIC_APP_SAMPLE_SOURCE, SAMPLE_SOURCE, createSourceSession } from "../source";
 import {
   createDefaultEffectRunnerServices,
   createLocalAnalyzerClient,
@@ -56,6 +56,66 @@ describe("локальные graph clients", () => {
     if (!model.ok) throw new Error("Model build failed.");
     expect(model.model.machines).toHaveLength(1);
     expect(model.model.topics.map((topic) => topic.eventType)).toEqual(["PAUSE", "PLAY", "STOP"]);
+  });
+
+  it("компилирует стартовый music-app пример для UI с managers, actors, branches и effects", async () => {
+    const source = createSourceSession({ source: MUSIC_APP_SAMPLE_SOURCE, filename: "sample.ts" });
+    const compile = await createLocalCompilerClient().compile({
+      requestId: "compile:1:1",
+      sourceVersion: source.version,
+      source,
+    });
+
+    expect(compile.ok).toBe(true);
+    if (!compile.ok) throw new Error("Compile failed.");
+    expect(compile.document.diagnostics).toEqual([]);
+    expect(compile.document.machines.map((machine) => machine.id)).toEqual(["appShell", "auth", "player", "trackInstance"]);
+    expect(compile.document.managers[0]?.machineRefs.map((ref) => ref.key)).toEqual([
+      "appShell",
+      "auth",
+      "player",
+      "trackInstance",
+    ]);
+
+    const analysis = await createLocalAnalyzerClient().analyze({
+      requestId: "analyze:1:1",
+      sourceVersion: 1,
+      document: compile.document,
+    });
+
+    expect(analysis.ok).toBe(true);
+    if (!analysis.ok) throw new Error("Analysis failed.");
+
+    const model = await createLocalVisualizerModelClient().build({
+      requestId: "model:1:1",
+      sourceVersion: 1,
+      document: compile.document,
+      analysisDiagnostics: analysis.diagnostics,
+    });
+
+    expect(model.ok).toBe(true);
+    if (!model.ok) throw new Error("Model build failed.");
+    expect(model.model.machines.map((machine) => machine.machineId)).toEqual(["appShell", "auth", "player", "trackInstance"]);
+    expect(model.model.topics.map((topic) => topic.eventType)).toEqual([
+      "APP_READY",
+      "APP_RESET",
+      "AUTH_RESPONSE",
+      "BUFFER_DONE",
+      "BUFFER_ERROR",
+      "CANCEL_LOGIN",
+      "DISCARD",
+      "LOGIN_REQUEST",
+      "LOGOUT",
+      "NEXT_TRACK",
+      "PAUSE",
+      "PLAY",
+      "QUEUE_EMPTY",
+      "RESUME",
+      "STOP",
+      "THEME_TOGGLE",
+      "TRACK_END",
+      "TRACK_LOAD",
+    ]);
   });
 
   it("возвращает compile document с контролируемыми diagnostics для невалидного исходника", async () => {
