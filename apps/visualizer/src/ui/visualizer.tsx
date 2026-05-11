@@ -28,7 +28,7 @@ export type PanelProps = ComponentProps<"section"> & {
 export const Panel = ({ className, rail = false, ...props }: PanelProps) => (
   <section
     className={cn(
-      "flex min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border bg-card text-card-foreground",
+      "flex min-h-0 min-w-0 flex-col overflow-hidden rounded-(--vf-radius-lg) border bg-card text-card-foreground",
       rail && "min-h-[300px]",
       className,
     )}
@@ -39,7 +39,7 @@ export const Panel = ({ className, rail = false, ...props }: PanelProps) => (
 export const PanelHeader = ({ className, ...props }: ComponentProps<"header">) => (
   <header
     className={cn(
-      "flex min-h-10 shrink-0 items-center gap-2 border-b bg-[color:var(--vf-surface-soft)] px-3 py-1.5",
+      "flex h-10 shrink-0 items-center gap-2 border-b border-(--vf-border-soft) bg-(--vf-surface-soft) px-3",
       className,
     )}
     {...props}
@@ -53,7 +53,7 @@ export const PanelBody = ({ className, ...props }: ComponentProps<"div">) => (
 export const PanelKicker = ({ className, ...props }: ComponentProps<"p">) => (
   <p
     className={cn(
-      "font-mono text-[10px] font-semibold uppercase tracking-[0.08em] text-[color:var(--vf-text-quiet)]",
+      "font-mono text-[10px] font-semibold uppercase tracking-[0.08em] text-(--vf-text-quiet)",
       className,
     )}
     {...props}
@@ -68,21 +68,55 @@ export type PanelTitleProps = ComponentProps<"div"> & {
 };
 
 export const PanelTitle = ({ eyebrow, title, titleId, titleClassName, className, ...props }: PanelTitleProps) => (
-  <div className={cn("min-w-0", className)} {...props}>
-    <PanelKicker>{eyebrow}</PanelKicker>
-    <h2 id={titleId} className={cn("truncate text-[12px] font-semibold leading-tight text-foreground", titleClassName)}>
+  <div className={cn("flex min-w-0 items-baseline gap-2", className)} {...props}>
+    <PanelKicker className="shrink-0">{eyebrow}</PanelKicker>
+    <h2
+      id={titleId}
+      className={cn("min-w-0 truncate text-[12px] font-semibold leading-tight text-foreground", titleClassName)}
+    >
       {title}
     </h2>
   </div>
 );
 
+export type WorkspaceHeaderProps = ComponentProps<"header"> & {
+  eyebrow: string;
+  title: string;
+  titleId?: string;
+};
+
+export const WorkspaceHeader = ({
+  eyebrow,
+  title,
+  titleId,
+  className,
+  children,
+  ...props
+}: WorkspaceHeaderProps) => (
+  <header
+    className={cn("flex min-h-8 shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 px-1", className)}
+    {...props}
+  >
+    <div className="flex min-w-0 items-baseline gap-2">
+      <PanelKicker className="shrink-0">{eyebrow}</PanelKicker>
+      <h2
+        id={titleId}
+        className="min-w-0 truncate text-[13px] font-semibold leading-tight text-foreground"
+      >
+        {title}
+      </h2>
+    </div>
+    {children}
+  </header>
+);
+
 const statusToneClass = {
-  ready: "border-[color:var(--vf-accent-border)] bg-[color:var(--vf-accent-soft)] text-[color:var(--vf-accent)]",
+  ready: "border-(--vf-accent-border) bg-(--vf-accent-soft) text-(--vf-accent)",
   muted: "border-border bg-muted text-muted-foreground",
-  domain: "border-[color:var(--vf-domain-border)] bg-[color:var(--vf-domain-soft)] text-[color:var(--vf-domain)]",
-  actor: "border-[color:var(--vf-actor-border)] bg-[color:var(--vf-actor-soft)] text-[color:var(--vf-actor)]",
-  routing: "border-[color:var(--vf-routing-border)] bg-[color:var(--vf-routing-soft)] text-[color:var(--vf-routing)]",
-  diagnostic: "border-[color:var(--vf-warning-border)] bg-[color:var(--vf-warning-soft)] text-[color:var(--vf-warning)]",
+  domain: "border-(--vf-domain-border) bg-(--vf-domain-soft) text-(--vf-domain)",
+  actor: "border-(--vf-actor-border) bg-(--vf-actor-soft) text-(--vf-actor)",
+  routing: "border-(--vf-routing-border) bg-(--vf-routing-soft) text-(--vf-routing)",
+  diagnostic: "border-(--vf-warning-border) bg-(--vf-warning-soft) text-(--vf-warning)",
 } as const;
 
 export type StatusBadgeTone = keyof typeof statusToneClass;
@@ -100,10 +134,10 @@ export const StatusBadge = ({
 );
 
 const layerToneClass = {
-  config: "border-[color:var(--vf-config-border)] bg-[color:var(--vf-config-soft)] text-[color:var(--vf-config)]",
-  effect: "border-[color:var(--vf-effect-border)] bg-[color:var(--vf-effect-soft)] text-[color:var(--vf-effect)]",
-  simulation: "border-[color:var(--vf-warning-border)] bg-[color:var(--vf-warning-soft)] text-[color:var(--vf-warning)]",
-  reducer: "border-[color:var(--vf-reducer-border)] bg-[color:var(--vf-reducer-soft)] text-[color:var(--vf-reducer)]",
+  config: "border-(--vf-config-border) bg-(--vf-config-soft) text-(--vf-config)",
+  effect: "border-(--vf-effect-border) bg-(--vf-effect-soft) text-(--vf-effect)",
+  simulation: "border-(--vf-warning-border) bg-(--vf-warning-soft) text-(--vf-warning)",
+  reducer: "border-(--vf-reducer-border) bg-(--vf-reducer-soft) text-(--vf-reducer)",
 } as const;
 
 const layerLabel = {
@@ -141,17 +175,17 @@ export const GraphRow = ({ className, layer, event, target, meta, selected = fal
   <button
     type="button"
     className={cn(
-      "grid min-h-9 w-full grid-cols-[auto_minmax(0,1fr)_auto_minmax(0,0.8fr)_auto] items-center gap-2 border-t border-[color:var(--vf-border-soft)] px-2.5 py-2 text-left transition-colors first:border-t-0 hover:bg-[color:var(--vf-row-hover)] focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-      selected && "bg-[color:var(--vf-accent-soft)]",
+      "grid min-h-9 w-full grid-cols-[auto_minmax(0,1fr)_auto_minmax(0,0.8fr)_auto] items-center gap-2 border-t border-(--vf-border-soft) px-2.5 py-2 text-left transition-colors first:border-t-0 hover:bg-(--vf-row-hover) focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+      selected && "bg-(--vf-accent-soft)",
       className,
     )}
     {...props}
   >
     <LayerBadge layer={layer} />
-    <span className="min-w-0 font-mono text-[11px] text-foreground [overflow-wrap:anywhere]">{event}</span>
-    <span className="font-mono text-[10px] text-[color:var(--vf-text-quiet)]">to</span>
-    <span className="min-w-0 font-mono text-[11px] text-primary [overflow-wrap:anywhere]">{target}</span>
-    <span className="min-w-0 justify-self-end text-right font-mono text-[10px] text-[color:var(--vf-text-quiet)]">{meta}</span>
+    <span className="min-w-0 font-mono text-[11px] text-foreground wrap-anywhere">{event}</span>
+    <span className="font-mono text-[10px] text-(--vf-text-quiet)">to</span>
+    <span className="min-w-0 font-mono text-[11px] text-primary wrap-anywhere">{target}</span>
+    <span className="min-w-0 justify-self-end text-right font-mono text-[10px] text-(--vf-text-quiet)">{meta}</span>
   </button>
 );
 
@@ -168,7 +202,7 @@ export const SourceSnippet = ({
 }: ComponentProps<"div"> & { lines: readonly SourceLine[] }) => (
   <div
     className={cn(
-      "overflow-auto rounded-md border border-[color:var(--vf-border-soft)] bg-background py-2",
+      "overflow-auto rounded-md border border-(--vf-border-soft) bg-background py-2",
       className,
     )}
     aria-label="Representative source snippet"
@@ -179,11 +213,11 @@ export const SourceSnippet = ({
         key={line.line}
         className={cn(
           "grid grid-cols-[38px_minmax(0,1fr)] gap-2 px-3 py-1 font-mono text-[11px] leading-relaxed text-muted-foreground",
-          line.selected && "bg-[color:var(--vf-accent-soft)] text-foreground",
+          line.selected && "bg-(--vf-accent-soft) text-foreground",
         )}
       >
-        <span className="select-none text-right text-[color:var(--vf-text-quiet)]">{line.line}</span>
-        <code className="min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere]">{line.code}</code>
+        <span className="select-none text-right text-(--vf-text-quiet)">{line.line}</span>
+        <code className="min-w-0 whitespace-pre-wrap wrap-anywhere">{line.code}</code>
       </div>
     ))}
   </div>
@@ -197,7 +231,7 @@ const sourceEditorTheme = EditorView.theme(
       backgroundColor: "var(--vf-surface)",
       color: "var(--foreground)",
       fontFamily: "var(--vf-mono)",
-      fontSize: "13px",
+      fontSize: "var(--vf-editor-font-size)",
     },
     ".cm-scroller": {
       fontFamily: "var(--vf-mono)",
@@ -382,7 +416,7 @@ export const SourceEditorShell = ({
         data-first-line-number={firstLineNumber}
         data-highlighted-line-numbers={highlightedLineNumbers?.join(",") ?? ""}
         className={cn(
-          "min-h-28 overflow-hidden rounded-lg border bg-[color:var(--vf-surface)] text-foreground shadow-none",
+          "min-h-28 overflow-hidden rounded-lg border bg-(--vf-surface) text-foreground shadow-none",
           textareaClassName,
         )}
       />
@@ -394,12 +428,12 @@ export const SourceEditorShell = ({
 export const DiagnosticsAlert = ({ children, className, ...props }: ComponentProps<typeof Alert>) => (
   <Alert
     className={cn(
-      "border-[color:var(--vf-warning-border)] bg-[color:var(--vf-warning-soft)] text-foreground",
+      "border-(--vf-warning-border) bg-(--vf-warning-soft) text-foreground",
       className,
     )}
     {...props}
   >
-    <AlertTitle className="font-mono text-[11px] text-[color:var(--vf-warning)]">analyzer</AlertTitle>
+    <AlertTitle className="font-mono text-[11px] text-(--vf-warning)">analyzer</AlertTitle>
     <AlertDescription className="text-muted-foreground">{children}</AlertDescription>
   </Alert>
 );
@@ -409,18 +443,26 @@ export const PaneScrollArea = ({ className, ...props }: ComponentProps<typeof Sc
 );
 
 export const IconButton = ({ className, ...props }: ComponentProps<typeof Button>) => (
-  <Button variant="outline" size="icon" className={cn("shrink-0", className)} {...props} />
+  <Button
+    variant="outline"
+    size="icon"
+    className={cn(
+      "size-8 shrink-0 border-(--vf-border) bg-(--vf-surface-soft) text-(--vf-text-muted) hover:border-(--vf-accent-border) hover:bg-(--vf-accent-soft) hover:text-(--vf-accent)",
+      className,
+    )}
+    {...props}
+  />
 );
 
 export type DensityRowRelation = "idle" | "selected" | "related" | "dimmed";
 
 const densityRowRelationClass: Record<DensityRowRelation, string> = {
-  idle: "border-transparent bg-transparent hover:bg-[color:var(--vf-row-hover)]",
+  idle: "border-transparent bg-transparent hover:bg-(--vf-row-hover)",
   selected:
-    "border-transparent bg-[color:var(--vf-accent-soft)] shadow-[inset_2px_0_0_var(--vf-accent)] hover:bg-[color:var(--vf-accent-soft)]",
+    "border-transparent bg-(--vf-accent-soft) shadow-[inset_2px_0_0_var(--vf-accent)] hover:bg-(--vf-accent-soft)",
   related:
-    "border-transparent bg-[color:var(--vf-row-related)] hover:bg-[color:var(--vf-row-related)]",
-  dimmed: "border-transparent bg-transparent opacity-40 hover:bg-[color:var(--vf-row-hover)]",
+    "border-transparent bg-(--vf-row-related) hover:bg-(--vf-row-related)",
+  dimmed: "border-transparent bg-transparent opacity-40 hover:bg-(--vf-row-hover)",
 };
 
 export type DensityRowProps = ComponentProps<"button"> & {
@@ -432,7 +474,7 @@ export const DensityRow = ({ className, relation = "idle", type, ...props }: Den
     type={type ?? "button"}
     data-relation-state={relation}
     className={cn(
-      "grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-y border-[color:var(--vf-border-soft)] px-3 py-1.5 text-left transition-colors first:border-t-0 last:border-b-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
+      "grid min-h-8 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-t border-(--vf-border-soft) px-3 py-1.5 text-left transition-colors duration-(--vf-duration-fast) first:border-t-0 focus-visible:relative focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
       densityRowRelationClass[relation],
       className,
     )}
@@ -443,10 +485,10 @@ export const DensityRow = ({ className, relation = "idle", type, ...props }: Den
 export type CounterTone = "neutral" | "in" | "out" | "warning";
 
 const counterToneClass: Record<CounterTone, string> = {
-  neutral: "text-[color:var(--vf-text-quiet)]",
-  in: "text-[color:var(--vf-counter-in)]",
-  out: "text-[color:var(--vf-counter-out)]",
-  warning: "text-[color:var(--vf-warning)]",
+  neutral: "text-(--vf-text-quiet)",
+  in: "text-(--vf-counter-in)",
+  out: "text-(--vf-counter-out)",
+  warning: "text-(--vf-warning)",
 };
 
 export type CounterProps = ComponentProps<"span"> & {
@@ -456,7 +498,7 @@ export type CounterProps = ComponentProps<"span"> & {
 export const Counter = ({ tone = "neutral", className, ...props }: CounterProps) => (
   <span
     className={cn(
-      "inline-flex shrink-0 items-center rounded-[3px] bg-[color:var(--vf-counter-surface)] px-1.5 font-mono text-[10px] leading-[18px]",
+      "inline-flex shrink-0 items-center rounded-[3px] bg-(--vf-counter-surface) px-1.5 font-mono text-[10px] leading-[18px]",
       counterToneClass[tone],
       className,
     )}
@@ -470,7 +512,7 @@ export const Chip = ({ className, type, ...props }: ChipProps) => (
   <button
     type={type ?? "button"}
     className={cn(
-      "inline-flex items-center gap-1.5 rounded-md border border-[color:var(--vf-border)] bg-[color:var(--vf-surface-soft)] px-2 py-1 font-mono text-[11px] text-foreground transition-colors hover:border-[color:var(--vf-accent-border)] hover:bg-[color:var(--vf-accent-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
+      "inline-flex min-h-6 items-center gap-1.5 rounded-md border border-(--vf-border) bg-(--vf-surface-soft) px-2 py-0.5 font-mono text-[11px] text-foreground transition-colors duration-(--vf-duration-fast) hover:border-(--vf-accent-border) hover:bg-(--vf-accent-soft) hover:text-(--vf-accent) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
       className,
     )}
     {...props}
@@ -484,7 +526,7 @@ export type ChipPillProps = ComponentProps<"span"> & {
 export const ChipPill = ({ tone = "neutral", className, ...props }: ChipPillProps) => (
   <span
     className={cn(
-      "inline-flex items-center rounded-full bg-[color:var(--vf-counter-surface)] px-1.5 font-mono text-[9px] leading-[16px]",
+      "inline-flex items-center rounded-full bg-(--vf-counter-surface) px-1.5 font-mono text-[9px] leading-[16px]",
       counterToneClass[tone],
       className,
     )}
@@ -495,7 +537,7 @@ export const ChipPill = ({ tone = "neutral", className, ...props }: ChipPillProp
 export const RoutingPill = ({ className, ...props }: ComponentProps<"span">) => (
   <span
     className={cn(
-      "inline-flex items-center rounded-[3px] bg-[color:var(--vf-routing-soft)] px-1.5 font-mono text-[9px] leading-[16px] text-[color:var(--vf-routing)]",
+      "inline-flex items-center rounded-[3px] bg-(--vf-routing-soft) px-1.5 font-mono text-[9px] leading-[16px] text-(--vf-routing)",
       className,
     )}
     {...props}
@@ -504,4 +546,27 @@ export const RoutingPill = ({ className, ...props }: ComponentProps<"span">) => 
 
 export const PulseDot = ({ className, ...props }: ComponentProps<"span">) => (
   <span aria-hidden="true" className={cn("vf-pulse-dot", className)} {...props} />
+);
+
+export const PrimaryActionButton = ({ className, ...props }: ComponentProps<typeof Button>) => (
+  <Button
+    size="sm"
+    className={cn(
+      "h-8 bg-primary font-semibold text-primary-foreground shadow-[0_1px_0_oklch(0_0_0/0.4)] hover:bg-(--vf-accent-strong) focus-visible:ring-2 focus-visible:ring-(--vf-accent) focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:bg-(--vf-surface-raised) disabled:text-(--vf-text-quiet) disabled:shadow-none",
+      className,
+    )}
+    {...props}
+  />
+);
+
+export type WorkspacePaneProps = ComponentProps<"section">;
+
+export const WorkspacePane = ({ className, ...props }: WorkspacePaneProps) => (
+  <section
+    className={cn(
+      "flex min-h-0 min-w-0 flex-col overflow-hidden rounded-(--vf-radius-lg) border bg-card",
+      className,
+    )}
+    {...props}
+  />
 );

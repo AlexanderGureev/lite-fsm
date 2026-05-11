@@ -1,5 +1,7 @@
+import type { ReactElement } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { TooltipProvider } from "@/ui/tooltip";
 import { VISUALIZER_TEST_IDS } from "../../test-ids";
 import type { MachineWorkbenchPanelView, VisualizerCommand } from "../../workbench";
 import { MachinesPanel } from "./MachinesPanel";
@@ -7,6 +9,9 @@ import { MachinesPanel } from "./MachinesPanel";
 const ids = VISUALIZER_TEST_IDS;
 
 const dispatchOf = () => vi.fn<(command: VisualizerCommand) => void>();
+
+const renderPanel = (element: ReactElement) =>
+  render(<TooltipProvider>{element}</TooltipProvider>);
 
 const viewFixture = (overrides: Partial<MachineWorkbenchPanelView> = {}): MachineWorkbenchPanelView => ({
   status: "ready",
@@ -142,7 +147,7 @@ const viewFixture = (overrides: Partial<MachineWorkbenchPanelView> = {}): Machin
 describe("панель MachinesPanel", () => {
   it("рендерит picker, cards, send control и actions timeline", () => {
     const dispatch = dispatchOf();
-    render(<MachinesPanel view={viewFixture()} dispatch={dispatch} />);
+    renderPanel(<MachinesPanel view={viewFixture()} dispatch={dispatch} />);
 
     expect(screen.getByTestId(ids.workbench.panel)).toBeTruthy();
     expect(screen.getAllByTestId(ids.workbench.machinePickerRow)).toHaveLength(2);
@@ -185,7 +190,7 @@ describe("панель MachinesPanel", () => {
 
   it("показывает пустые состояния и отключенные controls", () => {
     const dispatch = dispatchOf();
-    render(
+    renderPanel(
       <MachinesPanel
         view={viewFixture({
           selectedMachineIds: [],
@@ -209,7 +214,7 @@ describe("панель MachinesPanel", () => {
 
   it("не отправляет команды из disabled source buttons", () => {
     const dispatch = dispatchOf();
-    render(<MachinesPanel view={viewFixture()} dispatch={dispatch} />);
+    renderPanel(<MachinesPanel view={viewFixture()} dispatch={dispatch} />);
 
     fireEvent.click(screen.getByTestId(ids.workbench.sourceAction));
     expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "source.overlay.opened" }));
@@ -217,22 +222,24 @@ describe("панель MachinesPanel", () => {
 
   it("выбирает первое доступное событие после появления simulation overlay", async () => {
     const dispatch = dispatchOf();
-    const { rerender } = render(
+    const { rerender } = renderPanel(
       <MachinesPanel view={viewFixture({ sendOptions: [{ eventType: "DONE", group: "not-accepted" }] })} dispatch={dispatch} />,
     );
 
     expect(screen.getByTestId(ids.workbench.eventSend).hasAttribute("disabled")).toBe(true);
 
     rerender(
-      <MachinesPanel
-        view={viewFixture({
-          sendOptions: [
-            { eventType: "DONE", group: "not-accepted" },
-            { eventType: "START", group: "available" },
-          ],
-        })}
-        dispatch={dispatch}
-      />,
+      <TooltipProvider>
+        <MachinesPanel
+          view={viewFixture({
+            sendOptions: [
+              { eventType: "DONE", group: "not-accepted" },
+              { eventType: "START", group: "available" },
+            ],
+          })}
+          dispatch={dispatch}
+        />
+      </TooltipProvider>,
     );
 
     await waitFor(() => expect(screen.getByTestId(ids.workbench.eventSend).hasAttribute("disabled")).toBe(false));
@@ -243,7 +250,7 @@ describe("панель MachinesPanel", () => {
 
   it("покрывает actor cards, global rows, collapsed/no-row states и source/clear actions", () => {
     const dispatch = dispatchOf();
-    render(
+    renderPanel(
       <MachinesPanel
         view={viewFixture({
           selectedMachineIds: ["worker"],

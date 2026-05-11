@@ -2,379 +2,383 @@
 
 ## Назначение
 
-Этот документ описывает только дизайн `apps/visualizer/`. Root `DESIGN.md`
-относится к `apps/playground/` и не является источником истины для
-visualizer-а.
+Этот документ — единственный источник истины для дизайна `apps/visualizer/`.
+По нему должно быть возможно восстановить визуальную систему с нуля: токены,
+тема, типографика, layout grammar, component contracts, состояния,
+accessibility и responsive behavior. Документ описывает итоговую систему,
+а не историю изменений. Root `DESIGN.md` относится к `apps/playground/`
+и не является источником истины для visualizer.
 
-`apps/visualizer` - product UI для чтения систем `lite-fsm`: исходник,
+`apps/visualizer` — product UI для чтения систем `lite-fsm`: исходник,
 инвентарь машин, каталог событий, рабочая область машин, ручная симуляция,
-diagnostics и source anchors. Интерфейс не является лендингом, документацией
-или демо-галереей.
+diagnostics и source anchors. Это не лендинг, не документация и не демо.
 
-## Регистр
+## Регистр и принципы
 
-- Тип поверхности: плотный инструментальный workspace.
-- Сцена использования: разработчик разбирает event bus и reducer/effect
-  маршруты вечером в редакторе на широком экране, рядом открыт код. Темная
-  тема снижает контраст с IDE и удерживает внимание на технических labels.
-- Цветовая стратегия: restrained dark neutrals с маленьким cyan accent и
-  отдельной semantic palette для graph layers.
-- Основная грамматика: compact topbar, segmented tabs with counters, split
-  panes, scrollable lists, detail panels, machine cards, timeline, diagnostics
-  console.
+- Тип поверхности: плотный инструментальный workspace, тёмная тема.
+- Сцена: разработчик исследует event bus и reducer/effect маршруты в
+  редакторе на широком экране, рядом открыт код.
+- Цветовая стратегия: restrained dark neutrals + единственный cyan accent +
+  отдельная semantic palette для graph layers.
+- Грамматика: compact topbar, segmented tabs with counters, split panes,
+  scrollable lists, density rows, machine cards, timeline, diagnostics
+  console, source overlay.
 
-## Принципы
+Принципы:
 
-- Интерфейс обслуживает инспекцию. Не добавлять hero, marketing copy,
-  декоративный canvas, landing sections или крупные иллюстративные blocks.
-- Связи показываются выбором, подсветкой и detail rows. Не рисовать постоянную
-  сетку edges в Stage 12.
-- Labels API и graph ids остаются видимыми как code/data, поэтому mono style
-  является частью UX, а не декоративным приемом.
-- Состояния должны быть сканируемыми: layer, routing, confidence, diagnostics и
-  simulation flags имеют стабильные badge/row styles.
-- Компоненты используют familiar product affordances: tabs, buttons, search
-  inputs, lists, panels, source overlays. Не изобретать нестандартные controls.
-- Все стандартные иконки идут из `lucide-react`.
-- Визуальный словарь: плотность, eyebrow grammar, density rows, chip-list,
-  ref-row. Реализация остаётся через Tailwind + shadcn + `--vf-*` токены.
+- Интерфейс обслуживает инспекцию: никаких hero, marketing copy,
+  декоративного canvas, landing sections, иллюстративных blocks.
+- Связи показываются выбором, подсветкой и detail rows. Постоянные edges,
+  React Flow, ELK или edge-routing canvas запрещены.
+- Labels API и graph ids остаются как code/data: mono — часть UX,
+  не декоративный приём.
+- Состояния сканируемы: layer, routing, confidence, diagnostics, simulation
+  имеют стабильные badge/row styles.
+- Familiar product affordances: tabs, buttons, search inputs, lists, panels,
+  source overlays. Нестандартные controls не изобретать.
+- Иконки только из `lucide-react`.
+- Реализация: Tailwind + shadcn primitives + `--vf-*` токены. Любое
+  изменение токенов, component grammar, layout, состояний или interaction
+  patterns обновляет этот документ в той же правке.
 
 ## Tokens
 
-### Color
+Все цвета задаются в OKLCH. Hex-значения приведены как исходные дизайн-якоря.
+Все токены живут в `src/styles.css`; feature-компоненты не объявляют свои
+CSS-переменные.
 
-Все цвета задаются в OKLCH. Ниже приведены исходные hex-значения дизайна
-и их точные OKLCH-эквиваленты для воспроизведения.
+### Поверхности
 
-#### Поверхности и фон
-
-Уровни поверхностей образуют пять ступеней: от самого тёмного фона до
-поднятых заголовков и хот-стейт при наведении.
-
-OKLCH L-значения вычислены из исходных hex через sRGB gamma → linear → OKLab M1+M2
-матрицы (алгоритм Björn Ottosson). Хроматичность и hue взяты из вычисленного OKLab
-для каждого hex.
-
-| Token | OKLCH | Hex | Use |
+| Token | OKLCH | Hex | Использование |
 | --- | --- | --- | --- |
 | `--vf-bg` | `oklch(0.178 0.012 268)` | `#0f1116` | App background |
-| `--vf-bg-elevated` | `oklch(0.196 0.015 268)` | _(derived)_ | Reserved elevated surface |
-| `--vf-surface` | `oklch(0.215 0.018 268)` | `#161922` | Panels and cards |
-| `--vf-surface-soft` | `oklch(0.244 0.020 268)` | `#1c2029` | Inputs, nested list surfaces |
-| `--vf-surface-raised` | `oklch(0.272 0.022 268)` | `#232734` | Headers, active tabs |
-| `--vf-surface-hot` | `oklch(0.295 0.024 268)` | _(derived)_ | shadcn accent hover surface |
+| `--vf-bg-elevated` | `oklch(0.196 0.015 268)` | _(derived)_ | Резерв для приподнятой поверхности |
+| `--vf-surface` | `oklch(0.215 0.018 268)` | `#161922` | Панели и карточки |
+| `--vf-surface-soft` | `oklch(0.244 0.020 268)` | `#1c2029` | Inputs, headers панелей, channel strip |
+| `--vf-surface-raised` | `oklch(0.272 0.022 268)` | `#232734` | Активные tab, hover на entry карточках |
+| `--vf-surface-hot` | `oklch(0.295 0.024 268)` | _(derived)_ | shadcn accent hover |
 
-#### Границы
+### Границы
 
-| Token | OKLCH | Hex | Use |
-| --- | --- | --- | --- |
-| `--vf-border` | `oklch(0.315 0.025 268)` | `#2c3140` | Primary borders |
-| `--vf-border-soft` | `oklch(1 0 0 / 0.06)` | `rgba(255,255,255,0.06)` | Row separators |
-
-#### Текст
-
-| Token | OKLCH | Hex | Use |
-| --- | --- | --- | --- |
-| `--vf-text` | `oklch(0.936 0.008 252)` | `#e9ecf2` | Primary text |
-| `--vf-text-muted` | `oklch(0.668 0.019 258)` | `#9aa1b1` | Secondary labels |
-| `--vf-text-quiet` | `oklch(0.507 0.024 261)` | `#6b7385` | Counters, inactive text |
-
-#### Accent
-
-| Token | OKLCH | Hex | Use |
-| --- | --- | --- | --- |
-| `--vf-accent` | `oklch(0.807 0.098 184)` | `#7dd3c2` | Current selection, focus, ready state |
-| `--vf-accent-strong` | `oklch(0.855 0.115 184)` | _(derived)_ | Strong focus/active accent |
-| `--vf-accent-soft` | `oklch(0.807 0.098 184 / 0.14)` | `rgba(125,211,194,0.14)` | Selected backgrounds |
-| `--vf-accent-border` | `oklch(0.807 0.098 184 / 0.42)` | _(derived)_ | Selected borders and ready badges |
-| `--vf-counter-surface` | `oklch(0.936 0.008 252 / 0.08)` | _(derived)_ | Compact counters inside tabs |
-| `--vf-row-hover` | `oklch(0.936 0.008 252 / 0.035)` | _(derived)_ | Dense row hover |
-| `--vf-row-related` | `oklch(0.807 0.098 184 / 0.06)` | _(derived)_ | Related row tint |
-| `--vf-glow-current` | `oklch(0.807 0.098 184 / 0.55)` | _(derived)_ | Pulse glow for current state dot |
-
-#### Семантические цвета графа
-
-Каждый semantic role имеет три токена: base, soft fill (alpha 0.10–0.13),
-border (alpha 0.42).
-
-| Token | OKLCH | Hex | Use |
-| --- | --- | --- | --- |
-| `--vf-config` | `oklch(0.772 0.130 67)` | `#e6a957` | Config rows and counts |
-| `--vf-config-soft` | `oklch(0.772 0.130 67 / 0.12)` | | Config badge fill |
-| `--vf-config-border` | `oklch(0.772 0.130 67 / 0.42)` | | Config badge border |
-| `--vf-reducer` | `oklch(0.757 0.068 264)` | `#a8b8e0` | Reducer/self targets |
-| `--vf-reducer-soft` | `oklch(0.757 0.068 264 / 0.1)` | | Reducer badge fill |
-| `--vf-reducer-border` | `oklch(0.757 0.068 264 / 0.42)` | | Reducer badge border |
-| `--vf-effect` | `oklch(0.769 0.087 155)` | `#82c79c` | Effect rows and producers |
-| `--vf-effect-soft` | `oklch(0.769 0.087 155 / 0.12)` | | Effect badge fill |
-| `--vf-effect-border` | `oklch(0.769 0.087 155 / 0.42)` | | Effect badge border |
-| `--vf-routing` | `oklch(0.726 0.107 307)` | `#c79de0` | Routing badges |
-| `--vf-routing-soft` | `oklch(0.726 0.107 307 / 0.12)` | | Routing badge fill |
-| `--vf-routing-border` | `oklch(0.726 0.107 307 / 0.42)` | | Routing badge border |
-| `--vf-warning` | `oklch(0.784 0.110 80)` | `#d8b86b` | Manual timeline source, warnings |
-| `--vf-warning-soft` | `oklch(0.784 0.110 80 / 0.13)` | | Warning/diagnostic fill |
-| `--vf-warning-border` | `oklch(0.784 0.110 80 / 0.42)` | | Warning/diagnostic border |
-| `--vf-danger` | `oklch(0.672 0.131 19)` | `#e07a6e` | Errors, failed diagnostics |
-| `--vf-danger-soft` | `oklch(0.672 0.131 19 / 0.11)` | | Error fill |
-| `--vf-danger-border` | `oklch(0.672 0.131 19 / 0.42)` | | Error border |
-| `--vf-domain` | `oklch(0.740 0.100 231)` | `#7eb6f0` | Domain machine badges |
-| `--vf-domain-soft` | `oklch(0.740 0.100 231 / 0.1)` | | Domain badge fill |
-| `--vf-domain-border` | `oklch(0.740 0.100 231 / 0.42)` | | Domain badge border |
-| `--vf-actor` | `oklch(0.728 0.104 56)` | `#d6a06b` | Actor machine badges |
-| `--vf-actor-soft` | `oklch(0.728 0.104 56 / 0.1)` | | Actor badge fill |
-| `--vf-actor-border` | `oklch(0.728 0.104 56 / 0.42)` | | Actor badge border |
-
-#### Производные токены счётчиков
-
-| Token | Значение | Use |
+| Token | OKLCH | Использование |
 | --- | --- | --- |
-| `--vf-counter-in` | `= --vf-config` | Producer count arrows (↑) |
-| `--vf-counter-out` | `= --vf-effect` | Consumer count arrows (↓) |
+| `--vf-border` | `oklch(0.315 0.025 268)` | Основные рамки панелей и контролов |
+| `--vf-border-soft` | `oklch(1 0 0 / 0.06)` | Разделители строк, подзаголовки внутри панели |
 
-### Typography
+### Текст
 
-- Font stack: system sans for product UI,
-  `ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI"`.
+| Token | OKLCH | Использование |
+| --- | --- | --- |
+| `--vf-text` | `oklch(0.936 0.008 252)` | Primary text |
+| `--vf-text-muted` | `oklch(0.668 0.019 258)` | Вторичные labels |
+| `--vf-text-quiet` | `oklch(0.507 0.024 261)` | Счётчики, eyebrows, неактивный текст |
+
+### Accent
+
+| Token | OKLCH | Использование |
+| --- | --- | --- |
+| `--vf-accent` | `oklch(0.807 0.098 184)` | Primary action, current selection, ready state |
+| `--vf-accent-strong` | `oklch(0.855 0.115 184)` | Hover для primary action |
+| `--vf-accent-soft` | `oklch(0.807 0.098 184 / 0.14)` | Selected backgrounds, accent surfaces |
+| `--vf-accent-border` | `oklch(0.807 0.098 184 / 0.42)` | Selected borders, ready badges |
+| `--vf-counter-surface` | `oklch(0.936 0.008 252 / 0.08)` | Счётчики внутри tab/row |
+| `--vf-row-hover` | `oklch(0.936 0.008 252 / 0.035)` | Hover плотных строк |
+| `--vf-row-related` | `oklch(0.807 0.098 184 / 0.06)` | Related row tint |
+| `--vf-glow-current` | `oklch(0.807 0.098 184 / 0.55)` | Pulse-glow для current state |
+| `--vf-focus-ring` | `oklch(0.807 0.098 184 / 0.55)` | Focus outline для overlay-кнопок |
+
+### Семантические цвета графа
+
+Каждая роль имеет три токена: base, soft fill (alpha 0.10–0.13), border (alpha 0.42).
+
+| Token | OKLCH | Hex | Использование |
+| --- | --- | --- | --- |
+| `--vf-config` | `oklch(0.772 0.130 67)` | `#e6a957` | Config rows, `cfg` badge, producer counter |
+| `--vf-reducer` | `oklch(0.757 0.068 264)` | `#a8b8e0` | Reducer/self targets, `red` badge |
+| `--vf-effect` | `oklch(0.769 0.087 155)` | `#82c79c` | Effect rows, `eff` badge, consumer counter |
+| `--vf-routing` | `oklch(0.726 0.107 307)` | `#c79de0` | Routing badges и chips |
+| `--vf-warning` | `oklch(0.784 0.110 80)` | `#d8b86b` | Manual timeline source, warnings, `sim` badge |
+| `--vf-danger` | `oklch(0.672 0.131 19)` | `#e07a6e` | Errors, failed diagnostics |
+| `--vf-domain` | `oklch(0.740 0.100 231)` | `#7eb6f0` | Domain machine badges |
+| `--vf-actor` | `oklch(0.728 0.104 56)` | `#d6a06b` | Actor machine badges |
+
+### Производные токены
+
+| Token | Значение | Использование |
+| --- | --- | --- |
+| `--vf-counter-in` | `= --vf-config` | Producer counter (`↑`) |
+| `--vf-counter-out` | `= --vf-effect` | Consumer counter (`↓`) |
+
+### Радиусы, motion, тени, spacing
+
+| Token | Значение | Использование |
+| --- | --- | --- |
+| `--vf-radius-sm` | `6px` | Inputs, кнопки, layer badges, мелкие chips |
+| `--vf-radius` | `8px` | Inner cards, code surfaces, buttons |
+| `--vf-radius-lg` | `10px` | Панели верхнего уровня (Panel, WorkspacePane) |
+| `--vf-duration-fast` | `140ms` | Hover/focus, row tint |
+| `--vf-duration` | `180ms` | Открытие drawer, переключения акцентов |
+| `--vf-ease` | `cubic-bezier(0.16, 1, 0.3, 1)` | Все переходы |
+| `--vf-shadow-overlay` | `0 24px 60px -12px oklch(0 0 0 / 0.55)` | Console drawer, source dialog |
+| `--vf-pane-gap` | `10px` | Резерв для grid между панелями |
+
+Mapping shadcn theme variables (`--background`, `--card`, `--popover`,
+`--border`, `--input`, `--ring`, `--primary`, `--muted`, `--accent`,
+`--destructive`) указывает на соответствующие `--vf-*` токены — это
+единственный способ, которым shadcn-компоненты получают тему.
+
+## Typography
+
+- Sans stack: `ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`.
 - Mono stack: `JetBrains Mono`, `SF Mono`, `ui-monospace`, `Menlo`, `Consolas`.
-- Base size: `13px`, line-height `1.42`.
-- Panel headings: `12px`, `600`, letter spacing `0.01em`.
-- Eyebrows and counters: mono `10px..11px`, uppercase only for structural
-  labels.
-- Event/state/source ids: mono `11px..12px`, wrap with `overflow-wrap:anywhere`
-  when inside constrained rows.
-- No fluid type. Responsive behavior changes layout, not font sizes.
+- Базовый размер: `13px`, line-height `1.42`, antialiased.
+- Заголовки панели: sans `12–13px`, `600`.
+- Eyebrows и счётчики: mono `10–11px`, uppercase `tracking-[0.08em]`
+  только для structural labels (`L1 · PICKER`, `EVENTS`, `SOURCE · MACHINE`).
+- Event/state/source ids: mono `11–12px`, перенос через
+  `overflow-wrap: anywhere` внутри плотных колонок.
+- Счётчики и числовые поля: `tabular-nums`.
+- Без fluid type. Responsive адаптирует layout, не размер шрифта.
 
-### Shape, Borders, Motion
+## Shape, Borders, Motion
 
-- Radius: `6px` for compact controls, `8px` for panels and cards, `999px` for
-  badges.
-- Borders: one-pixel full borders by default. Side-stripe accents
-  (`box-shadow: inset 2px 0 0 var(--vf-accent)` или `inset 3px 0 0`) разрешены
-  только для двух ролей: current state в machine card и selected/related rows
+- Радиусы: `6px` для контролов и chips, `8px` для inner cards и code
+  surfaces, `10px` для top-level панелей, `999px` для статус-бейджей.
+- Рамки: один пиксель по умолчанию. Side-stripe accents (`box-shadow:
+  inset 2px 0 0 var(--vf-accent)` или `inset 3px 0 0`) разрешены только
+  для двух ролей: current state в machine card и selected/related rows
   в L1/L2/L3 picker. Любые другие side-stripes запрещены.
-- Shadows: только active machine card может использовать one-pixel focus ring
-  через `box-shadow`; idle panels не имеют тени. Для current state допустим
-  компактный pulse-glow на одной точке-индикаторе, не на ряду или карточке
-  целиком.
-- Motion: `140ms..220ms`, state feedback only. Do not animate layout
-  properties. Допустимы `pulseGlow` на current-state pulse dot и `rowAppear`
-  flash на recently-fired ряду.
-- Focus: visible outline in `--vf-accent`, at least `2px`, with offset.
-
-## Component Contracts
+- Тени: только overlay-поверхности (Console drawer, Source dialog) и
+  primary action могут использовать тень. Idle панели не имеют теней.
+- Pulse-glow допустим для одной точки-индикатора (current state),
+  не для строки или карточки целиком.
+- Motion: `140–220ms`, state feedback only. Layout properties не
+  анимируются. Допустимы `vfPulseGlow` (1.4s, current state) и `vfRowAppear`
+  (0.4s flash на recently-fired ряду).
+- Focus: `:focus-visible` обязателен; outline через
+  `ring-ring`/`--vf-accent`, `ring-2`, с offset для отдельных кнопок и
+  `ring-inset` для строк в плотных списках.
 
 ## UI Kit
 
-Stage `12b-shadcn-foundation` uses an app-local shadcn setup in
-`apps/visualizer/components.json`. It is independent from
-`apps/playground/components.json`.
+shadcn baseline установлен локально через `apps/visualizer/components.json`
+(независимый от `apps/playground/components.json`).
 
 - Framework: Vite SPA, React, TypeScript, Tailwind CSS v4.
-- shadcn base: Radix.
-- shadcn style: `radix-nova`.
-- Icon library: `lucide-react`.
+- shadcn base: Radix, style `radix-nova`, alias `@/ui`.
+- Icon library: `lucide-react` (единственная).
 - CSS entrypoint: `src/styles.css`.
-- UI alias: `@/ui`.
-- Utils alias: `@/lib/utils`.
-- RSC: `false`.
 
-Installed baseline components:
+Установленные shadcn компоненты:
 
-- `button` for topbar, panel actions, source actions and timeline actions.
-- `badge` for status, layer, routing, diagnostic and simulation markers.
-- `tabs` for the main Source/System/Events/Machines strip.
-- `input` and `select` for search/send fixture controls; the Source editor is
-  owned by the CodeMirror-backed `SourceEditorShell`.
-- `card` only for graph-domain preview cards, not for every panel.
-- `separator` for console/timeline divisions.
-- `scroll-area` for source, workbench and console panes.
-- `tooltip` for compact icon-only actions.
-- `alert` for diagnostics and console entries.
-- `dialog` for source overlay anchors opened from System, Events and Console.
+- `button`, `badge`, `tabs`, `input`, `select`, `card`, `separator`,
+  `scroll-area`, `tooltip`, `alert`, `dialog`.
+
+`card` используется только для graph-domain превью и workbench-карточек,
+не для каждой панели. Любая карточка не может быть вложена в другую
+карточку.
 
 Ownership rules:
 
-- shadcn generated files live under `src/ui/*` and should stay generic.
-- Visualizer-specific wrappers live in `src/ui/visualizer.tsx`: `Panel`,
-  `PanelHeader`, `StatusBadge`, `LayerBadge`, `GraphRow`, `SourceSnippet`,
-  `SourceEditorShell`, `DiagnosticsAlert`, `PaneScrollArea` and `IconButton`.
-- Wrappers are presentational only. They do not import graph IR, simulator,
-  services, store reducers or selectors.
-- Standard controls use shadcn variants first. App-specific wrappers may add
-  graph semantic color roles and dense row grammar.
-- `SelectItem` always stays inside `SelectGroup`; `TabsTrigger` always stays
-  inside `TabsList`; icon buttons use `Tooltip`.
+- shadcn-сгенерированные файлы живут под `src/ui/*` и остаются
+  generic.
+- Visualizer-specific обёртки живут в `src/ui/visualizer.tsx` и
+  только presentational. Они не импортируют graph IR, simulator, services,
+  store reducers или selectors.
+- Стандартные controls используют shadcn variants первыми.
+  App-specific обёртки добавляют graph semantic роли и плотную грамматику.
+- `SelectItem` всегда внутри `SelectGroup`. `TabsTrigger` всегда внутри
+  `TabsList`. Icon-only кнопки всегда обёрнуты в `Tooltip`.
 
-Token policy:
+## Component Contracts
 
-- `src/styles.css` is the only app-level CSS owner for Tailwind/shadcn theme
-  variables and visualizer graph semantic variables.
-- shadcn semantic variables map to visualizer OKLCH tokens:
-  `--background`, `--card`, `--popover`, `--border`, `--input`, `--ring`,
-  `--primary`, `--muted`, `--accent`, `--destructive`.
-- Graph-specific roles remain `--vf-*`: config, reducer, effect, routing,
-  warning, danger, domain, actor, surfaces and borders.
-- Feature components should prefer Tailwind utilities and shadcn variants.
-  New CSS selectors are allowed only for theme variables or repeated graph
-  grammar that cannot stay readable as utilities.
+### Wrappers (`src/ui/visualizer.tsx`)
 
-Allowed variants:
+| Wrapper | Назначение | Контракт |
+| --- | --- | --- |
+| `Panel` | Top-level панель/drawer | `flex flex-col`, `rounded-(--vf-radius-lg)`, `border`, `bg-card` |
+| `PanelHeader` | Шапка панели | Высота `h-10`, `bg-[--vf-surface-soft]`, `border-b border-[--vf-border-soft]` |
+| `PanelBody` | Скроллируемое тело | `min-h-0 flex-1` |
+| `PanelKicker` | Eyebrow-метка | mono `10px`, uppercase, `--vf-text-quiet` |
+| `PanelTitle` | Eyebrow + title в одну линию | `flex items-baseline gap-2`, title `12px/600`, `truncate` |
+| `WorkspaceHeader` | Заголовок над активным workspace | flex-wrap, eyebrow + title `13px/600`, action group справа |
+| `WorkspacePane` | L1/L2/L3 контейнер внутри workspace | то же стилевое ядро, что `Panel`, без `overflow-hidden` шапки |
+| `IconButton` | Icon-only square кнопка | `size-8`, `border`, `bg-surface-soft`, hover → accent. Требует `aria-label` и `Tooltip` |
+| `PrimaryActionButton` | Primary CTA (Open visualizer, send) | `h-8`, `bg-primary`, hover `--vf-accent-strong`, focus ring `--vf-accent`, disabled tone |
+| `DensityRow` | Плотная строка в picker/topic list | `min-h-8`, grid `[1fr,auto]`, относительные состояния через `data-relation-state` |
+| `GraphRow` | Transition/effect/reducer строка | grid `[layer,event,to,target,meta]`, mono ids |
+| `LayerBadge` | `cfg`/`red`/`eff`/`sim` бейдж | mono `9px/700`, uppercase, `radius-sm`, фиксированный `min-w-[34px]` |
+| `StatusBadge` | Status/diagnostic пилюля | `h-5`, `rounded-full`, mono `10px/600`, цветовые тона `ready/muted/domain/actor/routing/diagnostic` |
+| `Counter` / `ChipPill` | Счётчики на строках и chips | `bg-counter-surface`, mono, `tabular-nums` |
+| `Chip` | Кликабельный chip с graph semantic | `min-h-6`, `radius-sm`, hover/focus → accent |
+| `RoutingPill` | Routing label inline | mono `9px`, тон `--vf-routing` |
+| `PulseDot` | Current state индикатор | `7px`, `vfPulseGlow` 1.4s |
+| `SourceSnippet` | Статичный inline snippet | mono `11px`, line numbers справа от линии, accent фон на selected line |
+| `SourceEditorShell` | CodeMirror-обёртка для source editor и overlay | dark theme, line numbers, selected line через `--vf-accent-soft`, опциональный `firstLineNumber` |
+| `DiagnosticsAlert` | Diagnostic alert | `--vf-warning` тон, `analyzer` eyebrow |
+| `PaneScrollArea` | Внутренний скролл панели | shadcn `ScrollArea`, `min-h-0 flex-1` |
 
-- `Button`: `outline`, `secondary`, `ghost` and `icon` sizes for fixture
-  controls; `default` only for future primary user actions.
-- `Badge`: `outline` plus wrapper tone classes; badges are not primary actions.
-- `Tabs`: default segmented list; no underline-only tab style in this app.
-- `Card`: only graph cards or card-like workbench previews, radius `8px`.
-- `Alert`: diagnostics and simulator notices, using semantic visualizer colors.
+### App Shell (`features/shell/Shell.tsx`)
 
-Custom graph grammar that remains outside shadcn:
+- Один полноэкранный shell: topbar (`auto`) + workspace (`1fr`).
+- Topbar: brand mark + sub-title (`stage 12e`), сегментированные tabs с
+  counters/diag-badges, source filename pill, compile status pill,
+  Console toggle. На `<sm` ширина — секции переносятся вертикально.
+- Tabs: shadcn segmented в обёртке `TabsList` с
+  `bg-[--vf-surface-soft]`, активный `TabsTrigger` использует
+  `--vf-surface-raised` + лёгкая тень `0 1px 2px oklch(0 0 0 / 0.35)`,
+  без подчёркивания. Counter активного таба — accent, остальных — neutral.
+  `diag {n}` бейдж окрашен warning или danger в зависимости от
+  `data-has-error`.
+- Workspace: один pane на таб (`Source/System/Events/Machines`). L1/L2
+  zones рендерятся в активном табе и не делят горизонталь с Source или
+  Console.
+- Mobile: topbar секции переносятся; tabs строка скроллится горизонтально;
+  workspace стакается в одну колонку.
 
-- Layer tags: `cfg`, `red`, `eff`, `sim`.
-- Event/state/routing rows with stable columns and long-label wrapping.
-- Source snippets use the CodeMirror-backed `SourceEditorShell` in read-only
-  mode when they need syntax highlighting, line numbers and selected anchors.
-- Source-overlay fragments with line clipping and fallback rows when anchors have
-  no source location.
-- Timeline rows and relation chips in later stages.
+### Source Workspace
 
-Testing hooks:
+- `WorkspaceHeader` с eyebrow `Source · pasted snippet` и filename.
+- Action group: `IconButton` reset (с tooltip) + `PrimaryActionButton`
+  «Open visualizer». На `<sm` action group растягивается на ширину.
+- Editor: `SourceEditorShell` слева, side panel с двумя карточками
+  (`Projection` summary с крупными числами `18px/600` и `Source meta`
+  с key/value mono списком). На `<lg` карточки переносятся под editor.
+- Подсказка под editor одна короткая строка, без маркетинга.
 
-- Stable `data-testid` values live in `src/test-ids.ts`.
-- Test ids are reserved for app shell anchors, tabs, primary controls, panels,
-  representative rows, console entries and timeline controls.
-- Accessibility names and roles remain the first user-facing contract. Test ids
-  are a stable e2e convenience for text that may change during later stages.
-- UI assertions should target stable hooks such as `data-status`, `data-count`,
-  `data-machine-id`, `data-event-type` and `data-row-id`, not display copy.
-- Do not derive test ids from display labels. Use domain ids (`machineId`,
-  `eventType`, `rowId`, `diagnosticId`, `stepId`) for future data-driven lists.
+### System Panel (L1)
 
-### App Shell
+- `WorkspaceHeader` + контентный grid: machines | topics | detail.
+  На `<lg` колонки стакаются в одну.
+- Machines/Topics panes: `WorkspacePane` с `PanelHeader`, `SectionTitle`
+  с количеством в badge и `SectionPaneSearch` (`h-8` input, focus ring).
+- Строки списка — `DensityRow` с layer/domain/actor бейджами и
+  `Counter`-ами. Selected row — `relation="selected"` (accent stripe +
+  accent tint), related — `relation="related"`, выключенные — `dimmed`
+  (opacity 0.4).
+- Detail pane: при отсутствии выбора — компактный empty state с иконкой и
+  одной фразой; при выборе — meta, source actions (`IconButton` + tooltip),
+  open in workbench — `PrimaryActionButton`.
 
-- Full viewport product shell with one compact topbar and one full-width active
-  workspace pane. Source, System, Events and Machines are peer tabs; Source is
-  not a permanent side rail.
-- Topbar contains brand mark, segmented tabs, current source/status pills and
-  console toggle.
-- Tabs are segmented buttons with counters. Active tab uses raised surface and
-  accent counter, not a colored underline.
-- Active tab content owns the available width. L1/L2 panels must not share
-  horizontal space with Source or Console.
-- Mobile layout stacks topbar content and turns workspace panes into a single
-  column.
+### Events Panel (L2)
 
-### Panels
+- `WorkspaceHeader` с eyebrow `EVENTS` и `Topic catalog`.
+- Layout: catalog list | topic detail. На `<lg` стакается.
+- Catalog list: `DensityRow` с `Counter` arrows (`↑` producers,
+  `↓` consumers).
+- Topic detail: header (`L2 · TOPIC <id>`), `EVENT TOPIC` eyebrow,
+  крупный mono id, ряд status badges (producers/consumers/machines/routing).
+- Producers/Consumers секции: каждая в `WorkspacePane`-стиле без вложенных
+  карточек, заголовок включает `LayerBadge` (`eff`/`cfg`).
+- Producer/Consumer строки: machine id, source link (`SourceLink` —
+  `Button` с tooltip), confidence chip (`exact`/`fuzzy`), branch counter.
+- Routing values: chip-list внутри отдельного блока с eyebrow
+  `ROUTING VALUES`. Действие «Open related machines» —
+  `Button` с иконкой.
 
-- Panel header contains eyebrow, concise title and optional actions.
-- Panel body scrolls independently when content grows.
-- Empty panels should show a representative task state, not marketing copy.
-- Do not put a card inside another card. Use rows, sections or framed code
-  blocks for inner structure.
+### Machines Panel (L3)
 
-### Lists And Rows
+- `WorkspaceHeader` + grid: picker | machine cards (multi-column) |
+  simulator. На `<lg` колонки стакаются.
+- Picker: `DensityRow` с чекбоксом, kind badge, tag chips, footer-легенда
+  цветов.
+- Machine card (`WorkspacePane`): header с domain/actor badge,
+  `StatusBadge` для current state, `IconButton` Code2 (tooltip «View
+  machine source»). State block: pulse-dot + state name + `initial` badge.
+  Transitions: `cfg`/`red` строки; effects: `eff` строки.
+- Current state получает side-stripe `--vf-accent`, accent tint и pulse
+  dot. Recently-fired строка — `vfRowAppear` flash (warning bg → idle).
+- Simulator (`Event timeline`): header с running badge и reset
+  (`IconButton` + tooltip), описание-подсказка (без маркетинга),
+  `Select` события + `PrimaryActionButton` «send», ниже timeline rows.
+  Footer: `1 step`/`N steps` мелким mono.
 
-- Machine and topic rows use grid/flex layouts with stable counters.
-- Density rows (≤32px высоты) для L1/L2/L3 picker: `[badge?] · <b mono>{id}</b>`
-  inline + counters справа.
-- Selected rows use side-stripe `--vf-accent` accent + accent-tint background.
-  Related rows используют accent tint без stripe. Dimmed rows lower opacity
-  only when another relation is selected (`opacity ~0.32`).
-- Long event/state/guard/routing strings wrap predictably with
-  `overflow-wrap:anywhere`; columns must not stretch the viewport.
-- Counts use arrows consistently: producers `↑`, consumers `↓`.
+### Source Overlay
 
-### L1/L2 Read-Only Views
+- shadcn `Dialog`, открывается из L1 (`view source`), L2 (source link) и
+  console targets.
+- Header: eyebrow `SOURCE · MACHINE/TOPIC`, крупный mono id, под ним
+  `source v{n} · anchors {k} · line {l}, column {c}` (`tabular-nums`),
+  `IconButton` close.
+- Body: `SourceEditorShell` в read-only с line numbers и `selected line`
+  подсветкой через `--vf-accent-soft`.
+- Footer: одна `Button` close с иконкой `X`. Esc и backdrop тоже закрывают.
+- Source edits/recompile очищают overlay через app state.
 
-- `System` is the L1 system view. It is split into machines, topics and
-  details zones inside the workbench panel; narrow viewports stack the zones in
-  one column.
-- L1 machine/topic filters are case-insensitive text queries over ids, titles,
-  kind/group tags, topic names and visible semantic labels.
-- L1 relation state is shown with row tint, border and dimming. Do not draw
-  persistent edges, routes or canvas layers.
-- Machine details can open source anchors or prepare the Machines placeholder
-  with the selected machine for Stage 12e.
-- Topic details can open the selected topic in the L2 `Events` catalog.
-- `Events` is the L2 topic catalog. It is split into topic list and details;
-  narrow viewports stack list above detail.
-- L2 details show producers, consumers, routing values, source state, guard,
-  confidence, branch targets and dynamic/unknown labels from the visualizer
-  model only.
-- Empty states must distinguish no model, no search matches, no selected topic
-  and no producers/consumers.
+### Console Drawer
 
-### Badges
+- Right-side overlay поверх workspace. По умолчанию закрыт. Backdrop —
+  `bg-background/70 backdrop-blur-[1px]`. Drawer — `Panel` с
+  `shadow-(--vf-shadow-overlay)`, ширина `min(100vw - 1rem, 460px)`.
+- Header: `PanelTitle` `Diagnostics / Console` + `IconButton` close
+  (`Tooltip` «Close · Esc»).
+- Channel strip: `Button` ghost/secondary, активный — `--vf-surface-raised`,
+  с компактным счётчиком справа.
+- Entry list: каждая запись — кнопка с `border-soft`, hover →
+  `--vf-surface-raised`. Содержимое: badges (channel + severity) +
+  origin + location + title (mono, bold) + message.
+- Empty state: иконка `AlertCircle` + одна фраза.
+- Footer: `N entries / filter · {channel}`, mono `10px`.
 
-- Badges are mono, compact and stable in height.
-- `domain`, `actor`, `config`, `reducer`, `effect`, `routing`, `diagnostic`,
-  `simulation`, `terminal` each map to one color role.
-- Badges do not become primary buttons. Clickable chips must have button
-  affordance and focus-visible state.
+### Empty / Error / Diagnostic States
 
-### Source Editor And Overlay
-
-- Source editor is a full-width tab with dark code surface, mono text, explicit
-  action row and a compact projection summary. It does not remain mounted beside
-  System/Events after the source pipeline opens the model.
-- Source overlay uses app-local shadcn `Dialog` and opens from L1 rows, L2 rows
-  and console targets with a concise title and prioritized source anchors.
-- Overlay snippets are derived from the current `SourceSession.source`,
-  `sourceVersion` and `GraphSourceAnchor[]`; they render as read-only
-  CodeMirror fragments with original line numbers, clipped context and fallback
-  rows when a source location is missing.
-- Close behavior is the standard Dialog close button, Escape and backdrop.
-  Source edits/recompile clear the overlay through app state.
-
-### L3 Cards And Timeline
-
-- Machine cards show kind, current state, source affordance and grouped rows.
-- State blocks show current state, initial/terminal badges and row layer tags.
-  Current state получает side-stripe accent + лёгкий accent tint + pulse-dot
-  слева от заголовка (анимация `pulseGlow`, 1.4s).
-- Transition rows use `cfg`; effect rows use `eff`; reducer/self information
-  uses reducer color.
-- Recently-fired ряды могут получать `rowAppear` flash (warning bg на 0.4s)
-  до следующего шага.
-- Timeline rows show sequence, event, source kind and consumed transitions.
-  Manual/external/effect sources have distinct semantic markers.
-
-### Console And Diagnostics
-
-- Console is a right-side overlay drawer. It is closed by default, opens above
-  the active workspace, dims the underlying pane and never changes the active
-  tab layout width.
-- Entries include origin, severity, message and optional graph/source target.
-- Diagnostics colors are semantic, not decorative. Error, warning and info must
-  remain readable on the dark surface.
+- Empty state — компактный блок (иконка + одна фраза), без CTA в виде
+  иллюстраций. Различай: «нет модели», «нет совпадений по фильтру»,
+  «ничего не выбрано», «нет producers/consumers».
+- Diagnostic уровни: `failed`/`blocked` → `--vf-danger` (red dot,
+  `diag` бейдж), `warning`/`degraded` → `--vf-warning`, `ready`/`running`
+  → `--vf-accent`. Цвет не дублируется иконкой — иконка только усиливает.
+- Error fill всегда сопровождается читаемым текстом, без полупрозрачного
+  фона на критических путях.
 
 ## Accessibility
 
-- Interactive targets should remain at least `32px` tall in dense desktop mode.
-- `:focus-visible` is mandatory for tabs, buttons, chips, source actions and
-  console rows.
-- Contrast must remain sufficient for muted text and semantic badges.
-- Keyboard navigation follows document order: tabs, topbar actions, active pane
-  controls, console controls when the drawer is open.
-- Labels such as event types and machine ids may be English/API terms; concise
-  UI copy may stay English while specs remain Russian.
+- Минимальная высота интерактивных таргетов — `32px` в плотном desktop
+  режиме (`size-8` для icon, `h-8` для primary action).
+- `:focus-visible` обязателен для tabs, buttons, chips, density rows,
+  console entries, source actions. Outline идёт от `--vf-accent` через
+  `ring-2`, с offset на изолированных кнопках и `ring-inset` на строках
+  плотных списков.
+- Все icon-only кнопки имеют `aria-label` и `Tooltip`.
+- Все badges — текст + цвет; нельзя кодировать значение только цветом.
+- Контраст: `text-muted` ≥ 4.5:1 на surfaces; semantic badges — на
+  `*-soft` фоне с `*-border` рамкой.
+- Keyboard navigation: tabs → topbar actions → активный pane controls →
+  console controls (когда drawer открыт).
+- Labels могут оставаться английскими (event/state/machine ids),
+  UI-копия — короткая, тех. термины не переводятся.
 
 ## Responsive Floor
 
-- Minimum viewport width: `320px`.
-- At narrow widths, workspace panes stack vertically, tab strip scrolls
-  horizontally and cards keep stable row spacing.
-- Long labels wrap instead of causing horizontal page overflow.
-- Console remains reachable as an overlay drawer; when open it may cover the
-  right side of the active pane and must provide an obvious close control.
+- Минимальная ширина viewport: `320px`.
+- На `<sm` topbar секции переносятся вертикально, tab strip скроллится
+  горизонтально (`overflow-x-auto`), action groups растягиваются на 100%.
+- На `<lg` workspace панели стакаются в одну колонку (`grid-cols-1`),
+  карточки сохраняют ту же row-сетку.
+- Long event/state/guard/routing строки переносятся через
+  `overflow-wrap: anywhere`; колонки не толкают viewport.
+- Console остаётся overlay-drawer-ом и обязательно имеет видимый close.
+
+## Testing Hooks
+
+- Стабильные `data-testid` живут в `src/test-ids.ts`.
+- Test ids зарезервированы для shell-якорей, tabs, primary controls,
+  panels, представительных rows, console entries и timeline controls.
+- Семантические atoms: `data-status`, `data-count`,
+  `data-machine-id`, `data-event-type`, `data-row-id`,
+  `data-relation-state`, `data-empty`, `data-entry-count`. Display copy
+  не используется как селектор.
+- Accessible names и роли — первичный контракт; test ids — стабильное
+  e2e-удобство.
 
 ## Prohibited
 
-- Landing pages, hero sections and marketing value props.
-- Decorative gradient text, glass surfaces, blur cards or ornamental blobs.
-- React Flow, ELK, canvas coordinates or edge routing in Stage 12.
-- Custom SVG icon system when a lucide icon exists.
-- Nested cards.
-- Side-stripe accent borders за пределами разрешённых ролей (current state,
-  selected/related rows). Любой другой side-stripe запрещён.
-- Копирование сырого CSS/DOM из внешних прототипов. Следовать визуальному
-  словарю допустимо; реализация остаётся через Tailwind + shadcn + `--vf-*` токены.
+- Landing pages, hero sections, marketing value props.
+- Декоративный gradient text, glass surfaces, blur cards, blobs.
+- React Flow, ELK, edge-routing canvas, постоянные графовые ребра.
+- Любая icon library кроме `lucide-react`; собственные SVG-иконки, когда
+  есть подходящий lucide.
+- Nested cards, дополнительные side-stripes сверх разрешённых ролей,
+  fluid font-size, анимация layout properties.
+- Объявление новых CSS-переменных вне `src/styles.css`. Любое изменение
+  токенов сопровождается обновлением этого документа.

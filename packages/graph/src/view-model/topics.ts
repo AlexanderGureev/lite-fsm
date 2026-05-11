@@ -2,6 +2,7 @@ import type { GraphRouting, GraphRoutingTarget, GraphTransition, LiteFsmGraphDoc
 import type { DiagnosticIndex } from "./diagnostics";
 import { idsForTopic } from "./diagnostics";
 import { sourceStateKey, sourcesEqual } from "./indexes";
+import { isFoldedReducerTransition } from "./reducer-folding";
 import { transitionAnchors, emissionAnchors } from "./source-anchors";
 import { compareText, orderedUnique } from "./sort";
 import { targetView } from "./targets";
@@ -76,16 +77,22 @@ const reducerBranchesForAccepted = (
   return machine.transitions.filter(
     (transition) =>
       transition.layer === "reducer" &&
+      !isFoldedReducerTransition(accepted, transition) &&
       transition.event.type === accepted.event.type &&
       sourcesEqual(transition.source, accepted.source),
   );
 };
 
-const consumerBranches = (
+const consumerBranchTransitions = (
   machine: LiteFsmGraphMachine,
   accepted: GraphTransition,
+): GraphTransition[] => [accepted, ...reducerBranchesForAccepted(machine, accepted)];
+
+const consumerBranches = (
+  machine: LiteFsmGraphMachine,
+  transitions: readonly GraphTransition[],
 ): GraphTopicConsumer["branches"] => {
-  return [accepted, ...reducerBranchesForAccepted(machine, accepted)].map((transition) => ({
+  return transitions.map((transition) => ({
     transitionId: transition.id,
     layer: transition.layer,
     target: targetView(machine, transition.target),
@@ -105,14 +112,15 @@ export const buildTopicSummaries = (
     for (const transition of machine.transitions) {
       topic(topics, transition.event.type);
       if (transition.layer !== "config") continue;
+      const branchTransitions = consumerBranchTransitions(machine, transition);
 
       topic(topics, transition.event.type).consumers.push({
         machineId: machine.id,
         sourceStateKey: sourceStateKey(machine, transition.source),
         acceptedTransitionId: transition.id,
-        branches: consumerBranches(machine, transition),
+        branches: consumerBranches(machine, branchTransitions),
         confidence: transition.confidence,
-        sourceAnchors: transitionAnchors(transition),
+        sourceAnchors: branchTransitions.flatMap((branch) => transitionAnchors(branch)),
       });
     }
 

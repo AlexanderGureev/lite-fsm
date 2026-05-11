@@ -9,7 +9,8 @@ import type {
 } from "./types";
 import type { GraphDiagnostic, GraphEmission, GraphState, GraphTransition, LiteFsmGraphMachine } from "../types";
 import { configRowId, diagnosticRowId, effectRowId, reducerRowId } from "./ids";
-import { machineTitle, sourceStateId, sourceStateKey, sourcesEqual, targetKey } from "./indexes";
+import { machineTitle, sourceStateId, sourceStateKey, sourcesEqual } from "./indexes";
+import { foldedReducerTransitions } from "./reducer-folding";
 import { emissionAnchors, machineAnchors, stateAnchors, transitionAnchors } from "./source-anchors";
 import { orderedUnique } from "./sort";
 import { targetView } from "./targets";
@@ -89,18 +90,7 @@ const matchingAcceptedTransition = (
 const foldedReducerIds = (
   machine: LiteFsmGraphMachine,
   accepted: GraphTransition,
-): string[] => {
-  return machine.transitions
-    .filter(
-      (candidate) =>
-        candidate.layer === "reducer" &&
-        !candidate.guard &&
-        candidate.event.type === accepted.event.type &&
-        sourcesEqual(candidate.source, accepted.source) &&
-        targetKey(candidate.target) === targetKey(accepted.target),
-    )
-    .map((transition) => transition.id);
-};
+): string[] => foldedReducerTransitions(machine, accepted).map((transition) => transition.id);
 
 const sourceStateIdForRow = (
   machine: LiteFsmGraphMachine,

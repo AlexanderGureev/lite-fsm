@@ -302,6 +302,37 @@ describe("@lite-fsm/graph/view-model: public surface", () => {
 });
 
 describe("@lite-fsm/graph/view-model: L1/L2 и workbench", () => {
+  it("не показывает свернутый reducer passthrough как отдельную L2 ветку", () => {
+    const result = compileLiteFsmGraph(
+      `
+        import { createMachine } from "@lite-fsm/core";
+
+        export const appShell = createMachine({
+          config: {
+            BOOTING: { APP_READY: "READY" },
+            READY: { APP_RESET: "BOOTING", THEME_TOGGLE: null },
+          },
+          initialState: "BOOTING",
+          initialContext: { theme: "dark" },
+          reducer: (state, action, { nextState }) => {
+            state.state = nextState;
+
+            if (action.type === "THEME_TOGGLE") {
+              state.context.theme = state.context.theme === "dark" ? "light" : "dark";
+            }
+          },
+        });
+      `,
+      { filename: "app-shell.ts" },
+    );
+    const model = buildGraphVisualizerModel(result.document);
+    const appReady = model.topics.find((topic) => topic.eventType === "APP_READY");
+
+    expect(appReady?.consumers).toHaveLength(1);
+    expect(appReady?.consumers[0]?.branches.map((branch) => branch.layer)).toEqual(["config"]);
+    expect(appReady?.consumers[0]?.sourceAnchors.map((anchor) => anchor.kind)).toEqual(["config-transition"]);
+  });
+
   it("строит системный инвентарь, менеджеры, топики и relation index", () => {
     const model = buildGraphVisualizerModel(createProjectionDocument());
 
@@ -437,11 +468,6 @@ describe("@lite-fsm/graph/view-model: L1/L2 и workbench", () => {
                 [
                   "config",
                   "flow:transition:config:idle:START:0",
-                  "loading",
-                ],
-                [
-                  "reducer",
-                  "flow:transition:reducer:idle:START:0",
                   "loading",
                 ],
                 [
