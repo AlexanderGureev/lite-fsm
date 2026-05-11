@@ -29,7 +29,6 @@ diagnostics и source anchors. Это не лендинг, не документ
 - Интерфейс обслуживает инспекцию: никаких hero, marketing copy,
   декоративного canvas, landing sections, иллюстративных blocks.
 - Связи показываются выбором, подсветкой и detail rows. Постоянные edges,
-  React Flow, ELK или edge-routing canvas запрещены.
 - Labels API и graph ids остаются как code/data: mono — часть UX,
   не декоративный приём.
 - Состояния сканируемы: layer, routing, confidence, diagnostics, simulation
@@ -49,78 +48,78 @@ CSS-переменные.
 
 ### Поверхности
 
-| Token | OKLCH | Hex | Использование |
-| --- | --- | --- | --- |
-| `--vf-bg` | `oklch(0.178 0.012 268)` | `#0f1116` | App background |
-| `--vf-bg-elevated` | `oklch(0.196 0.015 268)` | _(derived)_ | Резерв для приподнятой поверхности |
-| `--vf-surface` | `oklch(0.215 0.018 268)` | `#161922` | Панели и карточки |
-| `--vf-surface-soft` | `oklch(0.244 0.020 268)` | `#1c2029` | Inputs, headers панелей, channel strip |
-| `--vf-surface-raised` | `oklch(0.272 0.022 268)` | `#232734` | Активные tab, hover на entry карточках |
-| `--vf-surface-hot` | `oklch(0.295 0.024 268)` | _(derived)_ | shadcn accent hover |
+| Token                 | OKLCH                    | Hex         | Использование                          |
+| --------------------- | ------------------------ | ----------- | -------------------------------------- |
+| `--vf-bg`             | `oklch(0.178 0.012 268)` | `#0f1116`   | App background                         |
+| `--vf-bg-elevated`    | `oklch(0.196 0.015 268)` | _(derived)_ | Резерв для приподнятой поверхности     |
+| `--vf-surface`        | `oklch(0.215 0.018 268)` | `#161922`   | Панели и карточки                      |
+| `--vf-surface-soft`   | `oklch(0.244 0.020 268)` | `#1c2029`   | Inputs, headers панелей, channel strip |
+| `--vf-surface-raised` | `oklch(0.272 0.022 268)` | `#232734`   | Активные tab, hover на entry карточках |
+| `--vf-surface-hot`    | `oklch(0.295 0.024 268)` | _(derived)_ | shadcn accent hover                    |
 
 ### Границы
 
-| Token | OKLCH | Использование |
-| --- | --- | --- |
-| `--vf-border` | `oklch(0.315 0.025 268)` | Основные рамки панелей и контролов |
-| `--vf-border-soft` | `oklch(1 0 0 / 0.06)` | Разделители строк, подзаголовки внутри панели |
+| Token              | OKLCH                    | Использование                                 |
+| ------------------ | ------------------------ | --------------------------------------------- |
+| `--vf-border`      | `oklch(0.315 0.025 268)` | Основные рамки панелей и контролов            |
+| `--vf-border-soft` | `oklch(1 0 0 / 0.06)`    | Разделители строк, подзаголовки внутри панели |
 
 ### Текст
 
-| Token | OKLCH | Использование |
-| --- | --- | --- |
-| `--vf-text` | `oklch(0.936 0.008 252)` | Primary text |
-| `--vf-text-muted` | `oklch(0.668 0.019 258)` | Вторичные labels |
+| Token             | OKLCH                    | Использование                        |
+| ----------------- | ------------------------ | ------------------------------------ |
+| `--vf-text`       | `oklch(0.936 0.008 252)` | Primary text                         |
+| `--vf-text-muted` | `oklch(0.668 0.019 258)` | Вторичные labels                     |
 | `--vf-text-quiet` | `oklch(0.507 0.024 261)` | Счётчики, eyebrows, неактивный текст |
 
 ### Accent
 
-| Token | OKLCH | Использование |
-| --- | --- | --- |
-| `--vf-accent` | `oklch(0.807 0.098 184)` | Primary action, current selection, ready state |
-| `--vf-accent-strong` | `oklch(0.855 0.115 184)` | Hover для primary action |
-| `--vf-accent-soft` | `oklch(0.807 0.098 184 / 0.14)` | Selected backgrounds, accent surfaces |
-| `--vf-accent-border` | `oklch(0.807 0.098 184 / 0.42)` | Selected borders, ready badges |
-| `--vf-counter-surface` | `oklch(0.936 0.008 252 / 0.08)` | Счётчики внутри tab/row |
-| `--vf-row-hover` | `oklch(0.936 0.008 252 / 0.035)` | Hover плотных строк |
-| `--vf-row-related` | `oklch(0.807 0.098 184 / 0.06)` | Related row tint |
-| `--vf-glow-current` | `oklch(0.807 0.098 184 / 0.55)` | Pulse-glow для current state |
-| `--vf-focus-ring` | `oklch(0.807 0.098 184 / 0.55)` | Focus outline для overlay-кнопок |
+| Token                  | OKLCH                            | Использование                                  |
+| ---------------------- | -------------------------------- | ---------------------------------------------- |
+| `--vf-accent`          | `oklch(0.807 0.098 184)`         | Primary action, current selection, ready state |
+| `--vf-accent-strong`   | `oklch(0.855 0.115 184)`         | Hover для primary action                       |
+| `--vf-accent-soft`     | `oklch(0.807 0.098 184 / 0.14)`  | Selected backgrounds, accent surfaces          |
+| `--vf-accent-border`   | `oklch(0.807 0.098 184 / 0.42)`  | Selected borders, ready badges                 |
+| `--vf-counter-surface` | `oklch(0.936 0.008 252 / 0.08)`  | Счётчики внутри tab/row                        |
+| `--vf-row-hover`       | `oklch(0.936 0.008 252 / 0.035)` | Hover плотных строк                            |
+| `--vf-row-related`     | `oklch(0.807 0.098 184 / 0.06)`  | Related row tint                               |
+| `--vf-glow-current`    | `oklch(0.807 0.098 184 / 0.55)`  | Pulse-glow для current state                   |
+| `--vf-focus-ring`      | `oklch(0.807 0.098 184 / 0.55)`  | Focus outline для overlay-кнопок               |
 
 ### Семантические цвета графа
 
 Каждая роль имеет три токена: base, soft fill (alpha 0.10–0.13), border (alpha 0.42).
 
-| Token | OKLCH | Hex | Использование |
-| --- | --- | --- | --- |
-| `--vf-config` | `oklch(0.772 0.130 67)` | `#e6a957` | Config rows, `cfg` badge, producer counter |
-| `--vf-reducer` | `oklch(0.757 0.068 264)` | `#a8b8e0` | Reducer/self targets, `red` badge |
-| `--vf-effect` | `oklch(0.769 0.087 155)` | `#82c79c` | Effect rows, `eff` badge, consumer counter |
-| `--vf-routing` | `oklch(0.726 0.107 307)` | `#c79de0` | Routing badges и chips |
-| `--vf-warning` | `oklch(0.784 0.110 80)` | `#d8b86b` | Manual timeline source, warnings, `sim` badge |
-| `--vf-danger` | `oklch(0.672 0.131 19)` | `#e07a6e` | Errors, failed diagnostics |
-| `--vf-domain` | `oklch(0.740 0.100 231)` | `#7eb6f0` | Domain machine badges |
-| `--vf-actor` | `oklch(0.728 0.104 56)` | `#d6a06b` | Actor machine badges |
+| Token          | OKLCH                    | Hex       | Использование                                 |
+| -------------- | ------------------------ | --------- | --------------------------------------------- |
+| `--vf-config`  | `oklch(0.772 0.130 67)`  | `#e6a957` | Config rows, `cfg` badge, producer counter    |
+| `--vf-reducer` | `oklch(0.757 0.068 264)` | `#a8b8e0` | Reducer/self targets, `red` badge             |
+| `--vf-effect`  | `oklch(0.769 0.087 155)` | `#82c79c` | Effect rows, `eff` badge, consumer counter    |
+| `--vf-routing` | `oklch(0.726 0.107 307)` | `#c79de0` | Routing badges и chips                        |
+| `--vf-warning` | `oklch(0.784 0.110 80)`  | `#d8b86b` | Manual timeline source, warnings, `sim` badge |
+| `--vf-danger`  | `oklch(0.672 0.131 19)`  | `#e07a6e` | Errors, failed diagnostics                    |
+| `--vf-domain`  | `oklch(0.740 0.100 231)` | `#7eb6f0` | Domain machine badges                         |
+| `--vf-actor`   | `oklch(0.728 0.104 56)`  | `#d6a06b` | Actor machine badges                          |
 
 ### Производные токены
 
-| Token | Значение | Использование |
-| --- | --- | --- |
-| `--vf-counter-in` | `= --vf-config` | Producer counter (`↑`) |
+| Token              | Значение        | Использование          |
+| ------------------ | --------------- | ---------------------- |
+| `--vf-counter-in`  | `= --vf-config` | Producer counter (`↑`) |
 | `--vf-counter-out` | `= --vf-effect` | Consumer counter (`↓`) |
 
 ### Радиусы, motion, тени, spacing
 
-| Token | Значение | Использование |
-| --- | --- | --- |
-| `--vf-radius-sm` | `6px` | Inputs, кнопки, layer badges, мелкие chips |
-| `--vf-radius` | `8px` | Inner cards, code surfaces, buttons |
-| `--vf-radius-lg` | `10px` | Панели верхнего уровня (Panel, WorkspacePane) |
-| `--vf-duration-fast` | `140ms` | Hover/focus, row tint |
-| `--vf-duration` | `180ms` | Открытие drawer, переключения акцентов |
-| `--vf-ease` | `cubic-bezier(0.16, 1, 0.3, 1)` | Все переходы |
-| `--vf-shadow-overlay` | `0 24px 60px -12px oklch(0 0 0 / 0.55)` | Console drawer, source dialog |
-| `--vf-pane-gap` | `10px` | Резерв для grid между панелями |
+| Token                 | Значение                                | Использование                                 |
+| --------------------- | --------------------------------------- | --------------------------------------------- |
+| `--vf-radius-sm`      | `6px`                                   | Inputs, кнопки, layer badges, мелкие chips    |
+| `--vf-radius`         | `8px`                                   | Inner cards, code surfaces, buttons           |
+| `--vf-radius-lg`      | `10px`                                  | Панели верхнего уровня (Panel, WorkspacePane) |
+| `--vf-duration-fast`  | `140ms`                                 | Hover/focus, row tint                         |
+| `--vf-duration`       | `180ms`                                 | Открытие drawer, переключения акцентов        |
+| `--vf-ease`           | `cubic-bezier(0.16, 1, 0.3, 1)`         | Все переходы                                  |
+| `--vf-shadow-overlay` | `0 24px 60px -12px oklch(0 0 0 / 0.55)` | Console drawer, source dialog                 |
+| `--vf-pane-gap`       | `10px`                                  | Резерв для grid между панелями                |
 
 Mapping shadcn theme variables (`--background`, `--card`, `--popover`,
 `--border`, `--input`, `--ring`, `--primary`, `--muted`, `--accent`,
@@ -145,7 +144,7 @@ Mapping shadcn theme variables (`--background`, `--card`, `--popover`,
 - Радиусы: `6px` для контролов и chips, `8px` для inner cards и code
   surfaces, `10px` для top-level панелей, `999px` для статус-бейджей.
 - Рамки: один пиксель по умолчанию. Side-stripe accents (`box-shadow:
-  inset 2px 0 0 var(--vf-accent)` или `inset 3px 0 0`) разрешены только
+inset 2px 0 0 var(--vf-accent)` или `inset 3px 0 0`) разрешены только
   для двух ролей: current state в machine card и selected/related rows
   в L1/L2/L3 picker. Любые другие side-stripes запрещены.
 - Тени: только overlay-поверхности (Console drawer, Source dialog) и
@@ -194,29 +193,29 @@ Ownership rules:
 
 ### Wrappers (`src/ui/visualizer.tsx`)
 
-| Wrapper | Назначение | Контракт |
-| --- | --- | --- |
-| `Panel` | Top-level панель/drawer | `flex flex-col`, `rounded-(--vf-radius-lg)`, `border`, `bg-card` |
-| `PanelHeader` | Шапка панели | Высота `h-10`, `bg-[--vf-surface-soft]`, `border-b border-[--vf-border-soft]` |
-| `PanelBody` | Скроллируемое тело | `min-h-0 flex-1` |
-| `PanelKicker` | Eyebrow-метка | mono `10px`, uppercase, `--vf-text-quiet` |
-| `PanelTitle` | Eyebrow + title в одну линию | `flex items-baseline gap-2`, title `12px/600`, `truncate` |
-| `WorkspaceHeader` | Заголовок над активным workspace | flex-wrap, eyebrow + title `13px/600`, action group справа |
-| `WorkspacePane` | L1/L2/L3 контейнер внутри workspace | то же стилевое ядро, что `Panel`, без `overflow-hidden` шапки |
-| `IconButton` | Icon-only square кнопка | `size-8`, `border`, `bg-surface-soft`, hover → accent. Требует `aria-label` и `Tooltip` |
-| `PrimaryActionButton` | Primary CTA (Open visualizer, send) | `h-8`, `bg-primary`, hover `--vf-accent-strong`, focus ring `--vf-accent`, disabled tone |
-| `DensityRow` | Плотная строка в picker/topic list | `min-h-8`, grid `[1fr,auto]`, относительные состояния через `data-relation-state` |
-| `GraphRow` | Transition/effect/reducer строка | grid `[layer,event,to,target,meta]`, mono ids |
-| `LayerBadge` | `cfg`/`red`/`eff`/`sim` бейдж | mono `9px/700`, uppercase, `radius-sm`, фиксированный `min-w-[34px]` |
-| `StatusBadge` | Status/diagnostic пилюля | `h-5`, `rounded-full`, mono `10px/600`, цветовые тона `ready/muted/domain/actor/routing/diagnostic` |
-| `Counter` / `ChipPill` | Счётчики на строках и chips | `bg-counter-surface`, mono, `tabular-nums` |
-| `Chip` | Кликабельный chip с graph semantic | `min-h-6`, `radius-sm`, hover/focus → accent |
-| `RoutingPill` | Routing label inline | mono `9px`, тон `--vf-routing` |
-| `PulseDot` | Current state индикатор | `7px`, `vfPulseGlow` 1.4s |
-| `SourceSnippet` | Статичный inline snippet | mono `11px`, line numbers справа от линии, accent фон на selected line |
-| `SourceEditorShell` | CodeMirror-обёртка для source editor и overlay | dark theme, line numbers, selected line через `--vf-accent-soft`, опциональный `firstLineNumber` |
-| `DiagnosticsAlert` | Diagnostic alert | `--vf-warning` тон, `analyzer` eyebrow |
-| `PaneScrollArea` | Внутренний скролл панели | shadcn `ScrollArea`, `min-h-0 flex-1` |
+| Wrapper                | Назначение                                     | Контракт                                                                                            |
+| ---------------------- | ---------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `Panel`                | Top-level панель/drawer                        | `flex flex-col`, `rounded-(--vf-radius-lg)`, `border`, `bg-card`                                    |
+| `PanelHeader`          | Шапка панели                                   | Высота `h-10`, `bg-[--vf-surface-soft]`, `border-b border-[--vf-border-soft]`                       |
+| `PanelBody`            | Скроллируемое тело                             | `min-h-0 flex-1`                                                                                    |
+| `PanelKicker`          | Eyebrow-метка                                  | mono `10px`, uppercase, `--vf-text-quiet`                                                           |
+| `PanelTitle`           | Eyebrow + title в одну линию                   | `flex items-baseline gap-2`, title `12px/600`, `truncate`                                           |
+| `WorkspaceHeader`      | Заголовок над активным workspace               | flex-wrap, eyebrow + title `13px/600`, action group справа                                          |
+| `WorkspacePane`        | L1/L2/L3 контейнер внутри workspace            | то же стилевое ядро, что `Panel`, без `overflow-hidden` шапки                                       |
+| `IconButton`           | Icon-only square кнопка                        | `size-8`, `border`, `bg-surface-soft`, hover → accent. Требует `aria-label` и `Tooltip`             |
+| `PrimaryActionButton`  | Primary CTA (Open visualizer, send)            | `h-8`, `bg-primary`, hover `--vf-accent-strong`, focus ring `--vf-accent`, disabled tone            |
+| `DensityRow`           | Плотная строка в picker/topic list             | `min-h-8`, grid `[1fr,auto]`, относительные состояния через `data-relation-state`                   |
+| `GraphRow`             | Transition/effect/reducer строка               | grid `[layer,event,to,target,meta]`, mono ids                                                       |
+| `LayerBadge`           | `cfg`/`red`/`eff`/`sim` бейдж                  | mono `9px/700`, uppercase, `radius-sm`, фиксированный `min-w-[34px]`                                |
+| `StatusBadge`          | Status/diagnostic пилюля                       | `h-5`, `rounded-full`, mono `10px/600`, цветовые тона `ready/muted/domain/actor/routing/diagnostic` |
+| `Counter` / `ChipPill` | Счётчики на строках и chips                    | `bg-counter-surface`, mono, `tabular-nums`                                                          |
+| `Chip`                 | Кликабельный chip с graph semantic             | `min-h-6`, `radius-sm`, hover/focus → accent                                                        |
+| `RoutingPill`          | Routing label inline                           | mono `9px`, тон `--vf-routing`                                                                      |
+| `PulseDot`             | Current state индикатор                        | `7px`, `vfPulseGlow` 1.4s                                                                           |
+| `SourceSnippet`        | Статичный inline snippet                       | mono `11px`, line numbers справа от линии, accent фон на selected line                              |
+| `SourceEditorShell`    | CodeMirror-обёртка для source editor и overlay | dark theme, line numbers, selected line через `--vf-accent-soft`, опциональный `firstLineNumber`    |
+| `DiagnosticsAlert`     | Diagnostic alert                               | `--vf-warning` тон, `analyzer` eyebrow                                                              |
+| `PaneScrollArea`       | Внутренний скролл панели                       | shadcn `ScrollArea`, `min-h-0 flex-1`                                                               |
 
 ### App Shell (`features/shell/Shell.tsx`)
 
@@ -375,7 +374,6 @@ Ownership rules:
 
 - Landing pages, hero sections, marketing value props.
 - Декоративный gradient text, glass surfaces, blur cards, blobs.
-- React Flow, ELK, edge-routing canvas, постоянные графовые ребра.
 - Любая icon library кроме `lucide-react`; собственные SVG-иконки, когда
   есть подходящий lucide.
 - Nested cards, дополнительные side-stripes сверх разрешённых ролей,
