@@ -39,7 +39,7 @@ export const Panel = ({ className, rail = false, ...props }: PanelProps) => (
 export const PanelHeader = ({ className, ...props }: ComponentProps<"header">) => (
   <header
     className={cn(
-      "flex min-h-11 shrink-0 items-center gap-2 border-b bg-[color:var(--vf-surface-raised)] px-3 py-2",
+      "flex min-h-10 shrink-0 items-center gap-2 border-b bg-[color:var(--vf-surface-soft)] px-3 py-1.5",
       className,
     )}
     {...props}
@@ -51,7 +51,29 @@ export const PanelBody = ({ className, ...props }: ComponentProps<"div">) => (
 );
 
 export const PanelKicker = ({ className, ...props }: ComponentProps<"p">) => (
-  <p className={cn("font-mono text-[10px] font-bold uppercase text-[color:var(--vf-text-quiet)]", className)} {...props} />
+  <p
+    className={cn(
+      "font-mono text-[10px] font-semibold uppercase tracking-[0.08em] text-[color:var(--vf-text-quiet)]",
+      className,
+    )}
+    {...props}
+  />
+);
+
+export type PanelTitleProps = ComponentProps<"div"> & {
+  eyebrow: string;
+  title: string;
+  titleId?: string;
+  titleClassName?: string;
+};
+
+export const PanelTitle = ({ eyebrow, title, titleId, titleClassName, className, ...props }: PanelTitleProps) => (
+  <div className={cn("min-w-0", className)} {...props}>
+    <PanelKicker>{eyebrow}</PanelKicker>
+    <h2 id={titleId} className={cn("truncate text-[12px] font-semibold leading-tight text-foreground", titleClassName)}>
+      {title}
+    </h2>
+  </div>
 );
 
 const statusToneClass = {
@@ -96,8 +118,9 @@ export type LayerBadgeKind = keyof typeof layerToneClass;
 export const LayerBadge = ({ layer, className }: { layer: LayerBadgeKind; className?: string }) => (
   <Badge
     variant="outline"
+    data-layer={layer}
     className={cn(
-      "h-5 min-w-8 rounded-md px-1.5 font-mono text-[10px] font-bold",
+      "h-[18px] min-w-[34px] justify-center rounded-[3px] px-1.5 py-0 font-mono text-[9px] font-bold uppercase tracking-[0.04em]",
       layerToneClass[layer],
       className,
     )}
@@ -171,7 +194,7 @@ const sourceEditorTheme = EditorView.theme(
     "&": {
       height: "100%",
       minHeight: "100%",
-      backgroundColor: "var(--vf-bg)",
+      backgroundColor: "var(--vf-surface)",
       color: "var(--foreground)",
       fontFamily: "var(--vf-mono)",
       fontSize: "13px",
@@ -215,8 +238,7 @@ const sourceEditorTheme = EditorView.theme(
       outline: "none",
     },
     "&.cm-focused .cm-scroller": {
-      outline: "2px solid var(--ring)",
-      outlineOffset: "-2px",
+      outline: "none",
     },
   },
   { dark: true },
@@ -360,7 +382,7 @@ export const SourceEditorShell = ({
         data-first-line-number={firstLineNumber}
         data-highlighted-line-numbers={highlightedLineNumbers?.join(",") ?? ""}
         className={cn(
-          "min-h-28 overflow-hidden rounded-md border bg-background text-foreground shadow-none",
+          "min-h-28 overflow-hidden rounded-lg border bg-[color:var(--vf-surface)] text-foreground shadow-none",
           textareaClassName,
         )}
       />
@@ -388,4 +410,98 @@ export const PaneScrollArea = ({ className, ...props }: ComponentProps<typeof Sc
 
 export const IconButton = ({ className, ...props }: ComponentProps<typeof Button>) => (
   <Button variant="outline" size="icon" className={cn("shrink-0", className)} {...props} />
+);
+
+export type DensityRowRelation = "idle" | "selected" | "related" | "dimmed";
+
+const densityRowRelationClass: Record<DensityRowRelation, string> = {
+  idle: "border-transparent bg-transparent hover:bg-[color:var(--vf-row-hover)]",
+  selected:
+    "border-transparent bg-[color:var(--vf-accent-soft)] shadow-[inset_2px_0_0_var(--vf-accent)] hover:bg-[color:var(--vf-accent-soft)]",
+  related:
+    "border-transparent bg-[color:var(--vf-row-related)] hover:bg-[color:var(--vf-row-related)]",
+  dimmed: "border-transparent bg-transparent opacity-40 hover:bg-[color:var(--vf-row-hover)]",
+};
+
+export type DensityRowProps = ComponentProps<"button"> & {
+  relation?: DensityRowRelation;
+};
+
+export const DensityRow = ({ className, relation = "idle", type, ...props }: DensityRowProps) => (
+  <button
+    type={type ?? "button"}
+    data-relation-state={relation}
+    className={cn(
+      "grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-y border-[color:var(--vf-border-soft)] px-3 py-1.5 text-left transition-colors first:border-t-0 last:border-b-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
+      densityRowRelationClass[relation],
+      className,
+    )}
+    {...props}
+  />
+);
+
+export type CounterTone = "neutral" | "in" | "out" | "warning";
+
+const counterToneClass: Record<CounterTone, string> = {
+  neutral: "text-[color:var(--vf-text-quiet)]",
+  in: "text-[color:var(--vf-counter-in)]",
+  out: "text-[color:var(--vf-counter-out)]",
+  warning: "text-[color:var(--vf-warning)]",
+};
+
+export type CounterProps = ComponentProps<"span"> & {
+  tone?: CounterTone;
+};
+
+export const Counter = ({ tone = "neutral", className, ...props }: CounterProps) => (
+  <span
+    className={cn(
+      "inline-flex shrink-0 items-center rounded-[3px] bg-[color:var(--vf-counter-surface)] px-1.5 font-mono text-[10px] leading-[18px]",
+      counterToneClass[tone],
+      className,
+    )}
+    {...props}
+  />
+);
+
+export type ChipProps = ComponentProps<"button">;
+
+export const Chip = ({ className, type, ...props }: ChipProps) => (
+  <button
+    type={type ?? "button"}
+    className={cn(
+      "inline-flex items-center gap-1.5 rounded-md border border-[color:var(--vf-border)] bg-[color:var(--vf-surface-soft)] px-2 py-1 font-mono text-[11px] text-foreground transition-colors hover:border-[color:var(--vf-accent-border)] hover:bg-[color:var(--vf-accent-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
+      className,
+    )}
+    {...props}
+  />
+);
+
+export type ChipPillProps = ComponentProps<"span"> & {
+  tone?: CounterTone;
+};
+
+export const ChipPill = ({ tone = "neutral", className, ...props }: ChipPillProps) => (
+  <span
+    className={cn(
+      "inline-flex items-center rounded-full bg-[color:var(--vf-counter-surface)] px-1.5 font-mono text-[9px] leading-[16px]",
+      counterToneClass[tone],
+      className,
+    )}
+    {...props}
+  />
+);
+
+export const RoutingPill = ({ className, ...props }: ComponentProps<"span">) => (
+  <span
+    className={cn(
+      "inline-flex items-center rounded-[3px] bg-[color:var(--vf-routing-soft)] px-1.5 font-mono text-[9px] leading-[16px] text-[color:var(--vf-routing)]",
+      className,
+    )}
+    {...props}
+  />
+);
+
+export const PulseDot = ({ className, ...props }: ComponentProps<"span">) => (
+  <span aria-hidden="true" className={cn("vf-pulse-dot", className)} {...props} />
 );

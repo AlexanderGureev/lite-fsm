@@ -36,56 +36,100 @@ diagnostics и source anchors. Интерфейс не является ленд
 - Компоненты используют familiar product affordances: tabs, buttons, search
   inputs, lists, panels, source overlays. Не изобретать нестандартные controls.
 - Все стандартные иконки идут из `lucide-react`.
+- Визуальный словарь: плотность, eyebrow grammar, density rows, chip-list,
+  ref-row. Реализация остаётся через Tailwind + shadcn + `--vf-*` токены.
 
 ## Tokens
 
 ### Color
 
-Все новые цвета задаются в OKLCH.
+Все цвета задаются в OKLCH. Ниже приведены исходные hex-значения дизайна
+и их точные OKLCH-эквиваленты для воспроизведения.
 
-| Token | Value | Use |
+#### Поверхности и фон
+
+Уровни поверхностей образуют пять ступеней: от самого тёмного фона до
+поднятых заголовков и хот-стейт при наведении.
+
+OKLCH L-значения вычислены из исходных hex через sRGB gamma → linear → OKLab M1+M2
+матрицы (алгоритм Björn Ottosson). Хроматичность и hue взяты из вычисленного OKLab
+для каждого hex.
+
+| Token | OKLCH | Hex | Use |
+| --- | --- | --- | --- |
+| `--vf-bg` | `oklch(0.178 0.012 268)` | `#0f1116` | App background |
+| `--vf-bg-elevated` | `oklch(0.196 0.015 268)` | _(derived)_ | Reserved elevated surface |
+| `--vf-surface` | `oklch(0.215 0.018 268)` | `#161922` | Panels and cards |
+| `--vf-surface-soft` | `oklch(0.244 0.020 268)` | `#1c2029` | Inputs, nested list surfaces |
+| `--vf-surface-raised` | `oklch(0.272 0.022 268)` | `#232734` | Headers, active tabs |
+| `--vf-surface-hot` | `oklch(0.295 0.024 268)` | _(derived)_ | shadcn accent hover surface |
+
+#### Границы
+
+| Token | OKLCH | Hex | Use |
+| --- | --- | --- | --- |
+| `--vf-border` | `oklch(0.315 0.025 268)` | `#2c3140` | Primary borders |
+| `--vf-border-soft` | `oklch(1 0 0 / 0.06)` | `rgba(255,255,255,0.06)` | Row separators |
+
+#### Текст
+
+| Token | OKLCH | Hex | Use |
+| --- | --- | --- | --- |
+| `--vf-text` | `oklch(0.936 0.008 252)` | `#e9ecf2` | Primary text |
+| `--vf-text-muted` | `oklch(0.668 0.019 258)` | `#9aa1b1` | Secondary labels |
+| `--vf-text-quiet` | `oklch(0.507 0.024 261)` | `#6b7385` | Counters, inactive text |
+
+#### Accent
+
+| Token | OKLCH | Hex | Use |
+| --- | --- | --- | --- |
+| `--vf-accent` | `oklch(0.807 0.098 184)` | `#7dd3c2` | Current selection, focus, ready state |
+| `--vf-accent-strong` | `oklch(0.855 0.115 184)` | _(derived)_ | Strong focus/active accent |
+| `--vf-accent-soft` | `oklch(0.807 0.098 184 / 0.14)` | `rgba(125,211,194,0.14)` | Selected backgrounds |
+| `--vf-accent-border` | `oklch(0.807 0.098 184 / 0.42)` | _(derived)_ | Selected borders and ready badges |
+| `--vf-counter-surface` | `oklch(0.936 0.008 252 / 0.08)` | _(derived)_ | Compact counters inside tabs |
+| `--vf-row-hover` | `oklch(0.936 0.008 252 / 0.035)` | _(derived)_ | Dense row hover |
+| `--vf-row-related` | `oklch(0.807 0.098 184 / 0.06)` | _(derived)_ | Related row tint |
+| `--vf-glow-current` | `oklch(0.807 0.098 184 / 0.55)` | _(derived)_ | Pulse glow for current state dot |
+
+#### Семантические цвета графа
+
+Каждый semantic role имеет три токена: base, soft fill (alpha 0.10–0.13),
+border (alpha 0.42).
+
+| Token | OKLCH | Hex | Use |
+| --- | --- | --- | --- |
+| `--vf-config` | `oklch(0.772 0.130 67)` | `#e6a957` | Config rows and counts |
+| `--vf-config-soft` | `oklch(0.772 0.130 67 / 0.12)` | | Config badge fill |
+| `--vf-config-border` | `oklch(0.772 0.130 67 / 0.42)` | | Config badge border |
+| `--vf-reducer` | `oklch(0.757 0.068 264)` | `#a8b8e0` | Reducer/self targets |
+| `--vf-reducer-soft` | `oklch(0.757 0.068 264 / 0.1)` | | Reducer badge fill |
+| `--vf-reducer-border` | `oklch(0.757 0.068 264 / 0.42)` | | Reducer badge border |
+| `--vf-effect` | `oklch(0.769 0.087 155)` | `#82c79c` | Effect rows and producers |
+| `--vf-effect-soft` | `oklch(0.769 0.087 155 / 0.12)` | | Effect badge fill |
+| `--vf-effect-border` | `oklch(0.769 0.087 155 / 0.42)` | | Effect badge border |
+| `--vf-routing` | `oklch(0.726 0.107 307)` | `#c79de0` | Routing badges |
+| `--vf-routing-soft` | `oklch(0.726 0.107 307 / 0.12)` | | Routing badge fill |
+| `--vf-routing-border` | `oklch(0.726 0.107 307 / 0.42)` | | Routing badge border |
+| `--vf-warning` | `oklch(0.784 0.110 80)` | `#d8b86b` | Manual timeline source, warnings |
+| `--vf-warning-soft` | `oklch(0.784 0.110 80 / 0.13)` | | Warning/diagnostic fill |
+| `--vf-warning-border` | `oklch(0.784 0.110 80 / 0.42)` | | Warning/diagnostic border |
+| `--vf-danger` | `oklch(0.672 0.131 19)` | `#e07a6e` | Errors, failed diagnostics |
+| `--vf-danger-soft` | `oklch(0.672 0.131 19 / 0.11)` | | Error fill |
+| `--vf-danger-border` | `oklch(0.672 0.131 19 / 0.42)` | | Error border |
+| `--vf-domain` | `oklch(0.740 0.100 231)` | `#7eb6f0` | Domain machine badges |
+| `--vf-domain-soft` | `oklch(0.740 0.100 231 / 0.1)` | | Domain badge fill |
+| `--vf-domain-border` | `oklch(0.740 0.100 231 / 0.42)` | | Domain badge border |
+| `--vf-actor` | `oklch(0.728 0.104 56)` | `#d6a06b` | Actor machine badges |
+| `--vf-actor-soft` | `oklch(0.728 0.104 56 / 0.1)` | | Actor badge fill |
+| `--vf-actor-border` | `oklch(0.728 0.104 56 / 0.42)` | | Actor badge border |
+
+#### Производные токены счётчиков
+
+| Token | Значение | Use |
 | --- | --- | --- |
-| `--vf-bg` | `oklch(0.142 0.017 248)` | App background |
-| `--vf-bg-elevated` | `oklch(0.165 0.019 248)` | Reserved elevated app surface |
-| `--vf-surface` | `oklch(0.19 0.021 248)` | Panels and cards |
-| `--vf-surface-raised` | `oklch(0.235 0.025 248)` | Headers, active tabs |
-| `--vf-surface-soft` | `oklch(0.172 0.019 248)` | Inputs, nested list surfaces |
-| `--vf-surface-hot` | `oklch(0.265 0.03 248)` | shadcn accent hover surface |
-| `--vf-border` | `oklch(0.335 0.028 248)` | Primary borders |
-| `--vf-border-soft` | `oklch(0.285 0.023 248)` | Row separators |
-| `--vf-text` | `oklch(0.925 0.013 248)` | Primary text |
-| `--vf-text-muted` | `oklch(0.69 0.028 248)` | Secondary labels |
-| `--vf-text-quiet` | `oklch(0.54 0.031 248)` | Counters, inactive text |
-| `--vf-accent` | `oklch(0.79 0.105 185)` | Current selection, focus, ready state |
-| `--vf-accent-strong` | `oklch(0.84 0.12 185)` | Strong focus/active accent when needed |
-| `--vf-accent-soft` | `oklch(0.79 0.105 185 / 0.14)` | Selected backgrounds |
-| `--vf-accent-border` | `oklch(0.79 0.105 185 / 0.42)` | Selected borders and ready badges |
-| `--vf-counter-surface` | `oklch(0.925 0.013 248 / 0.08)` | Compact counters inside tabs |
-| `--vf-row-hover` | `oklch(0.925 0.013 248 / 0.035)` | Dense row hover |
-| `--vf-config` | `oklch(0.8 0.12 73)` | Config rows and counts |
-| `--vf-config-soft` | `oklch(0.8 0.12 73 / 0.12)` | Config badge fill |
-| `--vf-config-border` | `oklch(0.8 0.12 73 / 0.42)` | Config badge border |
-| `--vf-reducer` | `oklch(0.75 0.074 266)` | Reducer/self targets |
-| `--vf-reducer-soft` | `oklch(0.75 0.074 266 / 0.1)` | Reducer badge fill |
-| `--vf-reducer-border` | `oklch(0.75 0.074 266 / 0.42)` | Reducer badge border |
-| `--vf-effect` | `oklch(0.77 0.105 150)` | Effect rows and producers |
-| `--vf-effect-soft` | `oklch(0.77 0.105 150 / 0.12)` | Effect badge fill |
-| `--vf-effect-border` | `oklch(0.77 0.105 150 / 0.42)` | Effect badge border |
-| `--vf-routing` | `oklch(0.76 0.098 310)` | Routing badges |
-| `--vf-routing-soft` | `oklch(0.76 0.098 310 / 0.12)` | Routing badge fill |
-| `--vf-routing-border` | `oklch(0.76 0.098 310 / 0.42)` | Routing badge border |
-| `--vf-warning` | `oklch(0.79 0.115 92)` | Manual timeline source, warnings |
-| `--vf-warning-soft` | `oklch(0.79 0.115 92 / 0.13)` | Warning/diagnostic fill |
-| `--vf-warning-border` | `oklch(0.79 0.115 92 / 0.42)` | Warning/diagnostic border |
-| `--vf-danger` | `oklch(0.71 0.13 30)` | Errors, failed diagnostics |
-| `--vf-danger-soft` | `oklch(0.71 0.13 30 / 0.11)` | Error fill |
-| `--vf-danger-border` | `oklch(0.71 0.13 30 / 0.42)` | Error border |
-| `--vf-domain` | `oklch(0.74 0.105 235)` | Domain machine badges |
-| `--vf-domain-soft` | `oklch(0.74 0.105 235 / 0.1)` | Domain badge fill |
-| `--vf-domain-border` | `oklch(0.74 0.105 235 / 0.42)` | Domain badge border |
-| `--vf-actor` | `oklch(0.75 0.105 62)` | Actor machine badges |
-| `--vf-actor-soft` | `oklch(0.75 0.105 62 / 0.1)` | Actor badge fill |
-| `--vf-actor-border` | `oklch(0.75 0.105 62 / 0.42)` | Actor badge border |
+| `--vf-counter-in` | `= --vf-config` | Producer count arrows (↑) |
+| `--vf-counter-out` | `= --vf-effect` | Consumer count arrows (↓) |
 
 ### Typography
 
@@ -104,11 +148,17 @@ diagnostics и source anchors. Интерфейс не является ленд
 
 - Radius: `6px` for compact controls, `8px` for panels and cards, `999px` for
   badges.
-- Borders: one-pixel full borders. Do not use colored side-stripe borders.
-- Shadows: only active machine cards may use a one-pixel focus ring through
-  `box-shadow`; idle panels have no shadow.
+- Borders: one-pixel full borders by default. Side-stripe accents
+  (`box-shadow: inset 2px 0 0 var(--vf-accent)` или `inset 3px 0 0`) разрешены
+  только для двух ролей: current state в machine card и selected/related rows
+  в L1/L2/L3 picker. Любые другие side-stripes запрещены.
+- Shadows: только active machine card может использовать one-pixel focus ring
+  через `box-shadow`; idle panels не имеют тени. Для current state допустим
+  компактный pulse-glow на одной точке-индикаторе, не на ряду или карточке
+  целиком.
 - Motion: `140ms..220ms`, state feedback only. Do not animate layout
-  properties.
+  properties. Допустимы `pulseGlow` на current-state pulse dot и `rowAppear`
+  flash на recently-fired ряду.
 - Focus: visible outline in `--vf-accent`, at least `2px`, with offset.
 
 ## Component Contracts
@@ -224,9 +274,11 @@ Testing hooks:
 ### Lists And Rows
 
 - Machine and topic rows use grid/flex layouts with stable counters.
-- Selected rows use subtle accent background plus full border color. Related
-  rows use accent tint. Dimmed rows lower opacity only when another relation is
-  selected.
+- Density rows (≤32px высоты) для L1/L2/L3 picker: `[badge?] · <b mono>{id}</b>`
+  inline + counters справа.
+- Selected rows use side-stripe `--vf-accent` accent + accent-tint background.
+  Related rows используют accent tint без stripe. Dimmed rows lower opacity
+  only when another relation is selected (`opacity ~0.32`).
 - Long event/state/guard/routing strings wrap predictably with
   `overflow-wrap:anywhere`; columns must not stretch the viewport.
 - Counts use arrows consistently: producers `↑`, consumers `↓`.
@@ -277,8 +329,12 @@ Testing hooks:
 
 - Machine cards show kind, current state, source affordance and grouped rows.
 - State blocks show current state, initial/terminal badges and row layer tags.
+  Current state получает side-stripe accent + лёгкий accent tint + pulse-dot
+  слева от заголовка (анимация `pulseGlow`, 1.4s).
 - Transition rows use `cfg`; effect rows use `eff`; reducer/self information
   uses reducer color.
+- Recently-fired ряды могут получать `rowAppear` flash (warning bg на 0.4s)
+  до следующего шага.
 - Timeline rows show sequence, event, source kind and consumed transitions.
   Manual/external/effect sources have distinct semantic markers.
 
@@ -318,5 +374,7 @@ Testing hooks:
 - React Flow, ELK, canvas coordinates or edge routing in Stage 12.
 - Custom SVG icon system when a lucide icon exists.
 - Nested cards.
-- Side-stripe accent borders.
-- Hardcoded CSS/DOM copied from `music-app-mvp-flow.html`.
+- Side-stripe accent borders за пределами разрешённых ролей (current state,
+  selected/related rows). Любой другой side-stripe запрещён.
+- Копирование сырого CSS/DOM из внешних прототипов. Следовать визуальному
+  словарю допустимо; реализация остаётся через Tailwind + shadcn + `--vf-*` токены.

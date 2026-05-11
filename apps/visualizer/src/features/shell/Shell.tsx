@@ -1,4 +1,4 @@
-import { Activity, AlertCircle, FileCode, FileText, RefreshCw, Terminal, X } from "lucide-react";
+import { AlertCircle, FileCode, Play, RotateCcw, Terminal, X } from "lucide-react";
 import type { ConsolePanelView } from "../../console";
 import { useWorkbenchContext } from "../../app/workbench-context";
 import { useWorkbenchSelector } from "../../app/use-workbench-selector";
@@ -31,6 +31,7 @@ import {
   PanelBody,
   PanelHeader,
   PanelKicker,
+  PanelTitle,
   SourceEditorShell,
   StatusBadge,
 } from "@/ui/visualizer";
@@ -51,6 +52,15 @@ const statusTone = (status: string): "ready" | "muted" | "diagnostic" => {
   return "muted";
 };
 
+const compileStatusLabel = (status: string): string => {
+  if (status === "ready") return "compiled";
+  if (status === "running") return "compiling";
+  if (status === "failed") return "failed";
+  if (status === "blocked") return "blocked";
+
+  return "idle";
+};
+
 const SourceWorkspace = ({
   sourcePanel,
   dispatch,
@@ -58,17 +68,13 @@ const SourceWorkspace = ({
   sourcePanel: SourcePanelView;
   dispatch: (command: VisualizerCommand) => void;
 }) => (
-  <Panel aria-labelledby="source-pipeline-title" className="h-full" data-testid={VISUALIZER_TEST_IDS.source.panel}>
-    <PanelHeader>
-      <div className="min-w-0">
-        <PanelKicker>Source</PanelKicker>
-        <h2 id="source-pipeline-title" className="truncate text-xs font-semibold">
-          {sourcePanel.filename}
-        </h2>
-      </div>
+  <section aria-labelledby="source-pipeline-title" className="flex h-full min-h-0 flex-col gap-2" data-testid={VISUALIZER_TEST_IDS.source.panel}>
+    <header className="flex shrink-0 flex-wrap items-center gap-2 px-1">
+      <PanelKicker>Source · pasted snippet</PanelKicker>
+      <h2 id="source-pipeline-title" className="truncate font-mono text-[12px] font-semibold text-foreground">
+        {sourcePanel.filename}
+      </h2>
       <div className="ml-auto flex items-center gap-2">
-        <StatusBadge tone={statusTone(sourcePanel.compileStatus)}>compile {sourcePanel.compileStatus}</StatusBadge>
-        <StatusBadge tone={statusTone(sourcePanel.validationStatus)}>validation {sourcePanel.validationStatus}</StatusBadge>
         <Tooltip>
           <TooltipTrigger asChild>
             <IconButton
@@ -76,27 +82,44 @@ const SourceWorkspace = ({
               data-testid={VISUALIZER_TEST_IDS.source.reset}
               onClick={() => dispatch({ type: "source.reset-to-sample" })}
             >
-              <RefreshCw aria-hidden="true" />
+              <RotateCcw aria-hidden="true" />
             </IconButton>
           </TooltipTrigger>
           <TooltipContent>Reset to sample</TooltipContent>
         </Tooltip>
+        <Button
+          type="button"
+          size="sm"
+          className="bg-primary font-semibold text-primary-foreground hover:bg-[color:var(--vf-accent-strong)]"
+          data-testid={VISUALIZER_TEST_IDS.source.open}
+          disabled={!sourcePanel.canOpen}
+          onClick={() => dispatch({ type: "source.open-visualizer" })}
+        >
+          <Play data-icon="inline-start" aria-hidden="true" />
+          Open visualizer
+        </Button>
       </div>
-    </PanelHeader>
+    </header>
 
-    <PanelBody className="grid min-h-0 gap-2.5 overflow-auto p-2.5 lg:grid-cols-[minmax(0,1fr)_minmax(260px,320px)] lg:overflow-hidden">
-      <SourceEditorShell
-        label="Source editor"
-        value={sourcePanel.source}
-        textareaTestId={VISUALIZER_TEST_IDS.source.editor}
-        className="min-h-[420px] lg:min-h-0"
-        textareaClassName="min-h-[420px] lg:min-h-0 lg:flex-1"
-        onValueChange={(source) => dispatch({ type: "source.changed", source })}
-      />
+    <div className="grid min-h-0 flex-1 gap-2.5 overflow-auto lg:grid-cols-[minmax(0,1fr)_minmax(220px,260px)] lg:overflow-hidden">
+      <div className="flex min-h-[420px] min-w-0 flex-col gap-2 lg:min-h-0">
+        <SourceEditorShell
+          label="Source editor"
+          value={sourcePanel.source}
+          textareaTestId={VISUALIZER_TEST_IDS.source.editor}
+          className="min-h-[420px] flex-1 lg:min-h-0"
+          textareaClassName="min-h-[420px] flex-1 lg:min-h-0"
+          onValueChange={(source) => dispatch({ type: "source.changed", source })}
+        />
+        <p className="px-1 text-[11px] text-[color:var(--vf-text-quiet)]">
+          paste source → <span className="font-mono text-[color:var(--vf-accent)]">compile</span> → explore. The compiler accepts one or more{" "}
+          <code className="rounded-sm bg-[color:var(--vf-surface-soft)] px-1 font-mono text-[10px] text-foreground">createMachine(…)</code> calls per spec.
+        </p>
+      </div>
 
-      <aside className="flex min-h-fit flex-col gap-3 rounded-md border bg-[color:var(--vf-surface-soft)] p-3 lg:min-h-0">
+      <aside className="flex min-h-fit flex-col gap-2.5 lg:min-h-0">
         <div
-          className="grid gap-2 rounded-md border bg-background p-2.5 font-mono text-[11px] text-muted-foreground"
+          className="grid gap-1.5 rounded-lg border bg-[color:var(--vf-surface-soft)] p-3 font-mono text-[11px] text-[color:var(--vf-text-muted)]"
           data-testid={VISUALIZER_TEST_IDS.source.summary}
           data-version={sourcePanel.version}
           data-compile-status={sourcePanel.compileStatus}
@@ -107,46 +130,48 @@ const SourceWorkspace = ({
           data-machine-count={sourcePanel.machineCount}
           data-topic-count={sourcePanel.topicCount}
         >
-          <span>version {sourcePanel.version}</span>
-          <span className="min-w-0 [overflow-wrap:anywhere]">hash {sourcePanel.hash}</span>
-          <span>compile {sourcePanel.compileStatus}</span>
-          <span>analyze {sourcePanel.analysisStatus}</span>
-          <span>model {sourcePanel.modelStatus}</span>
-          <span>diagnostics {sourcePanel.diagnosticCount}</span>
-        </div>
-
-        <Button
-          variant="secondary"
-          size="sm"
-          className="justify-start"
-          data-testid={VISUALIZER_TEST_IDS.source.open}
-          disabled={!sourcePanel.canOpen}
-          onClick={() => dispatch({ type: "source.open-visualizer" })}
-        >
-          <FileText data-icon="inline-start" aria-hidden="true" />
-          Open visualizer
-        </Button>
-
-        <div className="grid gap-2 rounded-md border bg-background p-2.5">
           <PanelKicker>Projection</PanelKicker>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="mt-1 grid grid-cols-3 gap-2">
             <div>
-              <p className="font-mono text-[10px] text-[color:var(--vf-text-quiet)]">Machines</p>
-              <p className="mt-1 font-mono text-lg text-foreground">{sourcePanel.machineCount}</p>
+              <p className="text-[10px] text-[color:var(--vf-text-quiet)]">machines</p>
+              <p className="mt-0.5 text-base text-foreground">{sourcePanel.machineCount}</p>
             </div>
             <div>
-              <p className="font-mono text-[10px] text-[color:var(--vf-text-quiet)]">Topics</p>
-              <p className="mt-1 font-mono text-lg text-foreground">{sourcePanel.topicCount}</p>
+              <p className="text-[10px] text-[color:var(--vf-text-quiet)]">topics</p>
+              <p className="mt-0.5 text-base text-foreground">{sourcePanel.topicCount}</p>
             </div>
             <div>
-              <p className="font-mono text-[10px] text-[color:var(--vf-text-quiet)]">Issues</p>
-              <p className="mt-1 font-mono text-lg text-foreground">{sourcePanel.diagnosticCount}</p>
+              <p className="text-[10px] text-[color:var(--vf-text-quiet)]">issues</p>
+              <p
+                className={cn(
+                  "mt-0.5 text-base",
+                  sourcePanel.diagnosticCount > 0 ? "text-[color:var(--vf-warning)]" : "text-foreground",
+                )}
+              >
+                {sourcePanel.diagnosticCount}
+              </p>
             </div>
           </div>
         </div>
+
+        <div className="grid gap-1.5 rounded-lg border bg-[color:var(--vf-surface-soft)] p-3 font-mono text-[11px]">
+          <PanelKicker>Source meta</PanelKicker>
+          <dl className="mt-1 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-[color:var(--vf-text-muted)]">
+            <dt className="text-[color:var(--vf-text-quiet)]">version</dt>
+            <dd className="font-mono text-foreground">{sourcePanel.version}</dd>
+            <dt className="text-[color:var(--vf-text-quiet)]">hash</dt>
+            <dd className="min-w-0 break-all font-mono text-foreground [overflow-wrap:anywhere]">{sourcePanel.hash}</dd>
+            <dt className="text-[color:var(--vf-text-quiet)]">compile</dt>
+            <dd className="font-mono">{sourcePanel.compileStatus}</dd>
+            <dt className="text-[color:var(--vf-text-quiet)]">analyze</dt>
+            <dd className="font-mono">{sourcePanel.analysisStatus}</dd>
+            <dt className="text-[color:var(--vf-text-quiet)]">model</dt>
+            <dd className="font-mono">{sourcePanel.modelStatus}</dd>
+          </dl>
+        </div>
       </aside>
-    </PanelBody>
-  </Panel>
+    </div>
+  </section>
 );
 
 const ConsoleDrawer = ({
@@ -178,10 +203,7 @@ const ConsoleDrawer = ({
       data-testid={VISUALIZER_TEST_IDS.console.panel}
     >
       <PanelHeader className="justify-between">
-        <div className="min-w-0">
-          <PanelKicker>Diagnostics</PanelKicker>
-          <h2 className="truncate text-xs font-semibold">Console</h2>
-        </div>
+        <PanelTitle eyebrow="Diagnostics" title="Console" />
         <Button
           type="button"
           variant="outline"
@@ -215,7 +237,7 @@ const ConsoleDrawer = ({
         <PaneScrollArea>
           {consolePanel.entries.length === 0 ? (
             <div
-              className="flex min-h-36 flex-col items-start justify-center gap-2 p-3 text-sm text-muted-foreground"
+              className="flex min-h-36 items-center justify-center gap-2 p-3 text-sm text-muted-foreground"
               data-testid={VISUALIZER_TEST_IDS.console.entries}
               data-empty="true"
               data-entry-count="0"
@@ -286,6 +308,9 @@ export const Shell = () => {
   const machineWorkbenchPanel = useWorkbenchSelector(selectMachineWorkbenchPanel);
   const sourceOverlay = useWorkbenchSelector(selectSourceOverlay);
 
+  const compileLabel = compileStatusLabel(sourcePanel.compileStatus);
+  const compileTone = statusTone(sourcePanel.compileStatus);
+
   return (
     <main
       className="dark min-h-screen min-w-80 bg-background text-foreground"
@@ -293,29 +318,30 @@ export const Shell = () => {
     >
       <div className="grid h-screen grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
         <header
-          className="flex min-h-14 flex-col gap-2 border-b bg-card px-3 py-2 lg:flex-row lg:items-center"
+          className="flex min-h-12 flex-col gap-2 border-b bg-[color:var(--vf-surface)] px-4 py-2 lg:flex-row lg:items-center lg:gap-4"
           data-testid={VISUALIZER_TEST_IDS.shell.topbar}
         >
           <div className="flex min-w-0 shrink-0 items-center gap-2.5">
             <span
-              className="grid size-7 shrink-0 place-items-center rounded-md border border-[color:var(--vf-accent-border)] bg-[color:var(--vf-accent-soft)] font-mono text-[11px] font-bold text-primary"
+              className="grid size-6 shrink-0 place-items-center rounded-[5px] border border-[color:var(--vf-accent-border)] bg-[color:var(--vf-accent-soft)] font-mono text-[11px] font-bold text-[color:var(--vf-accent)]"
               aria-hidden="true"
             >
               lf
             </span>
-            <div className="min-w-0 truncate font-mono text-[12px] text-muted-foreground">
-              <span>lite-fsm visualizer</span> <span className="text-[color:var(--vf-text-quiet)]">·</span>{" "}
-              <h1 className="inline truncate font-semibold text-foreground">Stage 12e manual graph simulation</h1>
+            <div className="flex min-w-0 items-baseline gap-1.5 font-mono text-[12px] text-[color:var(--vf-text-muted)]">
+              <span className="truncate">lite-fsm visualizer</span>
+              <span className="text-[color:var(--vf-text-quiet)]">·</span>
+              <h1 className="inline truncate font-semibold text-foreground">stage 12e</h1>
             </div>
           </div>
 
           <Tabs
             value={activeTab}
             onValueChange={(value) => dispatch({ type: "tab.selected", tab: value as VisualizerTab })}
-            className="min-w-0 lg:flex-1"
+            className="min-w-0"
           >
             <TabsList
-              className="w-full max-w-full justify-start overflow-x-auto border bg-[color:var(--vf-surface-soft)] lg:w-fit"
+              className="w-full max-w-full gap-0.5 overflow-x-auto rounded-lg border bg-[color:var(--vf-surface-soft)] p-[3px] lg:w-fit"
               data-testid={VISUALIZER_TEST_IDS.tabs.root}
             >
               {tabs.map((tab) => (
@@ -327,11 +353,18 @@ export const Shell = () => {
                   data-diagnostic-count={tab.diagnosticCount}
                   data-has-error={tab.hasError}
                   data-testid={VISUALIZER_TEST_IDS.tabs.trigger[tab.tab]}
-                  className="min-w-fit px-3 data-active:bg-[color:var(--vf-surface-raised)]"
+                  className="min-w-fit gap-1.5 rounded-md px-3 py-1 text-[12px] font-medium text-[color:var(--vf-text-muted)] transition-colors hover:bg-[oklch(1_0_0/0.06)] hover:text-foreground data-active:font-semibold data-active:shadow-[0_1px_4px_oklch(0_0_0/0.4)] dark:data-active:bg-[color:var(--vf-accent-border)] dark:data-active:text-foreground dark:data-active:border-transparent"
                 >
                   <span>{tab.label}</span>
                   {tab.count ? (
-                    <span className="rounded-full bg-[color:var(--vf-counter-surface)] px-1.5 font-mono text-[10px] text-[color:var(--vf-text-quiet)]">
+                    <span
+                      className={cn(
+                        "rounded-full px-1.5 font-mono text-[10px]",
+                        activeTab === tab.tab
+                          ? "bg-[oklch(0_0_0/0.25)] text-foreground"
+                          : "bg-[color:var(--vf-counter-surface)] text-[color:var(--vf-text-quiet)]",
+                      )}
+                    >
                       {tab.count}
                     </span>
                   ) : null}
@@ -357,19 +390,36 @@ export const Shell = () => {
           </Tabs>
 
           <div className="flex min-w-0 flex-wrap items-center gap-2 lg:ml-auto lg:justify-end">
-            <StatusBadge tone="muted">
-              <FileCode data-icon="inline-start" aria-hidden="true" />
+            <span className="inline-flex shrink-0 items-center gap-1.5 rounded-md border bg-[color:var(--vf-surface-soft)] px-2 py-1 font-mono text-[11px] text-[color:var(--vf-text-muted)]">
+              <FileCode aria-hidden="true" className="size-3.5 text-[color:var(--vf-text-quiet)]" />
               {sourcePanel.filename}
-            </StatusBadge>
-            <StatusBadge
-              tone={statusTone(sourcePanel.modelStatus)}
+            </span>
+            <span
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-md border bg-[color:var(--vf-surface-soft)] px-2 py-1 font-mono text-[11px] text-[color:var(--vf-text-muted)]"
               data-testid={VISUALIZER_TEST_IDS.source.status}
               data-status={sourcePanel.modelStatus}
             >
-              <span className="sr-only">model status</span>
-              <Activity data-icon="inline-start" aria-hidden="true" />
-              model {sourcePanel.modelStatus}
-            </StatusBadge>
+              <span
+                aria-hidden="true"
+                className={cn(
+                  "size-1.5 shrink-0 rounded-full",
+                  compileTone === "ready"
+                    ? "bg-[color:var(--vf-accent)]"
+                    : compileTone === "diagnostic"
+                      ? "bg-[color:var(--vf-danger)]"
+                      : "bg-[color:var(--vf-text-quiet)]",
+                )}
+              />
+              <span className={cn(compileTone === "diagnostic" && "text-[color:var(--vf-danger)]", compileTone === "ready" && "text-[color:var(--vf-accent)]")}>
+                {compileLabel}
+              </span>
+              {sourcePanel.diagnosticCount > 0 ? (
+                <>
+                  <span className="text-[color:var(--vf-border)]">·</span>
+                  <span className="text-[color:var(--vf-warning)]">{sourcePanel.diagnosticCount} {sourcePanel.diagnosticCount === 1 ? "issue" : "issues"}</span>
+                </>
+              ) : null}
+            </span>
             <Button
               variant="outline"
               size="sm"
@@ -384,7 +434,7 @@ export const Shell = () => {
         </header>
 
         <section
-          className="min-h-0 p-2.5 sm:p-3.5"
+          className="min-h-0 p-2.5 sm:p-3"
           data-active-tab={activeTab}
           data-testid={VISUALIZER_TEST_IDS.shell.workspace}
         >

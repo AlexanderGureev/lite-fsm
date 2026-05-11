@@ -9,15 +9,21 @@ import type {
 } from "../../workbench";
 import { Button } from "@/ui/button";
 import { Input } from "@/ui/input";
-import { LayerBadge, PaneScrollArea, Panel, PanelBody, PanelHeader, PanelKicker, StatusBadge } from "@/ui/visualizer";
+import {
+  Counter,
+  DensityRow,
+  type DensityRowRelation,
+  LayerBadge,
+  PaneScrollArea,
+  PanelKicker,
+  PanelTitle,
+  RoutingPill,
+  StatusBadge,
+} from "@/ui/visualizer";
 import { VISUALIZER_TEST_IDS } from "@/test-ids";
-import { cn } from "@/lib/utils";
 
-const topicRowClass = (selected: boolean): string =>
-  cn(
-    "w-full rounded-md border bg-background p-2 text-left transition-colors hover:bg-[color:var(--vf-row-hover)] focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-    selected && "border-[color:var(--vf-accent-border)] bg-[color:var(--vf-accent-soft)]",
-  );
+const topicRelation = (topic: EventCatalogTopicRowView): DensityRowRelation =>
+  topic.selected ? "selected" : "idle";
 
 const TopicRow = ({
   topic,
@@ -26,9 +32,8 @@ const TopicRow = ({
   topic: EventCatalogTopicRowView;
   dispatch: (command: VisualizerCommand) => void;
 }) => (
-  <button
-    type="button"
-    className={topicRowClass(topic.selected)}
+  <DensityRow
+    relation={topicRelation(topic)}
     aria-pressed={topic.selected}
     data-testid={VISUALIZER_TEST_IDS.events.topicRow}
     data-event-type={topic.eventType}
@@ -37,38 +42,40 @@ const TopicRow = ({
     data-diagnostics={topic.diagnosticCount}
     onClick={() => dispatch({ type: "l2.topic.selected", eventType: topic.eventType })}
   >
-    <strong
-      className="block min-w-0 font-mono text-[11px] text-foreground [overflow-wrap:anywhere]"
-      data-testid={VISUALIZER_TEST_IDS.workbench.longLabel}
-      data-label-kind="event"
-    >
-      {topic.eventType}
-    </strong>
-    <span className="mt-1 flex flex-wrap items-center gap-1.5 font-mono text-[10px] text-[color:var(--vf-text-quiet)]">
-      <span>↑ {topic.producerCount}</span>
-      <span>↓ {topic.consumerCount}</span>
+    <span className="flex min-w-0 items-center gap-1.5">
+      <strong
+        className="min-w-0 truncate font-mono text-[12px] font-semibold text-foreground"
+        data-testid={VISUALIZER_TEST_IDS.workbench.longLabel}
+        data-label-kind="event"
+        title={topic.eventType}
+      >
+        {topic.eventType}
+      </strong>
       {topic.diagnosticCount > 0 ? <StatusBadge tone="diagnostic">diag {topic.diagnosticCount}</StatusBadge> : null}
     </span>
-  </button>
+    <span className="flex shrink-0 items-center gap-1">
+      <Counter tone="out">{topic.producerCount}↑</Counter>
+      <Counter tone="in">{topic.consumerCount}↓</Counter>
+    </span>
+  </DensityRow>
 );
 
-const SourceButton = ({
+const SourceLink = ({
   action,
   dispatch,
 }: {
   action: EventProducerRowView["sourceAction"];
   dispatch: (command: VisualizerCommand) => void;
 }) => (
-  <Button
+  <button
     type="button"
-    variant="outline"
-    size="sm"
+    className="ml-1 inline-flex items-center gap-1 rounded-sm border border-transparent px-1 py-0.5 font-mono text-[10px] text-[color:var(--vf-text-quiet)] transition-colors hover:text-[color:var(--vf-accent)] disabled:opacity-50"
     data-testid={VISUALIZER_TEST_IDS.events.viewSource}
     onClick={() => dispatch({ type: "source.overlay.opened", ...action })}
   >
-    <Eye data-icon="inline-start" aria-hidden="true" />
-    Source
-  </Button>
+    <Eye aria-hidden="true" className="size-3" />
+    source
+  </button>
 );
 
 const ProducerRow = ({
@@ -79,7 +86,7 @@ const ProducerRow = ({
   dispatch: (command: VisualizerCommand) => void;
 }) => (
   <li
-    className="rounded-md border bg-background p-2"
+    className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 rounded-md border bg-[color:var(--vf-surface-soft)] px-2.5 py-1.5"
     data-testid={VISUALIZER_TEST_IDS.events.producerRow}
     data-row-id={producer.rowId}
     data-machine-id={producer.machineId}
@@ -87,31 +94,42 @@ const ProducerRow = ({
     data-routing-label={producer.routingLabel}
     data-confidence={producer.confidence}
   >
-    <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+    <span className="flex min-w-0 items-center gap-1.5 font-mono text-[11px]">
       <LayerBadge layer="effect" />
       <strong
-        className="min-w-0 font-mono text-[11px] [overflow-wrap:anywhere]"
+        className="min-w-0 truncate text-foreground"
         data-testid={VISUALIZER_TEST_IDS.workbench.longLabel}
         data-label-kind="machine"
       >
         {producer.machineId}
       </strong>
-      <StatusBadge tone="routing" data-testid={VISUALIZER_TEST_IDS.workbench.longLabel} data-label-kind="routing">
-        {producer.routingLabel}
-      </StatusBadge>
+      <SourceLink action={producer.sourceAction} dispatch={dispatch} />
+    </span>
+    <span className="shrink-0">
       <StatusBadge tone={producer.confidence === "exact" ? "ready" : "diagnostic"}>{producer.confidence}</StatusBadge>
-    </div>
-    <p className="mt-1 font-mono text-[10px] text-[color:var(--vf-text-quiet)]">from {producer.sourceStateKey}</p>
-    {producer.guardLabel ? (
-      <p className="mt-1 text-sm text-muted-foreground" data-testid={VISUALIZER_TEST_IDS.workbench.longLabel} data-label-kind="guard">
-        {producer.guardLabel}
-      </p>
-    ) : null}
-    <div className="mt-2">
-      <SourceButton action={producer.sourceAction} dispatch={dispatch} />
-    </div>
+    </span>
+    <span className="col-span-2 min-w-0 font-mono text-[10px] text-[color:var(--vf-text-muted)]">
+      on entering <span className="text-[color:var(--vf-accent)]">{producer.sourceStateKey}</span>
+      <span className="mx-1 text-[color:var(--vf-text-quiet)]">may emit via</span>
+      <RoutingPill className="ml-0.5">{producer.routingLabel}</RoutingPill>
+      {producer.guardLabel ? (
+        <span className="ml-1 italic text-[color:var(--vf-warning)]" data-testid={VISUALIZER_TEST_IDS.workbench.longLabel} data-label-kind="guard">
+          · {producer.guardLabel}
+        </span>
+      ) : null}
+    </span>
   </li>
 );
+
+const consumerLayerForBranch = (branch: EventConsumerRowView["branches"][number]): "config" | "reducer" =>
+  branch.layer === "config" ? "config" : "reducer";
+
+const targetClass = (target: string): string => {
+  if (target === "self") return "text-[color:var(--vf-reducer)]";
+  if (target.startsWith("__")) return "text-[color:var(--vf-accent)]";
+
+  return "text-[color:var(--vf-accent)]";
+};
 
 const ConsumerRow = ({
   consumer,
@@ -121,7 +139,7 @@ const ConsumerRow = ({
   dispatch: (command: VisualizerCommand) => void;
 }) => (
   <li
-    className="rounded-md border bg-background p-2"
+    className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 rounded-md border bg-[color:var(--vf-surface-soft)] px-2.5 py-1.5"
     data-testid={VISUALIZER_TEST_IDS.events.consumerRow}
     data-row-id={consumer.rowId}
     data-machine-id={consumer.machineId}
@@ -130,63 +148,64 @@ const ConsumerRow = ({
     data-branch-count={consumer.branchCount}
     data-confidence={consumer.confidence}
   >
-    <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+    <span className="flex min-w-0 items-center gap-1.5 font-mono text-[11px]">
       <LayerBadge layer="config" />
       <strong
-        className="min-w-0 font-mono text-[11px] [overflow-wrap:anywhere]"
+        className="min-w-0 truncate text-foreground"
         data-testid={VISUALIZER_TEST_IDS.workbench.longLabel}
         data-label-kind="machine"
       >
         {consumer.machineId}
       </strong>
+      <SourceLink action={consumer.sourceAction} dispatch={dispatch} />
+    </span>
+    <span className="flex shrink-0 items-center gap-1">
       <StatusBadge tone={consumer.confidence === "exact" ? "ready" : "diagnostic"}>{consumer.confidence}</StatusBadge>
-      <StatusBadge tone="muted">branches {consumer.branchCount}</StatusBadge>
-    </div>
-    <p className="mt-1 font-mono text-[10px] text-[color:var(--vf-text-quiet)]">
-      from {consumer.sourceStateKey} to {consumer.targetSummary || "unknown"}
-    </p>
-    {consumer.guardLabels.length > 0 ? (
-      <p className="mt-1 text-sm text-muted-foreground" data-testid={VISUALIZER_TEST_IDS.workbench.longLabel} data-label-kind="guard">
-        {consumer.guardLabels.join(", ")}
-      </p>
-    ) : null}
-    <ol className="mt-2 flex flex-col gap-1.5">
+      {consumer.branchCount > 1 ? <StatusBadge tone="muted">branches {consumer.branchCount}</StatusBadge> : null}
+    </span>
+    <ol className="col-span-2 flex flex-col gap-0.5 font-mono text-[10px] text-[color:var(--vf-text-muted)]">
       {consumer.branches.map((branch) => (
         <li
           key={branch.rowId}
-          className="rounded-md border border-[color:var(--vf-border-soft)] bg-[color:var(--vf-surface-soft)] p-2"
+          className="flex min-w-0 flex-wrap items-center gap-1.5"
           data-testid={VISUALIZER_TEST_IDS.events.consumerBranch}
           data-row-id={branch.rowId}
           data-layer={branch.layer}
           data-target-label={branch.targetLabel}
           data-confidence={branch.confidence}
         >
-          <span className="flex min-w-0 flex-wrap items-center gap-1.5">
-            <LayerBadge layer={branch.layer === "config" ? "config" : "reducer"} />
-            <span
-              className="min-w-0 font-mono text-[11px] [overflow-wrap:anywhere]"
-              data-testid={VISUALIZER_TEST_IDS.workbench.longLabel}
-              data-label-kind="target"
-            >
-              {branch.targetLabel}
-            </span>
-            <StatusBadge tone={branch.confidence === "exact" ? "ready" : "diagnostic"}>{branch.confidence}</StatusBadge>
+          <LayerBadge layer={consumerLayerForBranch(branch)} />
+          <span className="text-[color:var(--vf-accent)]">{consumer.sourceStateKey}</span>
+          <span className="text-[color:var(--vf-text-quiet)]">→</span>
+          <span
+            className={targetClass(branch.targetLabel)}
+            data-testid={VISUALIZER_TEST_IDS.workbench.longLabel}
+            data-label-kind="target"
+          >
+            {branch.targetLabel}
           </span>
           {branch.guardLabel ? (
             <span
-              className="mt-1 block text-sm text-muted-foreground"
+              className="italic text-[color:var(--vf-warning)]"
               data-testid={VISUALIZER_TEST_IDS.workbench.longLabel}
               data-label-kind="guard"
             >
-              {branch.guardLabel}
+              · {branch.guardLabel}
             </span>
           ) : null}
+          <span className="ml-auto text-[color:var(--vf-text-quiet)]">{branch.confidence}</span>
         </li>
       ))}
     </ol>
-    <div className="mt-2">
-      <SourceButton action={consumer.sourceAction} dispatch={dispatch} />
-    </div>
+    {consumer.guardLabels.length > 0 ? (
+      <span
+        className="col-span-2 font-mono text-[10px] text-[color:var(--vf-text-quiet)]"
+        data-testid={VISUALIZER_TEST_IDS.workbench.longLabel}
+        data-label-kind="guard"
+      >
+        guards: {consumer.guardLabels.join(", ")}
+      </span>
+    ) : null}
   </li>
 );
 
@@ -198,123 +217,133 @@ const TopicDetail = ({
   dispatch: (command: VisualizerCommand) => void;
 }) => (
   <div
-    className="grid min-h-0 gap-3 lg:grid-cols-2"
+    className="flex min-h-0 min-w-0 flex-col gap-3 p-3"
     data-testid={VISUALIZER_TEST_IDS.events.detailTopic}
     data-detail-kind="topic"
     data-event-type={detail.eventType}
   >
-    <section className="flex min-h-0 flex-col gap-3 lg:col-span-2">
-      <div>
-        <PanelKicker>Topic</PanelKicker>
-        <h3
-          className="mt-1 min-w-0 font-mono text-sm font-semibold [overflow-wrap:anywhere]"
-          data-testid={VISUALIZER_TEST_IDS.workbench.longLabel}
-          data-label-kind="event"
-        >
-          {detail.eventType}
-        </h3>
-      </div>
-      <div className="flex flex-wrap gap-1.5">
-        <StatusBadge tone="muted">producers {detail.producerCount}</StatusBadge>
-        <StatusBadge tone="muted">consumers {detail.consumerCount}</StatusBadge>
-        <StatusBadge tone="muted">machines {detail.relatedMachineIds.length}</StatusBadge>
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <PanelKicker>event topic</PanelKicker>
+      <h3
+        className="min-w-0 font-mono text-[16px] font-semibold text-foreground [overflow-wrap:anywhere]"
+        data-testid={VISUALIZER_TEST_IDS.workbench.longLabel}
+        data-label-kind="event"
+      >
+        {detail.eventType}
+      </h3>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <StatusBadge tone="muted" className="border-[color:var(--vf-effect-border)] bg-[color:var(--vf-effect-soft)] text-[color:var(--vf-effect)]">
+          {detail.producerCount} producers
+        </StatusBadge>
+        <StatusBadge tone="muted" className="border-[color:var(--vf-config-border)] bg-[color:var(--vf-config-soft)] text-[color:var(--vf-config)]">
+          {detail.consumerCount} consumers
+        </StatusBadge>
+        <StatusBadge tone="muted">{detail.relatedMachineIds.length} machines</StatusBadge>
         {detail.routingKinds.map((kind) => (
           <StatusBadge key={kind} tone="routing">
             {kind}
           </StatusBadge>
         ))}
       </div>
-      <Button
-        type="button"
-        variant="secondary"
-        size="sm"
-        className="w-fit"
-        disabled={detail.relatedMachineIds.length === 0}
-        data-testid={VISUALIZER_TEST_IDS.events.openInWorkbench}
-        data-machine-count={detail.relatedMachineIds.length}
-        onClick={() => dispatch({ type: "l2.topic.opened-in-workbench", eventType: detail.eventType })}
-      >
-        <Box data-icon="inline-start" aria-hidden="true" />
-        Open related machines
-      </Button>
-      <div
-        className="rounded-md border bg-background p-2"
-        data-testid={VISUALIZER_TEST_IDS.events.routingValues}
-        data-empty={detail.routingValues.length === 0}
-      >
-        <PanelKicker>Routing values</PanelKicker>
-        {detail.routingValues.length === 0 ? (
-          <p className="mt-1 text-sm text-muted-foreground" data-empty="true">
-            No producer routing values.
+      <div className="flex flex-wrap gap-1.5">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={detail.relatedMachineIds.length === 0}
+          data-testid={VISUALIZER_TEST_IDS.events.openInWorkbench}
+          data-machine-count={detail.relatedMachineIds.length}
+          onClick={() => dispatch({ type: "l2.topic.opened-in-workbench", eventType: detail.eventType })}
+        >
+          <Box data-icon="inline-start" aria-hidden="true" />
+          Open related machines
+        </Button>
+      </div>
+    </div>
+
+    <section
+      className="rounded-md border border-[color:var(--vf-border-soft)] bg-[color:var(--vf-surface-soft)] p-2"
+      data-testid={VISUALIZER_TEST_IDS.events.routingValues}
+      data-empty={detail.routingValues.length === 0}
+    >
+      <PanelKicker>Routing values</PanelKicker>
+      {detail.routingValues.length === 0 ? (
+        <p className="mt-1 font-mono text-[11px] text-[color:var(--vf-text-quiet)]" data-empty="true">
+          No producer routing values.
+        </p>
+      ) : (
+        <div className="mt-1.5 flex flex-wrap gap-1">
+          {detail.routingValues.map((value) => (
+            <StatusBadge
+              key={`${value.kind}:${value.label}:${value.value ?? ""}`}
+              tone="routing"
+              data-testid={VISUALIZER_TEST_IDS.events.routingValue}
+              data-kind={value.kind}
+              data-label={value.label}
+              data-value={value.value ?? ""}
+              data-confidence={value.confidence}
+            >
+              {value.label} · {value.confidence}
+            </StatusBadge>
+          ))}
+        </div>
+      )}
+    </section>
+
+    <div className="grid min-h-0 gap-3 lg:grid-cols-2">
+      <section className="flex min-w-0 flex-col gap-1.5">
+        <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.08em] text-[color:var(--vf-text-quiet)]">
+          Producers <span className="font-normal text-[color:var(--vf-text-muted)] normal-case tracking-normal">— machines that emit this event from an effect</span>
+        </p>
+        {detail.producers.length === 0 ? (
+          <p
+            className="rounded-md border border-[color:var(--vf-border-soft)] bg-[color:var(--vf-surface-soft)] p-2 font-mono text-[11px] text-[color:var(--vf-text-quiet)]"
+            data-testid={VISUALIZER_TEST_IDS.events.producers}
+            data-empty="true"
+          >
+            No producers for this topic.
           </p>
         ) : (
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {detail.routingValues.map((value) => (
-              <StatusBadge
-                key={`${value.kind}:${value.label}:${value.value ?? ""}`}
-                tone="routing"
-                data-testid={VISUALIZER_TEST_IDS.events.routingValue}
-                data-kind={value.kind}
-                data-label={value.label}
-                data-value={value.value ?? ""}
-                data-confidence={value.confidence}
-              >
-                {value.label} · {value.confidence}
-              </StatusBadge>
+          <ol className="flex flex-col gap-1.5" data-testid={VISUALIZER_TEST_IDS.events.producers} data-empty="false">
+            {detail.producers.map((producer) => (
+              <ProducerRow key={producer.rowId} producer={producer} dispatch={dispatch} />
             ))}
-          </div>
+          </ol>
         )}
-      </div>
-    </section>
+      </section>
 
-    <section className="flex min-h-0 flex-col gap-2">
-      <PanelKicker>Producers</PanelKicker>
-      {detail.producers.length === 0 ? (
-        <p
-          className="rounded-md border bg-background p-2 text-sm text-muted-foreground"
-          data-testid={VISUALIZER_TEST_IDS.events.producers}
-          data-empty="true"
-        >
-          No producers for this topic.
+      <section className="flex min-w-0 flex-col gap-1.5">
+        <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.08em] text-[color:var(--vf-text-quiet)]">
+          Consumers <span className="font-normal text-[color:var(--vf-text-muted)] normal-case tracking-normal">— machines that accept this event from a state</span>
         </p>
-      ) : (
-        <ol className="flex flex-col gap-2" data-testid={VISUALIZER_TEST_IDS.events.producers} data-empty="false">
-          {detail.producers.map((producer) => (
-            <ProducerRow key={producer.rowId} producer={producer} dispatch={dispatch} />
-          ))}
-        </ol>
-      )}
-    </section>
-
-    <section className="flex min-h-0 flex-col gap-2">
-      <PanelKicker>Consumers</PanelKicker>
-      {detail.consumers.length === 0 ? (
-        <p
-          className="rounded-md border bg-background p-2 text-sm text-muted-foreground"
-          data-testid={VISUALIZER_TEST_IDS.events.consumers}
-          data-empty="true"
-        >
-          No consumers for this topic.
-        </p>
-      ) : (
-        <ol className="flex flex-col gap-2" data-testid={VISUALIZER_TEST_IDS.events.consumers} data-empty="false">
-          {detail.consumers.map((consumer) => (
-            <ConsumerRow key={consumer.rowId} consumer={consumer} dispatch={dispatch} />
-          ))}
-        </ol>
-      )}
-    </section>
+        {detail.consumers.length === 0 ? (
+          <p
+            className="rounded-md border border-[color:var(--vf-border-soft)] bg-[color:var(--vf-surface-soft)] p-2 font-mono text-[11px] text-[color:var(--vf-text-quiet)]"
+            data-testid={VISUALIZER_TEST_IDS.events.consumers}
+            data-empty="true"
+          >
+            No consumers for this topic.
+          </p>
+        ) : (
+          <ol className="flex flex-col gap-1.5" data-testid={VISUALIZER_TEST_IDS.events.consumers} data-empty="false">
+            {detail.consumers.map((consumer) => (
+              <ConsumerRow key={consumer.rowId} consumer={consumer} dispatch={dispatch} />
+            ))}
+          </ol>
+        )}
+      </section>
+    </div>
   </div>
 );
 
 const EmptyDetail = ({ detail }: { detail: Extract<EventCatalogDetailView, { kind: "empty" }> }) => (
   <div
-    className="flex min-h-48 flex-col justify-center gap-2 text-sm text-muted-foreground"
+    className="flex min-h-48 flex-col items-center justify-center gap-2 px-4 text-center text-[12px] text-[color:var(--vf-text-quiet)]"
     data-testid={VISUALIZER_TEST_IDS.events.detailEmpty}
     data-detail-kind="empty"
   >
-    <PanelKicker>Events</PanelKicker>
-    <h3 className="text-sm font-semibold text-foreground">{detail.title}</h3>
+    <PanelKicker>events</PanelKicker>
+    <h3 className="font-mono text-sm font-semibold text-foreground">{detail.title}</h3>
     <p>{detail.body}</p>
   </div>
 );
@@ -326,33 +355,37 @@ export const EventCatalogPanel = ({
   view: EventCatalogPanelView;
   dispatch: (command: VisualizerCommand) => void;
 }) => (
-  <Panel aria-labelledby="event-catalog-title" className="h-full" data-testid={VISUALIZER_TEST_IDS.events.panel}>
-    <PanelHeader>
-      <div className="min-w-0">
-        <PanelKicker>Events</PanelKicker>
-        <h2 id="event-catalog-title" className="truncate text-xs font-semibold">
-          Event catalog
-        </h2>
-      </div>
-      <StatusBadge tone={view.status === "ready" ? "ready" : "muted"}>{view.totalTopics} topics</StatusBadge>
-    </PanelHeader>
+  <section aria-labelledby="event-catalog-title" className="flex h-full min-h-0 flex-col gap-2" data-testid={VISUALIZER_TEST_IDS.events.panel}>
+    <header className="flex shrink-0 flex-wrap items-center gap-2 px-1">
+      <PanelKicker>Events</PanelKicker>
+      <h2 id="event-catalog-title" className="text-[12px] font-semibold text-foreground">
+        Event catalog
+      </h2>
+      <StatusBadge tone={view.status === "ready" ? "ready" : "muted"} className="ml-auto">
+        {view.totalTopics} topics
+      </StatusBadge>
+    </header>
 
-    <PanelBody className="grid min-h-0 gap-2.5 p-2.5 lg:grid-cols-[minmax(220px,0.7fr)_minmax(360px,1.3fr)]">
-      <section className="flex min-h-0 flex-col gap-2 rounded-md border bg-[color:var(--vf-surface-soft)] p-2">
-        <div className="flex items-center gap-2">
-          <Search aria-hidden="true" />
-          <Input
-            aria-label="Search events"
-            value={view.query}
-            placeholder="Search events"
-            data-testid={VISUALIZER_TEST_IDS.events.search}
-            onChange={(event) => dispatch({ type: "l2.query.changed", query: event.currentTarget.value })}
-          />
-        </div>
+    <div className="grid min-h-0 flex-1 gap-2.5 lg:grid-cols-[minmax(220px,0.85fr)_minmax(360px,2fr)]">
+      <section className="flex min-h-0 flex-col overflow-hidden rounded-lg border bg-[color:var(--vf-surface)]">
+        <header className="flex shrink-0 items-center gap-2 border-b border-[color:var(--vf-border-soft)] bg-[color:var(--vf-surface-soft)] px-3 py-1.5">
+          <PanelTitle eyebrow="L2 · Catalog" title="Events" />
+          <div className="relative ml-auto min-w-[140px] max-w-[220px] flex-1">
+            <Search aria-hidden="true" className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-[color:var(--vf-text-quiet)]" />
+            <Input
+              aria-label="Search events"
+              value={view.query}
+              placeholder="filter events"
+              data-testid={VISUALIZER_TEST_IDS.events.search}
+              onChange={(event) => dispatch({ type: "l2.query.changed", query: event.currentTarget.value })}
+              className="h-7 w-full rounded-md border-[color:var(--vf-border-soft)] bg-[color:var(--vf-surface)] pl-7 font-mono text-[11px]"
+            />
+          </div>
+        </header>
         <PaneScrollArea>
-          <div className="flex flex-col gap-2" data-testid={VISUALIZER_TEST_IDS.events.list}>
+          <div className="flex flex-col" data-testid={VISUALIZER_TEST_IDS.events.list}>
             {view.topics.length === 0 ? (
-              <p className="p-2 text-sm text-muted-foreground" data-testid={VISUALIZER_TEST_IDS.events.listEmpty}>
+              <p className="p-3 text-[12px] text-[color:var(--vf-text-quiet)]" data-testid={VISUALIZER_TEST_IDS.events.listEmpty}>
                 No events match this search.
               </p>
             ) : (
@@ -363,12 +396,21 @@ export const EventCatalogPanel = ({
       </section>
 
       <section
-        className="min-h-0 overflow-auto rounded-md border bg-[color:var(--vf-surface-soft)] p-3"
+        className="flex min-h-0 flex-col overflow-hidden rounded-lg border bg-[color:var(--vf-surface)]"
         data-detail-kind={view.detail.kind}
         data-testid={VISUALIZER_TEST_IDS.events.details}
       >
-        {view.detail.kind === "topic" ? <TopicDetail detail={view.detail} dispatch={dispatch} /> : <EmptyDetail detail={view.detail} />}
+        <header className="flex shrink-0 items-center gap-2 border-b border-[color:var(--vf-border-soft)] bg-[color:var(--vf-surface-soft)] px-3 py-1.5">
+          <PanelTitle
+            eyebrow={view.detail.kind === "topic" ? "L2 · Topic" : "L2 · Topic"}
+            title={view.detail.kind === "topic" ? view.detail.eventType : "Pick an event"}
+            titleClassName="font-mono"
+          />
+        </header>
+        <PaneScrollArea>
+          {view.detail.kind === "topic" ? <TopicDetail detail={view.detail} dispatch={dispatch} /> : <EmptyDetail detail={view.detail} />}
+        </PaneScrollArea>
       </section>
-    </PanelBody>
-  </Panel>
+    </div>
+  </section>
 );

@@ -10,7 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/ui/dialog";
-import { SourceEditorShell } from "@/ui/visualizer";
+import { PanelKicker, SourceEditorShell } from "@/ui/visualizer";
 import { VISUALIZER_TEST_IDS } from "@/test-ids";
 
 export const sourceOverlayOpenChange = (open: boolean, onClose: () => void): void => {
@@ -51,14 +51,18 @@ export const SourceOverlay = ({
     >
       {view.open ? (
         <>
-          <DialogHeader className="border-b bg-[color:var(--vf-surface-raised)] px-4 py-3">
+          <DialogHeader className="border-b border-[color:var(--vf-border-soft)] bg-[color:var(--vf-surface-soft)] px-3.5 py-2.5">
             <div className="flex min-w-0 items-start justify-between gap-3">
               <div className="min-w-0">
-                <DialogTitle className="truncate text-sm" data-testid={VISUALIZER_TEST_IDS.source.overlayTitle}>
+                <PanelKicker>Source · machine</PanelKicker>
+                <DialogTitle
+                  className="mt-0.5 truncate font-mono text-[13px] font-semibold"
+                  data-testid={VISUALIZER_TEST_IDS.source.overlayTitle}
+                >
                   {view.title}
                 </DialogTitle>
                 <DialogDescription
-                  className="font-mono text-[11px]"
+                  className="font-mono text-[10px] text-[color:var(--vf-text-quiet)]"
                   data-testid={VISUALIZER_TEST_IDS.source.overlayDescription}
                   data-source-version={view.sourceVersion}
                   data-anchor-count={view.anchorCount}
@@ -72,20 +76,22 @@ export const SourceOverlay = ({
                 <Button
                   type="button"
                   variant="outline"
-                  size="icon-sm"
+                  size="sm"
+                  className="h-7 px-2 font-mono text-[10px] text-[color:var(--vf-text-quiet)]"
                   aria-label="Close source overlay"
                   data-testid={VISUALIZER_TEST_IDS.source.overlayClose}
                 >
-                  <X aria-hidden="true" />
+                  <X aria-hidden="true" className="size-3" />
+                  close · esc
                 </Button>
               </DialogClose>
             </div>
           </DialogHeader>
 
-          <div className="min-h-0 overflow-hidden p-4">
+          <div className="min-h-0 overflow-hidden bg-[color:var(--vf-bg)] p-3.5">
             {view.fallback ? (
               <p
-                className="h-full overflow-auto rounded-md border bg-background p-3 text-sm text-muted-foreground"
+                className="h-full overflow-auto rounded-md border bg-[color:var(--vf-surface-soft)] p-3 font-mono text-[11px] text-[color:var(--vf-text-muted)]"
                 data-testid={VISUALIZER_TEST_IDS.source.overlayFallback}
                 data-fallback="true"
               >
@@ -96,10 +102,17 @@ export const SourceOverlay = ({
             )}
           </div>
 
-          <DialogFooter className="mx-0 mb-0 rounded-none border-t bg-[color:var(--vf-surface-soft)] px-4 py-3">
+          <DialogFooter className="mx-0 mb-0 rounded-none border-t border-[color:var(--vf-border-soft)] bg-[color:var(--vf-surface-soft)] px-3.5 py-2">
             <DialogClose asChild>
-              <Button type="button" variant="outline" size="sm" data-testid={VISUALIZER_TEST_IDS.source.overlayFooterClose}>
-                Close
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 px-2 font-mono text-[10px]"
+                data-testid={VISUALIZER_TEST_IDS.source.overlayFooterClose}
+              >
+                <X data-icon="inline-start" aria-hidden="true" className="size-3" />
+                close
               </Button>
             </DialogClose>
           </DialogFooter>
