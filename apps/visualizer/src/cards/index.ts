@@ -1,1 +1,2 @@
+export { buildWorkbenchCardModel } from "./build";
 export type { CardAction, CardOrigin, CardSection, EditableSupport, WorkbenchCardModel } from "./types";

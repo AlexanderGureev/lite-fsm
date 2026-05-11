@@ -5,7 +5,7 @@ import { SourceOverlay, sourceOverlayOpenChange } from "./SourceOverlay";
 
 const ids = VISUALIZER_TEST_IDS;
 
-describe("SourceOverlay", () => {
+describe("компонент SourceOverlay", () => {
   it("вызывает close handler только при закрытии Dialog", () => {
     const onClose = vi.fn();
 

@@ -9,8 +9,8 @@ import { SystemPanel } from "../system/SystemPanel";
 import {
   selectActiveTab,
   selectConsolePanel,
-  selectCurrentEmptyPanel,
   selectEventCatalogPanel,
+  selectMachineWorkbenchPanel,
   selectSourceOverlay,
   selectSourcePanel,
   selectSystemPanel,
@@ -276,11 +276,11 @@ export const Shell = () => {
   const { dispatch } = useWorkbenchContext();
   const activeTab = useWorkbenchSelector(selectActiveTab);
   const tabs = useWorkbenchSelector(selectTabItems);
-  const emptyPanel = useWorkbenchSelector(selectCurrentEmptyPanel);
   const consolePanel = useWorkbenchSelector(selectConsolePanel);
   const sourcePanel = useWorkbenchSelector(selectSourcePanel);
   const systemPanel = useWorkbenchSelector(selectSystemPanel);
   const eventCatalogPanel = useWorkbenchSelector(selectEventCatalogPanel);
+  const machineWorkbenchPanel = useWorkbenchSelector(selectMachineWorkbenchPanel);
   const sourceOverlay = useWorkbenchSelector(selectSourceOverlay);
 
   return (
@@ -302,7 +302,7 @@ export const Shell = () => {
             </span>
             <div className="min-w-0 truncate font-mono text-[12px] text-muted-foreground">
               <span>lite-fsm visualizer</span> <span className="text-[color:var(--vf-text-quiet)]">·</span>{" "}
-              <h1 className="inline truncate font-semibold text-foreground">Stage 12d read-only graph views</h1>
+              <h1 className="inline truncate font-semibold text-foreground">Stage 12e manual graph simulation</h1>
             </div>
           </div>
 
@@ -374,7 +374,7 @@ export const Shell = () => {
           ) : activeTab === "events" ? (
             <EventCatalogPanel view={eventCatalogPanel} dispatch={dispatch} />
           ) : (
-            <MachinesPanel view={emptyPanel} sourcePanel={sourcePanel} />
+            <MachinesPanel view={machineWorkbenchPanel} dispatch={dispatch} />
           )}
         </section>
       </div>

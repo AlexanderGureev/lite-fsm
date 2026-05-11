@@ -15,8 +15,8 @@ const anchor = (kind: GraphSourceAnchor["kind"], line?: number): GraphSourceAnch
     : {}),
 });
 
-describe("source overlay helpers", () => {
-  it("возвращает closed view без overlay state", () => {
+describe("helpers source overlay для исходника", () => {
+  it("возвращает закрытый view без overlay state", () => {
     expect(buildSourceOverlayView("const a = 1;", undefined)).toEqual({ open: false });
   });
 

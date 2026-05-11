@@ -53,13 +53,69 @@ export const flowMachine = createMachine({
 export const workerMachine = createMachine({
   groupTag: "reviewers",
   config: {
+    __INIT: {
+      SPAWN: "idle",
+    },
     idle: {
       DONE: "done",
       DYNAMIC: "done",
     },
     done: {},
   },
+  initialState: "__INIT",
+  initialContext: {},
+});
+
+export const auditMachine = createMachine({
+  config: {
+    idle: {
+      PING: "idle",
+    },
+  },
   initialState: "idle",
+  initialContext: {},
+});
+`;
+
+const simulationSource = `import { createMachine } from "@lite-fsm/core";
+
+export const flowMachine = createMachine({
+  config: {
+    idle: {
+      START: "loading",
+    },
+    loading: {
+      DONE: "done",
+      FAIL: "failed",
+    },
+    done: {
+      RESET: "idle",
+    },
+    failed: {
+      RESET: "idle",
+    },
+  },
+  initialState: "idle",
+  initialContext: {},
+  effects: {
+    loading: ({ transition }) => {
+      transition({ type: "DONE", meta: { groupTag: "reviewers" } });
+    },
+  },
+});
+
+export const workerMachine = createMachine({
+  groupTag: "reviewers",
+  config: {
+    __INIT: {
+      SPAWN: "idle",
+    },
+    idle: {
+      DONE: "done",
+    },
+    done: {},
+  },
+  initialState: "__INIT",
   initialContext: {},
 });
 
@@ -95,6 +151,15 @@ const systemTopic = (page: import("@playwright/test").Page, eventType: string) =
 const eventTopic = (page: import("@playwright/test").Page, eventType: string) =>
   page.locator(`[data-testid="${ids.events.topicRow}"][data-event-type="${eventType}"]`);
 
+const workbenchMachine = (page: import("@playwright/test").Page, machineId: string) =>
+  page.locator(`[data-testid="${ids.workbench.machinePickerRow}"][data-machine-id="${machineId}"]`);
+
+const workbenchRow = (page: import("@playwright/test").Page, testId: string, eventType: string) =>
+  page.locator(`[data-testid="${testId}"][data-event-type="${eventType}"]`);
+
+const timelineStep = (page: import("@playwright/test").Page, eventType: string) =>
+  page.locator(`[data-testid="${ids.workbench.timelineStep}"][data-event-type="${eventType}"]`);
+
 const expectCodeMirrorSourceEditor = async (page: import("@playwright/test").Page) => {
   const editor = page.getByTestId(ids.source.editor);
   await expect(editor.locator(".cm-editor")).toBeVisible();
@@ -121,7 +186,7 @@ const expectCodeMirrorSourceEditor = async (page: import("@playwright/test").Pag
   expect(metrics.gutterColor).not.toBe(metrics.backgroundColor);
 };
 
-test("12c Source editor is CodeMirror and source edits invalidate the ready model", async ({ page }) => {
+test("12c редактор исходника использует CodeMirror, а правки инвалидируют готовую модель", async ({ page }) => {
   await openVisualizer(page);
 
   await expectCodeMirrorSourceEditor(page);
@@ -144,7 +209,7 @@ test("12c Source editor is CodeMirror and source edits invalidate the ready mode
   await expect(page.getByTestId(ids.source.summary)).toHaveAttribute("data-version", "3");
 });
 
-test("12d sample source opens real System inventory with search, highlight and source overlay", async ({ page }) => {
+test("12d пример исходника открывает System inventory с поиском, подсветкой и source overlay", async ({ page }) => {
   await openVisualizer(page);
 
   await expect(page.getByTestId(ids.shell.root)).toBeVisible();
@@ -205,7 +270,7 @@ test("12d sample source opens real System inventory with search, highlight and s
   await expect(page.getByTestId(ids.tabs.trigger.machines)).toHaveAttribute("data-count", `1/${machineCount}`);
 });
 
-test("12d controlled fixture exposes L1 to L2 navigation, routing, branches and unknown rows", async ({ page }) => {
+test("12d контролируемый fixture показывает L1/L2 навигацию, routing, branches и unknown rows", async ({ page }) => {
   await openVisualizer(page);
 
   await fillSource(page, fixtureSource);
@@ -254,7 +319,7 @@ test("12d controlled fixture exposes L1 to L2 navigation, routing, branches and 
   await expect(eventTopic(page, "DONE")).toHaveCount(0);
 });
 
-test("12d diagnostics remain in the shared console and navigate to source anchors", async ({ page }) => {
+test("12d diagnostics остаются в общей консоли и переходят к source anchors", async ({ page }) => {
   await openVisualizer(page);
 
   await fillSource(page, "export const broken = ;");
@@ -275,7 +340,7 @@ test("12d diagnostics remain in the shared console and navigate to source anchor
   await expect(page.getByTestId(ids.source.status)).toHaveAttribute("data-status", "idle");
 });
 
-test("12d console controls, focus and responsive floor remain stable", async ({ page }) => {
+test("12d controls консоли, focus и responsive floor остаются стабильными", async ({ page }) => {
   await openVisualizer(page);
 
   await page.getByTestId(ids.console.toggle).focus();
@@ -308,4 +373,122 @@ test("12d console controls, focus and responsive floor remain stable", async ({ 
     const hasOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
     expect(hasOverflow).toBe(false);
   }
+});
+
+test("12e Machines открывается из L1 и выполняет manual send, transition, inspect, reset и source invalidation", async ({ page }) => {
+  await openVisualizer(page);
+
+  await fillSource(page, simulationSource);
+  await openSourceModel(page);
+
+  await systemMachine(page, "flowMachine").click();
+  await page.getByTestId(ids.system.openInWorkbench).click();
+  await expect(tabButton(page, "machines")).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByTestId(ids.workbench.panel)).toBeVisible();
+  await expect(workbenchMachine(page, "flowMachine")).toHaveAttribute("data-selected", "true");
+  await expect(page.getByTestId(ids.workbench.machineCard)).toHaveAttribute("data-machine-id", "flowMachine");
+  await expect(page.getByTestId(ids.workbench.currentState)).toHaveText("idle");
+  await expect(page.getByTestId(ids.workbench.timelineStep)).toHaveCount(1);
+
+  await workbenchRow(page, ids.workbench.row.config, "START").click();
+  await expect(page.getByTestId(ids.workbench.currentState)).toHaveText("loading");
+  await expect(page.getByTestId(ids.workbench.timelineStep)).toHaveCount(2);
+  await expect(timelineStep(page, "START")).toHaveAttribute("data-source", "manual cfg");
+  await expect(timelineStep(page, "START")).toBeVisible();
+  await expect(workbenchRow(page, ids.workbench.row.config, "START")).toHaveAttribute("data-recently-fired", "true");
+
+  await page.getByTestId(ids.workbench.simulationReset).click();
+  await expect(page.getByTestId(ids.workbench.timelineStep)).toHaveCount(1);
+  await expect(page.getByTestId(ids.workbench.currentState)).toHaveText("idle");
+
+  await page.getByTestId(ids.workbench.eventSend).click();
+  await expect(page.getByTestId(ids.workbench.currentState)).toHaveText("loading");
+  await expect(page.getByTestId(ids.workbench.timelineStep)).toHaveCount(2);
+  await expect(timelineStep(page, "START")).toHaveAttribute("data-source", "external");
+
+  await timelineStep(page, "START").click();
+  await expect(timelineStep(page, "START")).toHaveAttribute("data-selected", "true");
+  await expect(workbenchRow(page, ids.workbench.row.config, "START")).toHaveAttribute("data-inspected", "true");
+  await expect(page.getByTestId(ids.workbench.currentState)).toHaveText("loading");
+
+  await page.getByTestId(ids.workbench.simulationReset).click();
+  await expect(page.getByTestId(ids.workbench.timelineStep)).toHaveCount(1);
+  await expect(page.getByTestId(ids.workbench.currentState)).toHaveText("idle");
+  await expect(workbenchRow(page, ids.workbench.row.config, "START")).toHaveAttribute("data-recently-fired", "false");
+  await expect(workbenchRow(page, ids.workbench.row.config, "START")).toHaveAttribute("data-inspected", "false");
+
+  await tabButton(page, "source").click();
+  await fillSource(page, "export const changed = 1;");
+  await expect(page.getByTestId(ids.source.status)).toHaveAttribute("data-status", "idle");
+  await tabButton(page, "machines").click();
+  await expect(page.getByTestId(ids.workbench.timeline)).toHaveAttribute("data-empty", "true");
+  await expect(page.getByTestId(ids.workbench.machinePicker)).toContainText("Open the visualizer");
+});
+
+test("12e Machines открывает связанные L2 machines и следует suggested effect rows", async ({ page }) => {
+  await openVisualizer(page);
+
+  await fillSource(page, simulationSource);
+  await openSourceModel(page);
+
+  await systemTopic(page, "DONE").click();
+  await page.getByTestId(ids.system.openInEvents).click();
+  await expect(tabButton(page, "events")).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByTestId(ids.events.detailTopic)).toHaveAttribute("data-event-type", "DONE");
+
+  await page.getByTestId(ids.events.openInWorkbench).click();
+  await expect(tabButton(page, "machines")).toHaveAttribute("aria-selected", "true");
+  await expect(workbenchMachine(page, "flowMachine")).toHaveAttribute("data-selected", "true");
+  await expect(workbenchMachine(page, "workerMachine")).toHaveAttribute("data-selected", "true");
+  await expect(page.getByTestId(ids.workbench.machineCard)).toHaveCount(2);
+  await expect(page.getByTestId(ids.workbench.notice)).toBeVisible();
+
+  await workbenchMachine(page, "workerMachine").click();
+  await expect(workbenchMachine(page, "workerMachine")).toHaveAttribute("data-selected", "false");
+  await expect(page.getByTestId(ids.workbench.machineCard)).toHaveCount(1);
+
+  await workbenchRow(page, ids.workbench.row.config, "START").click();
+  await expect(page.getByTestId(ids.workbench.currentState).first()).toHaveText("loading");
+  const effectDone = workbenchRow(page, ids.workbench.row.effect, "DONE");
+  await expect(effectDone).toContainText("tag:reviewers");
+  await expect(effectDone).toHaveAttribute("data-dispatch-enabled", "true");
+
+  await effectDone.click();
+  await expect(page.getByTestId(ids.workbench.timelineStep)).toHaveCount(3);
+  await expect(timelineStep(page, "DONE")).toHaveAttribute("data-source", "manual eff");
+  await expect(effectDone).toHaveAttribute("data-recently-fired", "true");
+  await expect(effectDone).toContainText("tag:reviewers");
+});
+
+test("12e заблокированный target симулятора показывает diagnostics без stale mutation", async ({ page }) => {
+  const blockedSource = `import { createMachine } from "@lite-fsm/core";
+
+export const blockedMachine = createMachine({
+  config: {
+    idle: {
+      BAD: "*",
+    },
+  },
+  initialState: "idle",
+  initialContext: {},
+});
+`;
+
+  await openVisualizer(page);
+
+  await fillSource(page, blockedSource);
+  await openSourceModel(page);
+
+  await systemMachine(page, "blockedMachine").click();
+  await page.getByTestId(ids.system.openInWorkbench).click();
+  await expect(page.getByTestId(ids.workbench.currentState)).toHaveText("idle");
+  await expect(page.getByTestId(ids.workbench.timelineStep)).toHaveCount(1);
+
+  await workbenchRow(page, ids.workbench.row.config, "BAD").click();
+  await expect(page.getByText("status blocked")).toBeVisible();
+  await expect(page.getByTestId(ids.workbench.timelineStep)).toHaveCount(1);
+  await expect(page.getByTestId(ids.workbench.currentState)).toHaveText("idle");
+
+  await page.getByTestId(ids.console.toggle).click();
+  await expect(page.locator(`[data-testid="${ids.console.entry}"][data-origin="simulator"]`).first()).toBeVisible();
 });

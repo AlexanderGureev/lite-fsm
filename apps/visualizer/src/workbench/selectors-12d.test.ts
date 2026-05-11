@@ -100,7 +100,7 @@ const readySnapshot = (): WorkbenchSnapshot => {
   };
 };
 
-describe("12d selectors", () => {
+describe("12d selectors визуализатора", () => {
   it("строит L1 rows, search и relation highlight без мутации projection", () => {
     const store = createWorkbenchStore(readySnapshot());
     const initial = selectSystemPanel(store.getSnapshot());
@@ -213,7 +213,7 @@ describe("12d selectors", () => {
     });
   });
 
-  it("сохраняет referential stability для unrelated L1/L2 changes", () => {
+  it("сохраняет стабильность ссылок для несвязанных L1/L2 changes", () => {
     const store = createWorkbenchStore(readySnapshot());
     const initialSystem = selectSystemPanel(store.getSnapshot());
     const initialModel = store.getSnapshot().state.model;
@@ -232,7 +232,7 @@ describe("12d selectors", () => {
     expect(selectEventCatalogPanel(store.getSnapshot())).toBe(eventsAfterL2);
   });
 
-  it("строит source overlay selector из open command", () => {
+  it("строит selector source overlay из команды открытия", () => {
     const store = createWorkbenchStore(readySnapshot());
     const system = selectSystemPanel(store.getSnapshot());
     const action = system.machines.find((machine) => machine.machineId === "flowMachine")?.sourceAction;
@@ -248,7 +248,7 @@ describe("12d selectors", () => {
     }
   });
 
-  it("покрывает L1 fallback details и machine source без workbench model", () => {
+  it("покрывает fallback details L1 и machine source без workbench model", () => {
     const snapshot = readySnapshot();
     const model = snapshot.state.model.model!;
     const withoutWorkbench: WorkbenchSnapshot = {
@@ -274,7 +274,7 @@ describe("12d selectors", () => {
     expect(selectSystemPanel(topicFiltered).detail).toMatchObject({ kind: "empty" });
   });
 
-  it("покрывает L1 hover topic и отсутствующие relation index entries", () => {
+  it("покрывает hover topic в L1 и отсутствующие entries relation index", () => {
     const snapshot = readySnapshot();
     const model = snapshot.state.model.model!;
     const missingRelations: GraphVisualizerModel = {
@@ -407,7 +407,7 @@ describe("12d selectors", () => {
     });
   });
 
-  it("фильтрует L1/L2 по всем видимым labels и показывает L2 empty detail без совпадений", () => {
+  it("фильтрует L1/L2 по всем видимым labels и показывает пустой detail L2 без совпадений", () => {
     const store = createWorkbenchStore(readySnapshot());
 
     store.dispatch({ type: "l1.machine-query.changed", query: "  REVIEWERS  " });
@@ -443,7 +443,7 @@ describe("12d selectors", () => {
     });
   });
 
-  it("строит empty states для отсутствующей модели и пустого каталога", () => {
+  it("строит пустые states для отсутствующей модели и пустого каталога", () => {
     const empty = createInitialWorkbenchSnapshot();
     expect(selectSystemPanel(empty)).toMatchObject({ status: "empty", totalMachines: 0, detail: { kind: "empty" } });
     expect(selectEventCatalogPanel(empty)).toMatchObject({ status: "empty", totalTopics: 0, detail: { kind: "empty" } });

@@ -72,8 +72,8 @@ const consumer = (overrides: Partial<EventConsumerRowView> & Pick<EventConsumerR
   };
 };
 
-describe("EventCatalogPanel", () => {
-  it("рендерит topic detail с producers/consumers/routing и отправляет commands", () => {
+describe("панель EventCatalogPanel", () => {
+  it("рендерит detail темы с producers/consumers/routing и отправляет команды", () => {
     const dispatch = dispatchOf();
     const view: EventCatalogPanelView = {
       status: "ready",
@@ -88,6 +88,7 @@ describe("EventCatalogPanel", () => {
         eventType: "DONE",
         producerCount: 2,
         consumerCount: 2,
+        relatedMachineIds: ["flowMachine", "workerMachine"],
         routingKinds: ["tag", "unknown"],
         routingValues: [
           { kind: "tag", label: "tag:reviewers", value: "reviewers", confidence: "exact" },
@@ -129,6 +130,7 @@ describe("EventCatalogPanel", () => {
 
     fireEvent.change(screen.getByTestId(ids.events.search), { target: { value: "route" } });
     fireEvent.click(byData<HTMLButtonElement>(ids.events.topicRow, "data-event-type", "RESET"));
+    fireEvent.click(screen.getByTestId(ids.events.openInWorkbench));
     for (const button of screen.getAllByTestId(ids.events.viewSource)) {
       fireEvent.click(button);
     }
@@ -137,6 +139,7 @@ describe("EventCatalogPanel", () => {
       expect.arrayContaining([
         expect.objectContaining({ type: "l2.query.changed", query: "route" }),
         expect.objectContaining({ type: "l2.topic.selected", eventType: "RESET" }),
+        expect.objectContaining({ type: "l2.topic.opened-in-workbench", eventType: "DONE" }),
         expect.objectContaining({ type: "source.overlay.opened", title: "producer:exact", anchors: [] }),
         expect.objectContaining({ type: "source.overlay.opened", title: "producer:partial", anchors: [] }),
         expect.objectContaining({ type: "source.overlay.opened", title: "consumer:exact", anchors: [] }),
@@ -145,7 +148,7 @@ describe("EventCatalogPanel", () => {
     );
   });
 
-  it("рендерит empty sections для topic detail без routing/producers/consumers", () => {
+  it("рендерит пустые sections для detail темы без routing/producers/consumers", () => {
     const view: EventCatalogPanelView = {
       status: "ready",
       query: "done",
@@ -156,6 +159,7 @@ describe("EventCatalogPanel", () => {
         eventType: "DONE",
         producerCount: 0,
         consumerCount: 0,
+        relatedMachineIds: [],
         routingKinds: [],
         routingValues: [],
         producers: [],
@@ -166,11 +170,12 @@ describe("EventCatalogPanel", () => {
     render(<EventCatalogPanel view={view} dispatch={dispatchOf()} />);
 
     expect(screen.getByTestId(ids.events.routingValues).getAttribute("data-empty")).toBe("true");
+    expect(screen.getByTestId(ids.events.openInWorkbench).hasAttribute("disabled")).toBe(true);
     expect(screen.getByTestId(ids.events.producers).getAttribute("data-empty")).toBe("true");
     expect(screen.getByTestId(ids.events.consumers).getAttribute("data-empty")).toBe("true");
   });
 
-  it("рендерит empty detail и empty search list", () => {
+  it("рендерит пустой detail и пустой список поиска", () => {
     const view: EventCatalogPanelView = {
       status: "empty",
       query: "missing",

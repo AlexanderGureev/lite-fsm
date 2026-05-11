@@ -79,6 +79,7 @@ export const createInitialSimulationState = (): VisualizerSimulationState => ({
   scope: { kind: "machines", machineIds: [] },
   selectedMachineIds: EMPTY_ARRAY,
   recentlyFiredRowIds: EMPTY_ARRAY,
+  diagnostics: EMPTY_ARRAY,
 });
 
 export const createInitialPanelState = (): VisualizerPanelState => ({

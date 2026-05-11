@@ -19,6 +19,9 @@ export {
   selectTabItems,
 } from "./selectors";
 export { selectEventCatalogPanel } from "./event-catalog-selectors";
+export { buildSimulationOverlayInput, withInspectedStep } from "./simulation-overlay";
+export { simulatorDiagnostics } from "./simulation-adapter";
+export { selectMachineWorkbenchPanel } from "./machine-workbench-selectors";
 export { selectSystemPanel } from "./system-selectors";
 export type {
   EmptyPanelView,
@@ -35,6 +38,16 @@ export type {
   RoutingValueView,
 } from "./event-catalog-selectors";
 export type { SourceActionView } from "./selector-utils";
+export type {
+  MachineCardView,
+  MachinePickerRowView,
+  MachineStateBlockView,
+  MachineWorkbenchPanelView,
+  MachineWorkbenchRowActionView,
+  MachineWorkbenchRowView,
+  SendEventOptionView,
+  TimelineStepView,
+} from "./machine-workbench-selectors";
 export type {
   SystemDetailView,
   SystemMachineRowView,

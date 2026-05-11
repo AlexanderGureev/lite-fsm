@@ -63,6 +63,7 @@ export type EventCatalogDetailView =
       consumerCount: number;
       routingKinds: readonly string[];
       routingValues: readonly RoutingValueView[];
+      relatedMachineIds: readonly string[];
       producers: readonly EventProducerRowView[];
       consumers: readonly EventConsumerRowView[];
     };
@@ -186,6 +187,7 @@ const eventDetail = (
       value: value.value,
       confidence: value.confidence,
     })),
+    relatedMachineIds: model.relations.machineIdsByTopicType[topic.eventType]?.related ?? [],
     producers: topic.producers.map(producerRow),
     consumers: topic.consumers.map(consumerRow),
   };

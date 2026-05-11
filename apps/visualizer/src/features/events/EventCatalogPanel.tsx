@@ -1,4 +1,4 @@
-import { Eye, Search } from "lucide-react";
+import { Box, Eye, Search } from "lucide-react";
 import type {
   EventCatalogDetailView,
   EventCatalogPanelView,
@@ -171,12 +171,26 @@ const TopicDetail = ({
       <div className="flex flex-wrap gap-1.5">
         <StatusBadge tone="muted">producers {detail.producerCount}</StatusBadge>
         <StatusBadge tone="muted">consumers {detail.consumerCount}</StatusBadge>
+        <StatusBadge tone="muted">machines {detail.relatedMachineIds.length}</StatusBadge>
         {detail.routingKinds.map((kind) => (
           <StatusBadge key={kind} tone="routing">
             {kind}
           </StatusBadge>
         ))}
       </div>
+      <Button
+        type="button"
+        variant="secondary"
+        size="sm"
+        className="w-fit"
+        disabled={detail.relatedMachineIds.length === 0}
+        data-testid={VISUALIZER_TEST_IDS.events.openInWorkbench}
+        data-machine-count={detail.relatedMachineIds.length}
+        onClick={() => dispatch({ type: "l2.topic.opened-in-workbench", eventType: detail.eventType })}
+      >
+        <Box data-icon="inline-start" aria-hidden="true" />
+        Open related machines
+      </Button>
       <div
         className="rounded-md border bg-background p-2"
         data-testid={VISUALIZER_TEST_IDS.events.routingValues}

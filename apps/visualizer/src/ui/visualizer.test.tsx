@@ -16,7 +16,7 @@ import {
   StatusBadge,
 } from "./visualizer";
 
-describe("visualizer ui primitives", () => {
+describe("UI primitives визуализатора", () => {
   it("рендерит panel, badge, row, snippet, alert и icon button primitives", () => {
     const onClick = vi.fn();
 
@@ -62,7 +62,7 @@ describe("visualizer ui primitives", () => {
     expect(onClick).toHaveBeenCalledTimes(1);
   });
 
-  it("синхронизирует CodeMirror editor value, handler ref и suppress-update guard", () => {
+  it("синхронизирует значение CodeMirror editor, handler ref и suppress-update guard", () => {
     const onValueChange = vi.fn();
     const nextValueChange = vi.fn();
     const { rerender } = render(

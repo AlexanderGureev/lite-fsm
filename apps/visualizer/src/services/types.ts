@@ -135,23 +135,30 @@ export type VisualizerHostAdapter = {
 };
 
 export type VisualizerWorkbenchRowCommandTarget = {
+  kind: "transition" | "emission";
   machineId: string;
   rowId: string;
   slice: GraphSimulationSliceRef;
-};
+} & (
+  | { kind: "transition"; transitionId: string }
+  | { kind: "emission"; emissionId: string }
+);
+
+export type VisualizerTransitionRowCommandTarget = Extract<VisualizerWorkbenchRowCommandTarget, { kind: "transition" }>;
+export type VisualizerEmissionRowCommandTarget = Extract<VisualizerWorkbenchRowCommandTarget, { kind: "emission" }>;
 
 export type SimulationCommandEffect =
   | { kind: "simulation.send"; sourceVersion: number; event: GraphSimulationEvent }
   | {
       kind: "simulation.send-from-transition";
       sourceVersion: number;
-      target: VisualizerWorkbenchRowCommandTarget;
+      target: VisualizerTransitionRowCommandTarget;
       payload?: GraphJsonValue;
     }
   | {
       kind: "simulation.send-from-emission";
       sourceVersion: number;
-      target: VisualizerWorkbenchRowCommandTarget;
+      target: VisualizerEmissionRowCommandTarget;
       payload?: GraphJsonValue;
     }
   | {
@@ -165,6 +172,7 @@ export type EffectRunnerServices = {
   compiler: GraphCompilerClient;
   analyzer: GraphAnalyzerClient;
   visualizerModel: GraphVisualizerModelClient;
+  simulation: GraphSimulationService;
   validation: DiagnosticProviderRegistry;
   codegen: CodegenPlanner;
 };

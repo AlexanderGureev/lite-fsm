@@ -1,7 +1,7 @@
 import type { ConsoleEntry } from "../../console";
 import { WorkbenchProvider } from "../../app/workbench-context";
 import { createNoopCodegenPlanner } from "../../codegen";
-import type { EffectRunnerServices } from "../../services";
+import { createLocalSimulationService, type EffectRunnerServices } from "../../services";
 import { VISUALIZER_TEST_IDS } from "../../test-ids";
 import { createInitialWorkbenchSnapshot } from "../../workbench/state";
 import { createWorkbenchStore } from "../../workbench/store";
@@ -25,6 +25,7 @@ const compileFailureServices: EffectRunnerServices = {
   visualizerModel: {
     build: async (input) => ({ ok: false, sourceVersion: input.sourceVersion, diagnostics: [] }),
   },
+  simulation: createLocalSimulationService(),
   validation: createNoopValidationRegistry(),
   codegen: createNoopCodegenPlanner(),
 };
@@ -74,8 +75,8 @@ const consoleEntries: readonly ConsoleEntry[] = [
   },
 ];
 
-describe("Shell", () => {
-  it("связывает source controls, tabs, console toggle и empty console state", () => {
+describe("оболочка Shell", () => {
+  it("связывает controls исходника, tabs, toggle консоли и пустое состояние консоли", () => {
     const store = renderShell();
 
     expect(screen.getByTestId(ids.shell.root)).toBeTruthy();
@@ -130,7 +131,7 @@ describe("Shell", () => {
     expect(store.getSnapshot().state.panels.console.open).toBe(false);
   });
 
-  it("рендерит console entries, channel buttons и status tones для ready/failed states", () => {
+  it("рендерит записи консоли, channel buttons и status tones для ready/failed states", () => {
     const base = createInitialWorkbenchSnapshot();
     const snapshot: WorkbenchSnapshot = {
       ...base,
@@ -168,7 +169,7 @@ describe("Shell", () => {
     expect(store.getSnapshot().state.panels.console.selectedEntryId).toBe("diagnostic-entry");
   });
 
-  it("закрывает source overlay из Shell", () => {
+  it("закрывает source overlay из оболочки", () => {
     const base = createInitialWorkbenchSnapshot();
     const snapshot: WorkbenchSnapshot = {
       ...base,

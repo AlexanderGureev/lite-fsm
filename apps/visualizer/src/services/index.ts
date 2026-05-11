@@ -6,6 +6,8 @@ export {
   createLocalVisualizerModelClient,
 } from "./local-graph-clients";
 export type { LocalGraphClientDependencies } from "./local-graph-clients";
+export { createLocalSimulationService } from "./local-simulation-service";
+export type { LocalSimulationServiceDependencies } from "./local-simulation-service";
 export { createStaticHostAdapter, STATIC_HOST_CAPABILITIES } from "./static-host";
 export {
   createUnimplementedAnalyzerClient,
@@ -34,5 +36,7 @@ export type {
   VisualizerHostAdapter,
   VisualizerHostCapabilities,
   VisualizerHostState,
+  VisualizerEmissionRowCommandTarget,
+  VisualizerTransitionRowCommandTarget,
   VisualizerWorkbenchRowCommandTarget,
 } from "./types";

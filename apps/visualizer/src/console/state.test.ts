@@ -8,8 +8,8 @@ import {
 } from "./state";
 import { createConsoleEntryFromDiagnostic, createSystemConsoleEntry } from "./types";
 
-describe("console state", () => {
-  it("создает system и diagnostic entries с каналами и targets", () => {
+describe("состояние консоли", () => {
+  it("создает системные и диагностические записи с каналами и целями", () => {
     const diagnostic = createControlledDiagnostic(1, "host", "failed", "Failure");
 
     expect(createSystemConsoleEntry(1, "open", "Started", "Compiling")).toEqual({
@@ -32,7 +32,7 @@ describe("console state", () => {
     });
   });
 
-  it("добавляет, очищает и фильтрует console state без лишних refs", () => {
+  it("добавляет, очищает и фильтрует состояние консоли без лишних ссылок", () => {
     const initial = createInitialConsoleState();
     const unchangedAppend = appendConsoleEntries(initial, []);
     const unchangedReset = resetConsoleEntries(initial);
@@ -51,7 +51,7 @@ describe("console state", () => {
     expect(resetConsoleEntries(withEntries).channels).toEqual(["system", "diagnostics", "debug"]);
   });
 
-  it("добавляет entries в исходном порядке", () => {
+  it("добавляет записи в исходном порядке", () => {
     const first = createSystemConsoleEntry(1, "first", "First", "One");
     const second = createSystemConsoleEntry(1, "second", "Second", "Two");
 

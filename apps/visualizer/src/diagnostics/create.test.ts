@@ -11,8 +11,8 @@ const anchor: GraphSourceAnchor = {
   },
 };
 
-describe("diagnostic normalization", () => {
-  it("сохраняет graph refs, source anchors и выбирает graph primary target", () => {
+describe("нормализация diagnostics", () => {
+  it("сохраняет graph refs, source anchors и выбирает primary target графа", () => {
     const diagnostics: readonly GraphDiagnosticAnchor[] = [
       {
         diagnosticId: "compiler:machine:bad:0",
@@ -36,7 +36,7 @@ describe("diagnostic normalization", () => {
     ]);
   });
 
-  it("выбирает source target при единственном reliable anchor", () => {
+  it("выбирает source target при единственном надежном anchor", () => {
     expect(
       normalizeGraphDiagnostics({
         sourceVersion: 1,
@@ -64,7 +64,7 @@ describe("diagnostic normalization", () => {
     expect(diagnostic.primaryTarget).toEqual({ kind: "source", anchor });
   });
 
-  it("выбирает none target без anchors и для ambiguous anchors", () => {
+  it("выбирает none target без anchors и для неоднозначных anchors", () => {
     expect(
       createWorkbenchDiagnostic({
         diagnosticId: "source:1:none",
@@ -89,7 +89,7 @@ describe("diagnostic normalization", () => {
     ).toEqual({ kind: "none", reason: "ambiguous-anchor" });
   });
 
-  it("оставляет controlled diagnostics направленными в console", () => {
+  it("оставляет контролируемые diagnostics направленными в консоль", () => {
     expect(createControlledDiagnostic(1, "host", "failed", "Failure")).toEqual({
       diagnosticId: "host:1:failed",
       sourceVersion: 1,

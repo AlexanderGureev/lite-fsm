@@ -6,7 +6,7 @@ import { createNoopValidationRegistry } from "../validation";
 import { createNoopCodegenPlanner } from "./noop-planner";
 
 describe("зарезервированные no-op boundaries", () => {
-  it("возвращают static host capabilities без файловой системы", () => {
+  it("возвращают статические возможности host без файловой системы", () => {
     const capabilities = createStaticHostAdapter().getCapabilities();
 
     expect(capabilities).toEqual({
@@ -17,7 +17,7 @@ describe("зарезервированные no-op boundaries", () => {
     });
   });
 
-  it("возвращают diagnostic вместо source edits для codegen planner", async () => {
+  it("возвращают diagnostic вместо правок исходника для codegen planner", async () => {
     const result = await createNoopCodegenPlanner().plan({
       requestId: "codegen:1:1",
       sourceVersion: 1,
@@ -31,19 +31,19 @@ describe("зарезервированные no-op boundaries", () => {
     expect(result.diagnostics[0]?.diagnostic.code).toBe("codegen-not-implemented");
   });
 
-  it("оставляют validation registry пустым", async () => {
+  it("оставляют registry валидации пустым", async () => {
     const registry = createNoopValidationRegistry();
 
     await expect(registry.run({ sourceVersion: 1 })).resolves.toEqual([]);
     expect(registry.providerIds).toEqual([]);
   });
 
-  it("создают no-op canvas adapter", () => {
+  it("создают пустой canvas adapter", () => {
     expect(createNoopCanvasAdapter()).toEqual({ kind: "none" });
     expect(createInitialCanvasState()).toEqual({ adapter: { kind: "none" }, items: [] });
   });
 
-  it("сохраняют console ref при пустом append", () => {
+  it("сохраняют ссылку консоли при пустом append", () => {
     const consoleState = createInitialConsoleState();
 
     expect(appendConsoleEntries(consoleState, [])).toBe(consoleState);

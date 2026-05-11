@@ -18,6 +18,7 @@ import {
   createInitialSimulationState,
   createInitialSystemViewState,
 } from "./state";
+import { withInspectedStep } from "./simulation-overlay";
 import type {
   AnalysisState,
   CodegenState,
@@ -82,6 +83,16 @@ const unchanged = (snapshot: WorkbenchSnapshot, result: VisualizerCommandResult 
   effects: NO_EFFECTS,
 });
 
+const effectOnly = (
+  snapshot: WorkbenchSnapshot,
+  effects: readonly WorkbenchEffectDescriptor[],
+  result: VisualizerCommandResult = OK,
+): Reduction => ({
+  snapshot,
+  result,
+  effects,
+});
+
 const changed = (
   snapshot: WorkbenchSnapshot,
   state: VisualizerWorkbenchState,
@@ -99,6 +110,56 @@ const changed = (
 
 const stale = (snapshot: WorkbenchSnapshot): Reduction =>
   unchanged(snapshot, { ok: false, reason: "stale-source-version", diagnostics: [] });
+
+const disposeSimulationEffect = (snapshot: WorkbenchSnapshot): readonly WorkbenchEffectDescriptor[] =>
+  snapshot.state.simulation.status === "idle" && !snapshot.state.simulation.snapshot
+    ? NO_EFFECTS
+    : [{ kind: "simulation.dispose", sourceVersion: snapshot.state.source.version }];
+
+const createSimulationSessionEffect = (
+  state: VisualizerWorkbenchState,
+  selectedMachineIds: readonly string[],
+): WorkbenchEffectDescriptor | undefined => {
+  if (selectedMachineIds.length === 0 || !state.compile.document || !state.model.model) return undefined;
+
+  return {
+    kind: "create-simulation-session",
+    sourceVersion: state.source.version,
+    document: state.compile.document,
+    scope: { kind: "machines", machineIds: selectedMachineIds },
+  };
+};
+
+const simulationModelRequestId = (state: VisualizerWorkbenchState): string =>
+  `model:${state.source.version}:simulation:${state.simulation.inspectedStepId ?? state.simulation.snapshot?.timeline.currentStepId ?? "none"}`;
+
+const simulationModelEffect = (
+  state: VisualizerWorkbenchState,
+  simulation: VisualizerWorkbenchState["simulation"]["overlay"],
+): WorkbenchEffectDescriptor | undefined => {
+  if (!simulation || !state.compile.document || !state.model.model) return undefined;
+
+  return {
+    kind: "build-model",
+    requestId: simulationModelRequestId(state),
+    purpose: "simulation-overlay",
+    sourceVersion: state.source.version,
+    document: state.compile.document,
+    analysisDiagnostics: state.analysis.diagnostics,
+    simulation,
+  };
+};
+
+const selectionEffects = (
+  previous: WorkbenchSnapshot,
+  nextState: VisualizerWorkbenchState,
+  selectedMachineIds: readonly string[],
+): readonly WorkbenchEffectDescriptor[] => {
+  const createSession = createSimulationSessionEffect(nextState, selectedMachineIds);
+  const dispose = disposeSimulationEffect(previous);
+
+  return createSession ? [...dispose, createSession] : dispose;
+};
 
 const appendDiagnostics = (
   state: VisualizerWorkbenchState,
@@ -147,20 +208,25 @@ const sourceChanged = (snapshot: WorkbenchSnapshot, source: string): Reduction =
     source: updateSourceSession(snapshot.state.source, source),
   };
 
-  return changed(snapshot, resetDerivedForSource(withSource), [
-    "source",
-    "compile",
-    "analysis",
-    "model",
-    "validation",
-    "l1",
-    "l2",
-    "l3",
-    "simulation",
-    "diagnostics",
-    "console",
-    "panels",
-  ]);
+  return changed(
+    snapshot,
+    resetDerivedForSource(withSource),
+    [
+      "source",
+      "compile",
+      "analysis",
+      "model",
+      "validation",
+      "l1",
+      "l2",
+      "l3",
+      "simulation",
+      "diagnostics",
+      "console",
+      "panels",
+    ],
+    disposeSimulationEffect(snapshot),
+  );
 };
 
 const resetToSample = (snapshot: WorkbenchSnapshot): Reduction => sourceChanged(snapshot, SAMPLE_SOURCE);
@@ -200,7 +266,7 @@ const openVisualizer = (snapshot: WorkbenchSnapshot): Reduction => {
       panels: clearPipelinePanelSelection(snapshot.state.panels),
     },
     ["compile", "analysis", "model", "validation", "l1", "l2", "l3", "simulation", "diagnostics", "console", "panels"],
-    [{ kind: "compile", requestId, source: snapshot.state.source }],
+    [...disposeSimulationEffect(snapshot), { kind: "compile", requestId, source: snapshot.state.source }],
   );
 };
 
@@ -279,6 +345,7 @@ const analysisSucceeded = (
       {
         kind: "build-model",
         requestId,
+        purpose: "pipeline",
         sourceVersion: command.sourceVersion,
         document,
         analysisDiagnostics: command.diagnostics,
@@ -310,8 +377,33 @@ const modelSucceeded = (
   snapshot: WorkbenchSnapshot,
   command: Extract<VisualizerInternalCommand, { type: "model.succeeded" }>,
 ): Reduction => {
-  if (!requestMatches(command.sourceVersion, snapshot.state.model.requestId, command.requestId, snapshot.state.source.version)) {
+  const purpose = command.purpose ?? "pipeline";
+  const matches =
+    purpose === "simulation-overlay"
+      ? command.sourceVersion === snapshot.state.source.version && command.requestId === simulationModelRequestId(snapshot.state)
+      : requestMatches(command.sourceVersion, snapshot.state.model.requestId, command.requestId, snapshot.state.source.version);
+
+  if (!matches) {
     return stale(snapshot);
+  }
+
+  if (purpose === "simulation-overlay") {
+    return changed(
+      snapshot,
+      {
+        ...snapshot.state,
+        model: {
+          ...snapshot.state.model,
+          status: "ready",
+          model: command.model,
+          diagnostics: normalizeGraphDiagnostics({
+            sourceVersion: command.sourceVersion,
+            diagnostics: command.model.diagnostics,
+          }),
+        },
+      },
+      ["model"],
+    );
   }
 
   const requestId = `validation:${command.sourceVersion}:1`;
@@ -458,38 +550,67 @@ const toggleMachine = (snapshot: WorkbenchSnapshot, machineId: string): Reductio
   const selected = snapshot.state.l3.selectedMachineIds;
   const exists = selected.includes(machineId);
   const selectedMachineIds = exists ? selected.filter((id) => id !== machineId) : [...selected, machineId];
+  const state = {
+    ...snapshot.state,
+    l3: { selectedMachineIds },
+    simulation: {
+      ...createInitialSimulationState(),
+      selectedMachineIds,
+      scope: { kind: "machines" as const, machineIds: selectedMachineIds },
+    },
+  };
 
   return changed(
     snapshot,
-    {
-      ...snapshot.state,
-      l3: { selectedMachineIds },
-      simulation: {
-        ...createInitialSimulationState(),
-        selectedMachineIds,
-        scope: { kind: "machines", machineIds: selectedMachineIds },
-      },
-    },
+    state,
     ["l3", "simulation"],
+    selectionEffects(snapshot, state, selectedMachineIds),
   );
 };
 
 const selectMachineForWorkbench = (snapshot: WorkbenchSnapshot, machineId: string): Reduction => {
   const selectedMachineIds = [machineId];
+  const state = {
+    ...snapshot.state,
+    activeTab: "machines" as const,
+    l3: { selectedMachineIds },
+    simulation: {
+      ...createInitialSimulationState(),
+      selectedMachineIds,
+      scope: { kind: "machines" as const, machineIds: selectedMachineIds },
+    },
+  };
 
   return changed(
     snapshot,
-    {
-      ...snapshot.state,
-      activeTab: "machines",
-      l3: { selectedMachineIds },
-      simulation: {
-        ...createInitialSimulationState(),
-        selectedMachineIds,
-        scope: { kind: "machines", machineIds: selectedMachineIds },
-      },
-    },
+    state,
     ["activeTab", "l3", "simulation"],
+    selectionEffects(snapshot, state, selectedMachineIds),
+  );
+};
+
+const openTopicInWorkbench = (snapshot: WorkbenchSnapshot, eventType: string): Reduction => {
+  const relations = snapshot.state.model.model?.relations.machineIdsByTopicType[eventType];
+  if (!relations) return unchanged(snapshot, { ok: false, reason: "missing-model", diagnostics: [] });
+
+  const selectedMachineIds = [...new Set([...relations.producers, ...relations.consumers])];
+  const state = {
+    ...snapshot.state,
+    activeTab: "machines" as const,
+    l2: { ...snapshot.state.l2, selectedTopic: eventType },
+    l3: { selectedMachineIds },
+    simulation: {
+      ...createInitialSimulationState(),
+      selectedMachineIds,
+      scope: { kind: "machines" as const, machineIds: selectedMachineIds },
+    },
+  };
+
+  return changed(
+    snapshot,
+    state,
+    ["activeTab", "l2", "l3", "simulation"],
+    selectionEffects(snapshot, state, selectedMachineIds),
   );
 };
 
@@ -641,6 +762,8 @@ const reduceUserCommand = (snapshot: WorkbenchSnapshot, command: VisualizerComma
       return changed(snapshot, { ...snapshot.state, l2: { ...snapshot.state.l2, query: command.query } }, ["l2"]);
     case "l2.topic.selected":
       return changed(snapshot, { ...snapshot.state, l2: { ...snapshot.state.l2, selectedTopic: command.eventType } }, ["l2"]);
+    case "l2.topic.opened-in-workbench":
+      return openTopicInWorkbench(snapshot, command.eventType);
     case "l3.machine.toggled":
       return toggleMachine(snapshot, command.machineId);
     case "l3.selection.cleared":
@@ -648,11 +771,17 @@ const reduceUserCommand = (snapshot: WorkbenchSnapshot, command: VisualizerComma
         snapshot,
         { ...snapshot.state, l3: { selectedMachineIds: [] }, simulation: createInitialSimulationState() },
         ["l3", "simulation"],
+        disposeSimulationEffect(snapshot),
       );
-    case "l3.timeline.step.selected":
-      return changed(snapshot, { ...snapshot.state, simulation: { ...snapshot.state.simulation, inspectedStepId: command.stepId } }, [
-        "simulation",
-      ]);
+    case "l3.timeline.step.selected": {
+      const overlay = withInspectedStep(snapshot.state.simulation.overlay, snapshot.state.simulation.snapshot, command.stepId);
+      const state = {
+        ...snapshot.state,
+        simulation: { ...snapshot.state.simulation, inspectedStepId: command.stepId, overlay },
+      };
+      const effect = simulationModelEffect(state, overlay);
+      return changed(snapshot, state, ["simulation"], effect ? [effect] : NO_EFFECTS);
+    }
     case "source.overlay.opened":
       return changed(
         snapshot,
@@ -689,10 +818,33 @@ const reduceUserCommand = (snapshot: WorkbenchSnapshot, command: VisualizerComma
     case "codegen.intent.created":
       return codegenStarted(snapshot, command);
     case "l3.event.sent":
+      if (!snapshot.state.simulation.snapshot) return unchanged(snapshot, { ok: false, reason: "missing-simulation-session", diagnostics: [] });
+      return effectOnly(snapshot, [{ kind: "simulation.send", sourceVersion: snapshot.state.source.version, event: command.event }]);
     case "l3.transition-row.sent":
+      if (!snapshot.state.simulation.snapshot) return unchanged(snapshot, { ok: false, reason: "missing-simulation-session", diagnostics: [] });
+      return effectOnly(snapshot, [
+        { kind: "simulation.send-from-transition", sourceVersion: snapshot.state.source.version, target: command.target, payload: command.payload },
+      ]);
     case "l3.effect-row.followed":
+      if (!snapshot.state.simulation.snapshot) return unchanged(snapshot, { ok: false, reason: "missing-simulation-session", diagnostics: [] });
+      return effectOnly(snapshot, [
+        { kind: "simulation.send-from-emission", sourceVersion: snapshot.state.source.version, target: command.target, payload: command.payload },
+      ]);
     case "l3.simulation.reset":
-      return unchanged(snapshot, { ok: false, reason: "missing-simulation-session", diagnostics: [] });
+      if (!snapshot.state.simulation.snapshot) return unchanged(snapshot, { ok: false, reason: "missing-simulation-session", diagnostics: [] });
+      return changed(
+        snapshot,
+        { ...snapshot.state, simulation: { ...snapshot.state.simulation, inspectedStepId: undefined } },
+        ["simulation"],
+        [
+          {
+            kind: "simulation.reset",
+            sourceVersion: snapshot.state.source.version,
+            initialStateOverrides: command.initialStateOverrides,
+            initialContextOverrides: command.initialContextOverrides,
+          },
+        ],
+      );
   }
 };
 
@@ -715,7 +867,30 @@ const reduceInternalCommand = (snapshot: WorkbenchSnapshot, command: VisualizerI
       return validationCompleted(snapshot, command);
     case "simulation.snapshot.changed":
       if (command.sourceVersion !== snapshot.state.source.version) return stale(snapshot);
-      return changed(snapshot, { ...snapshot.state, simulation: { ...snapshot.state.simulation, snapshot: command.snapshot } }, ["simulation"]);
+      {
+        const simulation = {
+          ...snapshot.state.simulation,
+          status: command.status ?? snapshot.state.simulation.status,
+          snapshot: command.snapshot,
+          overlay: command.overlay,
+          pendingChoice: command.pendingChoice,
+          diagnostics: command.diagnostics ?? [],
+        };
+        const state = appendDiagnostics({ ...snapshot.state, simulation }, command.diagnostics ?? []);
+        const effect = simulationModelEffect(state, command.overlay);
+
+        return changed(
+          snapshot,
+          state,
+          command.diagnostics && command.diagnostics.length > 0
+            ? ["simulation", "diagnostics", "console"]
+            : ["simulation"],
+          effect ? [effect] : NO_EFFECTS,
+          command.diagnostics && command.diagnostics.length > 0
+            ? { ok: false, reason: "simulator-rejected", diagnostics: command.diagnostics }
+            : OK,
+        );
+      }
     case "codegen.plan.completed":
     case "codegen.plan.failed":
       return codegenCompleted(snapshot, command);

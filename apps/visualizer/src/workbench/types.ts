@@ -16,6 +16,9 @@ import type { SourceSession } from "../source";
 import type { VisualizerHostState, VisualizerWorkbenchRowCommandTarget } from "../services";
 import type { ValidationState } from "../validation";
 
+type VisualizerTransitionRowCommandTarget = Extract<VisualizerWorkbenchRowCommandTarget, { kind: "transition" }>;
+type VisualizerEmissionRowCommandTarget = Extract<VisualizerWorkbenchRowCommandTarget, { kind: "emission" }>;
+
 export type VisualizerTab = "source" | "system" | "events" | "machines";
 
 export type CompileState = {
@@ -65,9 +68,11 @@ export type VisualizerSimulationState = {
   initialStateOverrides?: readonly GraphInitialStateOverride[];
   initialContextOverrides?: readonly GraphInitialContextOverride[];
   snapshot?: GraphSimulationSnapshot;
+  overlay?: GraphVisualizerSimulationOverlayInput;
   pendingChoice?: GraphSimulationPendingChoice;
   inspectedStepId?: string;
   recentlyFiredRowIds: readonly string[];
+  diagnostics: readonly WorkbenchDiagnosticRef[];
 };
 
 export type SourceOverlayState = {
@@ -142,11 +147,12 @@ export type VisualizerCommand =
   | { type: "l1.machine.opened-in-workbench"; machineId: string }
   | { type: "l2.query.changed"; query: string }
   | { type: "l2.topic.selected"; eventType: string }
+  | { type: "l2.topic.opened-in-workbench"; eventType: string }
   | { type: "l3.machine.toggled"; machineId: string }
   | { type: "l3.selection.cleared" }
   | { type: "l3.event.sent"; event: GraphSimulationEvent }
-  | { type: "l3.transition-row.sent"; target: VisualizerWorkbenchRowCommandTarget; payload?: GraphJsonValue }
-  | { type: "l3.effect-row.followed"; target: VisualizerWorkbenchRowCommandTarget; payload?: GraphJsonValue }
+  | { type: "l3.transition-row.sent"; target: VisualizerTransitionRowCommandTarget; payload?: GraphJsonValue }
+  | { type: "l3.effect-row.followed"; target: VisualizerEmissionRowCommandTarget; payload?: GraphJsonValue }
   | {
       type: "l3.simulation.reset";
       initialStateOverrides?: readonly GraphInitialStateOverride[];
@@ -165,11 +171,25 @@ export type VisualizerInternalCommand =
   | { type: "compile.failed"; requestId: string; sourceVersion: number; diagnostics: readonly WorkbenchDiagnosticRef[] }
   | { type: "analysis.succeeded"; requestId: string; sourceVersion: number; diagnostics: readonly GraphDiagnostic[] }
   | { type: "analysis.failed"; requestId: string; sourceVersion: number; diagnostics: readonly WorkbenchDiagnosticRef[] }
-  | { type: "model.succeeded"; requestId: string; sourceVersion: number; model: GraphVisualizerModel }
+  | {
+      type: "model.succeeded";
+      requestId: string;
+      sourceVersion: number;
+      purpose?: "pipeline" | "simulation-overlay";
+      model: GraphVisualizerModel;
+    }
   | { type: "model.failed"; requestId: string; sourceVersion: number; diagnostics: readonly WorkbenchDiagnosticRef[] }
   | { type: "validation.succeeded"; requestId: string; sourceVersion: number; diagnostics: readonly WorkbenchDiagnosticRef[] }
   | { type: "validation.failed"; requestId: string; sourceVersion: number; diagnostics: readonly WorkbenchDiagnosticRef[] }
-  | { type: "simulation.snapshot.changed"; sourceVersion: number; snapshot?: GraphSimulationSnapshot }
+  | {
+      type: "simulation.snapshot.changed";
+      sourceVersion: number;
+      snapshot?: GraphSimulationSnapshot;
+      overlay?: GraphVisualizerSimulationOverlayInput;
+      status?: VisualizerSimulationState["status"];
+      pendingChoice?: GraphSimulationPendingChoice;
+      diagnostics?: readonly WorkbenchDiagnosticRef[];
+    }
   | { type: "codegen.plan.completed"; requestId: string; sourceVersion: number; result: CodegenPlanResult }
   | { type: "codegen.plan.failed"; requestId: string; sourceVersion: number; diagnostics: readonly WorkbenchDiagnosticRef[] };
 
@@ -179,6 +199,7 @@ export type WorkbenchEffectDescriptor =
   | {
       kind: "build-model";
       requestId: string;
+      purpose?: "pipeline" | "simulation-overlay";
       sourceVersion: number;
       document: LiteFsmGraphDocument;
       analysisDiagnostics: readonly GraphDiagnostic[];
@@ -199,9 +220,10 @@ export type WorkbenchEffectDescriptor =
       initialStateOverrides?: readonly GraphInitialStateOverride[];
       initialContextOverrides?: readonly GraphInitialContextOverride[];
     }
+  | { kind: "simulation.dispose"; sourceVersion: number }
   | { kind: "simulation.send"; sourceVersion: number; event: GraphSimulationEvent }
-  | { kind: "simulation.send-from-transition"; sourceVersion: number; target: VisualizerWorkbenchRowCommandTarget; payload?: GraphJsonValue }
-  | { kind: "simulation.send-from-emission"; sourceVersion: number; target: VisualizerWorkbenchRowCommandTarget; payload?: GraphJsonValue }
+  | { kind: "simulation.send-from-transition"; sourceVersion: number; target: VisualizerTransitionRowCommandTarget; payload?: GraphJsonValue }
+  | { kind: "simulation.send-from-emission"; sourceVersion: number; target: VisualizerEmissionRowCommandTarget; payload?: GraphJsonValue }
   | {
       kind: "simulation.reset";
       sourceVersion: number;

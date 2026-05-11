@@ -12,6 +12,7 @@ import {
   selectTabItems,
   shallowEqualObject,
 } from "./selectors";
+import type { WorkbenchSnapshot } from "./types";
 
 const documentFixture = { source: { filename: "sample.ts", language: "ts" }, diagnostics: [], machines: [], managers: [] } as unknown as LiteFsmGraphDocument;
 const modelFixture = { version: "lite-fsm.visualizer/v1", machines: [], managers: [], topics: [], diagnostics: [], workbenchMachines: {} } as unknown as GraphVisualizerModel;
@@ -41,7 +42,7 @@ const diagnostic = {
   primaryTarget: { kind: "console" as const },
 };
 
-describe("workbench store", () => {
+describe("store workbench визуализатора", () => {
   it("не уведомляет subscribers для no-op command", () => {
     const store = createWorkbenchStore();
     const listener = vi.fn();
@@ -55,7 +56,7 @@ describe("workbench store", () => {
     expect(listener).not.toHaveBeenCalled();
   });
 
-  it("сохраняет refs unrelated slices при выборе вкладки", () => {
+  it("сохраняет refs несвязанных slices при выборе вкладки", () => {
     const store = createWorkbenchStore();
     const before = store.getSnapshot();
 
@@ -71,7 +72,7 @@ describe("workbench store", () => {
     expect(after.revisions.model).toBe(before.revisions.model);
   });
 
-  it("возвращает stable selector refs для неизменных inputs", () => {
+  it("возвращает стабильные refs selectors для неизменных inputs", () => {
     const store = createWorkbenchStore();
     const firstTabs = selectTabItems(store.getSnapshot());
     const secondTabs = selectTabItems(store.getSnapshot());
@@ -95,7 +96,7 @@ describe("workbench store", () => {
     expect(shallowEqualObject({ activeTab: "source" }, { activeTab: "system" })).toBe(false);
   });
 
-  it("возвращает empty panel view для каждой вкладки", () => {
+  it("возвращает пустой panel view для каждой вкладки", () => {
     const store = createWorkbenchStore();
 
     expect(selectCurrentEmptyPanel(store.getSnapshot()).title).toBe("Source pipeline");
@@ -242,7 +243,7 @@ describe("workbench store", () => {
     expect(store.getSnapshot().state.console.entries[0]).toMatchObject({ channel: "system", title: "Source pipeline started" });
   });
 
-  it("open visualizer очищает старые diagnostics/console и увеличивает sequence", () => {
+  it("открытие visualizer очищает старые diagnostics/console и увеличивает sequence", () => {
     const store = createWorkbenchStore();
     store.dispatch({ type: "source.open-visualizer" });
     store.dispatch({ type: "compile.failed", requestId: "compile:1:1", sourceVersion: 1, diagnostics: [diagnostic] });
@@ -363,6 +364,7 @@ describe("workbench store", () => {
     expect(analysisOutput.effects[0]).toEqual({
       kind: "build-model",
       requestId: "model:1:1",
+      purpose: "pipeline",
       sourceVersion: 1,
       document: documentFixture,
       analysisDiagnostics,
@@ -411,7 +413,7 @@ describe("workbench store", () => {
     expect(store.getSnapshot().state.console.entries.some((entry) => entry.message === "Analyzer warning")).toBe(true);
   });
 
-  it("пишет diagnostics и console entries для failed responses", () => {
+  it("пишет diagnostics и entries консоли для failed responses", () => {
     const store = createWorkbenchStore();
     store.dispatch({ type: "source.open-visualizer" });
 
@@ -552,6 +554,40 @@ describe("workbench store", () => {
     expect(store.getSnapshot().state.console.entries).toEqual([]);
   });
 
+  it("source edit и recompile dispose-ят активную session симуляции", () => {
+    const snapshot = createInitialWorkbenchSnapshot();
+    const activeSnapshot: WorkbenchSnapshot = {
+      ...snapshot,
+      state: {
+        ...snapshot.state,
+        l3: { selectedMachineIds: ["player"] },
+        simulation: {
+          ...snapshot.state.simulation,
+          status: "running",
+          selectedMachineIds: ["player"],
+          scope: { kind: "machines" as const, machineIds: ["player"] },
+          snapshot: { timeline: { currentStepId: "step:old" } } as never,
+          overlay: { currentStateIdsByMachineId: { player: "player:idle" } },
+          inspectedStepId: "step:old",
+          pendingChoice: { pendingChoiceId: "choice:old" } as never,
+          diagnostics: [diagnostic],
+        },
+      },
+    };
+
+    const sourceChanged = createWorkbenchStore(activeSnapshot).dispatch({ type: "source.changed", source: "export const next = 1;" });
+    expect(sourceChanged.effects).toEqual([{ kind: "simulation.dispose", sourceVersion: 1 }]);
+
+    const openVisualizerStore = createWorkbenchStore(activeSnapshot);
+    const openVisualizer = openVisualizerStore.dispatch({ type: "source.open-visualizer" });
+    expect(openVisualizer.effects).toEqual([
+      { kind: "simulation.dispose", sourceVersion: 1 },
+      { kind: "compile", requestId: "compile:1:1", source: openVisualizerStore.getSnapshot().state.source },
+    ]);
+    expect(openVisualizerStore.getSnapshot().state.simulation.snapshot).toBeUndefined();
+    expect(openVisualizerStore.getSnapshot().state.simulation.inspectedStepId).toBeUndefined();
+  });
+
   it("оставляет snapshot прежним при source.changed с тем же текстом", () => {
     const store = createWorkbenchStore();
     const before = store.getSnapshot();
@@ -561,7 +597,7 @@ describe("workbench store", () => {
     expect(store.getSnapshot()).toBe(before);
   });
 
-  it("reset to sample возвращает source и инвалидирует derived state", () => {
+  it("reset to sample возвращает исходник и инвалидирует derived state", () => {
     const store = createWorkbenchStore();
     store.dispatch({ type: "source.changed", source: "export const changed = 1;" });
     store.dispatch({ type: "source.reset-to-sample" });
@@ -570,7 +606,7 @@ describe("workbench store", () => {
     expect(store.getSnapshot().state.source.version).toBe(3);
   });
 
-  it("reset to sample остается no-op если source уже sample", () => {
+  it("reset to sample остается no-op если исходник уже sample", () => {
     const store = createWorkbenchStore();
     const before = store.getSnapshot();
 
@@ -792,7 +828,7 @@ describe("workbench store", () => {
     expect(store.getSnapshot()).toBe(beforeSameNone);
   });
 
-  it("отклоняет simulation user commands до появления session", () => {
+  it("отклоняет пользовательские команды симуляции до появления session", () => {
     const store = createWorkbenchStore();
 
     expect(store.dispatch({ type: "l3.event.sent", event: { type: "PLAY" } }).result).toMatchObject({
@@ -802,13 +838,25 @@ describe("workbench store", () => {
     expect(
       store.dispatch({
         type: "l3.transition-row.sent",
-        target: { machineId: "player", rowId: "row", slice: { kind: "domain", machineId: "player" } },
+        target: {
+          kind: "transition",
+          machineId: "player",
+          rowId: "row",
+          transitionId: "transition",
+          slice: { kind: "domain", machineId: "player" },
+        },
       }).result,
     ).toMatchObject({ ok: false, reason: "missing-simulation-session" });
     expect(
       store.dispatch({
         type: "l3.effect-row.followed",
-        target: { machineId: "player", rowId: "row", slice: { kind: "domain", machineId: "player" } },
+        target: {
+          kind: "emission",
+          machineId: "player",
+          rowId: "row",
+          emissionId: "emission",
+          slice: { kind: "domain", machineId: "player" },
+        },
       }).result,
     ).toMatchObject({ ok: false, reason: "missing-simulation-session" });
     expect(store.dispatch({ type: "l3.simulation.reset" }).result).toMatchObject({
@@ -817,7 +865,76 @@ describe("workbench store", () => {
     });
   });
 
-  it("обрабатывает simulation snapshot и stale snapshot", () => {
+  it("открывает L3 из L2 topic и пересобирает scope симуляции", () => {
+    const snapshot = createInitialWorkbenchSnapshot();
+    const modelWithRelations = {
+      ...modelFixture,
+      relations: {
+        machineIdsByTopicType: {
+          PLAY: {
+            producers: ["producer", "producer"],
+            consumers: ["consumer", "producer"],
+            related: ["producer", "consumer"],
+          },
+        },
+        topicTypesByMachineId: {},
+      },
+    } as unknown as GraphVisualizerModel;
+    const store = createWorkbenchStore({
+      ...snapshot,
+      state: {
+        ...snapshot.state,
+        compile: { ...snapshot.state.compile, status: "ready", document: documentFixture, diagnostics: [] },
+        model: { status: "ready", model: modelWithRelations, diagnostics: [] },
+        simulation: {
+          ...snapshot.state.simulation,
+          status: "running",
+          snapshot: { timeline: { currentStepId: "root" } } as never,
+        },
+      },
+    });
+
+    const output = store.dispatch({ type: "l2.topic.opened-in-workbench", eventType: "PLAY" });
+
+    expect(output.result).toEqual({ ok: true });
+    expect(store.getSnapshot().state.activeTab).toBe("machines");
+    expect(store.getSnapshot().state.l2.selectedTopic).toBe("PLAY");
+    expect(store.getSnapshot().state.l3.selectedMachineIds).toEqual(["producer", "consumer"]);
+    expect(store.getSnapshot().state.simulation.scope).toEqual({ kind: "machines", machineIds: ["producer", "consumer"] });
+    expect(store.getSnapshot().state.simulation.snapshot).toBeUndefined();
+    expect(output.effects).toEqual([
+      { kind: "simulation.dispose", sourceVersion: 1 },
+      {
+        kind: "create-simulation-session",
+        sourceVersion: 1,
+        document: documentFixture,
+        scope: { kind: "machines", machineIds: ["producer", "consumer"] },
+      },
+    ]);
+  });
+
+  it("возвращает controlled error если L2 topic не связан с машинами", () => {
+    const snapshot = createInitialWorkbenchSnapshot();
+    const modelWithRelations = {
+      ...modelFixture,
+      relations: { machineIdsByTopicType: {}, topicTypesByMachineId: {} },
+    } as unknown as GraphVisualizerModel;
+    const store = createWorkbenchStore({
+      ...snapshot,
+      state: {
+        ...snapshot.state,
+        model: { status: "ready", model: modelWithRelations, diagnostics: [] },
+      },
+    });
+    const before = store.getSnapshot();
+
+    const output = store.dispatch({ type: "l2.topic.opened-in-workbench", eventType: "UNKNOWN" });
+
+    expect(output.result).toEqual({ ok: false, reason: "missing-model", diagnostics: [] });
+    expect(store.getSnapshot()).toBe(before);
+  });
+
+  it("обрабатывает snapshot симуляции и stale snapshot", () => {
     const store = createWorkbenchStore();
     const before = store.getSnapshot();
     const stale = store.dispatch({ type: "simulation.snapshot.changed", sourceVersion: 0 });
@@ -829,7 +946,297 @@ describe("workbench store", () => {
     expect(store.getSnapshot()).not.toBe(before);
   });
 
-  it("возвращает missing-document если analysis response пришел без document", () => {
+  it("пересобирает model как simulation overlay без переключения вкладки", () => {
+    const snapshot = createInitialWorkbenchSnapshot();
+    const overlay = { currentStateIdsByMachineId: { player: "player:idle" } };
+    const store = createWorkbenchStore({
+      ...snapshot,
+      state: {
+        ...snapshot.state,
+        activeTab: "machines",
+        compile: { ...snapshot.state.compile, status: "ready", document: documentFixture, diagnostics: [] },
+        analysis: { status: "ready", diagnostics: analysisDiagnostics, appDiagnostics: [] },
+        model: { status: "ready", model: modelFixture, diagnostics: [] },
+      },
+    });
+
+    const snapshotChanged = store.dispatch({
+      type: "simulation.snapshot.changed",
+      sourceVersion: 1,
+      snapshot: { timeline: { currentStepId: "root" } } as never,
+      overlay,
+      status: "running",
+    });
+
+    expect(snapshotChanged.effects).toEqual([
+      {
+        kind: "build-model",
+        requestId: "model:1:simulation:root",
+        purpose: "simulation-overlay",
+        sourceVersion: 1,
+        document: documentFixture,
+        analysisDiagnostics,
+        simulation: overlay,
+      },
+    ]);
+
+    const modelChanged = store.dispatch({
+      type: "model.succeeded",
+      requestId: "model:1:simulation:root",
+      sourceVersion: 1,
+      purpose: "simulation-overlay",
+      model: modelWithDiagnosticsFixture,
+    });
+
+    expect(modelChanged.effects).toEqual([]);
+    expect(store.getSnapshot().state.activeTab).toBe("machines");
+    expect(store.getSnapshot().state.validation.status).toBe("idle");
+    expect(store.getSnapshot().state.model.model).toBe(modelWithDiagnosticsFixture);
+
+    const beforeStaleOverlay = store.getSnapshot();
+    const staleOverlay = store.dispatch({
+      type: "model.succeeded",
+      requestId: "model:1:simulation:old",
+      sourceVersion: 1,
+      purpose: "simulation-overlay",
+      model: modelFixture,
+    });
+
+    expect(staleOverlay.result).toEqual({ ok: false, reason: "stale-source-version", diagnostics: [] });
+    expect(store.getSnapshot()).toBe(beforeStaleOverlay);
+  });
+
+  it("строит request id simulation overlay для inspect и fallback без snapshot", () => {
+    const snapshot = createInitialWorkbenchSnapshot();
+    const overlay = { currentStateIdsByMachineId: { player: "player:idle" } };
+    const store = createWorkbenchStore({
+      ...snapshot,
+      state: {
+        ...snapshot.state,
+        compile: { ...snapshot.state.compile, status: "ready", document: documentFixture, diagnostics: [] },
+        analysis: { status: "ready", diagnostics: analysisDiagnostics, appDiagnostics: [] },
+        model: { status: "ready", model: modelFixture, diagnostics: [] },
+        simulation: {
+          ...snapshot.state.simulation,
+          overlay,
+          snapshot: {
+            timeline: {
+              currentStepId: "root",
+              stepsById: {
+                "step:1": { rowRefs: [] },
+              },
+            },
+          } as never,
+        },
+      },
+    });
+
+    const inspected = store.dispatch({ type: "l3.timeline.step.selected", stepId: "step:1" });
+    expect(inspected.effects).toEqual([
+      {
+        kind: "build-model",
+        requestId: "model:1:simulation:step:1",
+        purpose: "simulation-overlay",
+        sourceVersion: 1,
+        document: documentFixture,
+        analysisDiagnostics,
+        simulation: { ...overlay, inspectedRefs: [] },
+      },
+    ]);
+
+    const fallbackStore = createWorkbenchStore({
+      ...snapshot,
+      state: {
+        ...snapshot.state,
+        compile: { ...snapshot.state.compile, status: "ready", document: documentFixture, diagnostics: [] },
+        analysis: { status: "ready", diagnostics: analysisDiagnostics, appDiagnostics: [] },
+        model: { status: "ready", model: modelFixture, diagnostics: [] },
+      },
+    });
+
+    expect(
+      fallbackStore.dispatch({
+        type: "simulation.snapshot.changed",
+        sourceVersion: 1,
+        overlay,
+      }).effects,
+    ).toEqual([
+      {
+        kind: "build-model",
+        requestId: "model:1:simulation:none",
+        purpose: "simulation-overlay",
+        sourceVersion: 1,
+        document: documentFixture,
+        analysisDiagnostics,
+        simulation: overlay,
+      },
+    ]);
+  });
+
+  it("мапит simulation diagnostics в controlled result и console", () => {
+    const store = createWorkbenchStore();
+
+    expect(
+      store.dispatch({
+        type: "simulation.snapshot.changed",
+        sourceVersion: 1,
+        diagnostics: [],
+      }).result,
+    ).toEqual({ ok: true });
+
+    const output = store.dispatch({
+      type: "simulation.snapshot.changed",
+      sourceVersion: 1,
+      status: "blocked",
+      diagnostics: [diagnostic],
+    });
+
+    expect(output.result).toEqual({ ok: false, reason: "simulator-rejected", diagnostics: [diagnostic] });
+    expect(store.getSnapshot().state.simulation.status).toBe("blocked");
+    expect(store.getSnapshot().state.diagnostics).toEqual([diagnostic]);
+    expect(store.getSnapshot().state.console.entries[0]?.message).toBe("Bad source");
+  });
+
+  it("создает новые simulation sessions для L1/L3 selection и очищает старые timeline/inspect", () => {
+    const snapshot = createInitialWorkbenchSnapshot();
+    const activeReadySnapshot: WorkbenchSnapshot = {
+      ...snapshot,
+      state: {
+        ...snapshot.state,
+        compile: { ...snapshot.state.compile, status: "ready", document: documentFixture, diagnostics: [] },
+        model: { status: "ready", model: modelFixture, diagnostics: [] },
+        l3: { selectedMachineIds: ["old"] },
+        simulation: {
+          ...snapshot.state.simulation,
+          status: "running",
+          selectedMachineIds: ["old"],
+          scope: { kind: "machines" as const, machineIds: ["old"] },
+          snapshot: { timeline: { currentStepId: "step:old" } } as never,
+          overlay: { currentStateIdsByMachineId: { old: "old:idle" } },
+          inspectedStepId: "step:old",
+          pendingChoice: { pendingChoiceId: "choice:old" } as never,
+          diagnostics: [diagnostic],
+        },
+      },
+    };
+
+    const l1Store = createWorkbenchStore(activeReadySnapshot);
+    const l1Output = l1Store.dispatch({ type: "l1.machine.opened-in-workbench", machineId: "player" });
+    expect(l1Store.getSnapshot().state.activeTab).toBe("machines");
+    expect(l1Store.getSnapshot().state.l3.selectedMachineIds).toEqual(["player"]);
+    expect(l1Store.getSnapshot().state.simulation.snapshot).toBeUndefined();
+    expect(l1Store.getSnapshot().state.simulation.inspectedStepId).toBeUndefined();
+    expect(l1Store.getSnapshot().state.simulation.diagnostics).toEqual([]);
+    expect(l1Output.effects).toEqual([
+      { kind: "simulation.dispose", sourceVersion: 1 },
+      {
+        kind: "create-simulation-session",
+        sourceVersion: 1,
+        document: documentFixture,
+        scope: { kind: "machines", machineIds: ["player"] },
+      },
+    ]);
+
+    const l3Store = createWorkbenchStore(activeReadySnapshot);
+    const l3Output = l3Store.dispatch({ type: "l3.machine.toggled", machineId: "worker" });
+    expect(l3Store.getSnapshot().state.l3.selectedMachineIds).toEqual(["old", "worker"]);
+    expect(l3Store.getSnapshot().state.simulation.scope).toEqual({ kind: "machines", machineIds: ["old", "worker"] });
+    expect(l3Store.getSnapshot().state.simulation.pendingChoice).toBeUndefined();
+    expect(l3Output.effects).toEqual([
+      { kind: "simulation.dispose", sourceVersion: 1 },
+      {
+        kind: "create-simulation-session",
+        sourceVersion: 1,
+        document: documentFixture,
+        scope: { kind: "machines", machineIds: ["old", "worker"] },
+      },
+    ]);
+
+    const clearStore = createWorkbenchStore(activeReadySnapshot);
+    const clearOutput = clearStore.dispatch({ type: "l3.selection.cleared" });
+    expect(clearStore.getSnapshot().state.l3.selectedMachineIds).toEqual([]);
+    expect(clearStore.getSnapshot().state.simulation.snapshot).toBeUndefined();
+    expect(clearOutput.effects).toEqual([{ kind: "simulation.dispose", sourceVersion: 1 }]);
+  });
+
+  it("создает descriptors команд симуляции при активном snapshot", () => {
+    const snapshot = createInitialWorkbenchSnapshot();
+    const store = createWorkbenchStore({
+      ...snapshot,
+      state: {
+        ...snapshot.state,
+        simulation: {
+          ...snapshot.state.simulation,
+          status: "running",
+          snapshot: { timeline: { currentStepId: "root" } } as never,
+        },
+      },
+    });
+
+    expect(store.dispatch({ type: "l3.event.sent", event: { type: "PLAY" } }).effects).toEqual([
+      { kind: "simulation.send", sourceVersion: 1, event: { type: "PLAY" } },
+    ]);
+    expect(
+      store.dispatch({
+        type: "l3.transition-row.sent",
+        target: {
+          kind: "transition",
+          machineId: "player",
+          rowId: "row",
+          transitionId: "transition",
+          slice: { kind: "domain", machineId: "player" },
+        },
+      }).effects,
+    ).toEqual([
+      {
+        kind: "simulation.send-from-transition",
+        sourceVersion: 1,
+        target: {
+          kind: "transition",
+          machineId: "player",
+          rowId: "row",
+          transitionId: "transition",
+          slice: { kind: "domain", machineId: "player" },
+        },
+        payload: undefined,
+      },
+    ]);
+    expect(
+      store.dispatch({
+        type: "l3.effect-row.followed",
+        target: {
+          kind: "emission",
+          machineId: "player",
+          rowId: "row",
+          emissionId: "emission",
+          slice: { kind: "domain", machineId: "player" },
+        },
+      }).effects,
+    ).toEqual([
+      {
+        kind: "simulation.send-from-emission",
+        sourceVersion: 1,
+        target: {
+          kind: "emission",
+          machineId: "player",
+          rowId: "row",
+          emissionId: "emission",
+          slice: { kind: "domain", machineId: "player" },
+        },
+        payload: undefined,
+      },
+    ]);
+    expect(store.dispatch({ type: "l3.simulation.reset" }).effects).toEqual([
+      {
+        kind: "simulation.reset",
+        sourceVersion: 1,
+        initialStateOverrides: undefined,
+        initialContextOverrides: undefined,
+      },
+    ]);
+  });
+
+  it("возвращает missing-document если response анализа пришел без document", () => {
     const snapshot = createInitialWorkbenchSnapshot();
     const store = createWorkbenchStore({
       ...snapshot,
@@ -849,7 +1256,7 @@ describe("workbench store", () => {
     expect(output.result).toEqual({ ok: false, reason: "missing-document", diagnostics: [] });
   });
 
-  it("применяет codegen failed response", () => {
+  it("применяет failed response codegen", () => {
     const store = createWorkbenchStore();
     store.dispatch({ type: "codegen.intent.created", intent: { kind: "add-machine", template: "domain" } });
 
@@ -864,7 +1271,7 @@ describe("workbench store", () => {
     expect(store.getSnapshot().state.codegen.diagnostics).toEqual([diagnostic]);
   });
 
-  it("игнорирует codegen completed response с устаревшим requestId текущей sourceVersion", () => {
+  it("игнорирует completed response codegen с устаревшим requestId текущей sourceVersion", () => {
     const store = createWorkbenchStore();
     store.dispatch({ type: "codegen.intent.created", intent: { kind: "add-machine", template: "domain" } });
     const before = store.getSnapshot();

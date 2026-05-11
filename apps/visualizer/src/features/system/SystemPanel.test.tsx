@@ -58,8 +58,8 @@ const topic = (overrides: Partial<SystemTopicRowView> & Pick<SystemTopicRowView,
 
 const dispatchOf = () => vi.fn<(command: VisualizerCommand) => void>();
 
-describe("SystemPanel", () => {
-  it("рендерит machine detail, relation states и отправляет L1 commands", () => {
+describe("панель SystemPanel", () => {
+  it("рендерит detail машины, состояния relations и отправляет L1 commands", () => {
     const dispatch = dispatchOf();
     const selectedMachine = machine({
       machineId: "selectedMachine",
@@ -144,7 +144,7 @@ describe("SystemPanel", () => {
     );
   });
 
-  it("рендерит topic detail, empty lists и topic navigation", () => {
+  it("рендерит detail темы, пустые списки и навигацию topics", () => {
     const dispatch = dispatchOf();
     const detailTopic = topic({ eventType: "DONE", producerCount: 0, consumerCount: 0 });
     const view: SystemPanelView = {
@@ -193,7 +193,7 @@ describe("SystemPanel", () => {
     expect(screen.getByTestId(ids.system.detailConsumers).getAttribute("data-empty")).toBe("true");
   });
 
-  it("рендерит empty detail и produced topic chips", () => {
+  it("рендерит пустой detail и chips produced topics", () => {
     const dispatch = dispatchOf();
     const producedMachine = machine({ machineId: "producer" });
     const view: SystemPanelView = {

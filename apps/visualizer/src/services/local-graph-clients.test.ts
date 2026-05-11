@@ -22,8 +22,8 @@ const createSampleDocument = async (): Promise<LiteFsmGraphDocument> => {
   return response.document;
 };
 
-describe("local graph clients", () => {
-  it("компилирует, анализирует и строит view-model для sample source", async () => {
+describe("локальные graph clients", () => {
+  it("компилирует, анализирует и строит view-model для примерного исходника", async () => {
     const source = createSourceSession({ source: SAMPLE_SOURCE, filename: "sample.ts" });
     const compile = await createLocalCompilerClient().compile({
       requestId: "compile:1:1",
@@ -58,7 +58,7 @@ describe("local graph clients", () => {
     expect(model.model.topics.map((topic) => topic.eventType)).toEqual(["PAUSE", "PLAY", "STOP"]);
   });
 
-  it("возвращает compile document с controlled diagnostics для невалидного source", async () => {
+  it("возвращает compile document с контролируемыми diagnostics для невалидного исходника", async () => {
     const source = createSourceSession({ source: "export const broken = ;", filename: "broken.ts" });
 
     const compile = await createLocalCompilerClient().compile({
@@ -73,7 +73,7 @@ describe("local graph clients", () => {
     expect(compile.document.machines).toEqual([]);
   });
 
-  it("возвращает controlled failed responses при service exceptions", async () => {
+  it("возвращает контролируемые failed responses при исключениях сервисов", async () => {
     const source = createSourceSession({ source: SAMPLE_SOURCE, filename: "sample.ts" });
     const document = await createSampleDocument();
 
@@ -116,7 +116,7 @@ describe("local graph clients", () => {
     });
   });
 
-  it("передает analysis diagnostics и simulation overlay в model builder", async () => {
+  it("передает diagnostics анализа и simulation overlay в построитель модели", async () => {
     const document = await createSampleDocument();
     const modelFixture = {
       version: "lite-fsm.visualizer/v1",
@@ -153,7 +153,7 @@ describe("local graph clients", () => {
     expect(model).toEqual({ ok: true, sourceVersion: 1, model: modelFixture });
   });
 
-  it("подключает local clients в default services", async () => {
+  it("подключает локальные clients в сервисы по умолчанию", async () => {
     const services = createDefaultEffectRunnerServices();
     const source = createSourceSession({ source: SAMPLE_SOURCE, filename: "sample.ts" });
 
@@ -162,7 +162,7 @@ describe("local graph clients", () => {
     ).resolves.toMatchObject({ ok: true, sourceVersion: 1 });
   });
 
-  it("передает filename/language в compiler dependency и document в analyzer dependency", async () => {
+  it("передает filename/language в зависимость compiler и document в зависимость analyzer", async () => {
     const document = await createSampleDocument();
     const compile = vi.fn(() => ({ document, diagnostics: document.diagnostics }));
     const analyze = vi.fn(() => ({ diagnostics: [{ code: "info", severity: "info" as const, message: "ok" }] }));

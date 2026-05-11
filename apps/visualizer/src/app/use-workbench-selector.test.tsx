@@ -5,7 +5,7 @@ import { memo } from "react";
 import { renderToString } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { createNoopCodegenPlanner } from "../codegen";
-import type { EffectRunnerServices } from "../services";
+import { createLocalSimulationService, type EffectRunnerServices } from "../services";
 import { createWorkbenchStore } from "../workbench";
 import { createNoopValidationRegistry } from "../validation";
 import { useWorkbenchSelector } from "./use-workbench-selector";
@@ -53,6 +53,7 @@ const createServices = (): EffectRunnerServices => ({
       model: modelFixture,
     })),
   },
+  simulation: createLocalSimulationService(),
   validation: createNoopValidationRegistry(),
   codegen: createNoopCodegenPlanner(),
 });
@@ -79,8 +80,8 @@ const MissingProviderProbe = () => {
   return null;
 };
 
-describe("useWorkbenchSelector", () => {
-  it("не rerender-ит component при unchanged selected value", () => {
+describe("хук useWorkbenchSelector", () => {
+  it("не выполняет rerender компонента при неизменном выбранном значении", () => {
     const store = createWorkbenchStore();
     const onRender = vi.fn();
 
