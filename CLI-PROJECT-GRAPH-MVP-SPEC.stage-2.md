@@ -24,6 +24,72 @@ CLI создает resolver/cache/host для graph compiler и пишет JSON 
 packages/cli/
 ```
 
+### CLI File Layout
+
+Рекомендуемая структура пакета является частью stage-2 contract. Ее можно
+минимально уточнять при реализации, но ownership boundaries должны сохраниться:
+bin/adapter слой не содержит domain logic, а resolver/cache/export-document
+остаются тестируемыми pure/domain modules.
+
+```txt
+packages/cli/
+  package.json
+  tsconfig.json
+  vitest.config.ts
+  src/
+    bin/
+      lite-fsm.ts
+    cli/
+      context.ts
+      create-program.ts
+      diagnostics.ts
+      node-fs.ts
+      result.ts
+    export-graph/
+      command.ts
+      export-document.ts
+      options.ts
+      run-export-graph.ts
+      write-output.ts
+    output/
+      format-diagnostics.ts
+      stable-json.ts
+    project/
+      create-project-host.ts
+      module-resolver.ts
+      source-cache.ts
+      tsconfig.ts
+  tests/
+    helpers/
+      memory-fs.ts
+    export-graph/
+      export-document.test.ts
+      export-graph-command.test.ts
+    project/
+      module-resolver.test.ts
+      source-cache.test.ts
+      tsconfig.test.ts
+```
+
+Правила:
+
+1. `src/bin/lite-fsm.ts` - thin Node entrypoint с shebang; он создает
+   `CliContext`, запускает program и выставляет `process.exitCode`.
+2. `src/cli/create-program.ts` - единственное место, где создается
+   `commander.Command` и регистрируются команды.
+3. `src/export-graph/command.ts` - commander adapter для `export-graph`; он
+   нормализует argv и вызывает use-case.
+4. `src/export-graph/run-export-graph.ts` - use-case: resolver/cache/host,
+   вызов `compileLiteFsmGraphProject`, diagnostics mapping и write policy.
+5. `src/export-graph/export-document.ts` - canonical TypeScript type, envelope
+   factory и deterministic stringify helper для
+   `lite-fsm.project-graph-export/v1`.
+6. `src/project/**` владеет tsconfig lookup, TypeScript module resolution,
+   source cache и созданием `LiteFsmGraphProjectHost`.
+7. `src/output/**` владеет stderr formatting и stable JSON primitives.
+8. Tests используют in-memory `CliFileSystem`; Node fs adapter и bin entrypoint
+   остаются thin integration adapters.
+
 ### Package Contract
 
 `packages/cli/package.json`:
@@ -90,7 +156,7 @@ lite-fsm export-graph --entry path/to/app-entry.ts --out lite-fsm.graph.json
 Поток выполнения:
 
 ```txt
-bin/lite-fsm.ts
+src/bin/lite-fsm.ts
   -> createCliContext(...)
   -> createProgram(context)
   -> register command modules
