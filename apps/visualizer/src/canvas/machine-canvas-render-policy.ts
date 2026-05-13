@@ -8,17 +8,24 @@ import type { MachineCanvasDensity, MachineCanvasSize } from "./machine-canvas-r
 
 export const MACHINE_CANVAS_RENDER_POLICY = {
   nodeMinWidth: 160,
-  nodeMaxWidth: 320,
+  nodeMaxWidth: 420,
   nodeNameCharWidth: 7.4,
   nodeHorizontalPadding: 28,
-  nodeMarkerGap: 6,
-  nodeMarkerWidth: 56,
   baseNodeHeight: 70,
+  nodeBadgeCharWidth: 6.2,
+  nodeBadgeGap: 4,
+  nodeBadgeHorizontalPadding: 12,
+  nodeLabelLineHeight: 16,
+  nodeMetadataRowHeight: 17,
+  nodeStatGap: 5,
+  nodeStatWidth: 46,
+  nodeLoopStatWidth: 58,
   extraHeightPerSideDegreeOverflow: 18,
   edgeLabelMaxWidth: 170,
   edgeLabelCharWidth: 6.4,
   edgeLabelPadding: 14,
   edgeLabelHeight: 18,
+  edgeLabelNodeClearance: 10,
   labelCollisionPasses: 4,
   labelCollisionCandidateShifts: [0.12, -0.12, 0.22, -0.22, 0.32, -0.32],
   labelTMin: 0.1,
@@ -187,24 +194,72 @@ export const machineCanvasDensityFor = (stateCount: number, visibleEdgeCount: nu
   return "very-dense";
 };
 
+const countWrappedRows = (itemWidths: readonly number[], contentWidth: number, gap: number): number => {
+  if (itemWidths.length === 0) return 0;
+
+  let rows = 1;
+  let rowWidth = 0;
+
+  for (const itemWidth of itemWidths) {
+    const nextWidth = rowWidth === 0 ? itemWidth : rowWidth + gap + itemWidth;
+
+    if (nextWidth <= contentWidth || rowWidth === 0) {
+      rowWidth = nextWidth;
+      continue;
+    }
+
+    rows += 1;
+    rowWidth = itemWidth;
+  }
+
+  return rows;
+};
+
+const badgeWidthFor = (badge: Pick<MachineFlowBadge, "label">): number =>
+  Math.ceil(
+    badge.label.length * MACHINE_CANVAS_RENDER_POLICY.nodeBadgeCharWidth +
+      MACHINE_CANVAS_RENDER_POLICY.nodeBadgeHorizontalPadding,
+  );
+
 export const machineCanvasNodeSizeFor = (node: MachineFlowNode): MachineCanvasSize => {
-  const markerWidth = node.badges.length > 0
-    ? MACHINE_CANVAS_RENDER_POLICY.nodeMarkerGap + MACHINE_CANVAS_RENDER_POLICY.nodeMarkerWidth
-    : 0;
   const desiredWidth = Math.ceil(
     node.label.length * MACHINE_CANVAS_RENDER_POLICY.nodeNameCharWidth +
-      MACHINE_CANVAS_RENDER_POLICY.nodeHorizontalPadding +
-      markerWidth,
+      MACHINE_CANVAS_RENDER_POLICY.nodeHorizontalPadding,
   );
+  const width = Math.min(
+    MACHINE_CANVAS_RENDER_POLICY.nodeMaxWidth,
+    Math.max(MACHINE_CANVAS_RENDER_POLICY.nodeMinWidth, desiredWidth),
+  );
+  const contentWidth = Math.max(1, width - MACHINE_CANVAS_RENDER_POLICY.nodeHorizontalPadding);
+  const labelLines = Math.max(
+    1,
+    Math.ceil((node.label.length * MACHINE_CANVAS_RENDER_POLICY.nodeNameCharWidth) / contentWidth),
+  );
+  const badgeRows = countWrappedRows(
+    node.badges.map(badgeWidthFor),
+    contentWidth,
+    MACHINE_CANVAS_RENDER_POLICY.nodeBadgeGap,
+  );
+  const statRows = countWrappedRows(
+    [
+      MACHINE_CANVAS_RENDER_POLICY.nodeStatWidth,
+      MACHINE_CANVAS_RENDER_POLICY.nodeStatWidth,
+      ...(node.stats.selfLoops > 0 ? [MACHINE_CANVAS_RENDER_POLICY.nodeLoopStatWidth] : []),
+    ],
+    contentWidth,
+    MACHINE_CANVAS_RENDER_POLICY.nodeStatGap,
+  );
+  const emissionRows = node.stats.emissions > 0 ? 1 : 0;
   const maxSideDegree = Math.max(node.stats.incoming, node.stats.outgoing);
 
   return {
-    width: Math.min(
-      MACHINE_CANVAS_RENDER_POLICY.nodeMaxWidth,
-      Math.max(MACHINE_CANVAS_RENDER_POLICY.nodeMinWidth, desiredWidth),
-    ),
+    width,
     height:
       MACHINE_CANVAS_RENDER_POLICY.baseNodeHeight +
+      (labelLines - 1) * MACHINE_CANVAS_RENDER_POLICY.nodeLabelLineHeight +
+      badgeRows * MACHINE_CANVAS_RENDER_POLICY.nodeMetadataRowHeight +
+      Math.max(0, statRows - 1) * MACHINE_CANVAS_RENDER_POLICY.nodeMetadataRowHeight +
+      emissionRows * MACHINE_CANVAS_RENDER_POLICY.nodeMetadataRowHeight +
       Math.max(0, maxSideDegree - 2) * MACHINE_CANVAS_RENDER_POLICY.extraHeightPerSideDegreeOverflow,
   };
 };

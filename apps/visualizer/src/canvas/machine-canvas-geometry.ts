@@ -9,6 +9,8 @@ export type MachineCanvasLabelSlot = {
   height: number;
 };
 
+export type MachineCanvasLabelObstacle = MachineCanvasPoint & MachineCanvasSize;
+
 type LabelSlotWithPosition = MachineCanvasLabelSlot & MachineCanvasPoint;
 
 export const clampMachineCanvasLabelT = (t: number): number =>
@@ -98,30 +100,46 @@ const labelSlotsOverlap = (left: LabelSlotWithPosition, right: LabelSlotWithPosi
   Math.abs(left.x - right.x) < (left.width + right.width) / 2 + 8 &&
   Math.abs(left.y - right.y) < (left.height + right.height) / 2 + 6;
 
+const labelSlotOverlapsObstacle = (slot: LabelSlotWithPosition, obstacle: MachineCanvasLabelObstacle): boolean => {
+  const obstacleCenterX = obstacle.x + obstacle.width / 2;
+  const obstacleCenterY = obstacle.y + obstacle.height / 2;
+
+  return (
+    Math.abs(slot.x - obstacleCenterX) < (slot.width + obstacle.width) / 2 &&
+    Math.abs(slot.y - obstacleCenterY) < (slot.height + obstacle.height) / 2
+  );
+};
+
+const labelSlotHasCollision = (
+  slot: LabelSlotWithPosition,
+  positioned: readonly LabelSlotWithPosition[],
+  slotIndex: number,
+  obstacles: readonly MachineCanvasLabelObstacle[],
+): boolean =>
+  obstacles.some((obstacle) => labelSlotOverlapsObstacle(slot, obstacle)) ||
+  positioned.some((candidate, index) => index < slotIndex && labelSlotsOverlap(slot, candidate));
+
 export const resolveMachineCanvasLabelCollisions = (
   slots: readonly MachineCanvasLabelSlot[],
+  obstacles: readonly MachineCanvasLabelObstacle[] = [],
 ): ReadonlyMap<string, number> => {
   const positioned = slots.map((slot) => positionedSlot(slot, clampMachineCanvasLabelT(slot.t)));
 
   for (let pass = 0; pass < MACHINE_CANVAS_RENDER_POLICY.labelCollisionPasses; pass += 1) {
     let moved = false;
 
-    for (let leftIndex = 0; leftIndex < positioned.length; leftIndex += 1) {
-      for (let rightIndex = leftIndex + 1; rightIndex < positioned.length; rightIndex += 1) {
-        if (!labelSlotsOverlap(positioned[leftIndex], positioned[rightIndex])) continue;
+    for (let index = 0; index < positioned.length; index += 1) {
+      if (!labelSlotHasCollision(positioned[index], positioned, index, obstacles)) continue;
 
-        const candidates = MACHINE_CANVAS_RENDER_POLICY.labelCollisionCandidateShifts
-          .map((shift) => positionedSlot(positioned[rightIndex], clampMachineCanvasLabelT(positioned[rightIndex].t + shift)))
-          .filter((candidate) => candidate.t !== positioned[rightIndex].t);
-        const available = candidates.find((candidate) =>
-          positioned.every((slot, index) => index === rightIndex || !labelSlotsOverlap(candidate, slot)),
-        );
+      const candidates = MACHINE_CANVAS_RENDER_POLICY.labelCollisionCandidateShifts
+        .map((shift) => positionedSlot(positioned[index], clampMachineCanvasLabelT(positioned[index].t + shift)))
+        .filter((candidate) => candidate.t !== positioned[index].t);
+      const available = candidates.find((candidate) => !labelSlotHasCollision(candidate, positioned, index, obstacles));
 
-        if (available) {
-          positioned[rightIndex] = available;
-          moved = true;
-        }
-      }
+      if (!available) continue;
+
+      positioned[index] = available;
+      moved = true;
     }
 
     if (!moved) break;

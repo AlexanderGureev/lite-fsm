@@ -303,23 +303,29 @@ Ownership rules:
   nodes не draggable, handles не connectable, click по graph item не dispatch-ит
   FSM events.
 - Nodes: fixed pre-layout dimensions. Width grows from label length up to
-  `320px`; labels truncate with `title`. Height grows by side degree. Roles:
+  `420px`; labels occupy their own row and wrap instead of competing with
+  badges. `title` still carries the full label. Height grows by label lines,
+  wrapped badge rows, wrapped stats rows, emission rows and side degree. Roles:
   normal quiet outline; current accent border/fill; initial accent border;
   terminal/synthetic dashed quiet; spawn badge; wildcard `*` dashed quiet with
   any-state badge; effect-source `*` dashed effect outline/fill.
-- Node stats show `in`, `out`, and `loop` counters. `emission-only` groups are
-  source-node chips (`emits N`) using effect tone and never render as
-  state-to-state edges.
+- Node stats show neutral visual counters with direction glyphs: `← IN`,
+  `→ OUT`, `↺ LOOP`. They must not reuse edge semantic colors, because edge
+  color communicates transition kind. `emission-only` groups are source-node
+  chips (`emits N`) using effect tone and never render as state-to-state edges.
 - Edges: accepted transition is solid `--vf-config`; self-emitted transition is
   dashed `--vf-effect`; from-other transition is dotted `--vf-routing`. Labels
   are mono chips with first event plus `+N`, capped at `170px`, and positioned
-  by route arc length with bounded collision shifts.
+  by route arc length with bounded collision shifts that avoid other labels and
+  node boxes.
 - Self loops are manual arcs above the node and stack deterministically by
   index. Non-self edges use ELK layered LR orthogonal routes; missing routes
   fall back to direct paths.
-- Hovering an edge label opens a fixed popover with source, target/self,
-  producer category, grouped event names, producer path, and row metadata. The
-  popover is built only from Machine Flow edge group metadata.
+- Hovering an edge label opens a fixed popover built only from Machine Flow
+  edge group metadata. Route states are rendered as explicit `from`/`to` (or
+  `loop`) rows; grouped event names are a vertical stack of semantic chips, not
+  one comma-like text run; producer and row metadata use compact rows with the
+  same `cfg`/`red`/`eff` color grammar as L3 machine cards.
 - Legend lives in the footer strip and lists accepted, self-emitted, from other,
   and emission-only grammar. Stable diagnostics attributes on graph root:
   `data-density` and `data-visible-edge-count`.

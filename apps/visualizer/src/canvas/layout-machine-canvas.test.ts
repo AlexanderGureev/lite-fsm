@@ -151,7 +151,7 @@ describe("раскладка для machine canvas", () => {
     expect(graph.edges.find((layoutEdge) => layoutEdge.id === "edge:self")).toMatchObject({
       selfIndex: 0,
       selfTotal: 1,
-      nodeSize: { width: 160, height: 88 },
+      nodeSize: { width: 160, height: 105 },
     });
     expect(graph.edges.find((layoutEdge) => layoutEdge.id === "edge:retry")?.route).toEqual({
       start: { x: 160, y: 44 },

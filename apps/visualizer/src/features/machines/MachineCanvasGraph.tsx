@@ -42,7 +42,6 @@ import {
   machineCanvasGraphDisplayBadges,
   machineCanvasGraphEdgePath,
   machineCanvasGraphEventLabelsForGroup,
-  machineCanvasGraphProducerLabel,
   machineCanvasGraphRowLabel,
   machineCanvasGraphSemanticNodeRef,
   scheduleMachineCanvasFitView,
@@ -67,6 +66,10 @@ type MachineCanvasEdgeData = {
 type MachineCanvasFlowNode = Node<MachineCanvasNodeData, "machine-canvas-node">;
 type MachineCanvasFlowEdge = Edge<MachineCanvasEdgeData, "machine-canvas-edge">;
 
+type MachineCanvasPopoverRow = MachineCanvasRenderEdge["group"]["rows"][number];
+type MachineCanvasPopoverProducer = MachineCanvasRenderEdge["group"]["producers"][number];
+type MachineCanvasPopoverLayer = MachineCanvasPopoverRow["rowKind"] | "producer";
+
 const createElkLayoutEngine = (): MachineCanvasLayoutEngine => {
   const elk = new ELK();
 
@@ -79,6 +82,13 @@ const MachineCanvasStateNode = ({ data }: NodeProps<MachineCanvasFlowNode>) => {
   const { node } = data;
   const roleStyle = machineCanvasNodeRoleStyle(node.role);
   const badges = machineCanvasGraphDisplayBadges(node);
+  const stats = [
+    { kind: "in", glyph: "←", label: "IN", value: node.stats.incoming, title: "incoming transitions" },
+    { kind: "out", glyph: "→", label: "OUT", value: node.stats.outgoing, title: "outgoing transitions" },
+    ...(node.stats.selfLoops > 0
+      ? [{ kind: "loop", glyph: "↺", label: "LOOP", value: node.stats.selfLoops, title: "self loops" }]
+      : []),
+  ];
 
   return (
     <div
@@ -89,27 +99,40 @@ const MachineCanvasStateNode = ({ data }: NodeProps<MachineCanvasFlowNode>) => {
       data-node-id={node.id}
       data-node-ref={machineCanvasGraphSemanticNodeRef(node)}
       data-node-role={node.role}
+      data-node-label-kind={node.label === "*" ? "symbol" : "name"}
     >
       <Handle type="target" position={Position.Left} />
       <div className="vf-machine-canvas-node-main">
         <strong className="vf-machine-canvas-node-label">{node.label}</strong>
-        {badges.length > 0 ? (
-          <span className="vf-machine-canvas-node-badges">
-            {badges.map((badge) => (
-              <span
-                key={`${badge.kind}:${badge.label}`}
-                className={cn("vf-machine-canvas-badge", `vf-machine-canvas-badge-${machineCanvasBadgeTone(badge.kind)}`)}
-              >
-                {badge.label}
-              </span>
-            ))}
-          </span>
-        ) : null}
       </div>
+      {badges.length > 0 ? (
+        <span className="vf-machine-canvas-node-badges">
+          {badges.map((badge) => (
+            <span
+              key={`${badge.kind}:${badge.label}`}
+              className={cn("vf-machine-canvas-badge", `vf-machine-canvas-badge-${machineCanvasBadgeTone(badge.kind)}`)}
+            >
+              {badge.label}
+            </span>
+          ))}
+        </span>
+      ) : null}
       <div className="vf-machine-canvas-node-stats" aria-label={`${node.label} graph stats`}>
-        <span title="incoming">in {node.stats.incoming}</span>
-        <span title="outgoing">out {node.stats.outgoing}</span>
-        {node.stats.selfLoops > 0 ? <span title="self loops">loop {node.stats.selfLoops}</span> : null}
+        {stats.map((stat) => (
+          <span
+            key={stat.kind}
+            className={cn("vf-machine-canvas-stat", `vf-machine-canvas-stat-${stat.kind}`)}
+            title={stat.title}
+            aria-label={`${stat.title}: ${stat.value}`}
+            data-stat-kind={stat.kind}
+          >
+            <span className="vf-machine-canvas-stat-glyph" aria-hidden="true">
+              {stat.glyph}
+            </span>
+            <span>{stat.label}</span>
+            <strong>{stat.value}</strong>
+          </span>
+        ))}
       </div>
       {node.emissionGroups.length > 0 ? (
         <div className="vf-machine-canvas-emissions">
@@ -131,6 +154,125 @@ const MachineCanvasStateNode = ({ data }: NodeProps<MachineCanvasFlowNode>) => {
   );
 };
 
+const popoverLayerLabels: Record<MachineCanvasPopoverLayer, string> = {
+  config: "cfg",
+  reducer: "red",
+  effect: "eff",
+  diagnostic: "diag",
+  unknown: "unknown",
+  producer: "emit",
+};
+
+const machineCanvasPopoverMeta = (row: MachineCanvasPopoverRow): string[] => {
+  switch (row.rowKind) {
+    case "config":
+    case "reducer":
+      return [
+        ...(row.sourceStateKey === "*" ? ["via *"] : []),
+        ...(row.guardLabel ? [row.guardLabel] : []),
+        ...(row.confidence ? [row.confidence] : []),
+      ];
+    case "effect":
+      return [
+        ...(row.routingLabel ? [row.routingLabel] : []),
+        ...(row.guardLabel ? [row.guardLabel] : []),
+        ...(row.confidence ? [row.confidence] : []),
+      ];
+    case "diagnostic":
+      return [row.severity];
+    case "unknown":
+      return [row.reason, row.confidence];
+  }
+};
+
+const machineCanvasPopoverProducerMeta = (producer: MachineCanvasPopoverProducer): string[] => [
+  ...(producer.routingLabel ? [producer.routingLabel] : []),
+  ...(producer.guardLabel ? [producer.guardLabel] : []),
+  ...(producer.confidence ? [producer.confidence] : []),
+];
+
+const EdgePopoverLayerBadge = ({ layer }: { layer: MachineCanvasPopoverLayer }) => (
+  <span className={cn("vf-machine-canvas-popover-layer", `vf-machine-canvas-popover-layer-${layer}`)}>
+    {popoverLayerLabels[layer]}
+  </span>
+);
+
+const EdgePopoverMetaPills = ({ values }: { values: readonly string[] }) =>
+  values.length > 0 ? (
+    <span className="vf-machine-canvas-popover-meta">
+      {values.map((value) => (
+        <span key={value}>{value}</span>
+      ))}
+    </span>
+  ) : null;
+
+const EdgePopoverProducerRow = ({ producer }: { producer: MachineCanvasPopoverProducer }) => (
+  <div className="vf-machine-canvas-popover-row" data-popover-row-kind="producer">
+    <EdgePopoverLayerBadge layer="producer" />
+    <strong className="vf-machine-canvas-popover-event">{producer.eventType}</strong>
+    <span className="vf-machine-canvas-popover-path">
+      {producer.machineTitle}.{producer.sourceStateKey}
+    </span>
+    <EdgePopoverMetaPills values={machineCanvasPopoverProducerMeta(producer)} />
+  </div>
+);
+
+const EdgePopoverMetadataRow = ({ row }: { row: MachineCanvasPopoverRow }) => {
+  switch (row.rowKind) {
+    case "config":
+    case "reducer":
+      return (
+        <div
+          className="vf-machine-canvas-popover-row"
+          data-popover-row-kind={row.rowKind}
+          aria-label={machineCanvasGraphRowLabel(row)}
+        >
+          <EdgePopoverLayerBadge layer={row.rowKind} />
+          <strong className="vf-machine-canvas-popover-event">{row.eventType}</strong>
+          <span className="vf-machine-canvas-popover-arrow">→</span>
+          <strong className="vf-machine-canvas-popover-state">{row.targetLabel}</strong>
+          <EdgePopoverMetaPills values={machineCanvasPopoverMeta(row)} />
+        </div>
+      );
+    case "effect":
+      return (
+        <div
+          className="vf-machine-canvas-popover-row"
+          data-popover-row-kind={row.rowKind}
+          aria-label={machineCanvasGraphRowLabel(row)}
+        >
+          <EdgePopoverLayerBadge layer="effect" />
+          <strong className="vf-machine-canvas-popover-event">{row.eventType}</strong>
+          <EdgePopoverMetaPills values={machineCanvasPopoverMeta(row)} />
+        </div>
+      );
+    case "diagnostic":
+      return (
+        <div
+          className="vf-machine-canvas-popover-row"
+          data-popover-row-kind={row.rowKind}
+          aria-label={machineCanvasGraphRowLabel(row)}
+        >
+          <EdgePopoverLayerBadge layer="diagnostic" />
+          <span className="vf-machine-canvas-popover-path">{row.label}</span>
+          <EdgePopoverMetaPills values={machineCanvasPopoverMeta(row)} />
+        </div>
+      );
+    case "unknown":
+      return (
+        <div
+          className="vf-machine-canvas-popover-row"
+          data-popover-row-kind={row.rowKind}
+          aria-label={machineCanvasGraphRowLabel(row)}
+        >
+          <EdgePopoverLayerBadge layer="unknown" />
+          <span className="vf-machine-canvas-popover-path">{row.reason}</span>
+          <EdgePopoverMetaPills values={machineCanvasPopoverMeta(row)} />
+        </div>
+      );
+  }
+};
+
 const EdgePopover = ({
   x,
   y,
@@ -143,6 +285,7 @@ const EdgePopover = ({
   const popoverRef = useRef<HTMLDivElement | null>(null);
   const [position, setPosition] = useState({ left: x, top: y, ready: false });
   const categoryStyle = machineCanvasProducerCategoryStyle(edge.producerCategory);
+  const eventLabels = machineCanvasGraphEventLabelsForGroup(edge.group);
 
   useEffect(() => {
     const rect = popoverRef.current!.getBoundingClientRect();
@@ -169,31 +312,35 @@ const EdgePopover = ({
         <span className={cn("vf-machine-canvas-popover-category", categoryStyle.className)}>
           {categoryStyle.label}
         </span>
-        <strong>{edge.sourceLabel}</strong>
-        <span>{edge.direction === "self" ? "loop" : "→"}</span>
-        <strong>{edge.direction === "self" ? "self" : edge.targetLabel}</strong>
+        <div className="vf-machine-canvas-popover-route">
+          <span>from</span>
+          <strong>{edge.sourceLabel}</strong>
+          <span>{edge.direction === "self" ? "loop" : "to"}</span>
+          <strong>{edge.direction === "self" ? "self" : edge.targetLabel}</strong>
+        </div>
       </div>
-      <div className="vf-machine-canvas-popover-section">
-        {machineCanvasGraphEventLabelsForGroup(edge.group).map((label) => (
-          <span key={label} className="vf-machine-canvas-popover-row">
-            {label}
-          </span>
-        ))}
-      </div>
-      {edge.group.producers.length > 0 ? (
-        <div className="vf-machine-canvas-popover-section">
-          {edge.group.producers.map((producer) => (
-            <span key={`${producer.machineId}:${producer.emissionId}`} className="vf-machine-canvas-popover-row">
-              {machineCanvasGraphProducerLabel(producer)}
+      <div className="vf-machine-canvas-popover-section" data-popover-section="events">
+        <span className="vf-machine-canvas-popover-section-title">events</span>
+        <div className="vf-machine-canvas-popover-event-list">
+          {eventLabels.map((label) => (
+            <span key={label} className={cn("vf-machine-canvas-popover-event-chip", categoryStyle.className)}>
+              {label}
             </span>
           ))}
         </div>
+      </div>
+      {edge.group.producers.length > 0 ? (
+        <div className="vf-machine-canvas-popover-section" data-popover-section="producers">
+          <span className="vf-machine-canvas-popover-section-title">producers</span>
+          {edge.group.producers.map((producer) => (
+            <EdgePopoverProducerRow key={`${producer.machineId}:${producer.emissionId}`} producer={producer} />
+          ))}
+        </div>
       ) : null}
-      <div className="vf-machine-canvas-popover-section">
+      <div className="vf-machine-canvas-popover-section" data-popover-section="rows">
+        <span className="vf-machine-canvas-popover-section-title">rows</span>
         {edge.group.rows.map((row, index) => (
-          <span key={`${row.rowId}:${index}`} className="vf-machine-canvas-popover-row">
-            {machineCanvasGraphRowLabel(row)}
-          </span>
+          <EdgePopoverMetadataRow key={`${row.rowId}:${index}`} row={row} />
         ))}
       </div>
     </div>,
@@ -214,6 +361,10 @@ const MachineCanvasEdge = ({
   const edge = data!.edge;
   const style = machineCanvasEdgeKindStyle(edge.kind);
   const { path, labelX, labelY } = machineCanvasGraphEdgePath({ edge, sourceX, sourceY });
+  const openPopover = (element: HTMLElement) => {
+    const rect = element.getBoundingClientRect();
+    setPopover({ x: rect.left + rect.width / 2, y: rect.top });
+  };
 
   return (
     <>
@@ -247,10 +398,9 @@ const MachineCanvasEdge = ({
           data-edge-direction={edge.direction}
           data-source-node-id={source}
           data-target-node-id={target}
-          onMouseEnter={(event) => {
-            const rect = event.currentTarget.getBoundingClientRect();
-            setPopover({ x: rect.left + rect.width / 2, y: rect.top });
-          }}
+          onPointerEnter={(event) => openPopover(event.currentTarget)}
+          onPointerLeave={() => setPopover(null)}
+          onMouseEnter={(event) => openPopover(event.currentTarget)}
           onMouseLeave={() => setPopover(null)}
         >
           <span>{edge.label}</span>

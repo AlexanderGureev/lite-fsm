@@ -1,12 +1,14 @@
 import type { MachineFlowEdgeGroup } from "@lite-fsm/graph/view-model";
 import {
   estimateMachineCanvasLabelBox,
+  type MachineCanvasLabelObstacle,
   machineCanvasDirectRoute,
   resolveMachineCanvasLabelCollisions,
 } from "./machine-canvas-geometry";
 import {
   formatMachineCanvasEdgeLabel,
   MACHINE_CANVAS_ELK_OPTIONS,
+  MACHINE_CANVAS_RENDER_POLICY,
   machineCanvasDensityFor,
   machineCanvasNodeSizeFor,
 } from "./machine-canvas-render-policy";
@@ -97,6 +99,18 @@ const labelTForSibling = (group: MachineFlowEdgeGroup, siblings: readonly Machin
   return 0.32 + (index / (siblings.length - 1)) * 0.36;
 };
 
+const nodeLabelObstacles = (nodes: readonly MachineCanvasRenderNode[]): readonly MachineCanvasLabelObstacle[] =>
+  nodes.map((node) => {
+    const clearance = MACHINE_CANVAS_RENDER_POLICY.edgeLabelNodeClearance;
+
+    return {
+      x: node.position.x - clearance,
+      y: node.position.y - clearance,
+      width: node.size.width + clearance * 2,
+      height: node.size.height + clearance * 2,
+    };
+  });
+
 export const createMachineCanvasElkGraph = (draft: MachineCanvasRenderDraft): MachineCanvasElkGraph => ({
   id: "machine-canvas",
   layoutOptions: MACHINE_CANVAS_ELK_OPTIONS,
@@ -171,6 +185,7 @@ export const applyMachineCanvasElkLayout = (
         },
       ];
     }),
+    nodeLabelObstacles(nodes),
   );
 
   return {

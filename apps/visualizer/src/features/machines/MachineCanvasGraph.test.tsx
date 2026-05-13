@@ -320,13 +320,25 @@ describe("граф MachineCanvasGraph", () => {
 
     expect(graph.getAttribute("data-density")).toBe("normal");
     expect(graph.getAttribute("data-visible-edge-count")).toBe("4");
-    expect(screen.getAllByTestId(ids.canvas.stateNode).map((element) => element.getAttribute("data-node-role"))).toEqual([
+    const stateNodes = screen.getAllByTestId(ids.canvas.stateNode);
+    expect(stateNodes.map((element) => element.getAttribute("data-node-role"))).toEqual([
       "initial",
       "effect-source",
       "current",
       "wildcard",
     ]);
-    expect(screen.getByTitle("loading_state_with_a_really_really_really_long_name").style.width).toBe("320px");
+    const loadingNode = screen.getByTitle("loading_state_with_a_really_really_really_long_name");
+    expect(loadingNode.style.width).toBe("406px");
+    expect(loadingNode.getAttribute("data-node-label-kind")).toBe("name");
+    expect(loadingNode.querySelector('[data-stat-kind="in"]')?.textContent).toBe("←IN1");
+    expect(loadingNode.querySelector('[data-stat-kind="in"]')?.getAttribute("aria-label")).toBe("incoming transitions: 1");
+    expect(loadingNode.querySelector('[data-stat-kind="out"]')?.textContent).toBe("→OUT1");
+    expect(stateNodes[0]?.querySelector('[data-stat-kind="loop"]')?.textContent).toBe("↺LOOP1");
+    expect(stateNodes[0]?.getAttribute("data-node-label-kind")).toBe("name");
+    expect(stateNodes[0]?.querySelector(".vf-machine-canvas-node-badges")?.textContent).toBe("initial");
+    expect(stateNodes[0]?.querySelector(".vf-machine-canvas-node-label")?.textContent).toBe("idle");
+    expect(stateNodes[0]?.querySelector(".vf-machine-canvas-node-stats")?.textContent).toContain("←IN1");
+    expect(stateNodes[3]?.getAttribute("data-node-label-kind")).toBe("symbol");
     expect(screen.getByTestId(ids.canvas.emissionChip).textContent).toBe("emits 1");
     expect(screen.getAllByTestId(ids.canvas.edgeLabel).map((element) => element.textContent)).toEqual([
       "START",
@@ -428,8 +440,11 @@ describe("граф MachineCanvasGraph", () => {
     const popover = await screen.findByTestId(ids.canvas.edgePopover);
     expect(popover.textContent).toContain("external");
     expect(popover.textContent).toContain("DYNAMIC");
-    expect(popover.textContent).toContain("effect:DYNAMIC");
-    expect(popover.textContent).toContain("diagnostic:escaped transition");
+    expect(popover.querySelector('[data-popover-section="events"]')?.textContent).toContain("DYNAMIC");
+    expect(popover.querySelector('[data-popover-row-kind="effect"]')?.textContent).toContain("eff");
+    expect(popover.querySelector('[data-popover-row-kind="effect"]')?.getAttribute("aria-label")).toBe("effect:DYNAMIC");
+    expect(popover.querySelector('[data-popover-row-kind="diagnostic"]')?.textContent).toContain("escaped transition");
+    expect(popover.querySelector('[data-popover-row-kind="diagnostic"]')?.textContent).toContain("warning");
     expect(popover.textContent).not.toContain(" · ");
   });
 
@@ -446,8 +461,16 @@ describe("граф MachineCanvasGraph", () => {
     expect(popover.textContent).toContain("loading");
     expect(popover.textContent).toContain("done");
     expect(popover.textContent).toContain("DONE");
-    expect(popover.textContent).toContain("player.loading · default · ok");
-    expect(popover.textContent).toContain("effect:DONE · default · ok");
+    const producerRow = popover.querySelector('[data-popover-row-kind="producer"]');
+    expect(producerRow?.textContent).toContain("emit");
+    expect(producerRow?.textContent).toContain("player.loading");
+    expect(producerRow?.textContent).toContain("default");
+    expect(producerRow?.textContent).toContain("ok");
+    const rows = Array.from(popover.querySelectorAll(".vf-machine-canvas-popover-row"));
+    expect(rows.map((row) => row.getAttribute("data-popover-row-kind"))).toEqual(["producer", "config", "effect"]);
+    expect(popover.querySelector('[data-popover-row-kind="effect"]')?.getAttribute("aria-label")).toBe(
+      "effect:DONE · default · ok",
+    );
 
     fireEvent.mouseLeave(doneLabel);
     expect(screen.queryByTestId(ids.canvas.edgePopover)).toBeNull();

@@ -89,7 +89,10 @@ describe("политика рендера machine canvas", () => {
 
   it("фиксирует constants, grouped label и legend items", () => {
     expect(MACHINE_CANVAS_RENDER_POLICY.nodeMinWidth).toBe(160);
-    expect(MACHINE_CANVAS_RENDER_POLICY.nodeMaxWidth).toBe(320);
+    expect(MACHINE_CANVAS_RENDER_POLICY.nodeMaxWidth).toBe(420);
+    expect(MACHINE_CANVAS_RENDER_POLICY.nodeBadgeGap).toBe(4);
+    expect(MACHINE_CANVAS_RENDER_POLICY.nodeStatWidth).toBe(46);
+    expect(MACHINE_CANVAS_RENDER_POLICY.nodeLoopStatWidth).toBe(58);
     expect(MACHINE_CANVAS_RENDER_POLICY.edgeLabelMaxWidth).toBe(170);
     expect(MACHINE_CANVAS_RENDER_POLICY.labelCollisionPasses).toBe(4);
     expect(MACHINE_CANVAS_RENDER_POLICY.labelCollisionCandidateShifts).toEqual([0.12, -0.12, 0.22, -0.22, 0.32, -0.32]);
@@ -131,7 +134,7 @@ describe("политика рендера machine canvas", () => {
           stats: { incoming: 1, outgoing: 4, selfLoops: 0, emissions: 0 },
         }),
       ),
-    ).toEqual({ width: 160, height: 106 });
+    ).toEqual({ width: 160, height: 123 });
     expect(
       machineCanvasNodeSizeFor(
         stateNode({
@@ -139,6 +142,37 @@ describe("политика рендера machine canvas", () => {
           badges: [{ kind: "terminal", label: "terminal" }],
         }),
       ).width,
-    ).toBe(320);
+    ).toBeGreaterThan(320);
+    expect(
+      machineCanvasNodeSizeFor(
+        stateNode({
+          label: "state_with_a_really_really_really_really_long_name",
+          badges: [{ kind: "terminal", label: "terminal" }],
+        }),
+      ).width,
+    ).toBeLessThanOrEqual(MACHINE_CANVAS_RENDER_POLICY.nodeMaxWidth);
+    expect(
+      machineCanvasNodeSizeFor(
+        stateNode({
+          label: "__INIT",
+          role: "current",
+          badges: [
+            { kind: "initial", label: "initial" },
+            { kind: "current", label: "current" },
+            { kind: "spawn", label: "spawn" },
+            { kind: "group-tag", label: "track" },
+          ],
+          stats: { incoming: 0, outgoing: 1, selfLoops: 0, emissions: 0 },
+        }),
+      ),
+    ).toEqual({ width: 160, height: 104 });
+    expect(
+      machineCanvasNodeSizeFor(
+        stateNode({
+          label: "READY",
+          stats: { incoming: 2, outgoing: 2, selfLoops: 1, emissions: 0 },
+        }),
+      ),
+    ).toEqual({ width: 160, height: 87 });
   });
 });

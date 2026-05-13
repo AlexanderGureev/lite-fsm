@@ -25,11 +25,13 @@
 ## Текущий фокус
 
 ```txt
-Этап: MVP 5. Hardening и проверки
+Этап: Post-MVP visual refactor. Node labels и metadata badges
 Статус: [x] выполнено
 Обновлено: 2026-05-13
-Заметка: Machine Canvas MVP закрыт compiled fixture matrix, read-only
-component checks и E2E hardening без screenshot snapshots.
+Заметка: Имена состояний вынесены из одной строки с role badges, nodes
+растут до 420px и переносят label; высота учитывает wrapped badge/stat rows;
+in/out/loop стали нейтральными visual counters с direction glyphs; edge
+labels учитывают state node obstacles.
 ```
 
 ## Чеклист этапов
@@ -51,6 +53,19 @@ component checks и E2E hardening без screenshot snapshots.
 Новые записи добавлять сверху.
 
 ```txt
+2026-05-13
+- Визуальный рефакторинг Machine Canvas node cards: state label теперь
+  занимает собственную строку и переносится вместо ellipsis; role badges
+  вынесены в отдельную metadata row.
+- `in`, `out`, `loop` заменены на нейтральные `← IN`/`→ OUT`/`↺ LOOP`
+  counters, чтобы не пересекаться с edge semantic colors; wildcard `*`
+  сохраняет увеличенный symbol treatment через `data-node-label-kind`.
+- Render policy увеличивает max node width до 420px и рассчитывает высоту по
+  label lines, wrapped badge/stat rows, emission rows и side degree;
+  `apps/visualizer/DESIGN.md` обновлен под новый контракт.
+- Edge label collision resolver теперь учитывает node boxes как obstacles и
+  сдвигает labels по route `t`, чтобы они не попадали под карточки состояний.
+
 2026-05-13
 - Реализован MVP stage 5 hardening: добавлены compiled fixtures для compact
   onboarding и inline xstate-like source, matrix tests поверх
@@ -136,6 +151,20 @@ component checks и E2E hardening без screenshot snapshots.
 Добавлять файлы по этапам по мере работы.
 
 ```txt
+Visual refactor
+- apps/visualizer/src/canvas/machine-canvas-render-policy.ts
+- apps/visualizer/src/canvas/machine-canvas-render-policy.test.ts
+- apps/visualizer/src/canvas/machine-canvas-geometry.ts
+- apps/visualizer/src/canvas/machine-canvas-geometry.test.ts
+- apps/visualizer/src/canvas/layout-machine-canvas.ts
+- apps/visualizer/src/canvas/layout-machine-canvas.test.ts
+- apps/visualizer/src/features/machines/MachineCanvasGraph.tsx
+- apps/visualizer/src/features/machines/MachineCanvasGraph.test.tsx
+- apps/visualizer/src/styles.css
+- apps/visualizer/tests/e2e/machine-canvas.spec.ts
+- apps/visualizer/DESIGN.md
+- GRAPH-VISUALIZER-MACHINE-CANVAS-IMPLEMENTATION-LOG.md
+
 
 Подготовка
 - GRAPH-VISUALIZER-MACHINE-CANVAS-MVP-SPEC.md
@@ -222,6 +251,23 @@ MVP этап 5
 Новые записи добавлять сверху.
 
 ```txt
+2026-05-13
+- PASS `pnpm --filter @lite-fsm/visualizer check-types`
+- PASS `pnpm --filter @lite-fsm/visualizer exec vitest run --config vitest.config.ts src/canvas/machine-canvas-render-policy.test.ts src/features/machines/MachineCanvasGraph.test.tsx`
+  `src/canvas/machine-canvas-geometry.test.ts src/canvas/layout-machine-canvas.test.ts`
+  — 4 files, 19 tests.
+- PASS `agent-browser` visual check at `http://127.0.0.1:5174/` on sample
+  `trackInstance` actor and onboarding fixture: full node labels visible,
+  wrapped badges fit node height, neutral direction counters do not reuse edge
+  colors; onboarding returned 6 state nodes, 7 edge labels and `[]` overlaps.
+- PASS `pnpm --filter @lite-fsm/visualizer test:coverage` — 33 files,
+  213 tests, 100% statements/branches/functions/lines
+  (1820 statements, 1184 branches, 572 functions, 1551 lines).
+- PASS `pnpm --filter @lite-fsm/visualizer test:e2e` — 15 tests.
+- PASS `pnpm run lint` — 0 errors; 2 warnings in ignored generated
+  `packages/graph/coverage/*/block-navigation.js`.
+- PASS `git diff --check`
+
 2026-05-13
 - PASS `pnpm --filter @lite-fsm/visualizer check-types`
 - PASS `pnpm --filter @lite-fsm/visualizer test:unit` — 33 files,

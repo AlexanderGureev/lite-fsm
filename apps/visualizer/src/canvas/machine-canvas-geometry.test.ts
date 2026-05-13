@@ -77,6 +77,12 @@ describe("геометрия machine canvas", () => {
     ]);
     expect(bounded.get("a")).toBe(0.9);
     expect(bounded.get("b")).toBe(0.9);
+
+    const awayFromNode = resolveMachineCanvasLabelCollisions(
+      [{ edgeId: "a", points: [{ x: 0, y: 0 }, { x: 300, y: 0 }], t: 0.5, width: 40, height: 18 }],
+      [{ x: 130, y: -20, width: 40, height: 40 }],
+    );
+    expect(awayFromNode.get("a")).not.toBe(0.5);
   });
 
   it("строит deterministic self-loop stack", () => {

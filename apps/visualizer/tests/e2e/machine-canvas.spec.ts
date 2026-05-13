@@ -43,6 +43,39 @@ const stateNodeByRef = (page: Page, ref: string) =>
 
 const edgeLabel = (page: Page, text: string) => page.getByTestId(ids.canvas.edgeLabel).filter({ hasText: text });
 
+const expectEdgeLabelsOutsideStateNodes = async (page: Page) => {
+  const overlaps = await page.evaluate(
+    ({ edgeLabelTestId, stateNodeTestId }) => {
+      const edgeLabels = Array.from(document.querySelectorAll<HTMLElement>(`[data-testid="${edgeLabelTestId}"]`));
+      const stateNodes = Array.from(document.querySelectorAll<HTMLElement>(`[data-testid="${stateNodeTestId}"]`));
+
+      return edgeLabels.flatMap((label) => {
+        const labelRect = label.getBoundingClientRect();
+        return stateNodes
+          .filter((node) => {
+            const nodeRect = node.getBoundingClientRect();
+            return (
+              labelRect.left < nodeRect.right - 1 &&
+              labelRect.right > nodeRect.left + 1 &&
+              labelRect.top < nodeRect.bottom - 1 &&
+              labelRect.bottom > nodeRect.top + 1
+            );
+          })
+          .map((node) => ({
+            label: label.textContent,
+            node: node.getAttribute("data-node-ref"),
+          }));
+      });
+    },
+    {
+      edgeLabelTestId: ids.canvas.edgeLabel,
+      stateNodeTestId: ids.canvas.stateNode,
+    },
+  );
+
+  expect(overlaps).toEqual([]);
+};
+
 const expectNoHorizontalOverflow = async (page: Page) => {
   const overflow = await page.evaluate(() => ({
     document: document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -65,6 +98,7 @@ test("12h Machine Canvas hardening показывает onboarding story без 
   await expect(edgeLabel(page, "CHECK_ONBOARDING_REJECT")).toHaveAttribute("data-edge-kind", "self-emitted-transition");
   await expect(page.getByTestId(ids.canvas.emissionChip)).toHaveAttribute("title", /ONBOARDING_TRACE/);
   await expect(edgeLabel(page, "ONBOARDING_TRACE")).toHaveCount(0);
+  await expectEdgeLabelsOutsideStateNodes(page);
 
   await edgeLabel(page, "CHECK_ONBOARDING_RESOLVE").hover();
   await expect(page.getByTestId(ids.canvas.edgePopover)).toContainText("self-emitted");
