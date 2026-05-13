@@ -23,6 +23,7 @@ export default defineConfig([
     "apps/docs/",
     "apps/playground/",
     "examples/",
+    "packages/graph/test-fixtures/",
     "tests/",
     "**/*.d.ts",
     "eslint.config.js",
