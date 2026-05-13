@@ -25,11 +25,11 @@
 ## Текущий фокус
 
 ```txt
-Этап: MVP 3. L3 board shell
+Этап: MVP 4. React Flow и ELK renderer
 Статус: [x] выполнено
 Обновлено: 2026-05-13
-Заметка: renderer, React Flow/ELK layout и graph geometry остаются этапом 4.
-Этап 3 подключает L3 graph action, selector wiring и controlled overlay shell.
+Заметка: ready Machine Flow Model рендерится как static read-only graph через
+React Flow + ELK; broad MVP fixture hardening остается этапом 5.
 ```
 
 ## Чеклист этапов
@@ -38,7 +38,7 @@
 - [x] MVP этап 1: Machine Flow Model в `packages/graph/view-model`.
 - [x] MVP этап 2: состояние canvas и selectors в visualizer.
 - [x] MVP этап 3: интеграция L3 board shell.
-- [ ] MVP этап 4: renderer на React Flow и ELK.
+- [x] MVP этап 4: renderer на React Flow и ELK.
 - [ ] MVP этап 5: hardening и проверки.
 - [ ] Post-MVP этап 1: расширение Machine Flow Model.
 - [ ] Post-MVP этап 2: pinned state, selectors и source actions.
@@ -51,6 +51,20 @@
 Новые записи добавлять сверху.
 
 ```txt
+2026-05-13
+- Финальное review/hardening этапа 4: strict coverage расширен на
+  `MachineCanvasGraph.tsx`; layout cancellation, stale layout state, fallback
+  self-loop geometry и renderer metadata вынесены в тестируемые view helpers.
+- Добавлены regression tests для Graph renderer popover bounds, fallback
+  badges/semantic refs, same-flow layout key reuse и fit-view cleanup.
+
+2026-05-13
+- Реализован Machine Canvas renderer: lazy `MachineCanvasGraph`, React Flow
+  static graph, ELK layered layout, custom state nodes, grouped edge labels,
+  manual self loops, emission-only source chips, legend и hover popover.
+- Добавлены pure renderer policy/geometry/layout modules с 100% coverage и
+  focused component/E2E tests для renderer smoke.
+
 2026-05-13
 - Финальное review/hardening этапа 3: добавлены regression tests для Escape
   cleanup, Shell controlled missing states, нескольких graph actions и
@@ -157,6 +171,29 @@ MVP этап 3
 - apps/visualizer/src/features/shell/Shell.test.tsx
 - apps/visualizer/src/test-ids.ts
 - GRAPH-VISUALIZER-MACHINE-CANVAS-IMPLEMENTATION-LOG.md
+
+MVP этап 4
+- apps/visualizer/package.json
+- pnpm-lock.yaml
+- apps/visualizer/src/canvas/machine-canvas-render-types.ts
+- apps/visualizer/src/canvas/machine-canvas-render-policy.ts
+- apps/visualizer/src/canvas/machine-canvas-render-policy.test.ts
+- apps/visualizer/src/canvas/machine-canvas-geometry.ts
+- apps/visualizer/src/canvas/machine-canvas-geometry.test.ts
+- apps/visualizer/src/canvas/layout-machine-canvas.ts
+- apps/visualizer/src/canvas/layout-machine-canvas.test.ts
+- apps/visualizer/src/features/machines/MachineCanvasGraph.tsx
+- apps/visualizer/src/features/machines/MachineCanvasGraph.test.tsx
+- apps/visualizer/src/features/machines/machine-canvas-graph-view.ts
+- apps/visualizer/src/features/machines/machine-canvas-graph-view.test.ts
+- apps/visualizer/src/features/machines/MachineCanvasBoard.tsx
+- apps/visualizer/src/features/machines/MachineCanvasBoard.test.tsx
+- apps/visualizer/src/test-ids.ts
+- apps/visualizer/src/styles.css
+- apps/visualizer/vitest.config.ts
+- apps/visualizer/tests/e2e/shell.spec.ts
+- apps/visualizer/DESIGN.md
+- GRAPH-VISUALIZER-MACHINE-CANVAS-IMPLEMENTATION-LOG.md
 ```
 
 ## Лог проверок
@@ -164,6 +201,19 @@ MVP этап 3
 Новые записи добавлять сверху.
 
 ```txt
+2026-05-13
+- PASS `pnpm --filter @lite-fsm/visualizer check-types`
+- PASS `pnpm --filter @lite-fsm/visualizer test:unit` — 32 files,
+  209 tests.
+- PASS `pnpm --filter @lite-fsm/visualizer test:coverage` — 100%
+  statements, branches, functions и lines; 1788 statements, 1163 branches,
+  564 functions, 1520 lines.
+- PASS `pnpm --filter @lite-fsm/visualizer test:e2e` — 13 tests.
+- PASS `pnpm run check-types`
+- PASS `pnpm run lint` — 0 errors; 2 warnings in ignored generated
+  `packages/graph/coverage/*/block-navigation.js`.
+- PASS `git diff --check`
+
 2026-05-13
 - PASS `pnpm --filter @lite-fsm/visualizer check-types`
 - PASS `pnpm --filter @lite-fsm/visualizer test:unit` — 27 files,
@@ -215,6 +265,14 @@ MVP этап 3
 Новые записи добавлять сверху.
 
 ```txt
+2026-05-13
+- Stage 4 добавляет `@xyflow/react` и `elkjs` только в
+  `apps/visualizer`; graph package exports не меняются.
+- `MachineCanvasGraph.tsx` включен в strict visualizer coverage; async layout
+  cancellation и derived renderer metadata вынесены в `machine-canvas-graph-view`
+  для прямого unit-покрытия без изменения Workbench state.
+- `emission-only` edge groups рендерятся только source-node chips/counters.
+
 2026-05-13
 - Этап 3 не добавляет `@xyflow/react`, `elkjs`, layout state, coordinates или
   React Flow ids; ready body содержит controlled renderer-loading slot.

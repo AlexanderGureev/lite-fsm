@@ -292,6 +292,38 @@ Ownership rules:
   `Select` события + `PrimaryActionButton` «send», ниже timeline rows.
   Footer: `1 step`/`N steps` мелким mono.
 
+### Machine Canvas Board
+
+- Full-workspace overlay внутри Machines Panel. Surface повторяет top-level
+  panel: `rounded-(--vf-radius-lg)`, border, `--vf-bg`, overlay shadow,
+  header `--vf-surface`. На mobile занимает тот же workspace bounds и не
+  создает horizontal overflow.
+- Body: React Flow canvas с dotted background density `22px`, controls в
+  `--vf-surface-soft`, скрытая attribution, invisible handles. Graph read-only:
+  nodes не draggable, handles не connectable, click по graph item не dispatch-ит
+  FSM events.
+- Nodes: fixed pre-layout dimensions. Width grows from label length up to
+  `320px`; labels truncate with `title`. Height grows by side degree. Roles:
+  normal quiet outline; current accent border/fill; initial accent border;
+  terminal/synthetic dashed quiet; spawn badge; wildcard `*` dashed quiet with
+  any-state badge; effect-source `*` dashed effect outline/fill.
+- Node stats show `in`, `out`, and `loop` counters. `emission-only` groups are
+  source-node chips (`emits N`) using effect tone and never render as
+  state-to-state edges.
+- Edges: accepted transition is solid `--vf-config`; self-emitted transition is
+  dashed `--vf-effect`; from-other transition is dotted `--vf-routing`. Labels
+  are mono chips with first event plus `+N`, capped at `170px`, and positioned
+  by route arc length with bounded collision shifts.
+- Self loops are manual arcs above the node and stack deterministically by
+  index. Non-self edges use ELK layered LR orthogonal routes; missing routes
+  fall back to direct paths.
+- Hovering an edge label opens a fixed popover with source, target/self,
+  producer category, grouped event names, producer path, and row metadata. The
+  popover is built only from Machine Flow edge group metadata.
+- Legend lives in the footer strip and lists accepted, self-emitted, from other,
+  and emission-only grammar. Stable diagnostics attributes on graph root:
+  `data-density` and `data-visible-edge-count`.
+
 ### Source Overlay
 
 - shadcn `Dialog`, открывается из L1 (`view source`), L2 (source link) и

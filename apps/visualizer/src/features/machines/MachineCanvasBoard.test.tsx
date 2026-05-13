@@ -5,6 +5,20 @@ import { VISUALIZER_TEST_IDS } from "../../test-ids";
 import type { VisualizerCommand } from "../../workbench";
 import { MachineCanvasBoard } from "./MachineCanvasBoard";
 
+vi.mock("./MachineCanvasGraph", () => ({
+  default: ({ flow, sourceVersion }: { flow: Extract<MachineCanvasBoardView, { status: "ready" }>["flow"]; sourceVersion: number }) => (
+    <div
+      data-testid="visualizer-machine-canvas-graph"
+      data-density="normal"
+      data-visible-edge-count={flow.edgeGroups.filter((group) => group.targetNodeId).length}
+      data-source-version={sourceVersion}
+    >
+      <span data-testid="visualizer-machine-canvas-state-node">{flow.nodes[0]?.label}</span>
+      <span data-testid="visualizer-machine-canvas-edge-label">{flow.edgeGroups[0]?.label}</span>
+    </div>
+  ),
+}));
+
 const ids = VISUALIZER_TEST_IDS;
 const emptyAnchors = [] as const;
 
@@ -117,7 +131,7 @@ describe("MachineCanvasBoard", () => {
     expect(missingMachineDispatch).toHaveBeenCalledWith({ type: "canvas.machine-board.closed" });
   });
 
-  it("рендерит ready header из Machine Flow Model", () => {
+  it("рендерит ready header из Machine Flow Model", async () => {
     const dispatch = dispatchOf();
 
     render(<MachineCanvasBoard view={readyView({ groupTag: "jobs" })} dispatch={dispatch} />);
@@ -131,12 +145,10 @@ describe("MachineCanvasBoard", () => {
     expect(screen.getByText("states").nextSibling?.textContent).toBe("2");
     expect(screen.getByText("transitions").nextSibling?.textContent).toBe("1");
     expect(screen.getByText("emissions").nextSibling?.textContent).toBe("1");
-    expect(screen.getByTestId(ids.canvas.graph).getAttribute("data-node-count")).toBe("2");
-    expect(screen.getByTestId(ids.canvas.graph).getAttribute("data-edge-count")).toBe("1");
     expect(screen.getByTestId(ids.canvas.legend).textContent).toContain("self-emitted");
-    expect(screen.getByTestId(ids.canvas.graph).textContent).toContain("Graph renderer loading");
-    expect(screen.queryByTestId(ids.canvas.stateNode)).toBeNull();
-    expect(screen.queryByTestId(ids.canvas.edgeLabel)).toBeNull();
+    expect((await screen.findByTestId(ids.canvas.stateNode)).textContent).toBe("idle");
+    expect(screen.getByTestId(ids.canvas.edgeLabel).textContent).toBe("PLAY");
+    expect(screen.getByTestId(ids.canvas.graph).getAttribute("data-visible-edge-count")).toBe("1");
   });
 
   it("не подменяет absent current initial state и закрывается по Escape", () => {

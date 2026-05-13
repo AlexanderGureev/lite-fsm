@@ -500,3 +500,28 @@ export const blockedMachine = createMachine({
   await page.getByTestId(ids.console.toggle).click();
   await expect(page.locator(`[data-testid="${ids.console.entry}"][data-origin="simulator"]`).first()).toBeVisible();
 });
+
+test("12g Machine Canvas Board рендерит React Flow graph smoke", async ({ page }) => {
+  await openVisualizer(page);
+
+  await fillSource(page, simulationSource);
+  await openSourceModel(page);
+
+  await systemMachine(page, "flowMachine").click();
+  await page.getByTestId(ids.system.openInWorkbench).click();
+  await expect(tabButton(page, "machines")).toHaveAttribute("aria-selected", "true");
+
+  await page
+    .locator(`[data-testid="${ids.workbench.machineCard}"][data-machine-id="flowMachine"] [data-testid="${ids.canvas.openAction}"]`)
+    .click();
+
+  await expect(page.getByTestId(ids.canvas.board)).toBeVisible();
+  await expect(page.getByTestId(ids.canvas.graph)).toHaveAttribute("data-density", /^(normal|dense|very-dense)$/);
+  await expect(page.getByTestId(ids.canvas.graph)).toHaveAttribute("data-visible-edge-count", /^[1-9]\d*$/);
+  await expect(page.getByTestId(ids.canvas.stateNode).first()).toBeVisible();
+  await expect(page.getByTestId(ids.canvas.edgeLabel).first()).toBeVisible();
+  await expect(page.locator(".react-flow__controls")).toBeVisible();
+
+  await page.getByTestId(ids.canvas.close).click();
+  await expect(page.getByTestId(ids.canvas.board)).toHaveCount(0);
+});

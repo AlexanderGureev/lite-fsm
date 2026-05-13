@@ -1,6 +1,7 @@
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { AlertCircle, Layers3, Network, X } from "lucide-react";
 import type { MachineCanvasBoardView } from "../../canvas";
+import { machineCanvasLegendItems } from "../../canvas/machine-canvas-render-policy";
 import type { VisualizerCommand } from "../../workbench";
 import { VISUALIZER_TEST_IDS } from "@/test-ids";
 import { IconButton, PanelKicker, StatusBadge } from "@/ui/visualizer";
@@ -9,6 +10,8 @@ type MachineCanvasBoardProps = {
   view: MachineCanvasBoardView;
   dispatch: (command: VisualizerCommand) => void;
 };
+
+const MachineCanvasGraph = lazy(() => import("./MachineCanvasGraph"));
 
 const closeBoard = (dispatch: (command: VisualizerCommand) => void): void => {
   dispatch({ type: "canvas.machine-board.closed" });
@@ -84,6 +87,24 @@ const CounterBadge = ({ label, value }: { label: string; value: number }) => (
   </span>
 );
 
+const MachineCanvasGraphFallback = () => (
+  <div
+    className="grid min-h-0 place-items-center bg-(--vf-bg-elevated) p-4"
+    data-testid={VISUALIZER_TEST_IDS.canvas.graph}
+    data-density="pending"
+    data-visible-edge-count="0"
+  >
+    <div
+      className="vf-machine-canvas-status"
+      data-testid={VISUALIZER_TEST_IDS.canvas.layoutStatus}
+      data-layout-status="loading"
+    >
+      <Layers3 aria-hidden="true" className="size-4 text-(--vf-accent)" />
+      <p>Graph renderer loading</p>
+    </div>
+  </div>
+);
+
 const ReadyBoard = ({
   view,
   dispatch,
@@ -127,41 +148,31 @@ const ReadyBoard = ({
       </header>
 
       <div className="grid min-h-0 grid-rows-[minmax(0,1fr)_auto] bg-(--vf-bg-elevated)">
-        <div
-          className="grid min-h-0 place-items-center overflow-hidden border-b border-(--vf-border-soft) bg-[radial-gradient(circle_at_1px_1px,var(--vf-border)_1px,transparent_0)] bg-[length:22px_22px] p-4"
-          data-testid={VISUALIZER_TEST_IDS.canvas.graph}
-          data-node-count={view.flow.nodes.length}
-          data-edge-count={view.flow.edgeGroups.length}
-        >
-          <div className="flex max-w-[460px] flex-col items-center gap-2 rounded-(--vf-radius-lg) border border-(--vf-border) bg-(--vf-surface) p-4 text-center shadow-(--vf-shadow-overlay)">
-            <Layers3 aria-hidden="true" className="size-5 text-(--vf-accent)" />
-            <p className="font-mono text-[12px] font-semibold text-foreground">Graph renderer loading</p>
-            <p className="font-mono text-[11px] text-(--vf-text-muted)">
-              {view.flow.nodes.length} nodes · {view.flow.edgeGroups.length} edge groups
-            </p>
-          </div>
-        </div>
+        <Suspense fallback={<MachineCanvasGraphFallback />}>
+          <MachineCanvasGraph flow={view.flow} sourceVersion={view.sourceVersion} />
+        </Suspense>
         <div
           className="flex min-h-10 flex-wrap items-center gap-x-3 gap-y-1.5 bg-(--vf-surface) px-3 py-2 font-mono text-[10px] text-(--vf-text-quiet)"
           data-testid={VISUALIZER_TEST_IDS.canvas.legend}
         >
-          <span className="inline-flex items-center gap-1.5">
-            <span aria-hidden="true" className="size-2 rounded-[2px] bg-(--vf-config)" />
-            accepted
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <span aria-hidden="true" className="size-2 rounded-[2px] bg-(--vf-effect)" />
-            self-emitted
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <span aria-hidden="true" className="size-2 rounded-[2px] bg-(--vf-routing)" />
-            from other
-          </span>
+          {machineCanvasLegendItems().map((item) => (
+            <span key={item.label} className="inline-flex items-center gap-1.5" title={item.description}>
+              <span
+                aria-hidden="true"
+                className={cnLegendDot(item.strokeDasharray)}
+                style={{ background: `var(${item.colorToken})` }}
+              />
+              {item.label}
+            </span>
+          ))}
         </div>
       </div>
     </section>
   );
 };
+
+const cnLegendDot = (strokeDasharray: string | undefined): string =>
+  strokeDasharray ? "size-2 rounded-full border border-current bg-transparent" : "size-2 rounded-[2px]";
 
 export const MachineCanvasBoard = ({ view, dispatch }: MachineCanvasBoardProps) => {
   useEffect(() => {
