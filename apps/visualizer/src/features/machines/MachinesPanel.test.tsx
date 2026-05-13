@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@/ui/tooltip";
 import { VISUALIZER_TEST_IDS } from "../../test-ids";
+import type { MachineCanvasBoardView } from "../../canvas";
 import type { MachineWorkbenchPanelView, VisualizerCommand } from "../../workbench";
 import { MachinesPanel } from "./MachinesPanel";
 
@@ -12,6 +13,13 @@ const dispatchOf = () => vi.fn<(command: VisualizerCommand) => void>();
 
 const renderPanel = (element: ReactElement) =>
   render(<TooltipProvider>{element}</TooltipProvider>);
+
+const closedCanvasBoard: MachineCanvasBoardView = { status: "not-opened", reason: "not-opened" };
+
+const renderMachinesPanel = (
+  view: MachineWorkbenchPanelView,
+  dispatch: (command: VisualizerCommand) => void,
+) => renderPanel(<MachinesPanel view={view} canvasBoard={closedCanvasBoard} dispatch={dispatch} />);
 
 const viewFixture = (overrides: Partial<MachineWorkbenchPanelView> = {}): MachineWorkbenchPanelView => ({
   status: "ready",
@@ -164,10 +172,29 @@ const viewFixture = (overrides: Partial<MachineWorkbenchPanelView> = {}): Machin
   ...overrides,
 });
 
+const secondCardView = (): MachineWorkbenchPanelView => ({
+  ...viewFixture(),
+  selectedMachineIds: ["player", "worker"],
+  cards: [
+    ...viewFixture().cards,
+    {
+      ...viewFixture().cards[0],
+      machineId: "worker",
+      title: "worker",
+      kind: "actorTemplate",
+      groupTag: "jobs",
+      currentStateKey: undefined,
+      sourceAction: { title: "worker", anchors: [], available: false },
+      states: [],
+      globalRows: [],
+    },
+  ],
+});
+
 describe("панель MachinesPanel", () => {
   it("рендерит picker, cards, send control и actions timeline", () => {
     const dispatch = dispatchOf();
-    renderPanel(<MachinesPanel view={viewFixture()} dispatch={dispatch} />);
+    renderMachinesPanel(viewFixture(), dispatch);
 
     expect(screen.getByTestId(ids.workbench.panel)).toBeTruthy();
     expect(screen.getAllByTestId(ids.workbench.machinePickerRow)).toHaveLength(2);
@@ -181,6 +208,7 @@ describe("панель MachinesPanel", () => {
     fireEvent.click(screen.getByTestId(ids.workbench.row.effect));
     fireEvent.click(screen.getAllByTestId(ids.workbench.timelineStep)[0]);
     fireEvent.click(screen.getByTestId(ids.workbench.simulationReset));
+    fireEvent.click(screen.getByTestId(ids.canvas.openAction));
 
     expect(dispatch).toHaveBeenCalledWith({ type: "l3.machine.toggled", machineId: "worker" });
     expect(dispatch).toHaveBeenCalledWith({ type: "l3.event.sent", event: { type: "PLAY" } });
@@ -206,6 +234,9 @@ describe("панель MachinesPanel", () => {
     });
     expect(dispatch).toHaveBeenCalledWith({ type: "l3.timeline.step.selected", stepId: "root" });
     expect(dispatch).toHaveBeenCalledWith({ type: "l3.simulation.reset" });
+    expect(dispatch).toHaveBeenCalledWith({ type: "canvas.machine-board.opened", machineId: "player" });
+    expect(screen.getByLabelText("Open graph").closest("button")).toBe(screen.getByTestId(ids.canvas.openAction));
+    expect((screen.getByTestId(ids.workbench.sourceAction) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("показывает пустые состояния и отключенные controls", () => {
@@ -220,6 +251,7 @@ describe("панель MachinesPanel", () => {
           timeline: [],
           simulationStatus: "idle",
         })}
+        canvasBoard={closedCanvasBoard}
         dispatch={dispatch}
       />,
     );
@@ -234,16 +266,33 @@ describe("панель MachinesPanel", () => {
 
   it("не отправляет команды из disabled source buttons", () => {
     const dispatch = dispatchOf();
-    renderPanel(<MachinesPanel view={viewFixture()} dispatch={dispatch} />);
+    renderMachinesPanel(viewFixture(), dispatch);
 
     fireEvent.click(screen.getByTestId(ids.workbench.sourceAction));
     expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "source.overlay.opened" }));
   });
 
+  it("открывает graph action для конкретной card при нескольких selected machines", () => {
+    const dispatch = dispatchOf();
+    renderMachinesPanel(secondCardView(), dispatch);
+
+    const graphActions = screen.getAllByTestId(ids.canvas.openAction);
+    expect(graphActions).toHaveLength(2);
+    expect(graphActions.every((action) => action.tagName === "BUTTON")).toBe(true);
+    expect(graphActions.every((action) => !(action as HTMLButtonElement).disabled)).toBe(true);
+
+    fireEvent.click(graphActions[1]);
+    expect(dispatch).toHaveBeenCalledWith({ type: "canvas.machine-board.opened", machineId: "worker" });
+  });
+
   it("выбирает первое доступное событие после появления simulation overlay", async () => {
     const dispatch = dispatchOf();
     const { rerender } = renderPanel(
-      <MachinesPanel view={viewFixture({ sendOptions: [{ eventType: "DONE", group: "not-accepted" }] })} dispatch={dispatch} />,
+      <MachinesPanel
+        view={viewFixture({ sendOptions: [{ eventType: "DONE", group: "not-accepted" }] })}
+        canvasBoard={closedCanvasBoard}
+        dispatch={dispatch}
+      />,
     );
 
     expect(screen.getByTestId(ids.workbench.eventSend).hasAttribute("disabled")).toBe(true);
@@ -257,6 +306,7 @@ describe("панель MachinesPanel", () => {
               { eventType: "START", group: "available" },
             ],
           })}
+          canvasBoard={closedCanvasBoard}
           dispatch={dispatch}
         />
       </TooltipProvider>,
@@ -382,6 +432,7 @@ describe("панель MachinesPanel", () => {
           simulationStatus: "blocked",
           diagnosticCount: 1,
         })}
+        canvasBoard={closedCanvasBoard}
         dispatch={dispatch}
       />,
     );
@@ -412,6 +463,7 @@ describe("панель MachinesPanel", () => {
             },
           ],
         })}
+        canvasBoard={closedCanvasBoard}
         dispatch={dispatchOf()}
       />,
     );

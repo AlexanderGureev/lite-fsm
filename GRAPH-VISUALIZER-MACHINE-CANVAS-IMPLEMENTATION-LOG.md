@@ -25,12 +25,11 @@
 ## Текущий фокус
 
 ```txt
-Этап: MVP 2. Canvas state и selectors
+Этап: MVP 3. L3 board shell
 Статус: [x] выполнено
 Обновлено: 2026-05-13
-Заметка: renderer, React Flow/ELK layout и L3 UI не входят в этап 2.
-`@lite-fsm/visualizer test:coverage` проходит со 100% statements, branches,
-functions и lines.
+Заметка: renderer, React Flow/ELK layout и graph geometry остаются этапом 4.
+Этап 3 подключает L3 graph action, selector wiring и controlled overlay shell.
 ```
 
 ## Чеклист этапов
@@ -38,7 +37,7 @@ functions и lines.
 - [x] Подготовка: отделить лог реализации от стабильного ТЗ.
 - [x] MVP этап 1: Machine Flow Model в `packages/graph/view-model`.
 - [x] MVP этап 2: состояние canvas и selectors в visualizer.
-- [ ] MVP этап 3: интеграция L3 board shell.
+- [x] MVP этап 3: интеграция L3 board shell.
 - [ ] MVP этап 4: renderer на React Flow и ELK.
 - [ ] MVP этап 5: hardening и проверки.
 - [ ] Post-MVP этап 1: расширение Machine Flow Model.
@@ -52,6 +51,20 @@ functions и lines.
 Новые записи добавлять сверху.
 
 ```txt
+2026-05-13
+- Финальное review/hardening этапа 3: добавлены regression tests для Escape
+  cleanup, Shell controlled missing states, нескольких graph actions и
+  renderer-placeholder boundaries; `MachineCanvasBoard` label logic упрощена.
+
+2026-05-13
+- Реализован L3 board shell: machine card graph action dispatch-ит
+  `canvas.machine-board.opened`, Shell подключает `selectMachineCanvasBoard`,
+  Machines tab рендерит full-workspace `MachineCanvasBoard` overlay.
+- Board shell показывает ready/missing-model/missing-machine states, header из
+  `MachineFlowMachine`, close action и Escape close без изменения L3 selection
+  или simulator session.
+- Добавлены stable `VISUALIZER_TEST_IDS.canvas.*` и component/Shell tests.
+
 2026-05-13
 - Финальное hardening/review этапа 2: добавлены tests для canvas helpers,
   reducer edge cases, selector current/no-current paths и прежних UI coverage
@@ -134,6 +147,16 @@ MVP этап 2
 - apps/visualizer/src/workbench/reducer.ts
 - apps/visualizer/src/workbench/machine-canvas-reducer.test.ts
 - GRAPH-VISUALIZER-MACHINE-CANVAS-IMPLEMENTATION-LOG.md
+
+MVP этап 3
+- apps/visualizer/src/features/machines/MachineCanvasBoard.tsx
+- apps/visualizer/src/features/machines/MachineCanvasBoard.test.tsx
+- apps/visualizer/src/features/machines/MachinesPanel.tsx
+- apps/visualizer/src/features/machines/MachinesPanel.test.tsx
+- apps/visualizer/src/features/shell/Shell.tsx
+- apps/visualizer/src/features/shell/Shell.test.tsx
+- apps/visualizer/src/test-ids.ts
+- GRAPH-VISUALIZER-MACHINE-CANVAS-IMPLEMENTATION-LOG.md
 ```
 
 ## Лог проверок
@@ -141,6 +164,17 @@ MVP этап 2
 Новые записи добавлять сверху.
 
 ```txt
+2026-05-13
+- PASS `pnpm --filter @lite-fsm/visualizer check-types`
+- PASS `pnpm --filter @lite-fsm/visualizer test:unit` — 27 files,
+  182 tests.
+- PASS `pnpm --filter @lite-fsm/visualizer test:coverage` — 100%
+  statements, branches, functions и lines.
+- PASS `pnpm run check-types`
+- PASS `git diff --check`
+- PASS `pnpm run lint` — 0 errors; 2 warnings in ignored generated
+  `packages/graph/coverage/*/block-navigation.js`.
+
 2026-05-13
 - PASS `pnpm --filter @lite-fsm/visualizer check-types`
 - PASS `pnpm --filter @lite-fsm/visualizer test:unit` — 26 files,
@@ -181,6 +215,13 @@ MVP этап 2
 Новые записи добавлять сверху.
 
 ```txt
+2026-05-13
+- Этап 3 не добавляет `@xyflow/react`, `elkjs`, layout state, coordinates или
+  React Flow ids; ready body содержит controlled renderer-loading slot.
+- Header Machine Canvas Board читает current только из
+  `MachineFlowMachine.currentStateKey`; initial state не используется как
+  fallback current.
+
 2026-05-13
 - Closed Machine Canvas state не хранит `machineBoard: undefined`; optional
   field удаляется, а `items` сохраняет исходную ссылку.

@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { Box, Code2, RotateCcw, Send } from "lucide-react";
+import { Box, Code2, Network, RotateCcw, Send } from "lucide-react";
+import type { MachineCanvasBoardView } from "../../canvas";
 import type {
   MachineCardView,
   MachinePickerRowView,
@@ -35,6 +36,7 @@ import {
 } from "@/ui/visualizer";
 import { VISUALIZER_TEST_IDS } from "@/test-ids";
 import { cn } from "@/lib/utils";
+import { MachineCanvasBoard } from "./MachineCanvasBoard";
 
 const machineTone = (kind: MachinePickerRowView["kind"]): "actor" | "domain" | "muted" => {
   if (kind === "actorTemplate") return "actor";
@@ -337,6 +339,20 @@ const MachineCard = ({
           </TooltipTrigger>
           <TooltipContent>View source</TooltipContent>
         </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              aria-label="Open graph"
+              className="inline-flex size-6 shrink-0 items-center justify-center rounded-md border border-(--vf-border) bg-(--vf-surface-raised) text-(--vf-text-muted) transition-colors duration-(--vf-duration-fast) hover:border-(--vf-accent-border) hover:bg-(--vf-accent-soft) hover:text-(--vf-accent) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+              data-testid={VISUALIZER_TEST_IDS.canvas.openAction}
+              onClick={() => dispatch({ type: "canvas.machine-board.opened", machineId: card.machineId })}
+            >
+              <Network aria-hidden="true" className="size-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>Open graph</TooltipContent>
+        </Tooltip>
       </header>
 
       {card.actorApproximation ? (
@@ -594,9 +610,11 @@ const WorkbenchTimeline = ({
 
 export const MachinesPanel = ({
   view,
+  canvasBoard,
   dispatch,
 }: {
   view: MachineWorkbenchPanelView;
+  canvasBoard: MachineCanvasBoardView;
   dispatch: (command: VisualizerCommand) => void;
 }) => {
   const selectedLabel = useMemo(
@@ -607,7 +625,7 @@ export const MachinesPanel = ({
   return (
     <section
       aria-labelledby="machine-workbench-title"
-      className="flex h-full min-h-0 flex-col gap-3"
+      className="relative flex h-full min-h-0 flex-col gap-3"
       data-testid={VISUALIZER_TEST_IDS.workbench.panel}
     >
       <WorkspaceHeader eyebrow="Machines" title="Machine workbench" titleId="machine-workbench-title">
@@ -673,6 +691,7 @@ export const MachinesPanel = ({
 
         <WorkbenchTimeline view={view} dispatch={dispatch} />
       </div>
+      <MachineCanvasBoard view={canvasBoard} dispatch={dispatch} />
     </section>
   );
 };

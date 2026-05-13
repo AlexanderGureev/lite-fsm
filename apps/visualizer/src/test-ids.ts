@@ -99,6 +99,15 @@ export const VISUALIZER_TEST_IDS = {
       simulation: "visualizer-workbench-row-simulation",
     },
   },
+  canvas: {
+    board: "visualizer-machine-canvas-board",
+    close: "visualizer-machine-canvas-close",
+    graph: "visualizer-machine-canvas-graph",
+    stateNode: "visualizer-machine-canvas-state-node",
+    edgeLabel: "visualizer-machine-canvas-edge-label",
+    legend: "visualizer-machine-canvas-legend",
+    openAction: "visualizer-workbench-graph-action",
+  },
   console: {
     toggle: "visualizer-console-toggle",
     backdrop: "visualizer-console-backdrop",

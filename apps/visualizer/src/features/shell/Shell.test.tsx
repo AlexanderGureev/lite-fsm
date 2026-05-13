@@ -7,10 +7,12 @@ import { createInitialWorkbenchSnapshot } from "../../workbench/state";
 import { createWorkbenchStore } from "../../workbench/store";
 import type { WorkbenchSnapshot } from "../../workbench/types";
 import { createNoopValidationRegistry } from "../../validation";
+import { openMachineBoard } from "../../canvas";
 import { TooltipProvider } from "@/ui/tooltip";
 import { EditorView } from "@codemirror/view";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
+import type { GraphVisualizerModel } from "@lite-fsm/graph/view-model";
 import { Shell } from "./Shell";
 
 const ids = VISUALIZER_TEST_IDS;
@@ -75,6 +77,91 @@ const consoleEntries: readonly ConsoleEntry[] = [
     severity: "blocked" as unknown as ConsoleEntry["severity"],
   },
 ];
+
+const emptyAnchors = [] as const;
+
+const machineCanvasModelFixture = (): GraphVisualizerModel =>
+  ({
+    version: "lite-fsm.visualizer/v1",
+    source: { filename: "fixture.ts", language: "ts" },
+    machines: [
+      {
+        machineId: "player",
+        title: "player",
+        kind: "domain",
+        initialState: "idle",
+        managerKeys: [],
+        counts: {
+          states: 2,
+          consumedTopics: 1,
+          producedTopics: 0,
+          configTransitions: 1,
+          reducerBranches: 0,
+          effectEmissions: 0,
+          diagnostics: 0,
+        },
+        consumedTopicTypes: ["PLAY"],
+        producedTopicTypes: [],
+        sourceAnchors: emptyAnchors,
+        diagnosticIds: [],
+      },
+    ],
+    managers: [],
+    topics: [{ eventType: "PLAY", producerCount: 0, consumerCount: 1, routingKinds: [], routingValues: [], producers: [], consumers: [], diagnosticIds: [] }],
+    relations: { machineIdsByTopicType: {} },
+    diagnostics: [],
+    rowMappings: {},
+    workbenchMachines: {
+      player: {
+        machineId: "player",
+        title: "player",
+        kind: "domain",
+        initialState: "idle",
+        sourceAnchors: emptyAnchors,
+        diagnostics: [],
+        globalBehavior: [],
+        states: [
+          {
+            stateId: "player:state:idle",
+            stateKey: "idle",
+            kind: "normal",
+            current: false,
+            collapsed: false,
+            badges: [{ kind: "initial", label: "initial" }],
+            sourceAnchors: emptyAnchors,
+            diagnosticIds: [],
+            rows: [
+              {
+                kind: "config",
+                rowId: "player:row:play",
+                machineId: "player",
+                sourceStateId: "player:state:idle",
+                eventType: "PLAY",
+                acceptedTransitionId: "player:accepted:play",
+                transitionId: "player:transition:play",
+                foldedReducerTransitionIds: [],
+                target: { kind: "state", stateId: "player:state:playing", label: "playing" },
+                confidence: "exact",
+                capabilities: [],
+                sourceAnchors: emptyAnchors,
+              },
+            ],
+          },
+          {
+            stateId: "player:state:playing",
+            stateKey: "playing",
+            kind: "normal",
+            current: false,
+            collapsed: false,
+            badges: [],
+            sourceAnchors: emptyAnchors,
+            diagnosticIds: [],
+            rows: [],
+          },
+        ],
+      },
+    },
+  }) as unknown as GraphVisualizerModel;
 
 describe("оболочка Shell", () => {
   it("связывает controls исходника, tabs, toggle консоли и пустое состояние консоли", () => {
@@ -252,5 +339,77 @@ describe("оболочка Shell", () => {
     fireEvent.click(screen.getByTestId(ids.source.overlayClose));
 
     expect(store.getSnapshot().state.panels.sourceOverlay).toBeUndefined();
+  });
+
+  it("открывает и закрывает machine canvas board из Machines tab", () => {
+    const base = createInitialWorkbenchSnapshot();
+    const snapshot: WorkbenchSnapshot = {
+      ...base,
+      state: {
+        ...base.state,
+        activeTab: "machines",
+        model: { status: "ready", model: machineCanvasModelFixture(), diagnostics: [] },
+        l3: { selectedMachineIds: ["player"] },
+        simulation: {
+          ...base.state.simulation,
+          status: "running",
+          selectedMachineIds: ["player"],
+          scope: { kind: "machines", machineIds: ["player"] },
+        },
+      },
+    };
+    const store = renderShell(snapshot);
+
+    expect(screen.getByTestId(ids.workbench.machineCard).textContent).toContain("@ idle");
+    fireEvent.click(screen.getByTestId(ids.canvas.openAction));
+
+    expect(store.getSnapshot().state.canvas.machineBoard).toEqual({ sourceVersion: 1, machineId: "player" });
+    expect(screen.getByTestId(ids.canvas.board).textContent).toContain("current simulation idle");
+    expect(store.getSnapshot().state.l3.selectedMachineIds).toEqual(["player"]);
+    expect(store.getSnapshot().state.simulation.status).toBe("running");
+
+    fireEvent.click(screen.getByTestId(ids.canvas.close));
+    expect(store.getSnapshot().state.canvas.machineBoard).toBeUndefined();
+    expect(screen.queryByTestId(ids.canvas.board)).toBeNull();
+    expect(store.getSnapshot().state.l3.selectedMachineIds).toEqual(["player"]);
+    expect(store.getSnapshot().state.simulation.status).toBe("running");
+
+    fireEvent.click(screen.getByTestId(ids.canvas.openAction));
+    expect(screen.getByTestId(ids.canvas.board)).toBeTruthy();
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(store.getSnapshot().state.canvas.machineBoard).toBeUndefined();
+    expect(screen.queryByTestId(ids.canvas.board)).toBeNull();
+  });
+
+  it("рендерит controlled machine canvas states из Shell selector", () => {
+    const base = createInitialWorkbenchSnapshot();
+    const missingModelSnapshot: WorkbenchSnapshot = {
+      ...base,
+      state: {
+        ...base.state,
+        activeTab: "machines",
+        canvas: openMachineBoard(base.state.canvas, base.state.source.version, "player"),
+      },
+    };
+    const store = renderShell(missingModelSnapshot);
+
+    expect(screen.getByTestId(ids.canvas.board).textContent).toContain("Compiled model is not available");
+    fireEvent.click(screen.getByTestId(ids.canvas.close));
+    expect(store.getSnapshot().state.canvas.machineBoard).toBeUndefined();
+
+    const missingMachineSnapshot: WorkbenchSnapshot = {
+      ...base,
+      state: {
+        ...base.state,
+        activeTab: "machines",
+        model: { status: "ready", model: machineCanvasModelFixture(), diagnostics: [] },
+        canvas: openMachineBoard(base.state.canvas, base.state.source.version, "worker"),
+      },
+    };
+    renderShell(missingMachineSnapshot);
+
+    expect(screen.getByTestId(ids.canvas.board).textContent).toContain("worker");
+    expect(screen.getByTestId(ids.canvas.board).textContent).toContain("no longer present");
   });
 });

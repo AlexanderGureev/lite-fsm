@@ -6,6 +6,7 @@ import { EventCatalogPanel } from "../events/EventCatalogPanel";
 import { MachinesPanel } from "../machines/MachinesPanel";
 import { SourceOverlay } from "../source/SourceOverlay";
 import { SystemPanel } from "../system/SystemPanel";
+import { selectMachineCanvasBoard } from "../../canvas";
 import {
   selectActiveTab,
   selectConsolePanel,
@@ -343,6 +344,7 @@ export const Shell = () => {
   const systemPanel = useWorkbenchSelector(selectSystemPanel);
   const eventCatalogPanel = useWorkbenchSelector(selectEventCatalogPanel);
   const machineWorkbenchPanel = useWorkbenchSelector(selectMachineWorkbenchPanel);
+  const machineCanvasBoard = useWorkbenchSelector(selectMachineCanvasBoard);
   const sourceOverlay = useWorkbenchSelector(selectSourceOverlay);
 
   const compileLabel = compileStatusLabel(sourcePanel.compileStatus);
@@ -507,7 +509,7 @@ export const Shell = () => {
           ) : activeTab === "events" ? (
             <EventCatalogPanel view={eventCatalogPanel} dispatch={dispatch} />
           ) : (
-            <MachinesPanel view={machineWorkbenchPanel} dispatch={dispatch} />
+            <MachinesPanel view={machineWorkbenchPanel} canvasBoard={machineCanvasBoard} dispatch={dispatch} />
           )}
         </section>
       </div>
