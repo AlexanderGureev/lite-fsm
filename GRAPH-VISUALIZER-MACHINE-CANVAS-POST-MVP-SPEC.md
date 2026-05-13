@@ -31,7 +31,7 @@ renderer extension points.
 - App state хранит semantic pinned/focused ids, но не renderer ids,
   coordinates, edge paths или DOM measurements.
 - `buildMachineFlowModel`, board state и renderer расширяются через MVP
-  pipeline/registry/builder functions.
+  pipeline и named builder/rule functions.
 
 ### 2.2 Product behavior
 
@@ -62,12 +62,12 @@ cases.
 Расширять существующие MVP владельцы:
 
 - `FlowBuildContext`;
-- target resolver registry;
+- target resolving;
 - producer classifier;
 - node role rules;
 - edge grouping key rules;
 - row/source attachment rules;
-- legend builder;
+- node stats builder;
 - simulation flag attachment;
 - density input counters.
 

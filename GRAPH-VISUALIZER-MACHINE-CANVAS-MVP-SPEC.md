@@ -88,6 +88,12 @@ dispatch-ит FSM events и остается полезным без simulator s
 - Названия `describe`, `it`, `test` пишутся на русском.
 - Pure graph logic и pure renderer logic покрываются 100% по
   statements/branches/functions/lines.
+- Pure renderer logic означает deterministic helpers без React, DOM, ELK
+  execution или React Flow runtime: render policy, id/mapping helpers, labels,
+  density, self-loop math и edge-group-to-render-draft transforms.
+- ELK calls, React Flow components, DOM measurement, lazy loading и async layout
+  orchestration покрываются focused unit/component/E2E tests, но не входят в
+  strict 100% pure coverage target.
 - Для `packages/graph` добавить package-local Vitest config/script или
   documented scoped root command для `machine-flow*` source files.
 - `packages/graph` coverage для `machine-flow*` source files: 100% по
@@ -172,7 +178,7 @@ validate input
 -> resolve targets
 -> group edge drafts
 -> attach source anchors and diagnostics refs
--> calculate node stats and legend
+-> calculate node stats and semantic counters
 -> sort final output
 ```
 
@@ -186,17 +192,22 @@ validate input
 - edge group key;
 - producer classifier;
 - target resolver;
-- legend builder.
+- node stats builder.
 
-Расширяемые правила держать в отдельных функциях или registry-like таблицах:
+Расширяемые правила имеют одного владельца и named function boundary:
 
-- target resolvers: `state`, `self`, `terminal`, `dynamic`, `blocked`,
+- target resolving: `state`, `self`, `terminal`, `dynamic`, `blocked`,
   `unknown`;
-- producer classifiers: `external`, `self-emitted`, `from-other`;
+- producer classification: `external`, `self-emitted`, `from-other`;
 - node role rules: `normal`, `initial`, `current`, `terminal`, `spawn`,
   `wildcard`, `effect-source`, `synthetic`;
 - edge grouping key rules;
 - row/source attachment rules.
+
+MVP допускает простые private functions, `switch` и linear early returns.
+Registry/table-driven форму использовать только если cases имеют одинаковый
+contract и она реально уменьшает ветвление. Не добавлять registry ради будущего
+расширения.
 
 `GraphWorkbenchRow` handling:
 
@@ -223,9 +234,9 @@ validate input
 - `MachineFlowMachine`;
 - `MachineFlowNode`;
 - `MachineFlowEdgeGroup`;
+- `MachineFlowProducerRef`;
 - `MachineFlowRowRef`;
 - `MachineFlowBadge`;
-- `MachineFlowLegend`;
 - `MachineFlowEdgeKind`;
 - `buildMachineFlowModel`.
 
@@ -244,7 +255,6 @@ type MachineFlowModel =
       machine: MachineFlowMachine;
       nodes: readonly MachineFlowNode[];
       edgeGroups: readonly MachineFlowEdgeGroup[];
-      legend: MachineFlowLegend;
     };
 
 type MachineFlowMachine = {
@@ -313,22 +323,46 @@ type MachineFlowEdgeGroup = {
   label: string;
   count: number;
   rows: readonly MachineFlowRowRef[];
+  producers: readonly MachineFlowProducerRef[];
   sourceAnchors: readonly GraphSourceAnchor[];
   diagnostics: readonly string[];
 };
 
+type MachineFlowProducerRef = {
+  machineId: string;
+  machineTitle: string;
+  emissionId: string;
+  eventType: string;
+  sourceStateKey: string | "*";
+  routingLabel?: string;
+  guardLabel?: string;
+  confidence?: "exact" | "partial" | "unknown";
+  sourceAnchors: readonly GraphSourceAnchor[];
+};
+
 type MachineFlowRowRef =
   | {
+      machineId: string;
       rowId: string;
-      rowKind: "config" | "reducer" | "effect";
+      rowKind: "config" | "reducer";
       eventType: string;
       targetLabel: string;
       guardLabel?: string;
-      routingLabel?: string;
       confidence?: "exact" | "partial" | "unknown";
       sourceAnchors: readonly GraphSourceAnchor[];
     }
   | {
+      machineId: string;
+      rowId: string;
+      rowKind: "effect";
+      eventType: string;
+      routingLabel?: string;
+      guardLabel?: string;
+      confidence?: "exact" | "partial" | "unknown";
+      sourceAnchors: readonly GraphSourceAnchor[];
+    }
+  | {
+      machineId?: string;
       rowId: string;
       rowKind: "diagnostic";
       label: string;
@@ -336,6 +370,7 @@ type MachineFlowRowRef =
       sourceAnchors: readonly GraphSourceAnchor[];
     }
   | {
+      machineId?: string;
       rowId: string;
       rowKind: "unknown";
       label: string;
@@ -358,16 +393,6 @@ type MachineFlowBadge = {
     | "diagnostic"
     | "unknown";
   label: string;
-  tone?: "neutral" | "config" | "effect" | "routing" | "warning" | "danger";
-};
-
-type MachineFlowLegend = {
-  edgeKinds: ReadonlyArray<{
-    kind: MachineFlowEdgeKind;
-    label: string;
-    description: string;
-  }>;
-  badges: readonly MachineFlowBadge[];
 };
 ```
 
@@ -375,10 +400,15 @@ Contract requirements:
 
 - Optional fields заполняются только данными из `GraphVisualizerModel`.
 - `MachineFlowRowRef` остается discriminated union.
+- `MachineFlowProducerRef` хранит producer metadata отдельно от consumer rows.
+- Config/reducer row refs имеют `targetLabel`; effect row refs не получают fake
+  target и используют `routingLabel` / `MachineFlowProducerRef` для producer
+  details.
 - Diagnostic/unknown rows не получают fake `eventType` или fake target.
-- Machine Flow Model не хранит renderer stroke/style/marker hints.
-- Renderer мапит `edge.kind`, `producerCategory` и `layer` через local render
-  policy.
+- Machine Flow Model не хранит renderer stroke/style/marker hints, legend
+  labels/descriptions или badge tones.
+- Renderer мапит `edge.kind`, `producerCategory`, `layer` и `badge.kind`
+  через local render policy.
 
 ### 3.3 Semantic ids
 
@@ -386,7 +416,9 @@ Contract requirements:
 - Wildcard state node id строится из `machineId` и wildcard state marker.
 - Wildcard effect node id строится из `machineId` и wildcard effect marker.
 - Edge group id строится из `machineId`, source node, target node или
-  `target:none`, edge kind, producer category, direction и grouped row ids.
+  `target:none`, edge kind, producer category и direction.
+- Edge group id не включает grouped row ids; original row ids остаются только в
+  `MachineFlowEdgeGroup.rows`.
 - Semantic ids детерминированы до layout.
 - React Flow ids не появляются в Machine Flow Model.
 
@@ -459,15 +491,23 @@ Wildcard effect:
 ### 3.7 Effect emissions и producer category
 
 - Consumed events классифицируются через `model.topics` и `model.relations`.
-- Edge kind выбирается в порядке:
+- Producer details для edge groups сохраняются в `MachineFlowEdgeGroup.producers`
+  из `GraphTopicProducer` / effect rows, включая machine, source state, routing,
+  guard, confidence и source anchors.
+- Producer classification имеет одного владельца:
+  `classifyEdgeProducer(...)`.
+- Classification выполняется после pairing local lifecycle rows:
   1. Same-machine effect producer + local consumer -> `self-emitted-transition`
      и `producerCategory: "self-emitted"`.
   2. Producers только из других machines -> `from-other-transition` и
      `producerCategory: "from-other"`.
-  3. Остальные accepted rows -> `accepted-transition`.
-- `accepted-transition` использует `producerCategory: "external"` для
-  no/unknown/external producer и `"self-emitted"` для same-machine producer без
-  local lifecycle pairing.
+  3. Producers только из same machine, но без local lifecycle pairing ->
+     `accepted-transition` и `producerCategory: "self-emitted"`.
+  4. Нет producer, unknown/external producer или mixed same+other producers ->
+     `accepted-transition` и `producerCategory: "external"`.
+- Mixed producer set не добавляет новый public `producerCategory` в MVP:
+  renderer видит `external`, а known producer refs сохраняются в `producers`
+  для popover/debug metadata.
 - Pairing self-emitted lifecycle edges выполняется по `eventType` и source
   locality: same concrete source state consumer, затем wildcard accepted
   transition того же event.
@@ -476,6 +516,18 @@ Wildcard effect:
 - Accepted row, использованный в `self-emitted-transition`, не создает
   duplicate `accepted-transition`.
 - Self-emitted edge строится от effect source node к accepted target.
+- `self-emitted-transition` содержит в `producers` same-machine effect producer
+  и в `rows` consumer row плюс local effect row.
+- `from-other-transition` содержит в `producers` producers из других machines и
+  в `rows` consumer rows текущей machine.
+- `accepted-transition` с no/unknown/external producer содержит
+  `producers: []`.
+- `accepted-transition` с same-machine producer без local lifecycle pairing
+  сохраняет same-machine producer в `producers`, но остается
+  `kind: "accepted-transition"`.
+- `accepted-transition` с mixed known producers сохраняет known producers в
+  `producers`, но остается `kind: "accepted-transition"` и
+  `producerCategory: "external"`.
 - Wildcard effect с local consumer создает lifecycle edge от wildcard effect
   node к accepted target.
 - Consumer через wildcard config/reducer сохраняет `via *` / `via any state` в
@@ -520,6 +572,10 @@ Wildcard effect:
 - Wildcard accepted transition как fallback consumer.
 - Emission-only effects как edge group без `targetNodeId`.
 - Producer categories: `external`, `self-emitted`, `from-other`.
+- Mixed same+other producers классифицируются как `accepted-transition` /
+  `producerCategory: "external"` без новой public category.
+- Producer refs для self, from-other и same-machine non-local accepted
+  transitions.
 - Dynamic, blocked и unknown targets сохраняют row refs.
 - Routing metadata сохраняется для effect rows.
 - Diagnostic/unknown rows не создают transition edges.
@@ -527,6 +583,7 @@ Wildcard effect:
 - Role precedence.
 - Grouped labels и `+N`.
 - Deterministic sorting и stable ids.
+- Edge group ids не включают grouped row ids.
 - `machine-flow*` coverage: 100% statements/branches/functions/lines.
 - Type API tests для нового view-model export.
 
@@ -799,6 +856,8 @@ Mapping tables/functions:
 - `edgeKind -> stroke/style/marker`;
 - `producerCategory -> legend/popover metadata label`;
 - `badgeKind -> tone`;
+- `edgeKind` / `producerCategory` / `badgeKind` -> local legend
+  labels/descriptions;
 - `layout error -> controlled board state`.
 
 Renderer не меняет Machine Flow semantics.
@@ -950,20 +1009,24 @@ Density:
   - target или self;
   - producer category;
   - grouped event names;
-  - producer path из row refs, routing labels или source anchors.
-- Popover строится только из `MachineFlowEdgeGroup.rows`, `sourceAnchors` и
-  `producerCategory`.
+  - producer path из `MachineFlowEdgeGroup.producers`.
+- Popover строится только из `MachineFlowEdgeGroup.rows`,
+  `MachineFlowEdgeGroup.producers`, `sourceAnchors` и `producerCategory`.
 - Renderer не обращается к `model.topics`/`model.relations`.
 
 ### 6.8 Тесты этапа 4
 
-- Unit: render policy mapping для node roles и edge kinds.
+- Unit: render policy mapping для node roles, edge kinds, legend labels и
+  badge tones.
 - Unit: renderer policy constants и grouped label text.
 - Unit: MVP density thresholds.
 - Unit: self-loop geometry deterministic.
 - Unit: label collision pass остается в `0.1..0.9`.
 - Unit coverage: `apps/visualizer/src/canvas/*machine-canvas*` pure modules
   покрыты 100% statements/branches/functions/lines.
+- Unit coverage excludes ELK execution wrappers, React Flow component glue, DOM
+  measurement и async layout orchestration; эти paths покрываются focused
+  integration/component/E2E tests.
 - Component: graph рендерит state nodes.
 - Component: graph рендерит edge labels.
 - Component: wildcard state node различим.
@@ -1016,40 +1079,23 @@ Reference material:
 
 | Fixture | Reference |
 | --- | --- |
-| `lamp` | `apps/playground/app/examples/lamp/store/machines/lamp.ts` |
-| `likes`, `likesPending` | `apps/playground/app/examples/likes/store/machines/likes.ts`, `likesPending.ts` |
-| `likes-v2/likeSync` | `apps/playground/app/examples/likes-v2/store/machines/likesV2.ts`, `likeSync.ts` |
-| `persist/chat*` | `apps/playground/app/examples/persist/store/machines/chatSession.ts`, `chatComposer.ts`, `chatThread.ts` |
-| `album-download` | `apps/playground/app/examples/album-download/store/machines/albumDownload.ts`, `trackDownload.ts` |
-| `actor-canvas` | `apps/playground/app/examples/actor-canvas/store/machines/canvasBoard.ts`, `canvasStroke.ts`, `canvasNetwork.ts` |
-| `ssr-demo*` | `apps/playground/app/examples/ssr-demo*/store/machines/*.ts` |
-| `roguelite` | `apps/playground/app/examples/roguelite/store/machines/*.ts` |
 | `test-example/onboarding` | `apps/playground/app/examples/test-example/store/machines/onboarding.ts` |
 | `xstate` | `xstate/graph-parser-fixtures.ts` и focused `xstate/*.ts` examples |
 
 Required semantic coverage:
 
-- `lamp`: two-state flow, reset/self handling.
-- `likes`: wildcard state, pending flow, effect resolve/reject,
-  reducer/context alternatives.
-- `likes-v2`: actor template, `__INIT`, terminal states, wildcard cancel.
-- `persist/chat*`: context machines, self/null handled events, persistence
-  metadata.
-- `album-download`: one-state summary, per-track actor template, grouped self
-  loops.
-- `actor-canvas`: snapshot persistence, actor template strokes, wildcard
-  network effect, emission-only sync.
-- `ssr-demo*`: hydration, paginated grids/entity lists, wildcard effects,
-  context-scoped requests.
-- `roguelite`: dense self loops, routed actor/group events, actor templates,
-  terminal despawn flows.
 - `test-example/onboarding`: wildcard state и wildcard effect в одной machine,
-  conditional effect resolve/reject.
-- `xstate`: computed keys, unresolved config, dynamic targets, escaped
-  transition, conditional reducers/effects, wildcard effect.
+  reducer `nextState`, local effect resolve/reject и self-emitted lifecycle
+  edges.
+- `xstate`: `createMachine` aliases, `createConfig` / `createReducer` /
+  `createEffect` wrappers, computed keys, wildcard state/effect, conditional
+  reducers/effects, local const configs/effects, actor templates, `__INIT`,
+  terminal states, actor/group/tag/unscoped routing, persistence metadata,
+  manager linking, emission-only effects, unresolved config, dynamic targets и
+  escaped transition diagnostics.
 
-Каждая fixture фиксирует expected visual story: business flow, collapsed edges,
-emission-only chips и metadata badges.
+Каждый набор фиксирует expected visual story: business flow, collapsed edges,
+emission-only chips, producer metadata и role badges.
 
 ### 7.3 E2E coverage
 
@@ -1066,10 +1112,10 @@ emission-only chips и metadata badges.
 - Проверить отсутствие ложного state-to-state edge для emission-only group.
 - Проверить actor template: `__INIT`, terminal states, routing metadata,
   отсутствие per-instance nodes.
-- Проверить one-state service через grouped self loops/node chips.
-- Проверить dense fixture: нет horizontal overflow, graph видим после fit view.
-- Снять deterministic screenshots для `lamp`, wildcard/self-loop fixture и
-  dense fixture при disabled/reduced motion.
+- Проверить larger `xstate/onboarding` или focused xstate fixture: нет
+  horizontal overflow, graph видим после fit view.
+- Снять deterministic screenshots для `test-example/onboarding` и selected
+  xstate fixture при disabled/reduced motion.
 - Закрыть canvas board.
 - Проверить, что source edit закрывает canvas board.
 
@@ -1089,7 +1135,7 @@ emission-only chips и metadata badges.
   edges.
 - Effect emissions без local consumer остаются `emission-only` groups без
   `targetNodeId` и без state-to-state edges.
-- One-state machines и dense fixtures читаемы.
+- `test-example/onboarding` и selected xstate fixtures читаемы.
 - Actor templates читаются как templates без per-instance nodes.
 - Canvas не dispatch-ит events.
 - Layout failure показывает controlled board error state.
@@ -1101,5 +1147,6 @@ emission-only chips и metadata badges.
 Готовность MVP:
 
 - MVP user flow работает end-to-end.
-- Graph читаем для small и dense compiled fixtures.
+- Graph читаем для selected `test-example/onboarding` и xstate compiled
+  fixtures.
 - Post-MVP extension points доступны без переписывания MVP architecture.
