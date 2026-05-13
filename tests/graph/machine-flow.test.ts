@@ -294,7 +294,7 @@ const hasEventType = (
   row: GraphWorkbenchRow,
 ): row is Extract<GraphWorkbenchRow, { eventType: string }> => "eventType" in row;
 
-describe("@lite-fsm/graph/view-model: Machine Flow Model", () => {
+describe("модель Machine Flow из @lite-fsm/graph/view-model", () => {
   it("возвращает controlled empty state для отсутствующей machine", () => {
     const result = buildMachineFlowModel({ model: modelOf({ workbenches: [] }), machineId: "missing" });
 
@@ -476,6 +476,42 @@ describe("@lite-fsm/graph/view-model: Machine Flow Model", () => {
     expect(result.edgeGroups.find((edge) => edge.label === "LOOP")?.direction).toBe("self");
     expect(result.edgeGroups.find((edge) => edge.label === "DONE")?.rows.map((row) => row.rowKind)).toEqual(["effect", "config"]);
     expect(result.nodes.find((node) => node.label === "loading")?.stats.emissions).toBe(2);
+  });
+
+  it("pair-ит wildcard effect с concrete local consumer того же event", () => {
+    const machineId = "wildcard-lifecycle";
+    const wildcardEffect = effectRow({ machineId, source: "*", event: "PONG" });
+    const concreteConsumer = configRow({ machineId, source: "idle", event: "PONG", target: stateTarget(machineId, "ready") });
+    const workbench = workbenchOf({
+      machineId,
+      states: [
+        stateBlock({ machineId, key: "idle", rows: [concreteConsumer] }),
+        stateBlock({ machineId, key: "ready" }),
+      ],
+      globalBehavior: [wildcardEffect],
+    });
+    const result = ready(
+      modelOf({
+        workbenches: [workbench],
+        topics: [topic("PONG", [producer({ machineId, source: "*", event: "PONG" })])],
+      }),
+      machineId,
+    );
+    const wildcardEffectNode = result.nodes.find((node) => node.ref.kind === "wildcard-effect");
+    const readyNode = result.nodes.find((node) => node.label === "ready");
+
+    expect(result.edgeGroups).toHaveLength(1);
+    expect(result.edgeGroups[0]).toMatchObject({
+      label: "PONG",
+      kind: "self-emitted-transition",
+      producerCategory: "self-emitted",
+      sourceNodeId: wildcardEffectNode?.nodeId,
+      targetNodeId: readyNode?.nodeId,
+    });
+    expect(result.edgeGroups[0]?.rows).toEqual([
+      expect.objectContaining({ rowKind: "config", eventType: "PONG", sourceStateKey: "idle" }),
+      expect.objectContaining({ rowKind: "effect", eventType: "PONG" }),
+    ]);
   });
 
   it("классифицирует producers from-other, mixed, same-machine non-local и external", () => {

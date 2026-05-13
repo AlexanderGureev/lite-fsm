@@ -54,6 +54,8 @@ const flowNode = (input: Partial<MachineFlowNode> = {}): MachineFlowNode => ({
   stats: input.stats ?? { incoming: 0, outgoing: 0, selfLoops: 0, emissions: 0 },
 });
 
+type MachineFlowTransitionRowRef = Extract<MachineFlowRowRef, { rowKind: "config" | "reducer" }>;
+
 const renderNode = (input: Partial<MachineCanvasRenderNode> = {}): MachineCanvasRenderNode => ({
   id: input.id ?? "node",
   flowNode: input.flowNode ?? flowNode(),
@@ -66,10 +68,11 @@ const renderNode = (input: Partial<MachineCanvasRenderNode> = {}): MachineCanvas
   emissionGroups: input.emissionGroups ?? [],
 });
 
-const configRow = (eventType = "START"): MachineFlowRowRef => ({
+const configRow = (eventType = "START"): MachineFlowTransitionRowRef => ({
   machineId: "player",
   rowId: `row:${eventType}`,
   rowKind: "config",
+  sourceStateKey: "idle",
   eventType,
   targetLabel: "loading",
   guardLabel: "guard",
@@ -158,7 +161,7 @@ const readyLayoutState = (layoutKey: string): MachineCanvasGraphLayoutState => (
   },
 });
 
-describe("machine canvas graph view helpers", () => {
+describe("помощники graph view для machine canvas", () => {
   it("создает stable layout keys для новых и повторных flow refs", () => {
     const keyFor = createMachineCanvasLayoutKeyFactory();
     const firstFlow = flow("player");
@@ -274,6 +277,7 @@ describe("machine canvas graph view helpers", () => {
     );
     expect(machineCanvasGraphProducerLabel(producer())).toBe("player.loading");
     expect(machineCanvasGraphRowLabel(configRow("START"))).toBe("config:START → loading · guard");
+    expect(machineCanvasGraphRowLabel({ ...configRow("RESET"), sourceStateKey: "*" })).toBe("config:RESET → loading · via * · guard");
     expect(machineCanvasGraphRowLabel(effectRow("DONE"))).toBe("effect:DONE");
     expect(machineCanvasGraphRowLabel(diagnosticRow)).toBe("diagnostic:bad branch");
   });

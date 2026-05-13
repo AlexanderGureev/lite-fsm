@@ -180,6 +180,7 @@ const transitionRow = (eventType: string, targetLabel: string): MachineFlowRowRe
   machineId: "player",
   rowId: `row:${eventType}`,
   rowKind: "config",
+  sourceStateKey: "idle",
   eventType,
   targetLabel,
   guardLabel: "guard",
@@ -305,7 +306,7 @@ const layoutGraph = (graph: MachineCanvasElkGraph): MachineCanvasElkGraph => ({
   })),
 });
 
-describe("MachineCanvasGraph", () => {
+describe("граф MachineCanvasGraph", () => {
   beforeEach(() => {
     reactFlowMock.fitView.mockClear();
     elkMock.layout.mockImplementation(async (graph) => layoutGraph(graph));

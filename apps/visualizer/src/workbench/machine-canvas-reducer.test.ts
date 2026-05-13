@@ -95,7 +95,7 @@ const diagnostic = createWorkbenchDiagnostic({
   sourceAnchors: [],
 });
 
-describe("machine canvas reducer", () => {
+describe("редьюсер machine canvas", () => {
   it("открывает board и сохраняет source version с machine id", () => {
     const store = createWorkbenchStore(readySnapshot());
 

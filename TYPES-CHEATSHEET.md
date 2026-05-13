@@ -403,7 +403,7 @@ const snapshot: GraphSimulationSnapshot | undefined = createGraphSimulator(docum
 | `MachineFlowModel`                           | controlled `missing-machine` или ready semantic graph одной machine                                  |
 | `MachineFlowNode`                            | state/wildcard/effect-source/synthetic target node с semantic id, role, badges, anchors и stats      |
 | `MachineFlowEdgeGroup`                       | grouped transition/emission edge с semantic refs, row refs, producer refs и diagnostics              |
-| `MachineFlowRowRef` / `MachineFlowProducerRef` | compact source metadata для edge popover/detail panel без восстановления semantics в renderer      |
+| `MachineFlowRowRef` / `MachineFlowProducerRef` | compact source metadata для edge popover/detail panel без восстановления semantics в renderer; config/reducer row refs хранят `sourceStateKey` для wildcard labels |
 
 `GraphConfigRow.foldedReducerTransitionIds` показывает reducer branches, свернутые в config row. Для команд visualizer app использует `GraphConfigRow.transitionId` или `GraphReducerRow.transitionId`; ambiguous/no-match mapping виден через `GraphVisualizerRowMappingIndex.diagnostics`.
 `MachineFlowModel` хранит semantic ids (`stateId`, `rowId`, `edgeGroup.groupId`) и не хранит React Flow ids, layout coordinates, stroke/style hints или DOM state.

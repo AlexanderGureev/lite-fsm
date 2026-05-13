@@ -39,6 +39,7 @@ const row = (eventType: string, targetLabel = "target"): MachineFlowRowRef => ({
   machineId: "player",
   rowId: `row:${eventType}`,
   rowKind: "config",
+  sourceStateKey: "idle",
   eventType,
   targetLabel,
   sourceAnchors: [],
@@ -111,7 +112,7 @@ const positionedGraph = (draftGraph: MachineCanvasElkGraph): MachineCanvasElkGra
   ),
 });
 
-describe("layout machine canvas", () => {
+describe("раскладка для machine canvas", () => {
   it("строит render draft, sibling label t и emission chips без transition edge", () => {
     const draft = buildMachineCanvasRenderDraft(flowFixture());
 

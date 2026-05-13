@@ -2,8 +2,6 @@ import type { CanvasAdapter, CanvasState } from "./types";
 
 export const createNoopCanvasAdapter = (): CanvasAdapter => ({ kind: "none" });
 
-const createMachineCanvasAdapter = (): CanvasAdapter => ({ kind: "machine-canvas" });
-
 export const createInitialCanvasState = (): CanvasState => ({
   adapter: createNoopCanvasAdapter(),
   items: [],
@@ -24,7 +22,7 @@ export const openMachineBoard = (
 
   return {
     ...canvas,
-    adapter: createMachineCanvasAdapter(),
+    adapter: { kind: "machine-canvas" },
     machineBoard: { sourceVersion, machineId },
   };
 };

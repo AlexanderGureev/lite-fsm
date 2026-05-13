@@ -31,7 +31,7 @@ import type { Assert, NotAny, NotNever } from "./_helpers";
 const document = {} as LiteFsmGraphDocument;
 const machine = {} as LiteFsmGraphMachine;
 
-describe("@lite-fsm/graph/view-model public API", () => {
+describe("публичный API @lite-fsm/graph/view-model", () => {
   test("subpath экспортирует builders и root import их не раскрывает", () => {
     expect(buildGraphVisualizerModel(document)).type.toBe<GraphVisualizerModel>();
     expect(buildMachineWorkbenchModel(machine)).type.toBe<GraphMachineWorkbenchModel>();
@@ -83,6 +83,7 @@ describe("@lite-fsm/graph/view-model public API", () => {
       Assert<NotAny<MachineFlowEdgeGroup["producerCategory"]>>,
       Assert<NotAny<MachineFlowProducerRef["sourceStateKey"]>>,
       Assert<NotAny<MachineFlowRowRef["rowKind"]>>,
+      Assert<NotAny<Extract<MachineFlowRowRef, { rowKind: "config" | "reducer" }>["sourceStateKey"]>>,
       Assert<NotAny<MachineFlowBadge["kind"]>>,
       Assert<NotAny<MachineFlowEdgeKind>>,
     ];

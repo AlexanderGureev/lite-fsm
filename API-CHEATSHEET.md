@@ -91,7 +91,7 @@ const model = buildGraphVisualizerModel(document, {
 | `MachineFlowModel.edgeGroups`        | grouped semantic edges: accepted transitions, self-emitted/from-other transitions и emission-only source chips |
 
 View-model не запускает simulator и не исполняет пользовательский код. Simulation overlay принимает только готовые ids/flags (`currentStateIds*`, `availableTransitionIds*`, `suggestedEmissionIds*`, `firedRefs`, `inspectedRefs`) и проставляет display flags на rows.
-Machine Flow строится только поверх `GraphVisualizerModel`: сохраняет semantic ids, source anchors, row refs, producer refs, current state из overlay/workbench и не содержит renderer coordinates/styles.
+Machine Flow строится только поверх `GraphVisualizerModel`: сохраняет semantic ids, source anchors, row refs, producer refs, source state для transition rows, current state из overlay/workbench и не содержит renderer coordinates/styles.
 
 ## Mental model
 

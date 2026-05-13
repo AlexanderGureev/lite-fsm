@@ -40,7 +40,7 @@ const edgeGroup = (input: Partial<MachineFlowEdgeGroup>): MachineFlowEdgeGroup =
   diagnostics: [],
 });
 
-describe("machine canvas render policy", () => {
+describe("политика рендера machine canvas", () => {
   it("мапит роли nodes, edge kinds, producer category и badge tones", () => {
     expect(machineCanvasNodeRoleStyle("normal").label).toBe("state");
     expect(machineCanvasNodeRoleStyle("current").className).toContain("current");

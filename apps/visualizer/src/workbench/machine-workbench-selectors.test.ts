@@ -372,7 +372,7 @@ const readySnapshot = (): WorkbenchSnapshot => {
   };
 };
 
-describe("selectors machine workbench для L3", () => {
+describe("селекторы machine workbench для L3", () => {
   it("строит пустой L3 view без model", () => {
     expect(selectMachineWorkbenchPanel(createInitialWorkbenchSnapshot())).toMatchObject({
       status: "empty",
@@ -459,6 +459,35 @@ describe("selectors machine workbench для L3", () => {
 
     expect(view.status).toBe("ready");
     expect(view.timeline).toEqual([]);
+  });
+
+  it("не подставляет initial state как current state для L3 card", () => {
+    const snapshot = readySnapshot();
+    const model = snapshot.state.model.model;
+    if (!model) throw new Error("Missing model fixture.");
+    const player = model.workbenchMachines.player;
+    if (!player) throw new Error("Missing player workbench.");
+    const noCurrentPlayer = {
+      ...player,
+      currentStateId: undefined,
+      states: player.states.map((state) => ({ ...state, current: false })),
+    };
+    const view = selectMachineWorkbenchPanel({
+      ...snapshot,
+      state: {
+        ...snapshot.state,
+        l3: { selectedMachineIds: ["player"] },
+        model: {
+          ...snapshot.state.model,
+          model: {
+            ...model,
+            workbenchMachines: { ...model.workbenchMachines, player: noCurrentPlayer },
+          },
+        },
+      },
+    });
+
+    expect(view.cards[0]?.currentStateKey).toBeUndefined();
   });
 
   it("сохраняет ссылку L3 view при toggle консоли и меняет только inspect output при выборе timeline step", () => {

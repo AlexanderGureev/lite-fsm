@@ -97,7 +97,7 @@ const readyView = (
   };
 };
 
-describe("MachineCanvasBoard", () => {
+describe("борд MachineCanvasBoard", () => {
   it("не рендерит board когда canvas не открыт", () => {
     const dispatch = dispatchOf();
 

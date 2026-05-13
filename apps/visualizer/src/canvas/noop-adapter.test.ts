@@ -10,7 +10,7 @@ import type { CanvasState } from "./types";
 
 const item = { kind: "diagnostic" as const, diagnosticId: "diagnostic:1" };
 
-describe("machine canvas state helpers", () => {
+describe("помощники состояния machine canvas", () => {
   it("создает пустой adapter и initial state", () => {
     expect(createNoopCanvasAdapter()).toEqual({ kind: "none" });
     expect(createInitialCanvasState()).toEqual({ adapter: { kind: "none" }, items: [] });

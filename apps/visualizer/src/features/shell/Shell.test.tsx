@@ -360,7 +360,7 @@ describe("оболочка Shell", () => {
     };
     const store = renderShell(snapshot);
 
-    expect(screen.getByTestId(ids.workbench.machineCard).textContent).toContain("@ idle");
+    expect(screen.getByTestId(ids.workbench.machineCard).textContent).not.toContain("@ idle");
     fireEvent.click(screen.getByTestId(ids.canvas.openAction));
 
     expect(store.getSnapshot().state.canvas.machineBoard).toEqual({ sourceVersion: 1, machineId: "player" });

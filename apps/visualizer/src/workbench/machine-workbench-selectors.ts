@@ -197,7 +197,8 @@ const stateBlockView = (
 });
 
 const currentStateKey = (workbench: GraphMachineWorkbenchModel): string | undefined =>
-  workbench.states.find((state) => state.current)?.stateKey ?? workbench.initialState;
+  workbench.states.find((state) => state.stateId === workbench.currentStateId)?.stateKey ??
+  workbench.states.find((state) => state.current)?.stateKey;
 
 const cardView = (
   workbench: GraphMachineWorkbenchModel,

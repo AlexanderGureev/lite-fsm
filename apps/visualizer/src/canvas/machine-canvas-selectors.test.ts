@@ -103,7 +103,7 @@ const snapshotWithBoard = (
   };
 };
 
-describe("machine canvas selectors", () => {
+describe("селекторы machine canvas", () => {
   it("возвращает not-opened когда board не открыт", () => {
     expect(selectMachineCanvasBoard(createInitialWorkbenchSnapshot())).toEqual({
       status: "not-opened",

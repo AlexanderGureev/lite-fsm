@@ -44,7 +44,7 @@ const edgeByLabel = (
   return edge;
 };
 
-describe("machine canvas fixture matrix", () => {
+describe("матрица фикстур machine canvas", () => {
   it("компилирует compact onboarding visual story без playground imports", () => {
     const flow = readyFlow(machineCanvasOnboardingSource, "onboarding");
     const wildcardState = flow.nodes.find((node) => node.ref.kind === "wildcard-state");

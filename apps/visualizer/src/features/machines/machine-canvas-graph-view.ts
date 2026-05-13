@@ -116,9 +116,10 @@ export const machineCanvasGraphProducerLabel = (producer: MachineCanvasProducerR
 export const machineCanvasGraphRowLabel = (row: MachineCanvasRowRef): string => {
   if ("eventType" in row) {
     const target = "targetLabel" in row ? ` → ${row.targetLabel}` : "";
+    const source = "sourceStateKey" in row && row.sourceStateKey === "*" ? " · via *" : "";
     const routing = "routingLabel" in row && row.routingLabel ? ` · ${row.routingLabel}` : "";
     const guard = row.guardLabel ? ` · ${row.guardLabel}` : "";
-    return `${row.rowKind}:${row.eventType}${target}${routing}${guard}`;
+    return `${row.rowKind}:${row.eventType}${target}${source}${routing}${guard}`;
   }
 
   return `${row.rowKind}:${row.label}`;

@@ -270,16 +270,20 @@ const createTransitionCandidate = (
     sourceStateKey: sourceNode.stateKey,
     targetNodeId: target.targetNodeId,
     direction: target.direction,
-    row: transitionRowRef(row),
+    row: transitionRowRef(row, sourceNode.stateKey),
     eventType: row.eventType,
     sourceAnchors: row.sourceAnchors,
   };
 };
 
-const transitionRowRef = (row: GraphConfigRow | GraphReducerRow): MachineFlowEdgeRowRef => ({
+const transitionRowRef = (
+  row: GraphConfigRow | GraphReducerRow,
+  sourceStateKey: string | "*",
+): MachineFlowEdgeRowRef => ({
   machineId: row.machineId,
   rowId: row.rowId,
   rowKind: row.kind,
+  sourceStateKey,
   eventType: row.eventType,
   targetLabel: row.target.label,
   ...(row.guard ? { guardLabel: guardLabel(row.guard) } : {}),
@@ -553,7 +557,7 @@ const localConsumersForEffect = (
 ): TransitionCandidate[] => {
   const sameEvent = transitionCandidates.filter((candidate) => candidate.eventType === effect.eventType);
   if (effect.sourceStateKey === "*") {
-    return sameEvent.filter((candidate) => candidate.sourceStateKey === "*");
+    return sameEvent;
   }
 
   const sameSource = sameEvent.filter((candidate) => candidate.sourceStateKey === effect.sourceStateKey);

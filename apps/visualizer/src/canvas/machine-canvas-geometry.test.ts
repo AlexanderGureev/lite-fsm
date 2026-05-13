@@ -9,7 +9,7 @@ import {
   resolveMachineCanvasLabelCollisions,
 } from "./machine-canvas-geometry";
 
-describe("machine canvas geometry", () => {
+describe("геометрия machine canvas", () => {
   it("ограничивает label t и выбирает точку на polyline", () => {
     expect(clampMachineCanvasLabelT(-1)).toBe(0.1);
     expect(clampMachineCanvasLabelT(0.4)).toBe(0.4);

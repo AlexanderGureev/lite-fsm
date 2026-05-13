@@ -106,6 +106,7 @@ export type MachineFlowRowRef =
       machineId: string;
       rowId: string;
       rowKind: "config" | "reducer";
+      sourceStateKey: string | "*";
       eventType: string;
       targetLabel: string;
       guardLabel?: string;
