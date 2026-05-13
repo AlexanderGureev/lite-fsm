@@ -49,6 +49,8 @@
   },
   "scripts": {
     "build": "tsup --config tsup.config.ts && tsc -p tsconfig.build.json && node ../../scripts/dts-to-dcts.mjs dist",
-    "check-types": "tsc --noEmit -p tsconfig.json"
+    "check-types": "tsc --noEmit -p tsconfig.json",
+    "test:unit": "vitest run --config vitest.config.ts",
+    "test:coverage": "vitest run --coverage --config vitest.config.ts"
   }
 }

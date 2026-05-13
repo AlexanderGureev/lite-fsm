@@ -14,7 +14,7 @@
 | `@lite-fsm/react`                                              | `FSMContext`, `FSMContextProvider`, `FSMHydrationBoundary`, `useHydrateSnapshot`, `useManager`, `useSelector`, `useTransition`, `defineMachine`   |
 | `@lite-fsm/graph`                                              | experimental: `compileLiteFsmGraph`, `selectMachineGraph`, `analyzeLiteFsmGraph` и IR-типы для graph tooling                                      |
 | `@lite-fsm/graph/simulator`                                    | experimental: `createGraphSimulator`, `createMachineGraphSimulator` для headless symbolic simulation поверх graph IR                               |
-| `@lite-fsm/graph/view-model`                                   | experimental: `buildGraphVisualizerModel`, `buildMachineWorkbenchModel` для read-only visualizer projection поверх graph IR                        |
+| `@lite-fsm/graph/view-model`                                   | experimental: `buildGraphVisualizerModel`, `buildMachineWorkbenchModel`, `buildMachineFlowModel` для read-only visualizer projections              |
 |                                                                |
 
 `@lite-fsm/react` помечен `"use client"`. Импортировать можно из SSR/RSC, hooks/provider — только в client tree.
@@ -84,11 +84,14 @@ const model = buildGraphVisualizerModel(document, {
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
 | `buildGraphVisualizerModel(doc,?)`   | строит L1/L2/L3 projection: machines, managers, topics, relation index, diagnostics, workbench rows          |
 | `buildMachineWorkbenchModel(m, ?)`   | isolated helper для workbench preview/unit tests одной machine                                               |
+| `buildMachineFlowModel({ model, machineId })` | строит semantic state graph одной machine для Machine Canvas Board без React Flow/DOM/layout state           |
 | `GraphVisualizerModel.topics`        | каталог event topics с producers, consumers, reducer branches и routing summary                              |
 | `GraphVisualizerModel.rowMappings`   | canonical mapping simulator row refs / transition-emission ids к workbench `rowId` с diagnostics ambiguity   |
 | `GraphMachineWorkbenchModel.states`  | state blocks и строки `config` / `reducer` / `effect` / `diagnostic` без JSX, DOM, simulator runtime или UI state |
+| `MachineFlowModel.edgeGroups`        | grouped semantic edges: accepted transitions, self-emitted/from-other transitions и emission-only source chips |
 
 View-model не запускает simulator и не исполняет пользовательский код. Simulation overlay принимает только готовые ids/flags (`currentStateIds*`, `availableTransitionIds*`, `suggestedEmissionIds*`, `firedRefs`, `inspectedRefs`) и проставляет display flags на rows.
+Machine Flow строится только поверх `GraphVisualizerModel`: сохраняет semantic ids, source anchors, row refs, producer refs, current state из overlay/workbench и не содержит renderer coordinates/styles.
 
 ## Mental model
 

@@ -13,7 +13,7 @@
 | `@lite-fsm/middleware`    | только runtime middleware                                                                                                                                                                                                                                          |
 | `@lite-fsm/graph`         | experimental graph compiler/analyzer IR-типы                                                                                                                                                                                                                       |
 | `@lite-fsm/graph/simulator` | experimental simulator-типы: snapshots, slices, timeline, choices, available transitions, suggested emissions                                                                                                                                                     |
-| `@lite-fsm/graph/view-model` | experimental visualizer projection-типы: summaries, topics, workbench rows, anchors, row mappings, overlay inputs                                                                                                                                                |
+| `@lite-fsm/graph/view-model` | experimental visualizer projection-типы: summaries, topics, workbench rows, anchors, row mappings, overlay inputs, Machine Flow Model                                                                                                                            |
 |                           |
 
 ## Generics
@@ -400,8 +400,13 @@ const snapshot: GraphSimulationSnapshot | undefined = createGraphSimulator(docum
 | `GraphDiagnosticAnchor`                      | build-local diagnostic id + origin + optional graph/source binding                                   |
 | `GraphVisualizerRowMappingIndex`             | mapping transition/emission identifiers к `rowId`, включая folded reducer rows                       |
 | `GraphVisualizerSimulationOverlayInput`      | готовые simulation ids/flags для подсветки rows без запуска simulator-а                              |
+| `MachineFlowModel`                           | controlled `missing-machine` или ready semantic graph одной machine                                  |
+| `MachineFlowNode`                            | state/wildcard/effect-source/synthetic target node с semantic id, role, badges, anchors и stats      |
+| `MachineFlowEdgeGroup`                       | grouped transition/emission edge с semantic refs, row refs, producer refs и diagnostics              |
+| `MachineFlowRowRef` / `MachineFlowProducerRef` | compact source metadata для edge popover/detail panel без восстановления semantics в renderer      |
 
 `GraphConfigRow.foldedReducerTransitionIds` показывает reducer branches, свернутые в config row. Для команд visualizer app использует `GraphConfigRow.transitionId` или `GraphReducerRow.transitionId`; ambiguous/no-match mapping виден через `GraphVisualizerRowMappingIndex.diagnostics`.
+`MachineFlowModel` хранит semantic ids (`stateId`, `rowId`, `edgeGroup.groupId`) и не хранит React Flow ids, layout coordinates, stroke/style hints или DOM state.
 
 ## Middleware
 

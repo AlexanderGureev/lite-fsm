@@ -3,7 +3,9 @@ import * as graphRoot from "@lite-fsm/graph";
 import type { GraphDiagnostic, LiteFsmGraphDocument, LiteFsmGraphMachine } from "@lite-fsm/graph";
 import {
   buildGraphVisualizerModel,
+  buildMachineFlowModel,
   buildMachineWorkbenchModel,
+  type BuildMachineFlowModelInput,
   type BuildGraphVisualizerModelOptions,
   type BuildMachineWorkbenchModelOptions,
   type GraphConfigRow,
@@ -14,6 +16,14 @@ import {
   type GraphVisualizerSimulationOverlayInput,
   type GraphWorkbenchCapability,
   type GraphWorkbenchRow,
+  type MachineFlowBadge,
+  type MachineFlowEdgeGroup,
+  type MachineFlowEdgeKind,
+  type MachineFlowMachine,
+  type MachineFlowModel,
+  type MachineFlowNode,
+  type MachineFlowProducerRef,
+  type MachineFlowRowRef,
 } from "@lite-fsm/graph/view-model";
 
 import type { Assert, NotAny, NotNever } from "./_helpers";
@@ -25,11 +35,14 @@ describe("@lite-fsm/graph/view-model public API", () => {
   test("subpath экспортирует builders и root import их не раскрывает", () => {
     expect(buildGraphVisualizerModel(document)).type.toBe<GraphVisualizerModel>();
     expect(buildMachineWorkbenchModel(machine)).type.toBe<GraphMachineWorkbenchModel>();
+    expect(buildMachineFlowModel({ model: buildGraphVisualizerModel(document), machineId: "flow" })).type.toBe<MachineFlowModel>();
 
     // @ts-expect-error!
     graphRoot.buildGraphVisualizerModel;
     // @ts-expect-error!
     graphRoot.buildMachineWorkbenchModel;
+    // @ts-expect-error!
+    graphRoot.buildMachineFlowModel;
   });
 
   test("options принимают analyzer diagnostics и simulation facts", () => {
@@ -62,6 +75,16 @@ describe("@lite-fsm/graph/view-model public API", () => {
       Assert<NotAny<GraphWorkbenchCapability>>,
       Assert<NotAny<GraphConfigRow["foldedReducerTransitionIds"]>>,
       Assert<NotAny<GraphTargetView["kind"]>>,
+      Assert<NotAny<BuildMachineFlowModelInput>>,
+      Assert<NotAny<MachineFlowModel>>,
+      Assert<NotNever<MachineFlowModel>>,
+      Assert<NotAny<MachineFlowMachine["kind"]>>,
+      Assert<NotAny<MachineFlowNode["role"]>>,
+      Assert<NotAny<MachineFlowEdgeGroup["producerCategory"]>>,
+      Assert<NotAny<MachineFlowProducerRef["sourceStateKey"]>>,
+      Assert<NotAny<MachineFlowRowRef["rowKind"]>>,
+      Assert<NotAny<MachineFlowBadge["kind"]>>,
+      Assert<NotAny<MachineFlowEdgeKind>>,
     ];
 
     expect<Checks>().type.not.toBe<never>();

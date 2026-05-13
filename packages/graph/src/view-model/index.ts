@@ -1,4 +1,16 @@
 export { buildGraphVisualizerModel, buildMachineWorkbenchModel } from "./build-model";
+export { buildMachineFlowModel } from "./machine-flow";
+export type {
+  BuildMachineFlowModelInput,
+  MachineFlowBadge,
+  MachineFlowEdgeGroup,
+  MachineFlowEdgeKind,
+  MachineFlowMachine,
+  MachineFlowModel,
+  MachineFlowNode,
+  MachineFlowProducerRef,
+  MachineFlowRowRef,
+} from "./machine-flow-types";
 export type {
   BuildGraphVisualizerModelOptions,
   BuildMachineWorkbenchModelOptions,
