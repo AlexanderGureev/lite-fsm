@@ -105,9 +105,11 @@ describe("панель EventCatalogPanel", () => {
             branches: [
               { rowId: "branch:config", layer: "config", targetLabel: "done", guardLabel: "if: context.ready", confidence: "exact" },
               { rowId: "branch:reducer", layer: "reducer", targetLabel: "failed", confidence: "partial" },
+              { rowId: "branch:self", layer: "config", targetLabel: "self", confidence: "exact" },
+              { rowId: "branch:terminal", layer: "config", targetLabel: "__RESOLVED", confidence: "exact" },
             ],
-            branchCount: 2,
-            targetSummary: "done | failed",
+            branchCount: 4,
+            targetSummary: "done | failed | self | __RESOLVED",
           }),
           consumer({
             rowId: "consumer:unknown",
@@ -127,6 +129,8 @@ describe("панель EventCatalogPanel", () => {
     expect(byData(ids.events.producerRow, "data-row-id", "producer:exact").getAttribute("data-routing-label")).toBe("tag:reviewers");
     expect(byData(ids.events.consumerRow, "data-row-id", "consumer:unknown").getAttribute("data-target-summary")).toBe("");
     expect(byData(ids.events.consumerBranch, "data-row-id", "branch:reducer").getAttribute("data-layer")).toBe("reducer");
+    expect(byData(ids.events.consumerBranch, "data-row-id", "branch:self").getAttribute("data-target-label")).toBe("self");
+    expect(byData(ids.events.consumerBranch, "data-row-id", "branch:terminal").getAttribute("data-target-label")).toBe("__RESOLVED");
 
     fireEvent.change(screen.getByTestId(ids.events.search), { target: { value: "route" } });
     fireEvent.click(byData<HTMLButtonElement>(ids.events.topicRow, "data-event-type", "RESET"));

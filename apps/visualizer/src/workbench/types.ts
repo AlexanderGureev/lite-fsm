@@ -159,6 +159,8 @@ export type VisualizerCommand =
       initialContextOverrides?: readonly GraphInitialContextOverride[];
     }
   | { type: "l3.timeline.step.selected"; stepId: string }
+  | { type: "canvas.machine-board.opened"; machineId: string }
+  | { type: "canvas.machine-board.closed" }
   | { type: "source.overlay.opened"; title: string; anchors: readonly GraphSourceAnchor[] }
   | { type: "source.overlay.closed" }
   | { type: "panel.console.toggled"; open?: boolean }
@@ -240,6 +242,7 @@ export type VisualizerCommandResult =
         | "stale-source-version"
         | "missing-document"
         | "missing-model"
+        | "missing-machine"
         | "missing-simulation-session"
         | "ambiguous-row-slice"
         | "simulator-rejected"

@@ -58,7 +58,6 @@ const compileStatusLabel = (status: string): string => {
   if (status === "ready") return "compiled";
   if (status === "running") return "compiling";
   if (status === "failed") return "failed";
-  if (status === "blocked") return "blocked";
 
   return "idle";
 };

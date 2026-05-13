@@ -4,7 +4,6 @@ import { Button } from "@/ui/button";
 import { Input } from "@/ui/input";
 import {
   Chip,
-  ChipPill,
   Counter,
   DensityRow,
   type DensityRowRelation,
@@ -119,13 +118,9 @@ const TopicRow = ({
 
 const TopicChip = ({
   eventType,
-  count,
-  countTone,
   dispatch,
 }: {
   eventType: string;
-  count?: number;
-  countTone?: "in" | "out";
   dispatch: (command: VisualizerCommand) => void;
 }) => (
   <Chip
@@ -136,12 +131,6 @@ const TopicChip = ({
     <span data-testid={VISUALIZER_TEST_IDS.workbench.longLabel} data-label-kind="event">
       {eventType}
     </span>
-    {typeof count === "number" ? (
-      <ChipPill tone={countTone ?? "neutral"}>
-        {count}
-        {countTone === "in" ? "↑" : countTone === "out" ? "↓" : ""}
-      </ChipPill>
-    ) : null}
   </Chip>
 );
 
@@ -373,9 +362,9 @@ const SectionPaneSearch = ({
   onChange,
 }: {
   placeholder: string;
-  testId?: string;
-  value?: string;
-  onChange?: (value: string) => void;
+  testId: string;
+  value: string;
+  onChange: (value: string) => void;
 }) => (
   <div className="relative ml-auto min-w-[140px] max-w-[220px] flex-1">
     <Search
@@ -384,10 +373,10 @@ const SectionPaneSearch = ({
     />
     <Input
       aria-label={placeholder}
-      value={value ?? ""}
+      value={value}
       placeholder={placeholder}
       data-testid={testId}
-      onChange={(event) => onChange?.(event.currentTarget.value)}
+      onChange={(event) => onChange(event.currentTarget.value)}
       className="h-8 w-full rounded-md border-(--vf-border-soft) bg-(--vf-surface-soft) pl-7 font-mono text-[11px] focus-visible:border-(--vf-accent-border) focus-visible:ring-1 focus-visible:ring-ring"
     />
   </div>
@@ -396,7 +385,6 @@ const SectionPaneSearch = ({
 const SectionPane = ({
   eyebrow,
   title,
-  search,
   searchPlaceholder,
   searchTestId,
   searchValue,
@@ -406,25 +394,22 @@ const SectionPane = ({
 }: {
   eyebrow: string;
   title: string;
-  search: boolean;
-  searchPlaceholder?: string;
-  searchTestId?: string;
-  searchValue?: string;
-  onSearchChange?: (value: string) => void;
+  searchPlaceholder: string;
+  searchTestId: string;
+  searchValue: string;
+  onSearchChange: (value: string) => void;
   children: React.ReactNode;
   onMouseLeave?: () => void;
 }) => (
   <WorkspacePane>
     <header className="flex h-10 shrink-0 items-center gap-2 border-b border-(--vf-border-soft) bg-(--vf-surface-soft) px-3">
       <PanelTitle eyebrow={eyebrow} title={title} />
-      {search ? (
-        <SectionPaneSearch
-          placeholder={searchPlaceholder ?? ""}
-          testId={searchTestId}
-          value={searchValue}
-          onChange={onSearchChange}
-        />
-      ) : null}
+      <SectionPaneSearch
+        placeholder={searchPlaceholder}
+        testId={searchTestId}
+        value={searchValue}
+        onChange={onSearchChange}
+      />
     </header>
     <PaneScrollArea onMouseLeave={onMouseLeave}>{children}</PaneScrollArea>
   </WorkspacePane>
@@ -457,7 +442,6 @@ export const SystemPanel = ({
       <SectionPane
         eyebrow="L1 · Inventory"
         title="Machines"
-        search
         searchPlaceholder="filter machines"
         searchTestId={VISUALIZER_TEST_IDS.system.machineSearch}
         searchValue={view.machineQuery}
@@ -483,7 +467,6 @@ export const SystemPanel = ({
       <SectionPane
         eyebrow="L1 · Bus"
         title="Event topics"
-        search
         searchPlaceholder="filter events"
         searchTestId={VISUALIZER_TEST_IDS.system.topicSearch}
         searchValue={view.topicQuery}

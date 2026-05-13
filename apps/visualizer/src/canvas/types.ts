@@ -6,11 +6,17 @@ export type CanvasItemOrigin =
   | { kind: "diagnostic"; diagnosticId: string }
   | { kind: "draft"; draftId: string; intent: SourceEditIntent };
 
-export type CanvasAdapter = {
-  kind: "none";
+export type MachineCanvasBoardState = {
+  sourceVersion: number;
+  machineId: string;
 };
+
+export type CanvasAdapter =
+  | { kind: "none" }
+  | { kind: "machine-canvas" };
 
 export type CanvasState = {
   adapter: CanvasAdapter;
   items: readonly CanvasItemOrigin[];
+  machineBoard?: MachineCanvasBoardState;
 };

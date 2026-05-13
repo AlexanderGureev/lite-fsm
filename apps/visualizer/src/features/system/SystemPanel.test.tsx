@@ -170,8 +170,10 @@ describe("панель SystemPanel", () => {
     expect(screen.getByTestId(ids.system.detailProducers).getAttribute("data-empty")).toBe("true");
     expect(screen.getByTestId(ids.system.detailConsumers).getAttribute("data-values")).toBe("workerMachine");
 
+    fireEvent.click(byData<HTMLButtonElement>(ids.system.topicChip, "data-event-type", "workerMachine"));
     fireEvent.click(screen.getByTestId(ids.system.openInEvents));
 
+    expect(dispatch).toHaveBeenCalledWith({ type: "l1.machine.selected", machineId: "workerMachine" });
     expect(dispatch).toHaveBeenCalledWith({ type: "l1.topic.opened-in-event-catalog", eventType: "DONE" });
 
     rerender(
@@ -191,6 +193,9 @@ describe("панель SystemPanel", () => {
 
     expect(screen.getByTestId(ids.system.detailProducers).getAttribute("data-values")).toBe("flowMachine");
     expect(screen.getByTestId(ids.system.detailConsumers).getAttribute("data-empty")).toBe("true");
+    fireEvent.click(byData<HTMLButtonElement>(ids.system.topicChip, "data-event-type", "flowMachine"));
+
+    expect(dispatch).toHaveBeenCalledWith({ type: "l1.machine.selected", machineId: "flowMachine" });
   });
 
   it("рендерит пустой detail и chips produced topics", () => {

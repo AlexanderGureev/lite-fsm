@@ -1,4 +1,9 @@
 import {
+  clearCanvasOnPipelineInvalidation,
+  closeMachineBoard,
+  openMachineBoard,
+} from "../canvas";
+import {
   appendConsoleEntries,
   createConsoleEntryFromDiagnostic,
   createInitialConsoleState,
@@ -108,6 +113,20 @@ const changed = (
   effects,
 });
 
+const canvasRevision = (
+  previous: VisualizerWorkbenchState,
+  next: VisualizerWorkbenchState,
+): readonly RevisionKey[] => (previous.canvas === next.canvas ? [] : ["canvas"]);
+
+const clearCanvasForPipelineInvalidation = (
+  state: VisualizerWorkbenchState,
+): VisualizerWorkbenchState => {
+  const canvas = clearCanvasOnPipelineInvalidation(state.canvas);
+  if (canvas === state.canvas) return state;
+
+  return { ...state, canvas };
+};
+
 const stale = (snapshot: WorkbenchSnapshot): Reduction =>
   unchanged(snapshot, { ok: false, reason: "stale-source-version", diagnostics: [] });
 
@@ -198,6 +217,7 @@ const resetDerivedForSource = (state: VisualizerWorkbenchState): VisualizerWorkb
   diagnostics: [],
   console: createInitialConsoleState(),
   panels: clearPipelinePanelSelection(state.panels),
+  canvas: clearCanvasOnPipelineInvalidation(state.canvas),
 });
 
 const sourceChanged = (snapshot: WorkbenchSnapshot, source: string): Reduction => {
@@ -208,9 +228,11 @@ const sourceChanged = (snapshot: WorkbenchSnapshot, source: string): Reduction =
     source: updateSourceSession(snapshot.state.source, source),
   };
 
+  const state = resetDerivedForSource(withSource);
+
   return changed(
     snapshot,
-    resetDerivedForSource(withSource),
+    state,
     [
       "source",
       "compile",
@@ -224,6 +246,7 @@ const sourceChanged = (snapshot: WorkbenchSnapshot, source: string): Reduction =
       "diagnostics",
       "console",
       "panels",
+      ...canvasRevision(snapshot.state, state),
     ],
     disposeSimulationEffect(snapshot),
   );
@@ -249,23 +272,39 @@ const openVisualizer = (snapshot: WorkbenchSnapshot): Reduction => {
     ),
   ]);
 
+  const state = {
+    ...snapshot.state,
+    compile,
+    analysis: createIdleAnalysisState(),
+    model: createIdleModelState(),
+    validation: createIdleValidationState(),
+    l1: createInitialSystemViewState(),
+    l2: createInitialEventCatalogViewState(),
+    l3: createInitialMachineWorkbenchViewState(),
+    simulation: createInitialSimulationState(),
+    diagnostics: [],
+    console,
+    panels: clearPipelinePanelSelection(snapshot.state.panels),
+    canvas: clearCanvasOnPipelineInvalidation(snapshot.state.canvas),
+  };
+
   return changed(
     snapshot,
-    {
-      ...snapshot.state,
-      compile,
-      analysis: createIdleAnalysisState(),
-      model: createIdleModelState(),
-      validation: createIdleValidationState(),
-      l1: createInitialSystemViewState(),
-      l2: createInitialEventCatalogViewState(),
-      l3: createInitialMachineWorkbenchViewState(),
-      simulation: createInitialSimulationState(),
-      diagnostics: [],
-      console,
-      panels: clearPipelinePanelSelection(snapshot.state.panels),
-    },
-    ["compile", "analysis", "model", "validation", "l1", "l2", "l3", "simulation", "diagnostics", "console", "panels"],
+    state,
+    [
+      "compile",
+      "analysis",
+      "model",
+      "validation",
+      "l1",
+      "l2",
+      "l3",
+      "simulation",
+      "diagnostics",
+      "console",
+      "panels",
+      ...canvasRevision(snapshot.state, state),
+    ],
     [...disposeSimulationEffect(snapshot), { kind: "compile", requestId, source: snapshot.state.source }],
   );
 };
@@ -309,14 +348,14 @@ const compileFailed = (
   }
 
   const state = appendDiagnostics(
-    {
+    clearCanvasForPipelineInvalidation({
       ...snapshot.state,
       compile: { ...snapshot.state.compile, status: "failed", diagnostics: command.diagnostics },
-    },
+    }),
     command.diagnostics,
   );
 
-  return changed(snapshot, state, ["compile", "diagnostics", "console"]);
+  return changed(snapshot, state, ["compile", "diagnostics", "console", ...canvasRevision(snapshot.state, state)]);
 };
 
 const analysisSucceeded = (
@@ -451,14 +490,14 @@ const modelFailed = (
   }
 
   const state = appendDiagnostics(
-    {
+    clearCanvasForPipelineInvalidation({
       ...snapshot.state,
       model: { status: "failed", diagnostics: command.diagnostics },
-    },
+    }),
     command.diagnostics,
   );
 
-  return changed(snapshot, state, ["model", "diagnostics", "console"]);
+  return changed(snapshot, state, ["model", "diagnostics", "console", ...canvasRevision(snapshot.state, state)]);
 };
 
 const validationCompleted = (
@@ -544,6 +583,26 @@ const selectTab = (snapshot: WorkbenchSnapshot, tab: VisualizerTab): Reduction =
   if (tab === snapshot.state.activeTab) return unchanged(snapshot);
 
   return changed(snapshot, { ...snapshot.state, activeTab: tab }, ["activeTab"]);
+};
+
+const openMachineCanvasBoard = (snapshot: WorkbenchSnapshot, machineId: string): Reduction => {
+  const model = snapshot.state.model.model;
+  if (!model) return unchanged(snapshot, { ok: false, reason: "missing-model", diagnostics: [] });
+  if (!model.workbenchMachines[machineId]) {
+    return unchanged(snapshot, { ok: false, reason: "missing-machine", diagnostics: [] });
+  }
+
+  const canvas = openMachineBoard(snapshot.state.canvas, snapshot.state.source.version, machineId);
+  if (canvas === snapshot.state.canvas) return unchanged(snapshot);
+
+  return changed(snapshot, { ...snapshot.state, canvas }, ["canvas"]);
+};
+
+const closeMachineCanvasBoard = (snapshot: WorkbenchSnapshot): Reduction => {
+  const canvas = closeMachineBoard(snapshot.state.canvas);
+  if (canvas === snapshot.state.canvas) return unchanged(snapshot);
+
+  return changed(snapshot, { ...snapshot.state, canvas }, ["canvas"]);
 };
 
 const toggleMachine = (snapshot: WorkbenchSnapshot, machineId: string): Reduction => {
@@ -782,6 +841,10 @@ const reduceUserCommand = (snapshot: WorkbenchSnapshot, command: VisualizerComma
       const effect = simulationModelEffect(state, overlay);
       return changed(snapshot, state, ["simulation"], effect ? [effect] : NO_EFFECTS);
     }
+    case "canvas.machine-board.opened":
+      return openMachineCanvasBoard(snapshot, command.machineId);
+    case "canvas.machine-board.closed":
+      return closeMachineCanvasBoard(snapshot);
     case "source.overlay.opened":
       return changed(
         snapshot,

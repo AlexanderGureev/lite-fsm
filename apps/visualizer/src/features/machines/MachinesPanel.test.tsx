@@ -137,6 +137,26 @@ const viewFixture = (overrides: Partial<MachineWorkbenchPanelView> = {}): Machin
       selected: true,
       empty: false,
     },
+    {
+      stepId: "step:manual-config",
+      index: 2,
+      eventType: "CONFIG",
+      sourceLabel: "manual cfg",
+      acceptedMachines: ["player"],
+      rowRefCount: 1,
+      selected: false,
+      empty: false,
+    },
+    {
+      stepId: "step:manual-effect",
+      index: 3,
+      eventType: "EFFECT",
+      sourceLabel: "manual effect",
+      acceptedMachines: ["player"],
+      rowRefCount: 1,
+      selected: false,
+      empty: false,
+    },
   ],
   simulationStatus: "running",
   diagnosticCount: 0,
@@ -153,7 +173,7 @@ describe("панель MachinesPanel", () => {
     expect(screen.getAllByTestId(ids.workbench.machinePickerRow)).toHaveLength(2);
     expect(screen.getByTestId(ids.workbench.machineCard).getAttribute("data-machine-id")).toBe("player");
     expect(screen.getByTestId(ids.workbench.currentState).textContent).toBe("idle");
-    expect(screen.getAllByTestId(ids.workbench.timelineStep)).toHaveLength(2);
+    expect(screen.getAllByTestId(ids.workbench.timelineStep)).toHaveLength(4);
 
     fireEvent.click(screen.getAllByTestId(ids.workbench.machinePickerRow)[1]);
     fireEvent.click(screen.getByTestId(ids.workbench.eventSend));
@@ -337,7 +357,7 @@ describe("панель MachinesPanel", () => {
                       kind: "reducer",
                       layer: "reducer",
                       eventType: "REDUCE",
-                      targetLabel: "next",
+                      targetLabel: "self",
                       metaLabel: "exact",
                       sourceAction: { title: "REDUCE", anchors: [], available: false },
                       action: { enabled: false, reason: "not-current" },
@@ -379,5 +399,23 @@ describe("панель MachinesPanel", () => {
 
     expect(dispatch).toHaveBeenCalledWith({ type: "source.overlay.opened", title: "worker source", anchors: [], available: true });
     expect(dispatch).toHaveBeenCalledWith({ type: "l3.selection.cleared" });
+  });
+
+  it("рендерит terminal current state как muted current badge", () => {
+    renderPanel(
+      <MachinesPanel
+        view={viewFixture({
+          cards: [
+            {
+              ...viewFixture().cards[0],
+              currentStateKey: "__RESOLVED",
+            },
+          ],
+        })}
+        dispatch={dispatchOf()}
+      />,
+    );
+
+    expect(screen.getByText("@ __RESOLVED")).toBeTruthy();
   });
 });

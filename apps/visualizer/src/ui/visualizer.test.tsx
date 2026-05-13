@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   DiagnosticsAlert,
   GraphRow,
+  ChipPill,
   IconButton,
   LayerBadge,
   PaneScrollArea,
@@ -23,11 +24,12 @@ describe("UI primitives визуализатора", () => {
     render(
       <>
         <Panel rail data-testid="panel">
-          <PanelHeader data-testid="panel-header">
-            <PanelKicker data-testid="panel-kicker" />
-            <StatusBadge data-testid="status-default" />
-            <StatusBadge tone="diagnostic" data-testid="status-diagnostic" />
-            <LayerBadge layer="simulation" className="custom-layer" />
+        <PanelHeader data-testid="panel-header">
+          <PanelKicker data-testid="panel-kicker" />
+          <StatusBadge data-testid="status-default" />
+          <StatusBadge tone="diagnostic" data-testid="status-diagnostic" />
+          <ChipPill tone="warning" data-testid="chip-pill">3</ChipPill>
+          <LayerBadge layer="simulation" className="custom-layer" />
           </PanelHeader>
           <PanelBody data-testid="panel-body" />
         </Panel>
@@ -52,6 +54,7 @@ describe("UI primitives визуализатора", () => {
     expect(screen.getByTestId("panel-body")).toBeTruthy();
     expect(screen.getByTestId("status-default")).toBeTruthy();
     expect(screen.getByTestId("status-diagnostic")).toBeTruthy();
+    expect(screen.getByTestId("chip-pill").textContent).toBe("3");
     expect(screen.getByTestId("graph-row-selected")).toBeTruthy();
     expect(screen.getByTestId("graph-row-idle")).toBeTruthy();
     expect(screen.getByTestId("source-snippet").querySelectorAll("code")).toHaveLength(2);

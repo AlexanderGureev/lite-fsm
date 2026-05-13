@@ -100,6 +100,12 @@ describe("оболочка Shell", () => {
     expect(store.getSnapshot().state.activeTab).toBe("machines");
     expect(screen.getByTestId(ids.workbench.panel)).toBeTruthy();
 
+    fireEvent.click(screen.getByLabelText("Go to Source"));
+    expect(store.getSnapshot().state.activeTab).toBe("source");
+
+    fireEvent.mouseDown(screen.getByTestId(ids.tabs.trigger.events), { button: 0, ctrlKey: false });
+    expect(store.getSnapshot().state.activeTab).toBe("events");
+
     fireEvent.mouseDown(screen.getByTestId(ids.tabs.trigger.source), { button: 0, ctrlKey: false });
     expect(store.getSnapshot().state.activeTab).toBe("source");
     const sourceEditor = screen.getByTestId(ids.source.editor);
@@ -196,6 +202,32 @@ describe("оболочка Shell", () => {
 
     fireEvent.click(document.querySelector<HTMLElement>('[data-testid="visualizer-console-entry"][data-entry-id="diagnostic-entry"]')!);
     expect(store.getSnapshot().state.panels.console.selectedEntryId).toBe("diagnostic-entry");
+  });
+
+  it("рендерит ready source status и singular diagnostic label", () => {
+    const base = createInitialWorkbenchSnapshot();
+    const snapshot: WorkbenchSnapshot = {
+      ...base,
+      state: {
+        ...base.state,
+        compile: { ...base.state.compile, status: "ready" },
+        diagnostics: [
+          {
+            diagnosticId: "compiler:1:warn",
+            sourceVersion: 1,
+            origin: "compiler",
+            diagnostic: { code: "warn", severity: "warning", message: "One warning" },
+            sourceAnchors: [],
+            primaryTarget: { kind: "console" },
+          },
+        ],
+      },
+    };
+
+    renderShell(snapshot);
+
+    expect(screen.getByTestId(ids.source.status).textContent).toContain("compiled");
+    expect(screen.getByTestId(ids.source.status).textContent).toContain("1 issue");
   });
 
   it("закрывает source overlay из оболочки", () => {

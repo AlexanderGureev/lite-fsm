@@ -25,18 +25,19 @@
 ## Текущий фокус
 
 ```txt
-Этап: MVP 1. Machine Flow Model
+Этап: MVP 2. Canvas state и selectors
 Статус: [x] выполнено
 Обновлено: 2026-05-13
-Заметка: реализация начинается с MVP этапа 1. Post-MVP выполняется после
-завершения MVP.
+Заметка: renderer, React Flow/ELK layout и L3 UI не входят в этап 2.
+`@lite-fsm/visualizer test:coverage` проходит со 100% statements, branches,
+functions и lines.
 ```
 
 ## Чеклист этапов
 
 - [x] Подготовка: отделить лог реализации от стабильного ТЗ.
 - [x] MVP этап 1: Machine Flow Model в `packages/graph/view-model`.
-- [ ] MVP этап 2: состояние canvas и selectors в visualizer.
+- [x] MVP этап 2: состояние canvas и selectors в visualizer.
 - [ ] MVP этап 3: интеграция L3 board shell.
 - [ ] MVP этап 4: renderer на React Flow и ELK.
 - [ ] MVP этап 5: hardening и проверки.
@@ -51,6 +52,25 @@
 Новые записи добавлять сверху.
 
 ```txt
+2026-05-13
+- Финальное hardening/review этапа 2: добавлены tests для canvas helpers,
+  reducer edge cases, selector current/no-current paths и прежних UI coverage
+  gaps.
+- Удалены dead private branches в `SystemPanel` и unreachable
+  `compileStatusLabel("blocked")`; `closeMachineBoard` теперь удаляет optional
+  `machineBoard` field вместо записи `undefined`.
+
+2026-05-13
+- Реализован app-level Machine Canvas Board state: `sourceVersion`,
+  `machineId`, adapter `machine-canvas` и pure open/close/invalidation helpers.
+- Добавлены workbench commands `canvas.machine-board.opened/closed`,
+  controlled failures `missing-model` / `missing-machine` и invalidation на
+  source edit, compile reset/failure и model failure.
+- Добавлен selector `selectMachineCanvasBoard`, который вызывает
+  `buildMachineFlowModel` и возвращает controlled states без renderer/layout
+  данных.
+- Добавлены focused reducer и selector tests для MVP этапа 2.
+
 2026-05-13
 - Финальное ревью: убраны мертвые internal fields, `EdgeDraft.rows`
   сужен до edge-producing row refs, `MachineFlowEdgeGroup.diagnostics`
@@ -95,6 +115,25 @@ MVP этап 1
 - API-CHEATSHEET.md
 - TYPES-CHEATSHEET.md
 - GRAPH-VISUALIZER-MACHINE-CANVAS-IMPLEMENTATION-LOG.md
+
+MVP этап 2
+- apps/visualizer/src/canvas/types.ts
+- apps/visualizer/src/canvas/noop-adapter.ts
+- apps/visualizer/src/canvas/noop-adapter.test.ts
+- apps/visualizer/src/canvas/index.ts
+- apps/visualizer/src/canvas/machine-canvas-selectors.ts
+- apps/visualizer/src/canvas/machine-canvas-selectors.test.ts
+- apps/visualizer/src/features/events/EventCatalogPanel.test.tsx
+- apps/visualizer/src/features/machines/MachinesPanel.test.tsx
+- apps/visualizer/src/features/shell/Shell.tsx
+- apps/visualizer/src/features/shell/Shell.test.tsx
+- apps/visualizer/src/features/system/SystemPanel.tsx
+- apps/visualizer/src/features/system/SystemPanel.test.tsx
+- apps/visualizer/src/ui/visualizer.test.tsx
+- apps/visualizer/src/workbench/types.ts
+- apps/visualizer/src/workbench/reducer.ts
+- apps/visualizer/src/workbench/machine-canvas-reducer.test.ts
+- GRAPH-VISUALIZER-MACHINE-CANVAS-IMPLEMENTATION-LOG.md
 ```
 
 ## Лог проверок
@@ -102,6 +141,17 @@ MVP этап 1
 Новые записи добавлять сверху.
 
 ```txt
+2026-05-13
+- PASS `pnpm --filter @lite-fsm/visualizer check-types`
+- PASS `pnpm --filter @lite-fsm/visualizer test:unit` — 26 files,
+  173 tests.
+- PASS `pnpm --filter @lite-fsm/visualizer test:coverage` — 100%
+  statements, branches, functions и lines.
+- PASS `pnpm run check-types`
+- PASS `git diff --check`
+- PASS `pnpm run lint` — 0 errors; 2 warnings in ignored generated
+  `packages/graph/coverage/*/block-navigation.js`.
+
 2026-05-13
 - PASS `pnpm --filter @lite-fsm/graph check-types`
 - PASS `pnpm --filter @lite-fsm/graph test:unit` — 11 tests.
@@ -131,6 +181,22 @@ MVP этап 1
 Новые записи добавлять сверху.
 
 ```txt
+2026-05-13
+- Closed Machine Canvas state не хранит `machineBoard: undefined`; optional
+  field удаляется, а `items` сохраняет исходную ссылку.
+- Приватные UI ветки, недостижимые из текущих props/contracts, удалены вместо
+  покрытия искусственными тестами.
+
+2026-05-13
+- Machine Canvas Board state хранит только semantic `sourceVersion` и
+  `machineId`; viewport, hover, React Flow ids, coordinates и layout output не
+  сохраняются в workbench.
+- `machineBoard` является source of truth для opened board; adapter фиксирует
+  только active canvas mode.
+- Missing machine в reducer проверяется через latest
+  `model.workbenchMachines[machineId]`; selector дополнительно пробрасывает
+  `missing-machine` из `buildMachineFlowModel`.
+
 2026-05-13
 - Root import `@lite-fsm/graph` не получил Machine Flow export; public API
   доступен только через `@lite-fsm/graph/view-model`.
