@@ -25,11 +25,11 @@
 ## Текущий фокус
 
 ```txt
-Этап: MVP 4. React Flow и ELK renderer
+Этап: MVP 5. Hardening и проверки
 Статус: [x] выполнено
 Обновлено: 2026-05-13
-Заметка: ready Machine Flow Model рендерится как static read-only graph через
-React Flow + ELK; broad MVP fixture hardening остается этапом 5.
+Заметка: Machine Canvas MVP закрыт compiled fixture matrix, read-only
+component checks и E2E hardening без screenshot snapshots.
 ```
 
 ## Чеклист этапов
@@ -39,7 +39,7 @@ React Flow + ELK; broad MVP fixture hardening остается этапом 5.
 - [x] MVP этап 2: состояние canvas и selectors в visualizer.
 - [x] MVP этап 3: интеграция L3 board shell.
 - [x] MVP этап 4: renderer на React Flow и ELK.
-- [ ] MVP этап 5: hardening и проверки.
+- [x] MVP этап 5: hardening и проверки.
 - [ ] Post-MVP этап 1: расширение Machine Flow Model.
 - [ ] Post-MVP этап 2: pinned state, selectors и source actions.
 - [ ] Post-MVP этап 3: detail panel shell.
@@ -51,6 +51,18 @@ React Flow + ELK; broad MVP fixture hardening остается этапом 5.
 Новые записи добавлять сверху.
 
 ```txt
+2026-05-13
+- Реализован MVP stage 5 hardening: добавлены compiled fixtures для compact
+  onboarding и inline xstate-like source, matrix tests поверх
+  `compileLiteFsmGraph` -> `buildGraphVisualizerModel` ->
+  `buildMachineFlowModel` -> render draft.
+- Усилены component tests для read-only React Flow props, edge direction
+  metadata, zoom controls, long labels и кликов по graph items без dispatch.
+- Добавлен E2E Machine Canvas hardening spec без screenshot snapshots:
+  wildcard state/effect, self loop, grouped `+N`, self-emitted edges,
+  emission-only chips, actor template, hover popover, close, source
+  invalidation и horizontal overflow assertions.
+
 2026-05-13
 - Финальное review/hardening этапа 4: strict coverage расширен на
   `MachineCanvasGraph.tsx`; layout cancellation, stale layout state, fallback
@@ -194,6 +206,15 @@ MVP этап 4
 - apps/visualizer/tests/e2e/shell.spec.ts
 - apps/visualizer/DESIGN.md
 - GRAPH-VISUALIZER-MACHINE-CANVAS-IMPLEMENTATION-LOG.md
+
+MVP этап 5
+- apps/visualizer/tests/fixtures/machine-canvas-sources.ts
+- apps/visualizer/src/canvas/machine-canvas-fixture-matrix.test.ts
+- apps/visualizer/src/features/machines/MachineCanvasGraph.tsx
+- apps/visualizer/src/features/machines/MachineCanvasGraph.test.tsx
+- apps/visualizer/src/features/machines/MachineCanvasBoard.test.tsx
+- apps/visualizer/tests/e2e/machine-canvas.spec.ts
+- GRAPH-VISUALIZER-MACHINE-CANVAS-IMPLEMENTATION-LOG.md
 ```
 
 ## Лог проверок
@@ -201,6 +222,20 @@ MVP этап 4
 Новые записи добавлять сверху.
 
 ```txt
+2026-05-13
+- PASS `pnpm --filter @lite-fsm/visualizer check-types`
+- PASS `pnpm --filter @lite-fsm/visualizer test:unit` — 33 files,
+  212 tests.
+- PASS `pnpm --filter @lite-fsm/visualizer test:coverage` — 100%
+  statements, branches, functions и lines; 1788 statements, 1163 branches,
+  564 functions, 1520 lines.
+- PASS `pnpm --filter @lite-fsm/visualizer test:e2e` — 15 tests.
+- PASS `pnpm run check-types`
+- PASS `pnpm run lint` — 0 errors; 2 warnings in ignored generated
+  `packages/graph/coverage/*/block-navigation.js`.
+- PASS `pnpm run build:packages`
+- PASS `git diff --check`
+
 2026-05-13
 - PASS `pnpm --filter @lite-fsm/visualizer check-types`
 - PASS `pnpm --filter @lite-fsm/visualizer test:unit` — 32 files,
@@ -265,6 +300,14 @@ MVP этап 4
 Новые записи добавлять сверху.
 
 ```txt
+2026-05-13
+- Stage 5 не добавляет screenshot snapshots: visual stability проверяется через
+  DOM visibility, semantic data attributes и horizontal overflow assertions.
+- Xstate-like fixture зафиксирован inline строкой в visualizer test fixtures;
+  реальные файлы `xstate/*` и playground modules не импортируются и не читаются.
+- `data-edge-direction` является renderer-local test hook для self-loop E2E
+  assertions, не частью public graph API.
+
 2026-05-13
 - Stage 4 добавляет `@xyflow/react` и `elkjs` только в
   `apps/visualizer`; graph package exports не меняются.

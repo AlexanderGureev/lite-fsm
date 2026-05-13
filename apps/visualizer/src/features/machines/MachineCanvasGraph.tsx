@@ -190,8 +190,8 @@ const EdgePopover = ({
         </div>
       ) : null}
       <div className="vf-machine-canvas-popover-section">
-        {edge.group.rows.map((row) => (
-          <span key={row.rowId} className="vf-machine-canvas-popover-row">
+        {edge.group.rows.map((row, index) => (
+          <span key={`${row.rowId}:${index}`} className="vf-machine-canvas-popover-row">
             {machineCanvasGraphRowLabel(row)}
           </span>
         ))}
@@ -244,6 +244,7 @@ const MachineCanvasEdge = ({
           data-edge-group-id={edge.id}
           data-edge-kind={edge.kind}
           data-producer-category={edge.producerCategory}
+          data-edge-direction={edge.direction}
           data-source-node-id={source}
           data-target-node-id={target}
           onMouseEnter={(event) => {

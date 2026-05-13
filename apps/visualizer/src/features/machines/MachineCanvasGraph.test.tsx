@@ -30,6 +30,12 @@ type ReactFlowMockEdge = {
 type ReactFlowMockProps = {
   nodes: readonly ReactFlowMockNode[];
   edges: readonly ReactFlowMockEdge[];
+  nodesDraggable?: boolean;
+  nodesConnectable?: boolean;
+  elementsSelectable?: boolean;
+  fitView?: boolean;
+  minZoom?: number;
+  maxZoom?: number;
   nodeTypes: Record<string, (props: { data: unknown }) => ReactNode>;
   edgeTypes: Record<
     string,
@@ -70,10 +76,30 @@ vi.mock("@xyflow/react", async () => {
     Position: { Left: "left", Right: "right" },
     ReactFlowProvider: ({ children }: { children?: ReactNode }) =>
       React.createElement("div", { "data-react-flow-provider": "true" }, children),
-    ReactFlow: ({ nodes, edges, nodeTypes, edgeTypes, children }: ReactFlowMockProps) =>
+    ReactFlow: ({
+      nodes,
+      edges,
+      nodesDraggable,
+      nodesConnectable,
+      elementsSelectable,
+      fitView,
+      minZoom,
+      maxZoom,
+      nodeTypes,
+      edgeTypes,
+      children,
+    }: ReactFlowMockProps) =>
       React.createElement(
         "div",
-        { className: "react-flow" },
+        {
+          className: "react-flow",
+          "data-nodes-draggable": String(nodesDraggable),
+          "data-nodes-connectable": String(nodesConnectable),
+          "data-elements-selectable": String(elementsSelectable),
+          "data-fit-view": String(fitView),
+          "data-min-zoom": String(minZoom),
+          "data-max-zoom": String(maxZoom),
+        },
         nodes.map((node) => {
           const NodeComponent = nodeTypes[node.type ?? ""];
           return React.createElement("div", { key: node.id }, NodeComponent({ data: node.data }));
@@ -99,7 +125,13 @@ vi.mock("@xyflow/react", async () => {
         children,
       ),
     Background: () => React.createElement("div", { "data-testid": "react-flow-background" }),
-    Controls: () => React.createElement("div", { className: "react-flow__controls" }),
+    Controls: ({ showInteractive }: { showInteractive?: boolean }) =>
+      React.createElement(
+        "div",
+        { className: "react-flow__controls", "data-show-interactive": String(showInteractive) },
+        React.createElement("button", { type: "button", "aria-label": "zoom in", className: "react-flow__controls-button" }),
+        React.createElement("button", { type: "button", "aria-label": "zoom out", className: "react-flow__controls-button" }),
+      ),
     BaseEdge: ({ path }: { path: string }) => React.createElement("svg", null, React.createElement("path", { "data-edge-path": path })),
     EdgeLabelRenderer: ({ children }: { children?: ReactNode }) => React.createElement(React.Fragment, null, children),
     Handle: ({ type, position }: { type: string; position: string }) =>
@@ -301,9 +333,24 @@ describe("MachineCanvasGraph", () => {
       "TICK+1",
       "ANY",
     ]);
+    expect(screen.getAllByTestId(ids.canvas.edgeLabel).map((element) => element.getAttribute("data-edge-direction"))).toEqual([
+      "normal",
+      "normal",
+      "self",
+      "normal",
+    ]);
+    expect(screen.getAllByTestId(ids.canvas.edgeLabel)[0]?.style.maxWidth).toBe("170px");
     expect(screen.queryByText("LOG")).toBeNull();
     expect(screen.getByTestId("react-flow-background")).toBeTruthy();
-    expect(document.querySelector(".react-flow__controls")).toBeTruthy();
+    const reactFlow = document.querySelector(".react-flow");
+    expect(reactFlow?.getAttribute("data-nodes-draggable")).toBe("false");
+    expect(reactFlow?.getAttribute("data-nodes-connectable")).toBe("false");
+    expect(reactFlow?.getAttribute("data-elements-selectable")).toBe("false");
+    expect(reactFlow?.getAttribute("data-fit-view")).toBe("true");
+    expect(reactFlow?.getAttribute("data-min-zoom")).toBe("0.3");
+    expect(reactFlow?.getAttribute("data-max-zoom")).toBe("1.6");
+    expect(document.querySelector(".react-flow__controls")?.getAttribute("data-show-interactive")).toBe("false");
+    expect(document.querySelectorAll(".react-flow__controls-button")).toHaveLength(2);
   });
 
   it("рендерит fallback badges, semantic refs и popover без producer/guard metadata", async () => {

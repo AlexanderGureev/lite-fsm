@@ -151,6 +151,18 @@ describe("MachineCanvasBoard", () => {
     expect(screen.getByTestId(ids.canvas.graph).getAttribute("data-visible-edge-count")).toBe("1");
   });
 
+  it("не dispatch-ит machine events при кликах по read-only graph items", async () => {
+    const dispatch = dispatchOf();
+
+    render(<MachineCanvasBoard view={readyView()} dispatch={dispatch} />);
+
+    fireEvent.click(await screen.findByTestId(ids.canvas.graph));
+    fireEvent.click(screen.getByTestId(ids.canvas.stateNode));
+    fireEvent.click(screen.getByTestId(ids.canvas.edgeLabel));
+
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
   it("не подменяет absent current initial state и закрывается по Escape", () => {
     const dispatch = dispatchOf();
 
