@@ -1,9 +1,11 @@
 export { compileLiteFsmGraph } from "./compile";
+export { compileLiteFsmGraphProject } from "./project/compile";
 export { selectMachineGraph } from "./select";
 export { analyzeLiteFsmGraph } from "./analyze";
 export type {
   AnalyzeLiteFsmGraphOptions,
   CompileLiteFsmGraphOptions,
+  CompileLiteFsmGraphProjectOptions,
   GraphAnalysisResult,
   GraphAnalysisRuleId,
   GraphAnalysisScope,
@@ -17,6 +19,7 @@ export type {
   GraphRouting,
   GraphRoutingTarget,
   GraphSource,
+  GraphSourceFile,
   GraphState,
   GraphStateRef,
   GraphTarget,
@@ -25,6 +28,10 @@ export type {
   LiteFsmGraphDocument,
   LiteFsmGraphMachine,
   LiteFsmGraphManager,
+  LiteFsmGraphProjectFile,
+  LiteFsmGraphProjectHost,
+  LiteFsmGraphProjectModuleResolution,
+  LiteFsmGraphProjectResult,
   LiteFsmGraphResult,
   MachineSelector,
   SelectMachineGraphResult,

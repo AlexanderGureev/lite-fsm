@@ -14,7 +14,7 @@ export const diagnosticBucketKey = (
   diagnostic: GraphDiagnostic,
 ): string => {
   const loc = diagnostic.loc
-    ? `${diagnostic.loc.start.line}:${diagnostic.loc.start.column}:${diagnostic.loc.start.offset}-${diagnostic.loc.end.line}:${diagnostic.loc.end.column}:${diagnostic.loc.end.offset}`
+    ? `${diagnostic.loc.fileName ?? ""}:${diagnostic.loc.start.line}:${diagnostic.loc.start.column}:${diagnostic.loc.start.offset}-${diagnostic.loc.end.line}:${diagnostic.loc.end.column}:${diagnostic.loc.end.offset}`
     : "no-loc";
 
   return [origin, diagnostic.machineId ?? "document", diagnostic.code, loc].join(":");

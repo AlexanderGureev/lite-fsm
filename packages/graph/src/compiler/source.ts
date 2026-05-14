@@ -30,6 +30,10 @@ type CompilerSourceFileWithParseDiagnostics = ts.SourceFile & {
   parseDiagnostics: readonly ts.DiagnosticWithLocation[];
 };
 
+type SourceAdapterOptions = Pick<CompileLiteFsmGraphOptions, "filename" | "language"> & {
+  locFileName?: string;
+};
+
 export const inferGraphLanguage = (
   filename: string | undefined,
   language: CompileLiteFsmGraphOptions["language"],
@@ -55,7 +59,7 @@ export const createVirtualFilename = (
 
 export const createSourceAdapter = (
   sourceText: string,
-  options: Pick<CompileLiteFsmGraphOptions, "filename" | "language"> = {},
+  options: SourceAdapterOptions = {},
 ): SourceAdapter => {
   const language = inferGraphLanguage(options.filename, options.language);
   const filename = createVirtualFilename(options.filename, language);
@@ -81,6 +85,7 @@ export const createSourceAdapter = (
     const endPosition = sourceFile.getLineAndColumnAtPos(normalizedEnd);
 
     return {
+      ...(options.locFileName ? { fileName: options.locFileName } : {}),
       start: {
         line: startPosition.line,
         column: startPosition.column,

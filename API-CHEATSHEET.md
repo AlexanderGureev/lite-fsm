@@ -12,7 +12,7 @@
 | `@lite-fsm/middleware`                                         | `immerMiddleware`, `devToolsMiddleware`                                                                                                           |
 | `@lite-fsm/middleware/immer` · `@lite-fsm/middleware/devTools` | per-feature entry points                                                                                                                          |
 | `@lite-fsm/react`                                              | `FSMContext`, `FSMContextProvider`, `FSMHydrationBoundary`, `useHydrateSnapshot`, `useManager`, `useSelector`, `useTransition`, `defineMachine`   |
-| `@lite-fsm/graph`                                              | experimental: `compileLiteFsmGraph`, `selectMachineGraph`, `analyzeLiteFsmGraph` и IR-типы для graph tooling                                      |
+| `@lite-fsm/graph`                                              | experimental: `compileLiteFsmGraph`, `compileLiteFsmGraphProject`, `selectMachineGraph`, `analyzeLiteFsmGraph` и IR-типы для graph tooling         |
 | `@lite-fsm/graph/simulator`                                    | experimental: `createGraphSimulator`, `createMachineGraphSimulator` для headless symbolic simulation поверх graph IR                               |
 | `@lite-fsm/graph/view-model`                                   | experimental: `buildGraphVisualizerModel`, `buildMachineWorkbenchModel`, `buildMachineFlowModel` для read-only visualizer projections              |
 |                                                                |
@@ -21,18 +21,25 @@
 
 ## Experimental graph compiler
 
-`@lite-fsm/graph` принимает строку TypeScript/JavaScript и возвращает JSON-документ графа без исполнения пользовательского кода.
+`@lite-fsm/graph` принимает строку TypeScript/JavaScript или project entrypoint через host и возвращает JSON-документ графа без исполнения пользовательского кода.
 
 ```ts
 const result = compileLiteFsmGraph(source, {
   filename: "machine.ts",
   parser: "static",
 });
+
+const project = compileLiteFsmGraphProject({
+  entryFileName: "/repo/store/index.ts",
+  projectRoot: "/repo",
+  host,
+});
 ```
 
 | API                               | Назначение                                                                                                         |
 | --------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
 | `compileLiteFsmGraph(src)`        | строит `LiteFsmGraphDocument`; компилирует machines/managers, refs, config/reducer transitions и effect emissions  |
+| `compileLiteFsmGraphProject(opts)` | синхронно строит project graph из entrypoint через `LiteFsmGraphProjectHost`, не читая filesystem из graph package |
 | `selectMachineGraph(doc, sel?)`   | выбирает одну machine по `index`, `id`, `variableName`, `exportName`, `managerKey` или `{ managerId, managerKey }` |
 | `analyzeLiteFsmGraph(doc, opts?)` | запускает semantic analyzer поверх готового IR; возвращает отдельные diagnostics `LFG_ANALYZER_*`                  |
 | `LiteFsmGraphDocument`            | универсальный IR для будущих визуализаторов, CLI, analyzer-а и simulator-а                                         |

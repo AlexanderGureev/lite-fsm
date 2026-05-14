@@ -1,4 +1,11 @@
-import { Node, SyntaxKind, VariableDeclarationKind, type CallExpression, type Expression } from "ts-morph";
+import {
+  Node,
+  SyntaxKind,
+  VariableDeclarationKind,
+  type CallExpression,
+  type Expression,
+  type VariableDeclaration,
+} from "ts-morph";
 import type { SourceLocation } from "../types";
 import type { SourceAdapter } from "./source";
 
@@ -15,7 +22,13 @@ export type ApiProvenance = {
 export type LocalConstBinding = {
   name: string;
   initializer: Expression;
+  declaration: VariableDeclaration;
   loc?: SourceLocation;
+};
+
+export type SourceCatalogOptions = {
+  apiImports?: readonly ApiProvenance[];
+  allowAmbientApi?: boolean;
 };
 
 export type SourceCatalog = {
@@ -28,6 +41,7 @@ export type SourceCatalog = {
 };
 
 const LITE_FSM_CORE_SOURCE = "@lite-fsm/core";
+const LITE_FSM_CORE_ALIAS = "lite-fsm";
 const KNOWN_API_NAMES = new Set<LiteFsmApiName>([
   "createMachine",
   "createConfig",
@@ -40,6 +54,10 @@ const isLiteFsmApiName = (name: string): name is LiteFsmApiName => {
   return KNOWN_API_NAMES.has(name as LiteFsmApiName);
 };
 
+const isCoreModuleSpecifier = (moduleSpecifier: string): boolean => {
+  return moduleSpecifier === LITE_FSM_CORE_SOURCE || moduleSpecifier === LITE_FSM_CORE_ALIAS;
+};
+
 const addNamedDeclarationBinding = (
   bindings: Set<string>,
   declaration: { getName: () => string | undefined },
@@ -48,10 +66,18 @@ const addNamedDeclarationBinding = (
   if (name) bindings.add(name);
 };
 
-export const createSourceCatalog = (source: SourceAdapter): SourceCatalog => {
+export const createSourceCatalog = (
+  source: SourceAdapter,
+  options: SourceCatalogOptions = {},
+): SourceCatalog => {
   const apiImports = new Map<string, ApiProvenance>();
   const localConsts = new Map<string, LocalConstBinding>();
   const localValueBindings = new Set<string>();
+  const allowAmbientApi = options.allowAmbientApi ?? true;
+
+  for (const apiImport of options.apiImports ?? []) {
+    apiImports.set(apiImport.localName, apiImport);
+  }
 
   for (const declaration of source.sourceFile.getImportDeclarations()) {
     if (declaration.isTypeOnly()) continue;
@@ -70,7 +96,7 @@ export const createSourceCatalog = (source: SourceAdapter): SourceCatalog => {
       const localName = specifier.getAliasNode()?.getText() ?? importedName;
       localValueBindings.add(localName);
 
-      if (moduleSpecifier !== LITE_FSM_CORE_SOURCE || !isLiteFsmApiName(importedName)) continue;
+      if (!isCoreModuleSpecifier(moduleSpecifier) || !isLiteFsmApiName(importedName)) continue;
 
       apiImports.set(localName, {
         apiName: importedName,
@@ -103,6 +129,7 @@ export const createSourceCatalog = (source: SourceAdapter): SourceCatalog => {
     localConsts.set(name, {
       name,
       initializer,
+      declaration,
       loc: source.locFromNode(declaration),
     });
   }
@@ -123,7 +150,7 @@ export const createSourceCatalog = (source: SourceAdapter): SourceCatalog => {
     resolveApiIdentifier(localName, apiName) {
       const imported = apiImports.get(localName);
       if (imported?.apiName === apiName) return "import";
-      if (localName === apiName && !localValueBindings.has(localName)) return "ambient";
+      if (allowAmbientApi && localName === apiName && !localValueBindings.has(localName)) return "ambient";
 
       return undefined;
     },

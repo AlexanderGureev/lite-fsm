@@ -17,7 +17,7 @@
 
 | Этап | Scope | Статус | Факт реализации | Проверки | Блокеры |
 | ---- | ----- | ------ | --------------- | -------- | ------- |
-| 1 | Graph Compiler | not started | - | - | - |
+| 1 | Graph Compiler | done | Добавлен public `compileLiteFsmGraphProject` с host-based source units, file-aware locations, manager map traversal, named barrel/namespace rest resolution, `lite-fsm` core alias, simple typed helper provenance, deterministic project files/source metadata и stage-1 graph tests для `real-store-shape` + playground smoke manifest. | `pnpm --filter @lite-fsm/graph test:unit`; `pnpm --filter @lite-fsm/graph test:coverage`; `pnpm --filter @lite-fsm/graph check-types`; `pnpm run test:types`; `pnpm run check-types` | - |
 | 2 | CLI | not started | - | - | - |
 | 3 | Visualizer | not started | - | - | - |
 

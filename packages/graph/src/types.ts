@@ -1,14 +1,24 @@
 export type GraphLanguage = "ts" | "tsx" | "js" | "jsx" | "unknown";
 
 export type SourceLocation = {
+  fileName?: string;
   start: { line: number; column: number; offset: number };
   end: { line: number; column: number; offset: number };
+};
+
+export type GraphSourceFile = {
+  fileName: string;
+  language: GraphLanguage;
+  hash?: string;
 };
 
 export type GraphSource = {
   filename?: string;
   language: GraphLanguage;
   hash?: string;
+  kind?: "single-file" | "project";
+  entryFileName?: string;
+  files?: readonly GraphSourceFile[];
 };
 
 export type LiteFsmGraphDocument = {
@@ -202,4 +212,36 @@ export type CompileLiteFsmGraphOptions = {
   language?: Exclude<GraphLanguage, "unknown">;
   parser?: "static";
   maxMachines?: number;
+};
+
+export type LiteFsmGraphProjectHost = {
+  readSource(fileName: string): string | undefined;
+  resolveModule(input: {
+    fromFileName: string;
+    moduleSpecifier: string;
+  }): LiteFsmGraphProjectModuleResolution;
+};
+
+export type LiteFsmGraphProjectModuleResolution =
+  | { kind: "resolved"; fileName: string }
+  | { kind: "core"; moduleSpecifier: string }
+  | { kind: "external"; moduleSpecifier: string }
+  | { kind: "not-found"; moduleSpecifier: string }
+  | { kind: "unsupported-extension"; moduleSpecifier: string; extension: string };
+
+export type CompileLiteFsmGraphProjectOptions = {
+  entryFileName: string;
+  projectRoot?: string;
+  host: LiteFsmGraphProjectHost;
+};
+
+export type LiteFsmGraphProjectFile = {
+  fileName: string;
+  language: "ts";
+  roles: ReadonlyArray<"entry" | "machine" | "barrel" | "helper">;
+  hash: string;
+};
+
+export type LiteFsmGraphProjectResult = LiteFsmGraphResult & {
+  files: readonly LiteFsmGraphProjectFile[];
 };

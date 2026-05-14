@@ -14,12 +14,12 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "node",
-    include: ["../../tests/graph/machine-flow*.test.ts"],
+    include: ["../../tests/graph/**/*.test.ts"],
     setupFiles: ["../../tests/setup.ts"],
     coverage: {
       provider: "v8",
       reporter: ["text", "json", "html", "lcov"],
-      include: ["src/view-model/machine-flow*.ts"],
+      include: ["src/view-model/machine-flow*.ts", "src/project/**/*.ts", "src/compiler/compile-machine.ts"],
       exclude: ["src/view-model/machine-flow-types.ts"],
       thresholds: {
         statements: 100,

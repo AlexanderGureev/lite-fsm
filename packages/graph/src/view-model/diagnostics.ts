@@ -18,7 +18,7 @@ export type DiagnosticIndex = {
 const locKey = (loc: SourceLocation | undefined): string | undefined => {
   if (!loc) return undefined;
 
-  return `${loc.start.line}:${loc.start.column}:${loc.start.offset}-${loc.end.line}:${loc.end.column}:${loc.end.offset}`;
+  return `${loc.fileName ?? ""}:${loc.start.line}:${loc.start.column}:${loc.start.offset}-${loc.end.line}:${loc.end.column}:${loc.end.offset}`;
 };
 
 const add = (map: Map<string, string[]>, key: string | undefined, id: string): void => {

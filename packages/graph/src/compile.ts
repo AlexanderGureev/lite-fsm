@@ -1,17 +1,14 @@
 import type { CompileLiteFsmGraphOptions, GraphDiagnostic, GraphSource, LiteFsmGraphResult } from "./types";
 import { assembleGraphDocument } from "./compiler/assembler";
-import { createSourceCatalog, type SourceCatalog } from "./compiler/catalog";
+import { createSourceCatalog } from "./compiler/catalog";
 import { discoverCandidates, type MachineCandidate } from "./compiler/candidates";
-import { compileConfigGraph } from "./compiler/config";
-import { createDiagnosticSink, normalizeDiagnostics } from "./compiler/diagnostics";
+import { normalizeDiagnostics } from "./compiler/diagnostics";
 import { createPartialEvaluator } from "./compiler/evaluator";
-import type { PartialEvaluator } from "./compiler/evaluator/types";
-import { compileEffectsGraph } from "./compiler/effects";
 import { createStableHash } from "./compiler/ids";
 import { linkManagers } from "./compiler/manager";
 import type { CompilerContext, MachineGraphSlice } from "./compiler/pipeline";
-import { compileReducerGraph } from "./compiler/reducer";
-import { createSourceAdapter, inferGraphLanguage, type SourceAdapter } from "./compiler/source";
+import { compileMachineSlice, createCompilerContext } from "./compiler/compile-machine";
+import { createSourceAdapter, inferGraphLanguage } from "./compiler/source";
 
 const createGraphSource = (source: unknown, options: CompileLiteFsmGraphOptions | undefined): GraphSource => ({
   filename: options?.filename,
@@ -38,33 +35,11 @@ const createCompilerFailure = (
   return { document, diagnostics: document.diagnostics };
 };
 
-const createCompilerContext = (
-  source: SourceAdapter,
-  catalog: SourceCatalog,
-  evaluator: PartialEvaluator,
-): CompilerContext => ({
-  source,
-  catalog,
-  evaluator,
-  diagnostics: createDiagnosticSink(),
-});
-
 const compileMachineSlices = (
   candidates: readonly MachineCandidate[],
   context: CompilerContext,
 ): MachineGraphSlice[] => {
-  return candidates.map((candidate) => {
-    const config = compileConfigGraph(candidate, context);
-
-    return {
-      candidate,
-      config,
-      reducer: compileReducerGraph(candidate, config, context),
-      effects: compileEffectsGraph(candidate, config, context),
-      managerKeys: candidate.managerKeys,
-      diagnostics: [],
-    };
-  });
+  return candidates.map((candidate) => compileMachineSlice(candidate, context));
 };
 
 export const compileLiteFsmGraph = (

@@ -328,6 +328,7 @@ export const defineEffect: TypedCreateEffectFn<AppEvent, Deps> = createEffect;
 import {
   analyzeLiteFsmGraph,
   compileLiteFsmGraph,
+  compileLiteFsmGraphProject,
   selectMachineGraph,
   type GraphJsonObject,
   type LiteFsmGraphDocument,
@@ -335,6 +336,7 @@ import {
 import { createGraphSimulator, type GraphSimulationSnapshot } from "@lite-fsm/graph/simulator";
 
 const result = compileLiteFsmGraph(source);
+const projectResult = compileLiteFsmGraphProject({ entryFileName, projectRoot, host });
 const document: LiteFsmGraphDocument = result.document;
 const json: GraphJsonObject = { count: 1 };
 const selected = selectMachineGraph(document, { managerKey: "machineKey" });
@@ -345,8 +347,11 @@ const snapshot: GraphSimulationSnapshot | undefined = createGraphSimulator(docum
 | Тип                          | Форма                                                                                                                                                                               |
 | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `LiteFsmGraphResult`         | `{ document: LiteFsmGraphDocument; diagnostics: GraphDiagnostic[] }`                                                                                                                |
+| `LiteFsmGraphProjectResult`  | `LiteFsmGraphResult & { files: LiteFsmGraphProjectFile[] }` для project graph compiler                                                                                              |
 | `GraphAnalysisResult`        | `{ diagnostics: GraphDiagnostic[] }` для semantic analyzer-а                                                                                                                        |
 | `LiteFsmGraphDocument`       | `{ version, source, machines, managers, diagnostics }`                                                                                                                              |
+| `GraphSource`                | `{ filename?, language, hash?, kind?, entryFileName?, files? }`; project mode использует `kind: "project"` и file-aware metadata                                                     |
+| `GraphSourceFile`            | `{ fileName, language, hash? }` для source files внутри project document                                                                                                            |
 | `LiteFsmGraphManager`        | manager metadata плюс `machineRefs: { key, machineId, loc? }[]`                                                                                                                     |
 | `LiteFsmGraphMachine`        | machine metadata плюс `states`, `transitions`, `emissions`, `reducerCases`, `initialContextSummary`, `initialContextJson?`                                                          |
 | `GraphJsonValue/Object`      | JSON-safe values для graph IR, simulator payload и initial context overrides                                                                                                          |
@@ -356,9 +361,14 @@ const snapshot: GraphSimulationSnapshot | undefined = createGraphSimulator(docum
 | `GraphRouting`               | routing emission-а: `default`, `unscoped`, `actor`, `group`, `tag` или `unknown`                                                                                                    |
 | `GraphRoutingTarget`         | literal, array, `self.actorId/groupId/groupTag` или dynamic routing target                                                                                                          |
 | `GraphDiagnostic`            | `{ code, severity, message, machineId?, loc? }`                                                                                                                                     |
+| `SourceLocation`             | `{ fileName?, start, end }`; `fileName` заполняется в project mode                                                                                                                  |
 | `MachineSelector`            | `{ index }`, `{ id }`, `{ variableName }`, `{ exportName }`, `{ managerKey }` или `{ managerId, managerKey }`                                                                       |
 | `SelectMachineGraphResult`   | success `{ ok: true, machine, diagnostics }` или failure `{ ok: false, candidates, diagnostics }`                                                                                   |
 | `CompileLiteFsmGraphOptions` | `{ filename?, language?, parser?: "static", maxMachines? }`                                                                                                                         |
+| `CompileLiteFsmGraphProjectOptions` | `{ entryFileName, projectRoot?, host }`; host владеет чтением source и module resolution                                                                                     |
+| `LiteFsmGraphProjectHost`    | `{ readSource(fileName), resolveModule({ fromFileName, moduleSpecifier }) }`                                                                                                        |
+| `LiteFsmGraphProjectModuleResolution` | discriminated union `resolved`/`core`/`external`/`not-found`/`unsupported-extension`                                                                                 |
+| `LiteFsmGraphProjectFile`    | `{ fileName, language: "ts", roles, hash }`; roles: `entry`, `machine`, `barrel`, `helper`                                                                                         |
 | `AnalyzeLiteFsmGraphOptions` | `{ rules?: GraphAnalysisRuleId[], strict?: boolean, scope?: GraphAnalysisScope }`                                                                                                   |
 | `GraphAnalysisScope`         | `{ kind: "document" }`, `{ kind: "machine", machineId }` или `{ kind: "manager", managerId }`                                                                                       |
 | `GraphAnalysisRuleId`        | analyzer rule union: `unknown-target`, `unreachable-state`, `dead-end-state`, `actor-template-shape`, `reducer-config-consistency`, `effect-event-acceptance`, `wildcard-shadowing` |

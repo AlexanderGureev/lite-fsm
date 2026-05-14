@@ -23,6 +23,7 @@ export const createStableHash = (source: string): string => {
 };
 
 export const createMachineId = (candidate: MachineCandidate, uniqueManagerKey?: string): string => {
+  if (candidate.preferredId) return candidate.preferredId;
   if (candidate.exportName) return candidate.exportName;
   if (candidate.variableName) return candidate.variableName;
   if (uniqueManagerKey) return uniqueManagerKey;

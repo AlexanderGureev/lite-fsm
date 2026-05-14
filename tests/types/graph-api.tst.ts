@@ -1,9 +1,10 @@
 import { describe, expect, test } from "tstyche";
 import * as graphRoot from "@lite-fsm/graph";
-import { analyzeLiteFsmGraph, compileLiteFsmGraph, selectMachineGraph } from "@lite-fsm/graph";
+import { analyzeLiteFsmGraph, compileLiteFsmGraph, compileLiteFsmGraphProject, selectMachineGraph } from "@lite-fsm/graph";
 import type {
   AnalyzeLiteFsmGraphOptions,
   CompileLiteFsmGraphOptions,
+  CompileLiteFsmGraphProjectOptions,
   GraphAnalysisResult,
   GraphAnalysisRuleId,
   GraphAnalysisScope,
@@ -17,6 +18,9 @@ import type {
   GraphValueSummary,
   LiteFsmGraphDocument,
   LiteFsmGraphMachine,
+  LiteFsmGraphProjectHost,
+  LiteFsmGraphProjectModuleResolution,
+  LiteFsmGraphProjectResult,
   LiteFsmGraphResult,
   MachineSelector,
   SelectMachineGraphResult,
@@ -39,6 +43,31 @@ describe("@lite-fsm/graph public API", () => {
     expect(selected).type.toBe<SelectMachineGraphResult>();
     expect(analyzed).type.toBe<GraphAnalysisResult>();
     expect(analyzed.diagnostics).type.toBe<GraphDiagnostic[]>();
+  });
+
+  test("compileLiteFsmGraphProject принимает host и возвращает project result", () => {
+    const host: LiteFsmGraphProjectHost = {
+      readSource(fileName) {
+        expect(fileName).type.toBe<string>();
+        return "";
+      },
+      resolveModule(input): LiteFsmGraphProjectModuleResolution {
+        expect(input.fromFileName).type.toBe<string>();
+        expect(input.moduleSpecifier).type.toBe<string>();
+        return { kind: "external", moduleSpecifier: input.moduleSpecifier };
+      },
+    };
+    const options: CompileLiteFsmGraphProjectOptions = {
+      entryFileName: "/project/store.ts",
+      projectRoot: "/project",
+      host,
+    };
+    const result = compileLiteFsmGraphProject(options);
+
+    expect(result).type.toBe<LiteFsmGraphProjectResult>();
+    expect(result.document).type.toBe<LiteFsmGraphDocument>();
+    expect(result.files[0]?.roles).type.toBe<ReadonlyArray<"entry" | "machine" | "barrel" | "helper">>();
+    expect(result.document.source.files?.[0]?.fileName).type.toBe<string | undefined>();
   });
 
   test("selectMachineGraph сужает результат по ok", () => {
@@ -67,6 +96,10 @@ describe("@lite-fsm/graph public API", () => {
       Assert<NotAny<MachineSelector>>,
       Assert<NotAny<SelectMachineGraphResult>>,
       Assert<NotAny<CompileLiteFsmGraphOptions>>,
+      Assert<NotAny<CompileLiteFsmGraphProjectOptions>>,
+      Assert<NotAny<LiteFsmGraphProjectHost>>,
+      Assert<NotAny<LiteFsmGraphProjectModuleResolution>>,
+      Assert<NotAny<LiteFsmGraphProjectResult>>,
       Assert<NotAny<AnalyzeLiteFsmGraphOptions>>,
       Assert<NotAny<GraphAnalysisScope>>,
       Assert<NotAny<GraphAnalysisRuleId>>,

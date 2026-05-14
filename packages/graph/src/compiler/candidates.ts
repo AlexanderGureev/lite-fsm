@@ -16,6 +16,7 @@ export type MachineCandidate = {
   index: number;
   variableName?: string;
   exportName?: string;
+  preferredId?: string;
   managerKeys: string[];
   isDefaultExport: boolean;
   provenance: ApiCallProvenance;
