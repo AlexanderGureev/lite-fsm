@@ -14,7 +14,10 @@
 ### Цель
 
 Visualizer принимает готовый graph export document и строит model без source
-compile.
+compile. Document-based pipeline должен быть first-class path: file input в MVP
+является только browser adapter-ом над готовым `LiteFsmGraphDocument`, а будущий
+`lite-fsm visualize` local session должен подключиться к тому же pipeline без
+нового UI/state flow.
 
 ### Входные условия
 
@@ -29,8 +32,12 @@ apps/visualizer/
 
 Этап добавляет только простое browser-поле выбора файла для загрузки CLI JSON
 export.
+Repo-root fixture `tests/fixtures/project-graph-export/v1/real-store-shape.json`
+создается на этапе 2 и используется visualizer tests как cross-package contract.
 Drag-and-drop JSON import, чтение original project files из browser runtime и
 rendering project source snippets не входят в MVP.
+Local session server, browser auto-open, watch mode и codegen apply также не
+входят в этап 3, но state/services границы должны оставить для них явное место.
 
 ### Project Export Document Contract
 
@@ -78,7 +85,7 @@ type LiteFsmProjectGraphExportDocument = {
 1. Visualizer валидирует document structurally by version and required fields.
 2. Visualizer извлекает `graph` и не импортирует `@lite-fsm/cli` runtime/package
    code.
-3. Canonical fixture для parser/model tests:
+3. Canonical repo-root fixture для parser/model tests:
    `tests/fixtures/project-graph-export/v1/real-store-shape.json`.
 4. `diagnostics` на верхнем уровне содержит только CLI diagnostics; graph
    diagnostics остаются в `graph.diagnostics`.
@@ -98,6 +105,10 @@ type LiteFsmProjectGraphExportDocument = {
 8. Добавить file-aware source anchor labels.
 9. Добавить fallback для source overlay без source text.
 10. Сохранить существующее поведение Source tab.
+11. File input adapter должен после parsing вызывать общий document pipeline, а
+    не собственный analyzer/model flow.
+12. Project export load не должен перезаписывать pasted source как будто это
+    original project source.
 
 Не требуется:
 
@@ -115,7 +126,52 @@ Project export support не должен смешивать browser IO, parsing 
 3. document pipeline принимает готовый `LiteFsmGraphDocument` и не вызывает
    `compileLiteFsmGraph(source)`;
 4. source anchor labels/fallback живут отдельно от pasted-source compile path;
-5. visualizer не импортирует `@lite-fsm/cli` runtime/package code.
+5. visualizer не импортирует `@lite-fsm/cli` runtime/package code;
+6. file input, tests и future local session должны сходиться в один document
+   pipeline helper;
+7. future local session может заменить static host adapter на local host
+   adapter, но не должен требовать другого graph/analyze/model pipeline;
+8. codegen UI должен проверять host capabilities, а не package/runtime имя.
+
+### Input Modes For Local Session
+
+Этап 3 реализует только existing pasted-source mode и new project-export mode.
+Но модель состояния должна явно различать source-backed и document-backed input,
+чтобы future `lite-fsm visualize` не связывал project locations с Source tab.
+
+Ожидаемые режимы:
+
+```ts
+type VisualizerInputMode =
+  | { kind: "pasted-source"; source: SourceSession }
+  | {
+      kind: "project-export";
+      document: LiteFsmGraphDocument;
+      files: LiteFsmGraphProjectFile[];
+      entryPath: string;
+    }
+  | {
+      kind: "local-session";
+      sessionId: string;
+      capabilities: VisualizerHostCapabilities;
+    };
+```
+
+Правила:
+
+1. Workbench state должен иметь явный discriminant текущего input source:
+   `inputMode` или эквивалентное поле. Нельзя выводить режим из пустого source,
+   filename или текущего compile status.
+2. MVP может реализовать shape выше напрямую или через эквивалентные поля, но
+   selectors/effects не должны выводить project source text из Source tab.
+3. `project-export` является static/read-only: `canReadFiles`, `canWriteFiles`
+   и `canApplyPatch` остаются `false`.
+4. `local-session` в будущем будет единственным режимом, где
+   `VisualizerHostAdapter.readFile`, `previewPatch` и `applyPatch` могут быть
+   доступны.
+5. Document pipeline не должен требовать `SourceSession.source`.
+6. Source editor остается UX для pasted source и не становится hidden transport
+   для project export JSON.
 
 ### Source Anchors
 
@@ -132,6 +188,9 @@ Project export support не должен смешивать browser IO, parsing 
    `loc.fileName` недоступен.
 6. Fallback должен показывать хотя бы anchor label `<path>:<line>:<column>` и
    короткое сообщение, что source text не включен в JSON export.
+7. Если future local host adapter умеет читать `loc.fileName`, source overlay
+   может показать snippet из этого файла, но fallback behavior project export
+   должен остаться независимым от Source tab.
 
 ### Tests
 
@@ -141,13 +200,16 @@ Visualizer tests:
 
 1. project export document parser принимает valid document;
 2. project export document parser отклоняет invalid version;
-3. parser принимает canonical fixture
+3. parser принимает repo-root canonical fixture
    `tests/fixtures/project-graph-export/v1/real-store-shape.json`;
 4. file input читает выбранный JSON export;
-5. model строится из exported `LiteFsmGraphDocument`;
-6. file-aware source anchor label содержит path, line и column;
-7. source overlay fallback появляется, если source text недоступен;
-8. source anchors/diagnostics с одинаковыми line/column/offset, но разными
+5. file input передает parsed graph в общий document pipeline;
+6. model строится из exported `LiteFsmGraphDocument`;
+7. project export load не перезаписывает pasted source как original source text;
+8. project export mode выставляет static/read-only capabilities;
+9. file-aware source anchor label содержит path, line и column;
+10. source overlay fallback появляется, если source text недоступен;
+11. source anchors/diagnostics с одинаковыми line/column/offset, но разными
    `fileName`, не dedupe и не bind как один source item.
 
 Coverage requirements:
@@ -157,7 +219,9 @@ Coverage requirements:
    statements/branches/functions/lines.
 2. Все новые pure/helper modules для project export path, включая source anchor
    labels/fallback, должны иметь strict 100% coverage.
-3. Если новые visualizer modules не попадают в текущий coverage include, обновить
+3. Pure/helper modules для input mode и document pipeline routing, если они
+   добавлены, должны иметь strict 100% coverage.
+4. Если новые visualizer modules не попадают в текущий coverage include, обновить
    `apps/visualizer/vitest.config.ts`.
 
 ### Verification
@@ -183,3 +247,7 @@ pnpm run check-types
    text.
 4. Source tab продолжает работать для pasted source.
 5. Existing single-source visualizer behavior остается совместимым.
+6. Project export flow использует общий document pipeline, пригодный для future
+   local session input.
+7. Project export mode остается static/read-only и не смешивает project
+   locations с current pasted source.
