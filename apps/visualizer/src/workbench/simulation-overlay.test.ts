@@ -42,7 +42,7 @@ const snapshot = (): GraphSimulationSnapshot =>
     },
   }) as unknown as GraphSimulationSnapshot;
 
-describe("overlay симуляции", () => {
+describe("оверлей симуляции", () => {
   it("строит overlay из snapshot, доступных transitions, suggested emissions и inspected step", () => {
     const overlay = buildSimulationOverlayInput({
       snapshot: snapshot(),

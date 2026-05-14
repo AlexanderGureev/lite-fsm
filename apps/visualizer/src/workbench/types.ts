@@ -1,4 +1,4 @@
-import type { GraphDiagnostic, GraphJsonValue, LiteFsmGraphDocument } from "@lite-fsm/graph";
+import type { GraphDiagnostic, GraphJsonValue, LiteFsmGraphDocument, LiteFsmGraphProjectFile } from "@lite-fsm/graph";
 import type {
   GraphInitialContextOverride,
   GraphInitialStateOverride,
@@ -13,13 +13,28 @@ import type { CodegenPlanResult, CodegenState, SourceEditIntent } from "../codeg
 import type { ConsoleChannelFilter, ConsoleState } from "../console";
 import type { WorkbenchDiagnosticRef } from "../diagnostics";
 import type { SourceSession } from "../source";
-import type { VisualizerHostState, VisualizerWorkbenchRowCommandTarget } from "../services";
+import type { VisualizerHostCapabilities, VisualizerHostState, VisualizerWorkbenchRowCommandTarget } from "../services";
+import type { LiteFsmProjectGraphExportDocument, ProjectGraphExportParseIssue } from "../project-export";
 import type { ValidationState } from "../validation";
 
 type VisualizerTransitionRowCommandTarget = Extract<VisualizerWorkbenchRowCommandTarget, { kind: "transition" }>;
 type VisualizerEmissionRowCommandTarget = Extract<VisualizerWorkbenchRowCommandTarget, { kind: "emission" }>;
 
 export type VisualizerTab = "source" | "system" | "events" | "machines";
+
+export type VisualizerInputMode =
+  | { kind: "pasted-source"; source: SourceSession }
+  | {
+      kind: "project-export";
+      document: LiteFsmGraphDocument;
+      files: readonly LiteFsmGraphProjectFile[];
+      entryPath: string;
+    }
+  | {
+      kind: "local-session";
+      sessionId: string;
+      capabilities: VisualizerHostCapabilities;
+    };
 
 export type CompileState = {
   status: "idle" | "running" | "ready" | "failed";
@@ -91,6 +106,8 @@ export type VisualizerPanelState = {
 
 export type VisualizerWorkbenchState = {
   host: VisualizerHostState;
+  inputMode: VisualizerInputMode;
+  inputVersion: number;
   source: SourceSession;
   compile: CompileState;
   analysis: AnalysisState;
@@ -109,6 +126,7 @@ export type VisualizerWorkbenchState = {
 };
 
 export type WorkbenchRevisionIndex = {
+  input: number;
   source: number;
   compile: number;
   analysis: number;
@@ -135,6 +153,8 @@ export type VisualizerCommand =
   | { type: "source.changed"; source: string }
   | { type: "source.reset-to-sample" }
   | { type: "source.open-visualizer" }
+  | { type: "project-export.loaded"; exportDocument: LiteFsmProjectGraphExportDocument }
+  | { type: "project-export.load.failed"; fileName: string; issue: ProjectGraphExportParseIssue }
   | { type: "tab.selected"; tab: VisualizerTab }
   | { type: "l1.machine-query.changed"; query: string }
   | { type: "l1.topic-query.changed"; query: string }

@@ -11,8 +11,9 @@ import {
   resetConsoleEntries,
   selectConsoleChannel,
 } from "../console";
-import { normalizeGraphDiagnostics } from "../diagnostics";
-import { MUSIC_APP_SAMPLE_SOURCE, updateSourceSession } from "../source";
+import { createWorkbenchDiagnostic, normalizeGraphDiagnostics } from "../diagnostics";
+import { STATIC_HOST_CAPABILITIES } from "../services";
+import { MUSIC_APP_SAMPLE_SOURCE, createSourceSession } from "../source";
 import {
   createIdleAnalysisState,
   createIdleCompileState,
@@ -130,10 +131,15 @@ const clearCanvasForPipelineInvalidation = (
 const stale = (snapshot: WorkbenchSnapshot): Reduction =>
   unchanged(snapshot, { ok: false, reason: "stale-source-version", diagnostics: [] });
 
+const nextInputVersion = (state: VisualizerWorkbenchState): number =>
+  Math.max(state.inputVersion, state.source.version) + 1;
+
+const currentInputVersion = (state: VisualizerWorkbenchState): number => state.inputVersion;
+
 const disposeSimulationEffect = (snapshot: WorkbenchSnapshot): readonly WorkbenchEffectDescriptor[] =>
   snapshot.state.simulation.status === "idle" && !snapshot.state.simulation.snapshot
     ? NO_EFFECTS
-    : [{ kind: "simulation.dispose", sourceVersion: snapshot.state.source.version }];
+    : [{ kind: "simulation.dispose", sourceVersion: currentInputVersion(snapshot.state) }];
 
 const createSimulationSessionEffect = (
   state: VisualizerWorkbenchState,
@@ -143,14 +149,14 @@ const createSimulationSessionEffect = (
 
   return {
     kind: "create-simulation-session",
-    sourceVersion: state.source.version,
+    sourceVersion: currentInputVersion(state),
     document: state.compile.document,
     scope: { kind: "machines", machineIds: selectedMachineIds },
   };
 };
 
 const simulationModelRequestId = (state: VisualizerWorkbenchState): string =>
-  `model:${state.source.version}:simulation:${state.simulation.inspectedStepId ?? state.simulation.snapshot?.timeline.currentStepId ?? "none"}`;
+  `model:${currentInputVersion(state)}:simulation:${state.simulation.inspectedStepId ?? state.simulation.snapshot?.timeline.currentStepId ?? "none"}`;
 
 const simulationModelEffect = (
   state: VisualizerWorkbenchState,
@@ -162,7 +168,7 @@ const simulationModelEffect = (
     kind: "build-model",
     requestId: simulationModelRequestId(state),
     purpose: "simulation-overlay",
-    sourceVersion: state.source.version,
+    sourceVersion: currentInputVersion(state),
     document: state.compile.document,
     analysisDiagnostics: state.analysis.diagnostics,
     simulation,
@@ -220,12 +226,28 @@ const resetDerivedForSource = (state: VisualizerWorkbenchState): VisualizerWorkb
   canvas: clearCanvasOnPipelineInvalidation(state.canvas),
 });
 
+const createNextSourceSession = (
+  state: VisualizerWorkbenchState,
+  source: string,
+): VisualizerWorkbenchState["source"] =>
+  createSourceSession({
+    source,
+    filePath: state.source.filePath,
+    filename: state.source.filename,
+    language: state.source.language,
+    version: nextInputVersion(state),
+  });
+
 const sourceChanged = (snapshot: WorkbenchSnapshot, source: string): Reduction => {
-  if (source === snapshot.state.source.source) return unchanged(snapshot);
+  if (source === snapshot.state.source.source && snapshot.state.inputMode.kind === "pasted-source") return unchanged(snapshot);
+
+  const nextSource = createNextSourceSession(snapshot.state, source);
 
   const withSource = {
     ...snapshot.state,
-    source: updateSourceSession(snapshot.state.source, source),
+    inputMode: { kind: "pasted-source" as const, source: nextSource },
+    inputVersion: nextSource.version,
+    source: nextSource,
   };
 
   const state = resetDerivedForSource(withSource);
@@ -234,6 +256,7 @@ const sourceChanged = (snapshot: WorkbenchSnapshot, source: string): Reduction =
     snapshot,
     state,
     [
+      "input",
       "source",
       "compile",
       "analysis",
@@ -254,9 +277,29 @@ const sourceChanged = (snapshot: WorkbenchSnapshot, source: string): Reduction =
 
 const resetToSample = (snapshot: WorkbenchSnapshot): Reduction => sourceChanged(snapshot, MUSIC_APP_SAMPLE_SOURCE);
 
+const ensurePastedSourceInput = (state: VisualizerWorkbenchState): VisualizerWorkbenchState => {
+  if (state.inputMode.kind === "pasted-source" && state.inputVersion === state.source.version) return state;
+
+  const source = createSourceSession({
+    source: state.source.source,
+    filePath: state.source.filePath,
+    filename: state.source.filename,
+    language: state.source.language,
+    version: nextInputVersion(state),
+  });
+
+  return {
+    ...state,
+    inputMode: { kind: "pasted-source", source },
+    inputVersion: source.version,
+    source,
+  };
+};
+
 const openVisualizer = (snapshot: WorkbenchSnapshot): Reduction => {
-  const sequence = snapshot.state.compile.sequence + 1;
-  const requestId = `compile:${snapshot.state.source.version}:${sequence}`;
+  const inputState = ensurePastedSourceInput(snapshot.state);
+  const sequence = inputState.compile.sequence + 1;
+  const requestId = `compile:${inputState.inputVersion}:${sequence}`;
   const compile: CompileState = {
     status: "running",
     requestId,
@@ -265,15 +308,15 @@ const openVisualizer = (snapshot: WorkbenchSnapshot): Reduction => {
   };
   const console = appendConsoleEntries(resetConsoleEntries(snapshot.state.console), [
     createSystemConsoleEntry(
-      snapshot.state.source.version,
+      inputState.inputVersion,
       `open:${sequence}`,
       "Source pipeline started",
-      `Compiling ${snapshot.state.source.filename ?? "source"} at version ${snapshot.state.source.version}.`,
+      `Compiling ${inputState.source.filename ?? "source"} at version ${inputState.inputVersion}.`,
     ),
   ]);
 
   const state = {
-    ...snapshot.state,
+    ...inputState,
     compile,
     analysis: createIdleAnalysisState(),
     model: createIdleModelState(),
@@ -292,6 +335,7 @@ const openVisualizer = (snapshot: WorkbenchSnapshot): Reduction => {
     snapshot,
     state,
     [
+      ...(inputState === snapshot.state ? [] : (["input", "source"] as const)),
       "compile",
       "analysis",
       "model",
@@ -305,7 +349,7 @@ const openVisualizer = (snapshot: WorkbenchSnapshot): Reduction => {
       "panels",
       ...canvasRevision(snapshot.state, state),
     ],
-    [...disposeSimulationEffect(snapshot), { kind: "compile", requestId, source: snapshot.state.source }],
+    [...disposeSimulationEffect(snapshot), { kind: "compile", requestId, source: inputState.source }],
   );
 };
 
@@ -313,29 +357,135 @@ const requestMatches = (
   sourceVersion: number,
   expectedRequestId: string | undefined,
   requestId: string,
-  currentSourceVersion: number,
-): boolean => sourceVersion === currentSourceVersion && expectedRequestId === requestId;
+  currentInputVersion: number,
+): boolean => sourceVersion === currentInputVersion && expectedRequestId === requestId;
 
-const compileSucceeded = (
+const startDocumentPipeline = (
   snapshot: WorkbenchSnapshot,
-  command: Extract<VisualizerInternalCommand, { type: "compile.succeeded" }>,
+  state: VisualizerWorkbenchState,
+  inputVersion: number,
+  document: NonNullable<VisualizerWorkbenchState["compile"]["document"]>,
+  changedRevisions: readonly RevisionKey[],
+  leadingEffects: readonly WorkbenchEffectDescriptor[] = NO_EFFECTS,
 ): Reduction => {
-  if (!requestMatches(command.sourceVersion, snapshot.state.compile.requestId, command.requestId, snapshot.state.source.version)) {
-    return stale(snapshot);
-  }
-
-  const requestId = `analyze:${command.sourceVersion}:1`;
+  const requestId = `analyze:${inputVersion}:1`;
   const analysis: AnalysisState = { status: "running", requestId, diagnostics: [], appDiagnostics: [] };
 
   return changed(
     snapshot,
     {
-      ...snapshot.state,
-      compile: { ...snapshot.state.compile, status: "ready", document: command.document, diagnostics: [] },
+      ...state,
       analysis,
     },
-    ["compile", "analysis"],
-    [{ kind: "analyze", requestId, sourceVersion: command.sourceVersion, document: command.document }],
+    [...changedRevisions, "analysis"],
+    [...leadingEffects, { kind: "analyze", requestId, sourceVersion: inputVersion, document }],
+  );
+};
+
+const projectExportLoaded = (
+  snapshot: WorkbenchSnapshot,
+  command: Extract<VisualizerCommand, { type: "project-export.loaded" }>,
+): Reduction => {
+  const inputVersion = nextInputVersion(snapshot.state);
+  const sequence = snapshot.state.compile.sequence + 1;
+  const document = command.exportDocument.graph;
+  const compile: CompileState = {
+    status: "ready",
+    sequence,
+    document,
+    diagnostics: [],
+  };
+  const console = appendConsoleEntries(resetConsoleEntries(snapshot.state.console), [
+    createSystemConsoleEntry(
+      inputVersion,
+      `project-export:${sequence}`,
+      "Project export pipeline started",
+      `Loaded ${command.exportDocument.entry.path} from CLI JSON export.`,
+    ),
+  ]);
+  const state = {
+    ...snapshot.state,
+    host: { capabilities: STATIC_HOST_CAPABILITIES },
+    inputMode: {
+      kind: "project-export" as const,
+      document,
+      files: command.exportDocument.files,
+      entryPath: command.exportDocument.entry.path,
+    },
+    inputVersion,
+    compile,
+    analysis: createIdleAnalysisState(),
+    model: createIdleModelState(),
+    validation: createIdleValidationState(),
+    l1: createInitialSystemViewState(),
+    l2: createInitialEventCatalogViewState(),
+    l3: createInitialMachineWorkbenchViewState(),
+    simulation: createInitialSimulationState(),
+    diagnostics: [],
+    console,
+    panels: clearPipelinePanelSelection(snapshot.state.panels),
+    canvas: clearCanvasOnPipelineInvalidation(snapshot.state.canvas),
+  };
+
+  return startDocumentPipeline(
+    snapshot,
+    state,
+    inputVersion,
+    document,
+    [
+      "input",
+      "compile",
+      "model",
+      "validation",
+      "l1",
+      "l2",
+      "l3",
+      "simulation",
+      "diagnostics",
+      "console",
+      "panels",
+      ...canvasRevision(snapshot.state, state),
+    ],
+    disposeSimulationEffect(snapshot),
+  );
+};
+
+const projectExportLoadFailed = (
+  snapshot: WorkbenchSnapshot,
+  command: Extract<VisualizerCommand, { type: "project-export.load.failed" }>,
+): Reduction => {
+  const diagnostic = createWorkbenchDiagnostic({
+    diagnosticId: `project-export:${snapshot.state.inputVersion}:${snapshot.state.console.entries.length}:${command.issue.code}`,
+    sourceVersion: snapshot.state.inputVersion,
+    origin: "source",
+    code: `project-export-${command.issue.code}`,
+    severity: "warning",
+    message: `${command.fileName}: ${command.issue.message}`,
+    sourceAnchors: [],
+    primaryTarget: { kind: "console" },
+  });
+  const state = appendDiagnostics(snapshot.state, [diagnostic]);
+
+  return changed(snapshot, state, ["diagnostics", "console"]);
+};
+
+const compileSucceeded = (
+  snapshot: WorkbenchSnapshot,
+  command: Extract<VisualizerInternalCommand, { type: "compile.succeeded" }>,
+): Reduction => {
+  if (!requestMatches(command.sourceVersion, snapshot.state.compile.requestId, command.requestId, snapshot.state.inputVersion)) {
+    return stale(snapshot);
+  }
+
+  return startDocumentPipeline(
+    snapshot,
+    {
+      ...snapshot.state,
+      compile: { ...snapshot.state.compile, status: "ready", document: command.document, diagnostics: [] },
+    },
+    command.sourceVersion,
+    command.document,
+    ["compile"],
   );
 };
 
@@ -343,7 +493,7 @@ const compileFailed = (
   snapshot: WorkbenchSnapshot,
   command: Extract<VisualizerInternalCommand, { type: "compile.failed" }>,
 ): Reduction => {
-  if (!requestMatches(command.sourceVersion, snapshot.state.compile.requestId, command.requestId, snapshot.state.source.version)) {
+  if (!requestMatches(command.sourceVersion, snapshot.state.compile.requestId, command.requestId, snapshot.state.inputVersion)) {
     return stale(snapshot);
   }
 
@@ -362,7 +512,7 @@ const analysisSucceeded = (
   snapshot: WorkbenchSnapshot,
   command: Extract<VisualizerInternalCommand, { type: "analysis.succeeded" }>,
 ): Reduction => {
-  if (!requestMatches(command.sourceVersion, snapshot.state.analysis.requestId, command.requestId, snapshot.state.source.version)) {
+  if (!requestMatches(command.sourceVersion, snapshot.state.analysis.requestId, command.requestId, snapshot.state.inputVersion)) {
     return stale(snapshot);
   }
 
@@ -397,7 +547,7 @@ const analysisFailed = (
   snapshot: WorkbenchSnapshot,
   command: Extract<VisualizerInternalCommand, { type: "analysis.failed" }>,
 ): Reduction => {
-  if (!requestMatches(command.sourceVersion, snapshot.state.analysis.requestId, command.requestId, snapshot.state.source.version)) {
+  if (!requestMatches(command.sourceVersion, snapshot.state.analysis.requestId, command.requestId, snapshot.state.inputVersion)) {
     return stale(snapshot);
   }
 
@@ -419,8 +569,8 @@ const modelSucceeded = (
   const purpose = command.purpose ?? "pipeline";
   const matches =
     purpose === "simulation-overlay"
-      ? command.sourceVersion === snapshot.state.source.version && command.requestId === simulationModelRequestId(snapshot.state)
-      : requestMatches(command.sourceVersion, snapshot.state.model.requestId, command.requestId, snapshot.state.source.version);
+      ? command.sourceVersion === snapshot.state.inputVersion && command.requestId === simulationModelRequestId(snapshot.state)
+      : requestMatches(command.sourceVersion, snapshot.state.model.requestId, command.requestId, snapshot.state.inputVersion);
 
   if (!matches) {
     return stale(snapshot);
@@ -485,7 +635,7 @@ const modelFailed = (
   snapshot: WorkbenchSnapshot,
   command: Extract<VisualizerInternalCommand, { type: "model.failed" }>,
 ): Reduction => {
-  if (!requestMatches(command.sourceVersion, snapshot.state.model.requestId, command.requestId, snapshot.state.source.version)) {
+  if (!requestMatches(command.sourceVersion, snapshot.state.model.requestId, command.requestId, snapshot.state.inputVersion)) {
     return stale(snapshot);
   }
 
@@ -504,7 +654,7 @@ const validationCompleted = (
   snapshot: WorkbenchSnapshot,
   command: Extract<VisualizerInternalCommand, { type: "validation.succeeded" | "validation.failed" }>,
 ): Reduction => {
-  if (!requestMatches(command.sourceVersion, snapshot.state.validation.requestId, command.requestId, snapshot.state.source.version)) {
+  if (!requestMatches(command.sourceVersion, snapshot.state.validation.requestId, command.requestId, snapshot.state.inputVersion)) {
     return stale(snapshot);
   }
 
@@ -527,7 +677,7 @@ const codegenStarted = (
   snapshot: WorkbenchSnapshot,
   command: Extract<VisualizerCommand, { type: "codegen.intent.created" }>,
 ): Reduction => {
-  const requestId = `codegen:${snapshot.state.source.version}:1`;
+  const requestId = `codegen:${snapshot.state.inputVersion}:1`;
   const codegen: CodegenState = {
     status: "previewing",
     requestId,
@@ -543,7 +693,7 @@ const codegenStarted = (
       {
         kind: "codegen.plan",
         requestId,
-        sourceVersion: snapshot.state.source.version,
+        sourceVersion: snapshot.state.inputVersion,
         sourceHash: snapshot.state.source.hash,
         intent: command.intent,
       },
@@ -555,7 +705,7 @@ const codegenCompleted = (
   snapshot: WorkbenchSnapshot,
   command: Extract<VisualizerInternalCommand, { type: "codegen.plan.completed" | "codegen.plan.failed" }>,
 ): Reduction => {
-  if (!requestMatches(command.sourceVersion, snapshot.state.codegen.requestId, command.requestId, snapshot.state.source.version)) {
+  if (!requestMatches(command.sourceVersion, snapshot.state.codegen.requestId, command.requestId, snapshot.state.inputVersion)) {
     return stale(snapshot);
   }
 
@@ -592,7 +742,7 @@ const openMachineCanvasBoard = (snapshot: WorkbenchSnapshot, machineId: string):
     return unchanged(snapshot, { ok: false, reason: "missing-machine", diagnostics: [] });
   }
 
-  const canvas = openMachineBoard(snapshot.state.canvas, snapshot.state.source.version, machineId);
+  const canvas = openMachineBoard(snapshot.state.canvas, snapshot.state.inputVersion, machineId);
   if (canvas === snapshot.state.canvas) return unchanged(snapshot);
 
   return changed(snapshot, { ...snapshot.state, canvas }, ["canvas"]);
@@ -731,7 +881,7 @@ const selectConsoleEntry = (snapshot: WorkbenchSnapshot, entryId: string): Reduc
         panels: {
           ...basePanels,
           sourceOverlay: {
-            sourceVersion: snapshot.state.source.version,
+            sourceVersion: snapshot.state.inputVersion,
             title: entry.title,
             anchors: [entry.target.anchor],
           },
@@ -783,6 +933,10 @@ const reduceUserCommand = (snapshot: WorkbenchSnapshot, command: VisualizerComma
       return resetToSample(snapshot);
     case "source.open-visualizer":
       return openVisualizer(snapshot);
+    case "project-export.loaded":
+      return projectExportLoaded(snapshot, command);
+    case "project-export.load.failed":
+      return projectExportLoadFailed(snapshot, command);
     case "tab.selected":
       return selectTab(snapshot, command.tab);
     case "l1.machine-query.changed":
@@ -855,7 +1009,7 @@ const reduceUserCommand = (snapshot: WorkbenchSnapshot, command: VisualizerComma
             sourceOverlay: {
               title: command.title,
               anchors: command.anchors,
-              sourceVersion: snapshot.state.source.version,
+              sourceVersion: snapshot.state.inputVersion,
             },
           },
         },
@@ -882,16 +1036,16 @@ const reduceUserCommand = (snapshot: WorkbenchSnapshot, command: VisualizerComma
       return codegenStarted(snapshot, command);
     case "l3.event.sent":
       if (!snapshot.state.simulation.snapshot) return unchanged(snapshot, { ok: false, reason: "missing-simulation-session", diagnostics: [] });
-      return effectOnly(snapshot, [{ kind: "simulation.send", sourceVersion: snapshot.state.source.version, event: command.event }]);
+      return effectOnly(snapshot, [{ kind: "simulation.send", sourceVersion: snapshot.state.inputVersion, event: command.event }]);
     case "l3.transition-row.sent":
       if (!snapshot.state.simulation.snapshot) return unchanged(snapshot, { ok: false, reason: "missing-simulation-session", diagnostics: [] });
       return effectOnly(snapshot, [
-        { kind: "simulation.send-from-transition", sourceVersion: snapshot.state.source.version, target: command.target, payload: command.payload },
+        { kind: "simulation.send-from-transition", sourceVersion: snapshot.state.inputVersion, target: command.target, payload: command.payload },
       ]);
     case "l3.effect-row.followed":
       if (!snapshot.state.simulation.snapshot) return unchanged(snapshot, { ok: false, reason: "missing-simulation-session", diagnostics: [] });
       return effectOnly(snapshot, [
-        { kind: "simulation.send-from-emission", sourceVersion: snapshot.state.source.version, target: command.target, payload: command.payload },
+        { kind: "simulation.send-from-emission", sourceVersion: snapshot.state.inputVersion, target: command.target, payload: command.payload },
       ]);
     case "l3.simulation.reset":
       if (!snapshot.state.simulation.snapshot) return unchanged(snapshot, { ok: false, reason: "missing-simulation-session", diagnostics: [] });
@@ -902,7 +1056,7 @@ const reduceUserCommand = (snapshot: WorkbenchSnapshot, command: VisualizerComma
         [
           {
             kind: "simulation.reset",
-            sourceVersion: snapshot.state.source.version,
+            sourceVersion: snapshot.state.inputVersion,
             initialStateOverrides: command.initialStateOverrides,
             initialContextOverrides: command.initialContextOverrides,
           },
@@ -929,7 +1083,7 @@ const reduceInternalCommand = (snapshot: WorkbenchSnapshot, command: VisualizerI
     case "validation.failed":
       return validationCompleted(snapshot, command);
     case "simulation.snapshot.changed":
-      if (command.sourceVersion !== snapshot.state.source.version) return stale(snapshot);
+      if (command.sourceVersion !== snapshot.state.inputVersion) return stale(snapshot);
       {
         const simulation = {
           ...snapshot.state.simulation,

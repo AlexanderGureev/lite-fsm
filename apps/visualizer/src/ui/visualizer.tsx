@@ -13,6 +13,7 @@ import {
   keymap,
   lineNumbers,
   rectangularSelection,
+  type KeyBinding,
 } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import { Alert, AlertDescription, AlertTitle } from "@/ui/alert";
@@ -338,7 +339,7 @@ const sourceEditorExtensions = (
   EditorView.updateListener.of((update) => {
     if (update.docChanged) onValueChange(update.state.doc.toString());
   }),
-  keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap]),
+  keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap] as unknown as readonly KeyBinding[]),
   sourceEditorSelectedLineHighlight(highlightedLineNumbers),
   sourceEditorTheme,
 ];

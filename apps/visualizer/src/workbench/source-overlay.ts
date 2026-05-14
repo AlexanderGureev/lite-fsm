@@ -1,4 +1,5 @@
 import type { GraphSourceAnchor } from "@lite-fsm/graph/view-model";
+import { formatSourceLocationLabel, matchesSourceFile } from "../lib/source-location";
 import type { SourceOverlayState } from "./types";
 
 const SOURCE_CONTEXT_LINES = 2;
@@ -30,6 +31,11 @@ export type SourceOverlayView =
       fallback?: string;
     };
 
+export type SourceOverlaySourceContext =
+  | { kind: "pasted-source"; source: string; filename?: string }
+  | { kind: "project-export" }
+  | { kind: "local-session" };
+
 const priorityOf = (anchor: GraphSourceAnchor): number => {
   const priority = MACHINE_ANCHOR_PRIORITY.indexOf(anchor.kind);
 
@@ -42,11 +48,19 @@ export const prioritizeMachineSourceAnchors = (
 
 const sourceLines = (source: string): readonly string[] => source.split(/\r?\n/);
 
-const sourceLocationLabel = (loc: NonNullable<GraphSourceAnchor["loc"]>): string =>
-  `line ${loc.start.line}, column ${loc.start.column}`;
+const sourceUnavailableFallback = (
+  context: Exclude<SourceOverlaySourceContext, { kind: "pasted-source" }>,
+  label: string,
+): string => {
+  if (context.kind === "project-export") {
+    return `${label}\nSource text is not included in the JSON export.`;
+  }
+
+  return `${label}\nSource text is not available from the current visualizer host.`;
+};
 
 export const buildSourceOverlayView = (
-  source: string,
+  sourceContext: SourceOverlaySourceContext,
   overlay: SourceOverlayState | undefined,
 ): SourceOverlayView => {
   if (!overlay) return { open: false };
@@ -64,7 +78,32 @@ export const buildSourceOverlayView = (
     };
   }
 
-  const lines = sourceLines(source);
+  const locationLabel = formatSourceLocationLabel(anchor.loc);
+  if (sourceContext.kind !== "pasted-source") {
+    return {
+      open: true,
+      title: overlay.title,
+      sourceVersion: overlay.sourceVersion,
+      anchorCount: overlay.anchors.length,
+      locationLabel,
+      lines: [],
+      fallback: sourceUnavailableFallback(sourceContext, locationLabel),
+    };
+  }
+
+  if (!matchesSourceFile(anchor.loc, sourceContext.filename)) {
+    return {
+      open: true,
+      title: overlay.title,
+      sourceVersion: overlay.sourceVersion,
+      anchorCount: overlay.anchors.length,
+      locationLabel,
+      lines: [],
+      fallback: `${locationLabel}\nSource text for this file is not available in the current pasted source.`,
+    };
+  }
+
+  const lines = sourceLines(sourceContext.source);
   const selectedStartLine = Math.max(1, Math.min(lines.length, anchor.loc.start.line));
   const selectedEndLine = Math.max(selectedStartLine, Math.min(lines.length, anchor.loc.end.line));
   const startLine = Math.max(1, selectedStartLine - SOURCE_CONTEXT_LINES);
@@ -86,7 +125,7 @@ export const buildSourceOverlayView = (
     title: overlay.title,
     sourceVersion: overlay.sourceVersion,
     anchorCount: overlay.anchors.length,
-    locationLabel: sourceLocationLabel(anchor.loc),
+    locationLabel,
     lines: viewLines,
   };
 };

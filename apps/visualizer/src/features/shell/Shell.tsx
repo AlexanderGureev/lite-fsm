@@ -1,4 +1,5 @@
-import { AlertCircle, FileCode, Play, RotateCcw, Terminal, X } from "lucide-react";
+import type { ChangeEvent } from "react";
+import { AlertCircle, FileCode, Play, RotateCcw, Terminal, Upload, X } from "lucide-react";
 import type { ConsolePanelView } from "../../console";
 import { useWorkbenchContext } from "../../app/workbench-context";
 import { useWorkbenchSelector } from "../../app/use-workbench-selector";
@@ -7,6 +8,7 @@ import { MachinesPanel } from "../machines/MachinesPanel";
 import { SourceOverlay } from "../source/SourceOverlay";
 import { SystemPanel } from "../system/SystemPanel";
 import { selectMachineCanvasBoard } from "../../canvas";
+import { readProjectGraphExportFile } from "../../project-export";
 import {
   selectActiveTab,
   selectConsolePanel,
@@ -63,6 +65,52 @@ const compileStatusLabel = (status: string): string => {
   return "idle";
 };
 
+const ProjectExportFileControl = ({
+  dispatch,
+}: {
+  dispatch: (command: VisualizerCommand) => void;
+}) => {
+  const onFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    if (!file) return;
+
+    try {
+      const result = await readProjectGraphExportFile(file);
+      if (result.ok) {
+        dispatch({ type: "project-export.loaded", exportDocument: result.document });
+      } else {
+        dispatch({ type: "project-export.load.failed", fileName: file.name, issue: result.issue });
+      }
+    } catch (error) {
+      dispatch({
+        type: "project-export.load.failed",
+        fileName: file.name,
+        issue: {
+          code: "invalid-json",
+          message: error instanceof Error ? error.message : "Could not read project graph export file.",
+        },
+      });
+    } finally {
+      input.value = "";
+    }
+  };
+
+  return (
+    <label className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md border border-(--vf-border) bg-(--vf-surface-soft) px-2.5 font-mono text-[11px] text-foreground transition-colors duration-(--vf-duration-fast) hover:bg-(--vf-surface-raised) focus-within:ring-2 focus-within:ring-ring">
+      <Upload data-icon="inline-start" aria-hidden="true" className="size-3.5" />
+      Import JSON
+      <input
+        type="file"
+        accept=".json,application/json"
+        className="sr-only"
+        data-testid={VISUALIZER_TEST_IDS.source.projectExportFile}
+        onChange={onFileChange}
+      />
+    </label>
+  );
+};
+
 const SourceWorkspace = ({
   sourcePanel,
   dispatch,
@@ -89,6 +137,7 @@ const SourceWorkspace = ({
           </TooltipTrigger>
           <TooltipContent>Reset to sample</TooltipContent>
         </Tooltip>
+        <ProjectExportFileControl dispatch={dispatch} />
         <PrimaryActionButton
           type="button"
           className="flex-1 sm:flex-initial"

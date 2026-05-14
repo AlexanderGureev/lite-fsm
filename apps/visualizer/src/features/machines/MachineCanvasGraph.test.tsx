@@ -10,7 +10,7 @@ import type {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { VISUALIZER_TEST_IDS } from "../../test-ids";
 import type { MachineCanvasElkGraph, MachineCanvasReadyFlow } from "../../canvas/machine-canvas-render-types";
-import { MachineCanvasGraph } from "./MachineCanvasGraph";
+import { MachineCanvasGraph, machineCanvasPopoverMeta, machineCanvasPopoverProducerMeta } from "./MachineCanvasGraph";
 
 type ReactFlowMockNode = {
   id: string;
@@ -205,6 +205,15 @@ const diagnosticRow: MachineFlowRowRef = {
   sourceAnchors: [],
 };
 
+const unknownRow: MachineFlowRowRef = {
+  rowId: "row:unknown",
+  rowKind: "unknown",
+  label: "dynamic row",
+  reason: "dynamic target",
+  confidence: "unknown",
+  sourceAnchors: [],
+};
+
 const edge = (input: Partial<MachineFlowEdgeGroup> & Pick<MachineFlowEdgeGroup, "groupId" | "sourceNodeId">): MachineFlowEdgeGroup => ({
   groupId: input.groupId,
   sourceNodeId: input.sourceNodeId,
@@ -366,6 +375,40 @@ describe("граф MachineCanvasGraph", () => {
     expect(document.querySelectorAll(".react-flow__controls-button")).toHaveLength(2);
   });
 
+  it("строит metadata pills для всех popover row variants", () => {
+    expect(machineCanvasPopoverMeta(transitionRow("PLAY", "playing"))).toEqual(["guard"]);
+    expect(
+      machineCanvasPopoverMeta({
+        machineId: "player",
+        rowId: "row:ANY",
+        rowKind: "config",
+        sourceStateKey: "*",
+        eventType: "ANY",
+        targetLabel: "idle",
+        guardLabel: "guard",
+        confidence: "partial",
+        sourceAnchors: [],
+      }),
+    ).toEqual(["via *", "guard", "partial"]);
+    expect(machineCanvasPopoverMeta(effectRow)).toEqual(["default", "ok"]);
+    expect(machineCanvasPopoverMeta({ ...effectRow, routingLabel: undefined, guardLabel: undefined, confidence: "unknown" })).toEqual([
+      "unknown",
+    ]);
+    expect(machineCanvasPopoverMeta(diagnosticRow)).toEqual(["warning"]);
+    expect(machineCanvasPopoverMeta(unknownRow)).toEqual(["dynamic target", "unknown"]);
+    expect(machineCanvasPopoverProducerMeta(producer)).toEqual(["default", "ok", "exact"]);
+    expect(
+      machineCanvasPopoverProducerMeta({
+        machineId: "worker",
+        machineTitle: "worker",
+        emissionId: "emit:minimal",
+        eventType: "MINIMAL",
+        sourceStateKey: "*",
+        sourceAnchors: [],
+      }),
+    ).toEqual([]);
+  });
+
   it("рендерит fallback badges, semantic refs и popover без producer/guard metadata", async () => {
     const flow = flowFixture();
     const edgeCaseFlow: MachineCanvasReadyFlow = {
@@ -474,6 +517,42 @@ describe("граф MachineCanvasGraph", () => {
 
     fireEvent.mouseLeave(doneLabel);
     expect(screen.queryByTestId(ids.canvas.edgePopover)).toBeNull();
+  });
+
+  it("рендерит popover для diagnostic, unknown rows и producer без metadata", async () => {
+    const flow: MachineCanvasReadyFlow = {
+      ...flowFixture(),
+      edgeGroups: [
+        edge({
+          groupId: "edge:unknown",
+          sourceNodeId: "idle",
+          targetNodeId: "done",
+          label: "UNKNOWN",
+          rows: [diagnosticRow, unknownRow],
+          producers: [
+            {
+              machineId: "worker",
+              machineTitle: "worker",
+              emissionId: "emit:minimal",
+              eventType: "MINIMAL",
+              sourceStateKey: "*",
+              sourceAnchors: [],
+            },
+          ],
+        }),
+      ],
+    };
+
+    render(<MachineCanvasGraph flow={flow} sourceVersion={8} />);
+
+    const label = await screen.findByTestId(ids.canvas.edgeLabel);
+    fireEvent.pointerEnter(label);
+
+    const popover = await screen.findByTestId(ids.canvas.edgePopover);
+    expect(popover.querySelector('[data-popover-row-kind="producer"]')?.textContent).toContain("worker.*");
+    expect(popover.querySelector('[data-popover-row-kind="diagnostic"]')?.textContent).toContain("warning");
+    expect(popover.querySelector('[data-popover-row-kind="unknown"]')?.textContent).toContain("dynamic target");
+    expect(popover.querySelector('[data-popover-row-kind="unknown"]')?.textContent).toContain("unknown");
   });
 
   it("позиционирует self popover снизу и справа в пределах viewport", async () => {

@@ -60,9 +60,27 @@ describe("состояние консоли", () => {
       sourceAnchors: [],
       primaryTarget: { kind: "console" },
     });
+    const withFileLoc = createConsoleEntryFromDiagnostic({
+      diagnosticId: "compiler:1:file",
+      sourceVersion: 1,
+      origin: "compiler",
+      diagnostic: {
+        code: "file",
+        severity: "warning",
+        message: "File loc",
+        loc: {
+          fileName: "store/index.ts",
+          start: { line: 8, column: 3, offset: 80 },
+          end: { line: 8, column: 6, offset: 83 },
+        },
+      },
+      sourceAnchors: [],
+      primaryTarget: { kind: "console" },
+    });
 
     expect(withAnchor.locationLabel).toBe("line 4, column 9");
     expect(withDiagnosticLoc.locationLabel).toBe("line 8, column 3");
+    expect(withFileLoc.locationLabel).toBe("store/index.ts:8:3");
   });
 
   it("добавляет, очищает и фильтрует состояние консоли без лишних ссылок", () => {

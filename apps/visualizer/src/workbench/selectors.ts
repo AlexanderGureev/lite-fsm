@@ -288,10 +288,17 @@ export const selectSourcePanel = createSelector(
 
 export const selectSourceOverlay = createSelector(
   (snapshot) => ({
-    source: snapshot.state.source.source,
+    source: snapshot.state.source,
+    inputMode: snapshot.state.inputMode,
     overlay: snapshot.state.panels.sourceOverlay,
   }),
-  ({ source, overlay }): SourceOverlayView => buildSourceOverlayView(source, overlay),
+  ({ source, inputMode, overlay }): SourceOverlayView =>
+    buildSourceOverlayView(
+      inputMode.kind === "pasted-source"
+        ? { kind: "pasted-source", source: source.source, filename: source.filename }
+        : { kind: inputMode.kind },
+      overlay,
+    ),
 );
 
 export const selectCurrentEmptyPanel = createSelector(

@@ -1,4 +1,5 @@
 import type { WorkbenchDiagnosticRef } from "../diagnostics";
+import { formatSourceLocationLabel } from "../lib/source-location";
 
 export type ConsoleChannel = "system" | "diagnostics" | "debug";
 export type ConsoleChannelFilter = "all" | ConsoleChannel;
@@ -7,7 +8,7 @@ const diagnosticLocationLabel = (diagnostic: WorkbenchDiagnosticRef): string | u
   const loc = diagnostic.sourceAnchors.find((anchor) => anchor.loc)?.loc ?? diagnostic.diagnostic.loc;
   if (!loc) return undefined;
 
-  return `line ${loc.start.line}, column ${loc.start.column}`;
+  return formatSourceLocationLabel(loc);
 };
 
 export type ConsoleEntry = {

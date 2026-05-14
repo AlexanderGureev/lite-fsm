@@ -18,6 +18,7 @@ export const VISUALIZER_TEST_IDS = {
     panel: "visualizer-source-panel",
     search: "visualizer-source-search",
     reset: "visualizer-source-reset",
+    projectExportFile: "visualizer-source-project-export-file",
     editor: "visualizer-source-editor",
     snippet: "visualizer-source-snippet",
     overlay: "visualizer-source-overlay",

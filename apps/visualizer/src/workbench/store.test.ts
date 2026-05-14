@@ -1,5 +1,6 @@
 import type { GraphDiagnostic, LiteFsmGraphDocument } from "@lite-fsm/graph";
 import type { GraphSourceAnchor, GraphVisualizerModel } from "@lite-fsm/graph/view-model";
+import { openMachineBoard } from "../canvas";
 import type { ConsoleEntry } from "../console";
 import type { WorkbenchDiagnosticRef } from "../diagnostics";
 import { describe, expect, it, vi } from "vitest";
@@ -16,6 +17,14 @@ import {
 import type { WorkbenchSnapshot } from "./types";
 
 const documentFixture = { source: { filename: "sample.ts", language: "ts" }, diagnostics: [], machines: [], managers: [] } as unknown as LiteFsmGraphDocument;
+const projectExportDocumentFixture = {
+  version: "lite-fsm.project-graph-export/v1" as const,
+  createdBy: { package: "@lite-fsm/cli" as const, version: "0.0.0" },
+  entry: { path: "store/index.ts" },
+  graph: documentFixture,
+  files: [{ fileName: "store/index.ts", language: "ts" as const, roles: ["entry" as const], hash: "abc" }],
+  diagnostics: [],
+};
 const modelFixture = { version: "lite-fsm.visualizer/v1", machines: [], managers: [], topics: [], diagnostics: [], workbenchMachines: {} } as unknown as GraphVisualizerModel;
 const modelWithDiagnosticsFixture = {
   ...modelFixture,
@@ -43,7 +52,7 @@ const diagnostic = {
   primaryTarget: { kind: "console" as const },
 };
 
-describe("store workbench визуализатора", () => {
+describe("хранилище workbench визуализатора", () => {
   it("не уведомляет subscribers для no-op command", () => {
     const store = createWorkbenchStore();
     const listener = vi.fn();
@@ -418,6 +427,225 @@ describe("store workbench визуализатора", () => {
         requestId: "analyze:1:1",
         sourceVersion: 1,
         document: documentFixture,
+      },
+    ]);
+  });
+
+  it("загружает project export через общий document pipeline без compile и смены pasted source", () => {
+    const store = createWorkbenchStore();
+    const sourceBefore = store.getSnapshot().state.source;
+
+    const output = store.dispatch({ type: "project-export.loaded", exportDocument: projectExportDocumentFixture });
+
+    expect(output.effects).toEqual([
+      {
+        kind: "analyze",
+        requestId: "analyze:2:1",
+        sourceVersion: 2,
+        document: documentFixture,
+      },
+    ]);
+    expect(store.getSnapshot().state.source).toBe(sourceBefore);
+    expect(store.getSnapshot().state.inputVersion).toBe(2);
+    expect(store.getSnapshot().state.inputMode).toEqual({
+      kind: "project-export",
+      document: documentFixture,
+      files: projectExportDocumentFixture.files,
+      entryPath: "store/index.ts",
+    });
+    expect(store.getSnapshot().state.host.capabilities).toEqual({
+      mode: "static",
+      canReadFiles: false,
+      canWriteFiles: false,
+      canApplyPatch: false,
+    });
+    expect(store.getSnapshot().state.compile).toMatchObject({ status: "ready", sequence: 1, document: documentFixture });
+    expect(store.getSnapshot().state.analysis).toMatchObject({ status: "running", requestId: "analyze:2:1" });
+    expect(store.getSnapshot().state.console.entries[0]).toMatchObject({
+      channel: "system",
+      title: "Project export pipeline started",
+    });
+  });
+
+  it("сбрасывает derived UI и dispose-ит активную simulation при загрузке project export", () => {
+    const base = createInitialWorkbenchSnapshot();
+    const source = { ...base.state.source, version: 4 };
+    const store = createWorkbenchStore({
+      ...base,
+      state: {
+        ...base.state,
+        source,
+        inputMode: { kind: "pasted-source", source },
+        inputVersion: 4,
+        compile: { status: "ready", sequence: 9, document: documentFixture, diagnostics: [diagnostic] },
+        analysis: { status: "ready", requestId: "analyze:4:1", diagnostics: analysisDiagnostics, appDiagnostics: [diagnostic] },
+        model: { status: "ready", requestId: "model:4:1", model: modelFixture, diagnostics: [diagnostic] },
+        validation: { status: "ready", requestId: "validation:4:1", providers: [], diagnostics: [diagnostic] },
+        l1: { selectedMachineId: "player", hoveredTopic: "PLAY", machineQuery: "play", topicQuery: "play" },
+        l2: { selectedTopic: "PLAY", query: "play" },
+        l3: { selectedMachineIds: ["player"] },
+        simulation: {
+          ...base.state.simulation,
+          status: "running",
+          selectedMachineIds: ["player"],
+          scope: { kind: "machines", machineIds: ["player"] },
+          diagnostics: [diagnostic],
+        },
+        diagnostics: [diagnostic],
+        console: {
+          ...base.state.console,
+          selectedChannel: "diagnostics",
+          entries: [
+            {
+              entryId: "old",
+              sourceVersion: 4,
+              channel: "diagnostics",
+              title: "Old",
+              message: "Old diagnostic",
+            },
+          ],
+        },
+        panels: {
+          console: { open: true, selectedEntryId: "old" },
+          sourceOverlay: { sourceVersion: 4, title: "Old source", anchors: [] },
+        },
+        canvas: openMachineBoard(base.state.canvas, 4, "player"),
+      },
+    });
+
+    const output = store.dispatch({ type: "project-export.loaded", exportDocument: projectExportDocumentFixture });
+
+    expect(output.effects).toEqual([
+      { kind: "simulation.dispose", sourceVersion: 4 },
+      {
+        kind: "analyze",
+        requestId: "analyze:5:1",
+        sourceVersion: 5,
+        document: documentFixture,
+      },
+    ]);
+    expect(store.getSnapshot().state.compile).toMatchObject({ status: "ready", sequence: 10, document: documentFixture });
+    expect(store.getSnapshot().state.analysis).toMatchObject({ status: "running", requestId: "analyze:5:1", diagnostics: [] });
+    expect(store.getSnapshot().state.model).toEqual({ status: "idle", diagnostics: [] });
+    expect(store.getSnapshot().state.validation).toEqual({ status: "idle", providers: [], diagnostics: [] });
+    expect(store.getSnapshot().state.l1).toEqual({ machineQuery: "", topicQuery: "" });
+    expect(store.getSnapshot().state.l2).toEqual({ query: "" });
+    expect(store.getSnapshot().state.l3).toEqual({ selectedMachineIds: [] });
+    expect(store.getSnapshot().state.simulation).toEqual({
+      status: "idle",
+      scope: { kind: "machines", machineIds: [] },
+      selectedMachineIds: [],
+      recentlyFiredRowIds: [],
+      diagnostics: [],
+    });
+    expect(store.getSnapshot().state.diagnostics).toEqual([]);
+    expect(store.getSnapshot().state.console.selectedChannel).toBe("diagnostics");
+    expect(store.getSnapshot().state.console.entries).toEqual([
+      expect.objectContaining({ entryId: "system:5:project-export:10", channel: "system" }),
+    ]);
+    expect(store.getSnapshot().state.panels).toEqual({
+      console: { open: true, selectedEntryId: undefined },
+      sourceOverlay: undefined,
+    });
+    expect(store.getSnapshot().state.canvas).toEqual({ adapter: { kind: "none" }, items: [] });
+  });
+
+  it("добавляет diagnostic для failed project export parse без запуска pipeline", () => {
+    const store = createWorkbenchStore();
+    const sourceBefore = store.getSnapshot().state.source;
+
+    const output = store.dispatch({
+      type: "project-export.load.failed",
+      fileName: "bad.json",
+      issue: { code: "invalid-version", message: "Unsupported version.", path: "version" },
+    });
+
+    expect(output.effects).toEqual([]);
+    expect(store.getSnapshot().state.source).toBe(sourceBefore);
+    expect(store.getSnapshot().state.inputMode.kind).toBe("pasted-source");
+    expect(store.getSnapshot().state.diagnostics).toMatchObject([
+      {
+        origin: "source",
+        diagnostic: {
+          code: "project-export-invalid-version",
+          message: "bad.json: Unsupported version.",
+        },
+        primaryTarget: { kind: "console" },
+      },
+    ]);
+  });
+
+  it("проверяет stale responses через inputVersion project export", () => {
+    const store = createWorkbenchStore();
+    store.dispatch({ type: "project-export.loaded", exportDocument: projectExportDocumentFixture });
+    const projectSnapshot = store.getSnapshot();
+
+    store.dispatch({ type: "source.changed", source: "export const next = 1;" });
+    expect(store.getSnapshot().state.inputVersion).toBe(3);
+
+    const staleAnalysis = store.dispatch({
+      type: "analysis.succeeded",
+      requestId: "analyze:2:1",
+      sourceVersion: 2,
+      diagnostics: [],
+    });
+
+    expect(staleAnalysis.result).toEqual({ ok: false, reason: "stale-source-version", diagnostics: [] });
+    expect(store.getSnapshot().state.analysis.status).toBe("idle");
+    expect(projectSnapshot.state.inputVersion).toBe(2);
+  });
+
+  it("игнорирует stale compile response после перехода на project export inputVersion", () => {
+    const store = createWorkbenchStore();
+    store.dispatch({ type: "source.open-visualizer" });
+    store.dispatch({ type: "project-export.loaded", exportDocument: projectExportDocumentFixture });
+    const projectSnapshot = store.getSnapshot();
+
+    const staleCompile = store.dispatch({
+      type: "compile.succeeded",
+      requestId: "compile:1:1",
+      sourceVersion: 1,
+      document: { ...documentFixture, source: { filename: "stale.ts", language: "ts" } } as unknown as LiteFsmGraphDocument,
+    });
+
+    expect(staleCompile.result).toEqual({ ok: false, reason: "stale-source-version", diagnostics: [] });
+    expect(store.getSnapshot()).toBe(projectSnapshot);
+  });
+
+  it("возвращает source.changed из project export в pasted-source даже при том же source text", () => {
+    const store = createWorkbenchStore();
+    const originalSource = store.getSnapshot().state.source.source;
+    store.dispatch({ type: "project-export.loaded", exportDocument: projectExportDocumentFixture });
+
+    const output = store.dispatch({ type: "source.changed", source: originalSource });
+
+    expect(output.effects).toEqual([]);
+    expect(store.getSnapshot().state.inputMode.kind).toBe("pasted-source");
+    expect(store.getSnapshot().state.inputVersion).toBe(3);
+    expect(store.getSnapshot().state.source).toMatchObject({
+      source: originalSource,
+      filename: "sample.ts",
+      version: 3,
+    });
+    expect(store.getSnapshot().state.compile).toEqual({ status: "idle", sequence: 0, diagnostics: [] });
+    expect(store.getSnapshot().state.analysis).toEqual({ status: "idle", diagnostics: [], appDiagnostics: [] });
+    expect(store.getSnapshot().state.console.entries).toEqual([]);
+  });
+
+  it("переключается с project export обратно на pasted source compile с новой inputVersion", () => {
+    const store = createWorkbenchStore();
+    store.dispatch({ type: "project-export.loaded", exportDocument: projectExportDocumentFixture });
+
+    const output = store.dispatch({ type: "source.open-visualizer" });
+
+    expect(store.getSnapshot().state.inputMode.kind).toBe("pasted-source");
+    expect(store.getSnapshot().state.inputVersion).toBe(3);
+    expect(store.getSnapshot().state.source.version).toBe(3);
+    expect(output.effects).toEqual([
+      {
+        kind: "compile",
+        requestId: "compile:3:2",
+        source: store.getSnapshot().state.source,
       },
     ]);
   });

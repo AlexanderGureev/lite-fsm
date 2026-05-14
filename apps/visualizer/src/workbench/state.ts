@@ -21,6 +21,7 @@ import type {
 export const EMPTY_ARRAY: readonly never[] = [];
 
 export const createInitialRevisions = (): WorkbenchRevisionIndex => ({
+  input: 0,
   source: 0,
   compile: 0,
   analysis: 0,
@@ -91,24 +92,30 @@ export const createIdleCodegenState = (): CodegenState => ({
   diagnostics: EMPTY_ARRAY,
 });
 
-export const createInitialWorkbenchState = (): VisualizerWorkbenchState => ({
-  host: { capabilities: createStaticHostAdapter().getCapabilities() },
-  source: createSourceSession({ source: MUSIC_APP_SAMPLE_SOURCE, filename: "sample.ts" }),
-  compile: createIdleCompileState(),
-  analysis: createIdleAnalysisState(),
-  model: createIdleModelState(),
-  validation: createIdleValidationState(),
-  activeTab: "source",
-  panels: createInitialPanelState(),
-  l1: createInitialSystemViewState(),
-  l2: createInitialEventCatalogViewState(),
-  l3: createInitialMachineWorkbenchViewState(),
-  simulation: createInitialSimulationState(),
-  diagnostics: EMPTY_ARRAY,
-  console: createInitialConsoleState(),
-  codegen: createIdleCodegenState(),
-  canvas: createInitialCanvasState(),
-});
+export const createInitialWorkbenchState = (): VisualizerWorkbenchState => {
+  const source = createSourceSession({ source: MUSIC_APP_SAMPLE_SOURCE, filename: "sample.ts" });
+
+  return {
+    host: { capabilities: createStaticHostAdapter().getCapabilities() },
+    inputMode: { kind: "pasted-source", source },
+    inputVersion: source.version,
+    source,
+    compile: createIdleCompileState(),
+    analysis: createIdleAnalysisState(),
+    model: createIdleModelState(),
+    validation: createIdleValidationState(),
+    activeTab: "source",
+    panels: createInitialPanelState(),
+    l1: createInitialSystemViewState(),
+    l2: createInitialEventCatalogViewState(),
+    l3: createInitialMachineWorkbenchViewState(),
+    simulation: createInitialSimulationState(),
+    diagnostics: EMPTY_ARRAY,
+    console: createInitialConsoleState(),
+    codegen: createIdleCodegenState(),
+    canvas: createInitialCanvasState(),
+  };
+};
 
 export const createInitialWorkbenchSnapshot = (): WorkbenchSnapshot => ({
   state: createInitialWorkbenchState(),

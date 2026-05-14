@@ -2,12 +2,13 @@ import type { GraphSourceAnchor } from "@lite-fsm/graph/view-model";
 import { describe, expect, it } from "vitest";
 import { buildSourceOverlayView, prioritizeMachineSourceAnchors } from "./source-overlay";
 
-const anchor = (kind: GraphSourceAnchor["kind"], line?: number): GraphSourceAnchor => ({
+const anchor = (kind: GraphSourceAnchor["kind"], line?: number, fileName?: string): GraphSourceAnchor => ({
   kind,
   editable: false,
   ...(line
     ? {
         loc: {
+          ...(fileName ? { fileName } : {}),
           start: { line, column: 1, offset: line * 10 },
           end: { line, column: 5, offset: line * 10 + 4 },
         },
@@ -15,13 +16,18 @@ const anchor = (kind: GraphSourceAnchor["kind"], line?: number): GraphSourceAnch
     : {}),
 });
 
-describe("helpers source overlay для исходника", () => {
+describe("утилиты source overlay исходника", () => {
   it("возвращает закрытый view без overlay state", () => {
-    expect(buildSourceOverlayView("const a = 1;", undefined)).toEqual({ open: false });
+    expect(buildSourceOverlayView({ kind: "pasted-source", source: "const a = 1;", filename: "sample.ts" }, undefined)).toEqual({ open: false });
   });
 
   it("строит fallback, если у anchors нет source range", () => {
-    expect(buildSourceOverlayView("const a = 1;", { sourceVersion: 1, title: "missing", anchors: [anchor("machine")] })).toEqual({
+    expect(
+      buildSourceOverlayView(
+        { kind: "pasted-source", source: "const a = 1;", filename: "sample.ts" },
+        { sourceVersion: 1, title: "missing", anchors: [anchor("machine")] },
+      ),
+    ).toEqual({
       open: true,
       title: "missing",
       sourceVersion: 1,
@@ -33,11 +39,14 @@ describe("helpers source overlay для исходника", () => {
   });
 
   it("строит snippet с context lines и selected range", () => {
-    const view = buildSourceOverlayView(["one", "two", "three", "four", "five"].join("\n"), {
-      sourceVersion: 2,
-      title: "flow",
-      anchors: [anchor("config-transition", 3)],
-    });
+    const view = buildSourceOverlayView(
+      { kind: "pasted-source", source: ["one", "two", "three", "four", "five"].join("\n"), filename: "sample.ts" },
+      {
+        sourceVersion: 2,
+        title: "flow",
+        anchors: [anchor("config-transition", 3)],
+      },
+    );
 
     expect(view).toMatchObject({
       open: true,
@@ -56,21 +65,24 @@ describe("helpers source overlay для исходника", () => {
   });
 
   it("пропускает anchors без loc и поддерживает CRLF/multi-line ranges", () => {
-    const view = buildSourceOverlayView(["one", "two", "three", "four", "five", "six"].join("\r\n"), {
-      sourceVersion: 4,
-      title: "windows",
-      anchors: [
-        anchor("diagnostic"),
-        {
-          kind: "reducer-branch",
-          editable: false,
-          loc: {
-            start: { line: 3, column: 1, offset: 10 },
-            end: { line: 4, column: 8, offset: 24 },
+    const view = buildSourceOverlayView(
+      { kind: "pasted-source", source: ["one", "two", "three", "four", "five", "six"].join("\r\n"), filename: "sample.ts" },
+      {
+        sourceVersion: 4,
+        title: "windows",
+        anchors: [
+          anchor("diagnostic"),
+          {
+            kind: "reducer-branch",
+            editable: false,
+            loc: {
+              start: { line: 3, column: 1, offset: 10 },
+              end: { line: 4, column: 8, offset: 24 },
+            },
           },
-        },
-      ],
-    });
+        ],
+      },
+    );
 
     expect(view.open).toBe(true);
     if (view.open) {
@@ -88,20 +100,23 @@ describe("helpers source overlay для исходника", () => {
 
   it("ограничивает длинный source fragment", () => {
     const source = Array.from({ length: 30 }, (_, index) => `line ${index + 1}`).join("\n");
-    const view = buildSourceOverlayView(source, {
-      sourceVersion: 3,
-      title: "long",
-      anchors: [
-        {
-          kind: "effect-emission",
-          editable: false,
-          loc: {
-            start: { line: 20, column: 1, offset: 200 },
-            end: { line: 30, column: 1, offset: 300 },
+    const view = buildSourceOverlayView(
+      { kind: "pasted-source", source, filename: "sample.ts" },
+      {
+        sourceVersion: 3,
+        title: "long",
+        anchors: [
+          {
+            kind: "effect-emission",
+            editable: false,
+            loc: {
+              start: { line: 20, column: 1, offset: 200 },
+              end: { line: 30, column: 1, offset: 300 },
+            },
           },
-        },
-      ],
-    });
+        ],
+      },
+    );
 
     expect(view.open).toBe(true);
     if (view.open) {
@@ -113,20 +128,23 @@ describe("helpers source overlay для исходника", () => {
 
   it("не обрезает выбранный range лимитом контекстного fragment", () => {
     const source = Array.from({ length: 40 }, (_, index) => `line ${index + 1}`).join("\n");
-    const view = buildSourceOverlayView(source, {
-      sourceVersion: 5,
-      title: "appShell",
-      anchors: [
-        {
-          kind: "machine",
-          editable: false,
-          loc: {
-            start: { line: 7, column: 1, offset: 70 },
-            end: { line: 21, column: 4, offset: 214 },
+    const view = buildSourceOverlayView(
+      { kind: "pasted-source", source, filename: "sample.ts" },
+      {
+        sourceVersion: 5,
+        title: "appShell",
+        anchors: [
+          {
+            kind: "machine",
+            editable: false,
+            loc: {
+              start: { line: 7, column: 1, offset: 70 },
+              end: { line: 21, column: 4, offset: 214 },
+            },
           },
-        },
-      ],
-    });
+        ],
+      },
+    );
 
     expect(view.open).toBe(true);
     if (view.open) {
@@ -147,5 +165,93 @@ describe("helpers source overlay для исходника", () => {
         anchor("machine", 2),
       ]).map((item) => item.kind),
     ).toEqual(["machine", "config-transition", "effect-emission", "diagnostic"]);
+  });
+
+  it("показывает file-aware fallback для project export без source text", () => {
+    const view = buildSourceOverlayView({ kind: "project-export" }, {
+      sourceVersion: 6,
+      title: "root",
+      anchors: [anchor("machine", 3, "store/root.ts")],
+    });
+
+    expect(view).toMatchObject({
+      open: true,
+      locationLabel: "store/root.ts:3:1",
+      lines: [],
+      fallback: "store/root.ts:3:1\nSource text is not included in the JSON export.",
+    });
+  });
+
+  it("оставляет anchors из разных files отдельными source items", () => {
+    const view = buildSourceOverlayView({ kind: "project-export" }, {
+      sourceVersion: 7,
+      title: "same offset",
+      anchors: [anchor("diagnostic", 3, "a.ts"), anchor("diagnostic", 3, "b.ts")],
+    });
+
+    expect(view.open).toBe(true);
+    if (view.open) {
+      expect(view.anchorCount).toBe(2);
+      expect(view.locationLabel).toBe("a.ts:3:1");
+    }
+  });
+
+  it("не применяет project file loc к текущему pasted source", () => {
+    const view = buildSourceOverlayView(
+      { kind: "pasted-source", source: "one\ntwo\nthree", filename: "sample.ts" },
+      { sourceVersion: 8, title: "foreign", anchors: [anchor("machine", 2, "project.ts")] },
+    );
+
+    expect(view).toMatchObject({
+      open: true,
+      locationLabel: "project.ts:2:1",
+      lines: [],
+      fallback: "project.ts:2:1\nSource text for this file is not available in the current pasted source.",
+    });
+  });
+
+  it("показывает snippet для file-aware loc текущего pasted source file", () => {
+    const view = buildSourceOverlayView(
+      { kind: "pasted-source", source: "one\ntwo\nthree", filename: "sample.ts" },
+      { sourceVersion: 8, title: "same file", anchors: [anchor("machine", 2, "sample.ts")] },
+    );
+
+    expect(view).toMatchObject({
+      open: true,
+      locationLabel: "sample.ts:2:1",
+      lines: [
+        { line: 1, code: "one", selected: false },
+        { line: 2, code: "two", selected: true },
+        { line: 3, code: "three", selected: false },
+      ],
+    });
+  });
+
+  it("показывает line/column fallback для project export anchor без fileName", () => {
+    const view = buildSourceOverlayView({ kind: "project-export" }, {
+      sourceVersion: 8,
+      title: "single source loc",
+      anchors: [anchor("machine", 2)],
+    });
+
+    expect(view).toMatchObject({
+      open: true,
+      locationLabel: "line 2, column 1",
+      lines: [],
+      fallback: "line 2, column 1\nSource text is not included in the JSON export.",
+    });
+  });
+
+  it("показывает fallback для local-session без readable host", () => {
+    const view = buildSourceOverlayView({ kind: "local-session" }, {
+      sourceVersion: 9,
+      title: "local",
+      anchors: [anchor("machine", 2, "project.ts")],
+    });
+
+    expect(view).toMatchObject({
+      open: true,
+      fallback: "project.ts:2:1\nSource text is not available from the current visualizer host.",
+    });
   });
 });

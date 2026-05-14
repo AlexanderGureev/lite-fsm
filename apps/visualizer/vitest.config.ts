@@ -24,6 +24,7 @@ export default defineConfig({
         "src/features/source/**/*.{ts,tsx}",
         "src/features/system/**/*.{ts,tsx}",
         "src/lib/**/*.{ts,tsx}",
+        "src/project-export/**/*.{ts,tsx}",
         "src/services/**/*.{ts,tsx}",
         "src/source/**/*.{ts,tsx}",
         "src/ui/visualizer.tsx",

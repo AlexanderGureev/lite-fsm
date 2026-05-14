@@ -10,8 +10,8 @@ import { createNoopValidationRegistry } from "../../validation";
 import { openMachineBoard } from "../../canvas";
 import { TooltipProvider } from "@/ui/tooltip";
 import { EditorView } from "@codemirror/view";
-import { act, fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import type { GraphVisualizerModel } from "@lite-fsm/graph/view-model";
 import { Shell } from "./Shell";
 
@@ -79,6 +79,21 @@ const consoleEntries: readonly ConsoleEntry[] = [
 ];
 
 const emptyAnchors = [] as const;
+
+const projectExportDocument = {
+  version: "lite-fsm.project-graph-export/v1",
+  createdBy: { package: "@lite-fsm/cli", version: "0.0.0" },
+  entry: { path: "store/index.ts" },
+  graph: {
+    version: "lite-fsm.graph/v1",
+    source: { filename: "store/index.ts", language: "ts", kind: "project", entryFileName: "store/index.ts" },
+    machines: [],
+    managers: [],
+    diagnostics: [],
+  },
+  files: [{ fileName: "store/index.ts", language: "ts", roles: ["entry"], hash: "abc" }],
+  diagnostics: [],
+};
 
 const machineCanvasModelFixture = (): GraphVisualizerModel =>
   ({
@@ -223,6 +238,154 @@ describe("оболочка Shell", () => {
 
     fireEvent.click(screen.getByTestId(ids.console.close));
     expect(store.getSnapshot().state.panels.console.open).toBe(false);
+  });
+
+  it("читает CLI JSON export через file input и запускает document pipeline", async () => {
+    const services: EffectRunnerServices = {
+      compiler: {
+        compile: vi.fn(async (input) => ({ ok: true as const, sourceVersion: input.sourceVersion, document: projectExportDocument.graph as never, diagnostics: [] })),
+      },
+      analyzer: {
+        analyze: vi.fn(async (input) => ({ ok: true as const, sourceVersion: input.sourceVersion, diagnostics: [] })),
+      },
+      visualizerModel: {
+        build: vi.fn(async (input) => ({ ok: true as const, sourceVersion: input.sourceVersion, model: machineCanvasModelFixture() })),
+      },
+      simulation: createLocalSimulationService(),
+      validation: createNoopValidationRegistry(),
+      codegen: createNoopCodegenPlanner(),
+    };
+    const store = renderShell(createInitialWorkbenchSnapshot(), services);
+    const sourceBefore = store.getSnapshot().state.source;
+
+    fireEvent.change(screen.getByTestId(ids.source.projectExportFile), {
+      target: {
+        files: [new File([JSON.stringify(projectExportDocument)], "graph.json", { type: "application/json" })],
+      },
+    });
+
+    await waitFor(() => expect(store.getSnapshot().state.model.status).toBe("ready"));
+
+    expect(services.compiler.compile).not.toHaveBeenCalled();
+    expect(services.analyzer.analyze).toHaveBeenCalledWith({
+      requestId: "analyze:2:1",
+      sourceVersion: 2,
+      document: projectExportDocument.graph,
+    });
+    expect(store.getSnapshot().state.inputMode).toMatchObject({
+      kind: "project-export",
+      entryPath: "store/index.ts",
+      files: projectExportDocument.files,
+    });
+    expect(store.getSnapshot().state.host.capabilities).toEqual({
+      mode: "static",
+      canReadFiles: false,
+      canWriteFiles: false,
+      canApplyPatch: false,
+    });
+    expect(store.getSnapshot().state.source).toBe(sourceBefore);
+  });
+
+  it("рендерит file input только для JSON export файлов", () => {
+    renderShell();
+
+    const input = screen.getByTestId(ids.source.projectExportFile);
+
+    expect(input.getAttribute("type")).toBe("file");
+    expect(input.getAttribute("accept")).toBe(".json,application/json");
+  });
+
+  it("показывает diagnostic для invalid project export file без смены source", async () => {
+    const store = renderShell();
+    const sourceBefore = store.getSnapshot().state.source;
+
+    fireEvent.change(screen.getByTestId(ids.source.projectExportFile), {
+      target: {
+        files: [new File(["{}"], "bad.json", { type: "application/json" })],
+      },
+    });
+
+    await waitFor(() => expect(store.getSnapshot().state.diagnostics).toHaveLength(1));
+
+    expect(store.getSnapshot().state.source).toBe(sourceBefore);
+    expect(store.getSnapshot().state.inputMode.kind).toBe("pasted-source");
+    expect(store.getSnapshot().state.diagnostics[0]?.diagnostic.code).toBe("project-export-invalid-version");
+    expect(store.getSnapshot().state.console.entries[0]?.message).toContain("bad.json");
+  });
+
+  it("показывает diagnostic для синтаксически invalid JSON без смены model/source", async () => {
+    const store = renderShell();
+    const sourceBefore = store.getSnapshot().state.source;
+    const modelBefore = store.getSnapshot().state.model;
+
+    fireEvent.change(screen.getByTestId(ids.source.projectExportFile), {
+      target: {
+        files: [new File(["{"], "broken-json.json", { type: "application/json" })],
+      },
+    });
+
+    await waitFor(() => expect(store.getSnapshot().state.diagnostics).toHaveLength(1));
+
+    expect(store.getSnapshot().state.source).toBe(sourceBefore);
+    expect(store.getSnapshot().state.model).toBe(modelBefore);
+    expect(store.getSnapshot().state.inputMode.kind).toBe("pasted-source");
+    expect(store.getSnapshot().state.diagnostics[0]?.diagnostic.code).toBe("project-export-invalid-json");
+    expect(store.getSnapshot().state.console.entries[0]?.message).toBe("broken-json.json: Project graph export must be valid JSON.");
+  });
+
+  it("показывает diagnostic если browser file read отклонен", async () => {
+    const store = renderShell();
+    const failingFile = {
+      name: "broken.json",
+      text: async () => {
+        throw new Error("read failed");
+      },
+    };
+
+    fireEvent.change(screen.getByTestId(ids.source.projectExportFile), {
+      target: {
+        files: [failingFile],
+      },
+    });
+
+    await waitFor(() => expect(store.getSnapshot().state.diagnostics).toHaveLength(1));
+
+    expect(store.getSnapshot().state.diagnostics[0]?.diagnostic.message).toBe("broken.json: read failed");
+  });
+
+  it("игнорирует file input change без выбранного файла", () => {
+    const store = renderShell();
+    const before = store.getSnapshot();
+
+    fireEvent.change(screen.getByTestId(ids.source.projectExportFile), {
+      target: {
+        files: [],
+      },
+    });
+
+    expect(store.getSnapshot()).toBe(before);
+  });
+
+  it("показывает fallback diagnostic message для unknown file read rejection", async () => {
+    const store = renderShell();
+    const failingFile = {
+      name: "unknown.json",
+      text: async () => {
+        throw "read failed";
+      },
+    };
+
+    fireEvent.change(screen.getByTestId(ids.source.projectExportFile), {
+      target: {
+        files: [failingFile],
+      },
+    });
+
+    await waitFor(() => expect(store.getSnapshot().state.diagnostics).toHaveLength(1));
+
+    expect(store.getSnapshot().state.diagnostics[0]?.diagnostic.message).toBe(
+      "unknown.json: Could not read project graph export file.",
+    );
   });
 
   it("рендерит записи консоли, channel buttons и status tones для ready/failed states", () => {

@@ -163,7 +163,7 @@ const popoverLayerLabels: Record<MachineCanvasPopoverLayer, string> = {
   producer: "emit",
 };
 
-const machineCanvasPopoverMeta = (row: MachineCanvasPopoverRow): string[] => {
+export const machineCanvasPopoverMeta = (row: MachineCanvasPopoverRow): string[] => {
   switch (row.rowKind) {
     case "config":
     case "reducer":
@@ -185,7 +185,7 @@ const machineCanvasPopoverMeta = (row: MachineCanvasPopoverRow): string[] => {
   }
 };
 
-const machineCanvasPopoverProducerMeta = (producer: MachineCanvasPopoverProducer): string[] => [
+export const machineCanvasPopoverProducerMeta = (producer: MachineCanvasPopoverProducer): string[] => [
   ...(producer.routingLabel ? [producer.routingLabel] : []),
   ...(producer.guardLabel ? [producer.guardLabel] : []),
   ...(producer.confidence ? [producer.confidence] : []),
