@@ -14,7 +14,7 @@ import type { ConsoleChannelFilter, ConsoleState } from "../console";
 import type { WorkbenchDiagnosticRef } from "../diagnostics";
 import type { SourceSession } from "../source";
 import type { VisualizerHostCapabilities, VisualizerHostState, VisualizerWorkbenchRowCommandTarget } from "../services";
-import type { LiteFsmProjectGraphExportDocument, ProjectGraphExportParseIssue } from "../project-export";
+import type { LiteFsmProjectGraphExportDocument, LiteFsmProjectGraphSourceBundle, ProjectGraphExportParseIssue } from "../project-export";
 import type { ValidationState } from "../validation";
 
 type VisualizerTransitionRowCommandTarget = Extract<VisualizerWorkbenchRowCommandTarget, { kind: "transition" }>;
@@ -29,6 +29,7 @@ export type VisualizerInputMode =
       document: LiteFsmGraphDocument;
       files: readonly LiteFsmGraphProjectFile[];
       entryPath: string;
+      sources?: LiteFsmProjectGraphSourceBundle;
     }
   | {
       kind: "local-session";

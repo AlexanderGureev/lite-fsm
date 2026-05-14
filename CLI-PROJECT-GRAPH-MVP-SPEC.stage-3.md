@@ -89,7 +89,8 @@ type LiteFsmProjectGraphExportDocument = {
    `tests/fixtures/project-graph-export/v1/real-store-shape.json`.
 4. `diagnostics` на верхнем уровне содержит только CLI diagnostics; graph
    diagnostics остаются в `graph.diagnostics`.
-5. JSON export не содержит original source text.
+5. JSON export по умолчанию не содержит original source text; optional
+   top-level source bundle может присутствовать только при явном CLI opt-in.
 
 ### Project Export Input
 
@@ -187,7 +188,7 @@ type VisualizerInputMode =
 5. Показывать source overlay fallback, если original source text для
    `loc.fileName` недоступен.
 6. Fallback должен показывать хотя бы anchor label `<path>:<line>:<column>` и
-   короткое сообщение, что source text не включен в JSON export.
+   короткое сообщение, что source text недоступен в текущем export.
 7. Если future local host adapter умеет читать `loc.fileName`, source overlay
    может показать snippet из этого файла, но fallback behavior project export
    должен остаться независимым от Source tab.

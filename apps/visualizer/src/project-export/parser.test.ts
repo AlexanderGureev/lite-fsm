@@ -70,6 +70,42 @@ describe("парсер project graph export для визуализатора", 
     expect(parse(document)).toEqual({ ok: true, document });
   });
 
+  it("принимает optional embedded source bundle", () => {
+    const document = {
+      ...validDocument(),
+      sources: {
+        files: [
+          {
+            fileName: "store/index.ts",
+            language: "ts",
+            hash: "abc",
+            text: "export const manager = 1;",
+          },
+        ],
+      },
+    };
+
+    expect(parse(document)).toEqual({ ok: true, document });
+  });
+
+  it("принимает embedded source bundle для нескольких files только в project order", () => {
+    const document = {
+      ...validDocument(),
+      files: [
+        { fileName: "store/index.ts", language: "ts", roles: ["entry"], hash: "entry" },
+        { fileName: "store/machine.ts", language: "ts", roles: ["machine"], hash: "machine" },
+      ],
+      sources: {
+        files: [
+          { fileName: "store/index.ts", language: "ts", hash: "entry", text: "export const entry = 1;" },
+          { fileName: "store/machine.ts", language: "ts", hash: "machine", text: "export const machine = 2;" },
+        ],
+      },
+    };
+
+    expect(parse(document)).toEqual({ ok: true, document });
+  });
+
   it("отклоняет invalid JSON", () => {
     expect(parseProjectGraphExportDocumentText("{")).toEqual({
       ok: false,
@@ -251,6 +287,124 @@ describe("парсер project graph export для визуализатора", 
       ok: false,
       issue: { path: "files.0.roles" },
     });
+    expect(parse({ ...validDocument(), files: [validDocument().files[0], validDocument().files[0]] })).toMatchObject({
+      ok: false,
+      issue: { path: "files.1.fileName" },
+    });
+  });
+
+  it("валидирует optional embedded source bundle contract", () => {
+    const document = {
+      ...validDocument(),
+      sources: {
+        files: [
+          {
+            fileName: "store/index.ts",
+            language: "ts",
+            hash: "abc",
+            text: "export const manager = 1;",
+          },
+        ],
+      },
+    };
+
+    expect(parse({ ...document, sources: null })).toMatchObject({ ok: false, issue: { path: "sources" } });
+    expect(parse({ ...document, sources: { files: null } })).toMatchObject({ ok: false, issue: { path: "sources.files" } });
+    expect(parse({ ...document, sources: { files: [null] } })).toMatchObject({
+      ok: false,
+      issue: { path: "sources.files.0" },
+    });
+    expect(parse({ ...document, sources: { files: [{ ...document.sources.files[0], fileName: 1 }] } })).toMatchObject({
+      ok: false,
+      issue: { path: "sources.files.0.fileName" },
+    });
+    expect(parse({ ...document, sources: { files: [{ ...document.sources.files[0], language: "tsx" }] } })).toMatchObject({
+      ok: false,
+      issue: { path: "sources.files.0.language" },
+    });
+    expect(parse({ ...document, sources: { files: [{ ...document.sources.files[0], hash: 1 }] } })).toMatchObject({
+      ok: false,
+      issue: { path: "sources.files.0.hash" },
+    });
+    expect(parse({ ...document, sources: { files: [{ ...document.sources.files[0], text: 1 }] } })).toMatchObject({
+      ok: false,
+      issue: { path: "sources.files.0.text" },
+    });
+    expect(parse({ ...document, sources: { files: [] } })).toMatchObject({
+      ok: false,
+      issue: { path: "sources.files" },
+    });
+    expect(
+      parse({
+        ...document,
+        files: [
+          { fileName: "store/index.ts", language: "ts", roles: ["entry"], hash: "abc" },
+          { fileName: "store/machine.ts", language: "ts", roles: ["machine"], hash: "def" },
+        ],
+        sources: {
+          files: [
+            document.sources.files[0],
+            { ...document.sources.files[0], hash: "abc" },
+          ],
+        },
+      }),
+    ).toMatchObject({
+      ok: false,
+      issue: { path: "sources.files.1.fileName" },
+    });
+    expect(parse({ ...document, sources: { files: [{ ...document.sources.files[0], fileName: "other.ts" }] } })).toMatchObject({
+      ok: false,
+      issue: { path: "sources.files.0.fileName" },
+    });
+    expect(parse({ ...document, sources: { files: [{ ...document.sources.files[0], hash: "def" }] } })).toMatchObject({
+      ok: false,
+      issue: { path: "sources.files.0.hash" },
+    });
+    expect(
+      parse({
+        ...document,
+        files: [
+          { fileName: "store/index.ts", language: "ts", roles: ["entry"], hash: "abc" },
+          { fileName: "store/machine.ts", language: "ts", roles: ["machine"], hash: "def" },
+        ],
+        sources: {
+          files: [
+            { fileName: "store/machine.ts", language: "ts", hash: "def", text: "export const machine = 2;" },
+            { fileName: "store/index.ts", language: "ts", hash: "abc", text: "export const entry = 1;" },
+          ],
+        },
+      }),
+    ).toMatchObject({
+      ok: false,
+      issue: { path: "sources.files.0.fileName" },
+    });
+    expect(
+      parse({
+        ...document,
+        files: [{ ...validDocument().files[0], language: "ts", hash: "abc" }],
+        sources: { files: [{ ...document.sources.files[0], language: "js" }] },
+      }),
+    ).toMatchObject({
+      ok: false,
+      issue: { path: "sources.files.0.language" },
+    });
+    expect(
+      parse({
+        ...document,
+        files: [{ ...validDocument().files[0], language: "js" }],
+        sources: { files: [document.sources.files[0]] },
+      }),
+    ).toMatchObject({
+      ok: false,
+      issue: { path: "files.0.language" },
+    });
+    expect(
+      parse({
+        ...document,
+        files: [{ ...validDocument().files[0], language: "ts", hash: "abc" }],
+        sources: { files: [{ ...document.sources.files[0], language: "ts" }] },
+      }),
+    ).toEqual({ ok: true, document });
   });
 
   it("валидирует CLI diagnostics contract", () => {

@@ -43,6 +43,7 @@ export const registerExportGraphCommand = (
     .option("--entry <path>", "entrypoint TypeScript file")
     .option("--out <path>", "output JSON file")
     .option("--tsconfig <path>", "explicit tsconfig for TypeScript module resolution")
+    .option("--include-source", "embed project source text in JSON export")
     .action(async (options: RawExportGraphOptions) => {
       setResult(await runExportGraphCommand(context, options));
     });

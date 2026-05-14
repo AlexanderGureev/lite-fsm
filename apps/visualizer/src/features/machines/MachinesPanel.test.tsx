@@ -201,6 +201,8 @@ describe("панель MachinesPanel", () => {
     expect(screen.getByTestId(ids.workbench.machineCard).getAttribute("data-machine-id")).toBe("player");
     expect(screen.getByTestId(ids.workbench.currentState).textContent).toBe("idle");
     expect(screen.getAllByTestId(ids.workbench.timelineStep)).toHaveLength(4);
+    expect(screen.getByTestId(ids.workbench.eventSelect).textContent).toContain("PLAY");
+    expect(screen.queryByText("STOP")).toBeNull();
 
     fireEvent.click(screen.getAllByTestId(ids.workbench.machinePickerRow)[1]);
     fireEvent.click(screen.getByTestId(ids.workbench.eventSend));
@@ -270,6 +272,49 @@ describe("панель MachinesPanel", () => {
 
     fireEvent.click(screen.getByTestId(ids.workbench.sourceAction));
     expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "source.overlay.opened" }));
+  });
+
+  it("монтирует event options только при открытом select", async () => {
+    const dispatch = dispatchOf();
+    const previousScrollIntoView = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = vi.fn();
+    renderMachinesPanel(viewFixture(), dispatch);
+
+    try {
+      expect(screen.queryByText("STOP")).toBeNull();
+
+      fireEvent.keyDown(screen.getByTestId(ids.workbench.eventSelect), { key: "Enter" });
+
+      await waitFor(() => expect(screen.getByText("STOP")).toBeTruthy());
+      fireEvent.click(screen.getByText("STOP"));
+      await waitFor(() => expect(screen.queryByText("STOP")).toBeNull());
+    } finally {
+      if (previousScrollIntoView) {
+        Element.prototype.scrollIntoView = previousScrollIntoView;
+      } else {
+        delete (Element.prototype as Partial<Element>).scrollIntoView;
+      }
+    }
+  });
+
+  it("не рендерит группу not accepted когда таких событий нет", async () => {
+    const dispatch = dispatchOf();
+    const previousScrollIntoView = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = vi.fn();
+    renderMachinesPanel(viewFixture({ sendOptions: [{ eventType: "PLAY", group: "available" }] }), dispatch);
+
+    try {
+      fireEvent.keyDown(screen.getByTestId(ids.workbench.eventSelect), { key: "Enter" });
+
+      await waitFor(() => expect(screen.getByText("available now (1)")).toBeTruthy());
+      expect(screen.queryByText("not accepted")).toBeNull();
+    } finally {
+      if (previousScrollIntoView) {
+        Element.prototype.scrollIntoView = previousScrollIntoView;
+      } else {
+        delete (Element.prototype as Partial<Element>).scrollIntoView;
+      }
+    }
   });
 
   it("открывает graph action для конкретной card при нескольких selected machines", () => {

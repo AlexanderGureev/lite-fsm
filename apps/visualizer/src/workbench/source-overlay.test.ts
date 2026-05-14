@@ -182,6 +182,147 @@ describe("утилиты source overlay исходника", () => {
     });
   });
 
+  it("показывает snippet для project export с embedded source text", () => {
+    const view = buildSourceOverlayView(
+      {
+        kind: "project-export",
+        sources: {
+          files: [
+            {
+              fileName: "store/root.ts",
+              language: "ts",
+              hash: "abc",
+              text: ["one", "two", "three", "four"].join("\n"),
+            },
+          ],
+        },
+      },
+      {
+        sourceVersion: 6,
+        title: "root",
+        anchors: [anchor("machine", 3, "store/root.ts")],
+      },
+    );
+
+    expect(view).toMatchObject({
+      open: true,
+      locationLabel: "store/root.ts:3:1",
+      lines: [
+        { line: 1, code: "one", selected: false },
+        { line: 2, code: "two", selected: false },
+        { line: 3, code: "three", selected: true },
+        { line: 4, code: "four", selected: false },
+      ],
+    });
+  });
+
+  it("выбирает embedded source по fileName среди нескольких project files", () => {
+    const view = buildSourceOverlayView(
+      {
+        kind: "project-export",
+        sources: {
+          files: [
+            {
+              fileName: "store/root.ts",
+              language: "ts",
+              hash: "root",
+              text: ["root one", "root two", "root three"].join("\n"),
+            },
+            {
+              fileName: "store/player.ts",
+              language: "ts",
+              hash: "player",
+              text: ["player one", "player two", "player three"].join("\n"),
+            },
+          ],
+        },
+      },
+      {
+        sourceVersion: 6,
+        title: "player",
+        anchors: [anchor("machine", 2, "store/player.ts")],
+      },
+    );
+
+    expect(view).toMatchObject({
+      open: true,
+      locationLabel: "store/player.ts:2:1",
+      lines: [
+        { line: 1, code: "player one", selected: false },
+        { line: 2, code: "player two", selected: true },
+        { line: 3, code: "player three", selected: false },
+      ],
+    });
+  });
+
+  it("показывает fallback для embedded sources, если source anchor не file-aware", () => {
+    const view = buildSourceOverlayView(
+      {
+        kind: "project-export",
+        sources: {
+          files: [{ fileName: "store/root.ts", language: "ts", hash: "abc", text: "const root = 1;" }],
+        },
+      },
+      {
+        sourceVersion: 6,
+        title: "root",
+        anchors: [anchor("machine", 1)],
+      },
+    );
+
+    expect(view).toMatchObject({
+      open: true,
+      locationLabel: "line 1, column 1",
+      lines: [],
+      fallback: "line 1, column 1\nSource text is not included in the JSON export.",
+    });
+  });
+
+  it("поддерживает пустой embedded source file и clamps выделение к первой строке", () => {
+    const view = buildSourceOverlayView(
+      {
+        kind: "project-export",
+        sources: {
+          files: [{ fileName: "empty.ts", language: "ts", hash: "empty", text: "" }],
+        },
+      },
+      {
+        sourceVersion: 6,
+        title: "empty",
+        anchors: [anchor("machine", 9, "empty.ts")],
+      },
+    );
+
+    expect(view).toMatchObject({
+      open: true,
+      locationLabel: "empty.ts:9:1",
+      lines: [{ line: 1, code: "", selected: true }],
+    });
+  });
+
+  it("показывает fallback для project export sources без нужного file", () => {
+    const view = buildSourceOverlayView(
+      {
+        kind: "project-export",
+        sources: {
+          files: [{ fileName: "other.ts", language: "ts", hash: "abc", text: "const other = 1;" }],
+        },
+      },
+      {
+        sourceVersion: 6,
+        title: "root",
+        anchors: [anchor("machine", 3, "store/root.ts")],
+      },
+    );
+
+    expect(view).toMatchObject({
+      open: true,
+      locationLabel: "store/root.ts:3:1",
+      lines: [],
+      fallback: "store/root.ts:3:1\nSource text is not included in the JSON export.",
+    });
+  });
+
   it("оставляет anchors из разных files отдельными source items", () => {
     const view = buildSourceOverlayView({ kind: "project-export" }, {
       sourceVersion: 7,

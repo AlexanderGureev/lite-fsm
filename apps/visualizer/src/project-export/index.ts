@@ -8,6 +8,8 @@ export {
 export type {
   CliDiagnostic,
   LiteFsmProjectGraphExportDocument,
+  LiteFsmProjectGraphSourceBundle,
+  LiteFsmProjectGraphSourceFile,
   ProjectGraphExportParseIssue,
   ProjectGraphExportParseResult,
 } from "./types";

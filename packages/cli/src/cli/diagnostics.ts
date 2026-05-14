@@ -6,6 +6,7 @@ export type CliDiagnosticCode =
   | "LFC_TSCONFIG_INVALID"
   | "LFC_GRAPH_PROJECT_FAILED"
   | "LFC_NO_MACHINES_EXPORTED"
+  | "LFC_SOURCE_BUNDLE_FILE_UNREADABLE"
   | "LFC_WRITE_FAILED";
 
 export type CliDiagnostic = {

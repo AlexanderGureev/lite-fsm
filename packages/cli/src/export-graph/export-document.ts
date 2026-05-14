@@ -19,6 +19,18 @@ export type LiteFsmProjectGraphExportDocument = {
   graph: LiteFsmGraphDocument;
   files: readonly LiteFsmGraphProjectFile[];
   diagnostics: readonly CliDiagnostic[];
+  sources?: LiteFsmProjectGraphSourceBundle;
+};
+
+export type LiteFsmProjectGraphSourceFile = {
+  fileName: string;
+  language: "ts";
+  hash: string;
+  text: string;
+};
+
+export type LiteFsmProjectGraphSourceBundle = {
+  files: readonly LiteFsmProjectGraphSourceFile[];
 };
 
 export type CreateProjectGraphExportDocumentOptions = {
@@ -26,6 +38,7 @@ export type CreateProjectGraphExportDocumentOptions = {
   tsconfigPath?: string;
   graphResult: LiteFsmGraphProjectResult;
   diagnostics: readonly CliDiagnostic[];
+  sources?: LiteFsmProjectGraphSourceBundle;
 };
 
 export const createProjectGraphExportDocument = ({
@@ -33,6 +46,7 @@ export const createProjectGraphExportDocument = ({
   tsconfigPath,
   graphResult,
   diagnostics,
+  sources,
 }: CreateProjectGraphExportDocumentOptions): LiteFsmProjectGraphExportDocument => ({
   version: PROJECT_GRAPH_EXPORT_VERSION,
   createdBy: {
@@ -46,6 +60,7 @@ export const createProjectGraphExportDocument = ({
   graph: graphResult.document,
   files: graphResult.files,
   diagnostics,
+  ...(sources ? { sources } : {}),
 });
 
 export const stringifyProjectGraphExportDocument = (document: LiteFsmProjectGraphExportDocument): string => {

@@ -296,7 +296,9 @@ export const selectSourceOverlay = createSelector(
     buildSourceOverlayView(
       inputMode.kind === "pasted-source"
         ? { kind: "pasted-source", source: source.source, filename: source.filename }
-        : { kind: inputMode.kind },
+        : inputMode.kind === "project-export"
+          ? { kind: "project-export", sources: inputMode.sources }
+          : { kind: inputMode.kind },
       overlay,
     ),
 );

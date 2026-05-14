@@ -185,7 +185,8 @@ rest shape для будущих tests.
 13. Effect helper call `uiButtonClickEffect(deps)` внутри effect body не
     требует deep expansion imported function body. Допустим partial diagnostic,
     если текущий compiler semantics не умеет вывести emission через этот call.
-14. JSON export не содержит source text.
+14. JSON export по умолчанию не содержит source text; `--include-source`
+    может добавить source bundle вне `graph`.
 
 ### Playground Examples Compatibility
 
@@ -290,7 +291,7 @@ Manifest current playground smoke entries:
 10. namespace object spread вида `{ ...machines }`;
 11. inline `createMachine({ ... })` прямо внутри manager map;
 12. expansion non-lite-fsm imported constants/helpers внутри machine config;
-13. source text внутри JSON export;
+13. source text внутри JSON export без явного `--include-source`;
 14. drag-and-drop UI для загрузки graph export;
 15. `--dry-run`;
 16. `--strict`;

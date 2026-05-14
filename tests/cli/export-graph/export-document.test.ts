@@ -57,6 +57,30 @@ describe("export document для project graph", () => {
     expect(JSON.parse(json)).toEqual(document);
     expect(json.indexOf('"version"')).toBeLessThan(json.indexOf('"createdBy"'));
     expect(json).not.toContain("sourceText");
+    expect(json).not.toContain('"sources"');
+  });
+
+  it("добавляет optional source bundle вне graph document", () => {
+    const document = createProjectGraphExportDocument({
+      entryPath: "store/index.ts",
+      graphResult,
+      diagnostics: [],
+      sources: {
+        files: [
+          {
+            fileName: "store/index.ts",
+            language: "ts",
+            hash: "abc",
+            text: "export const store = 1;",
+          },
+        ],
+      },
+    });
+
+    expect(document.sources).toEqual({
+      files: [{ fileName: "store/index.ts", language: "ts", hash: "abc", text: "export const store = 1;" }],
+    });
+    expect(document.graph.source.files).toEqual([{ fileName: "store/index.ts", language: "ts", hash: "abc" }]);
   });
 
   it("опускает tsconfigPath, когда tsconfig не использовался", () => {

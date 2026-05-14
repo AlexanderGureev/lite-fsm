@@ -387,6 +387,14 @@ type LiteFsmProjectGraphExportDocument = {
   graph: LiteFsmGraphDocument;
   files: LiteFsmGraphProjectFile[];
   diagnostics: CliDiagnostic[];
+  sources?: {
+    files: Array<{
+      fileName: string;
+      language: "ts";
+      hash: string;
+      text: string;
+    }>;
+  };
 };
 ```
 
@@ -397,8 +405,9 @@ type LiteFsmProjectGraphExportDocument = {
 | `graph`           | ровно `compileLiteFsmGraphProject(...).document`; `graph.diagnostics` хранит `LFG_*` diagnostics |
 | `files`           | ровно `compileLiteFsmGraphProject(...).files`                                                    |
 | `diagnostics`     | только CLI diagnostics `LFC_*`, показанные во время command execution                            |
+| `sources`         | optional `--include-source` bundle; порядок и metadata совпадают с `files`, `text` не входит в `graph` |
 
-`CliDiagnostic` имеет форму `{ code, severity, message, file?, loc?, hint? }`, где `severity` — `"info" | "warning" | "error"`, а code в MVP: `LFC_INVALID_OPTIONS`, `LFC_TSCONFIG_NOT_FOUND`, `LFC_TSCONFIG_INVALID`, `LFC_GRAPH_PROJECT_FAILED`, `LFC_NO_MACHINES_EXPORTED`, `LFC_WRITE_FAILED`.
+`CliDiagnostic` имеет форму `{ code, severity, message, file?, loc?, hint? }`, где `severity` — `"info" | "warning" | "error"`, а code в MVP: `LFC_INVALID_OPTIONS`, `LFC_TSCONFIG_NOT_FOUND`, `LFC_TSCONFIG_INVALID`, `LFC_GRAPH_PROJECT_FAILED`, `LFC_NO_MACHINES_EXPORTED`, `LFC_SOURCE_BUNDLE_FILE_UNREADABLE`, `LFC_WRITE_FAILED`.
 
 ## Experimental graph simulator types
 

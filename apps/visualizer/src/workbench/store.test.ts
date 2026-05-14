@@ -10,6 +10,7 @@ import {
   selectActiveTab,
   selectConsolePanel,
   selectCurrentEmptyPanel,
+  selectSourceOverlay,
   selectSourcePanel,
   selectTabItems,
   shallowEqualObject,
@@ -24,6 +25,19 @@ const projectExportDocumentFixture = {
   graph: documentFixture,
   files: [{ fileName: "store/index.ts", language: "ts" as const, roles: ["entry" as const], hash: "abc" }],
   diagnostics: [],
+};
+const projectExportDocumentWithSourcesFixture = {
+  ...projectExportDocumentFixture,
+  sources: {
+    files: [
+      {
+        fileName: "store/index.ts",
+        language: "ts" as const,
+        hash: "abc",
+        text: "export const manager = 1;",
+      },
+    ],
+  },
 };
 const modelFixture = { version: "lite-fsm.visualizer/v1", machines: [], managers: [], topics: [], diagnostics: [], workbenchMachines: {} } as unknown as GraphVisualizerModel;
 const modelWithDiagnosticsFixture = {
@@ -464,6 +478,92 @@ describe("хранилище workbench визуализатора", () => {
     expect(store.getSnapshot().state.console.entries[0]).toMatchObject({
       channel: "system",
       title: "Project export pipeline started",
+    });
+  });
+
+  it("сохраняет embedded sources при загрузке project export", () => {
+    const store = createWorkbenchStore();
+    const sourceBefore = store.getSnapshot().state.source;
+
+    store.dispatch({ type: "project-export.loaded", exportDocument: projectExportDocumentWithSourcesFixture });
+
+    expect(store.getSnapshot().state.source).toBe(sourceBefore);
+    expect(store.getSnapshot().state.inputMode).toEqual({
+      kind: "project-export",
+      document: documentFixture,
+      files: projectExportDocumentWithSourcesFixture.files,
+      entryPath: "store/index.ts",
+      sources: projectExportDocumentWithSourcesFixture.sources,
+    });
+  });
+
+  it("selector source overlay использует embedded sources project export", () => {
+    const store = createWorkbenchStore();
+    store.dispatch({ type: "project-export.loaded", exportDocument: projectExportDocumentWithSourcesFixture });
+    store.dispatch({
+      type: "source.overlay.opened",
+      title: "manager",
+      anchors: [
+        {
+          kind: "machine",
+          editable: false,
+          loc: {
+            fileName: "store/index.ts",
+            start: { line: 1, column: 1, offset: 0 },
+            end: { line: 1, column: 7, offset: 6 },
+          },
+        },
+      ],
+    });
+
+    expect(selectSourceOverlay(store.getSnapshot())).toMatchObject({
+      open: true,
+      locationLabel: "store/index.ts:1:1",
+      lines: [{ line: 1, code: "export const manager = 1;", selected: true }],
+    });
+  });
+
+  it("selector source overlay сохраняет local-session fallback", () => {
+    const base = createInitialWorkbenchSnapshot();
+    const store = createWorkbenchStore({
+      ...base,
+      state: {
+        ...base.state,
+        inputMode: {
+          kind: "local-session",
+          sessionId: "session-1",
+          capabilities: {
+            mode: "local",
+            canReadFiles: true,
+            canWriteFiles: false,
+            canApplyPatch: false,
+            projectRoot: "/project",
+          },
+        },
+        panels: {
+          ...base.state.panels,
+          sourceOverlay: {
+            sourceVersion: 1,
+            title: "manager",
+            anchors: [
+              {
+                kind: "machine",
+                editable: false,
+                loc: {
+                  fileName: "store/index.ts",
+                  start: { line: 1, column: 1, offset: 0 },
+                  end: { line: 1, column: 7, offset: 6 },
+                },
+              },
+            ],
+          },
+        },
+      },
+    });
+
+    expect(selectSourceOverlay(store.getSnapshot())).toMatchObject({
+      open: true,
+      fallback: "store/index.ts:1:1\nSource text is not available from the current visualizer host.",
     });
   });
 

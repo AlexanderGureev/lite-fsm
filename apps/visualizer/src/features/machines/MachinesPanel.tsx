@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { Box, Code2, Network, RotateCcw, Send } from "lucide-react";
 import type { MachineCanvasBoardView } from "../../canvas";
 import type {
@@ -8,7 +8,6 @@ import type {
   MachineWorkbenchPanelView,
   MachineWorkbenchRowView,
   SendEventOptionView,
-  TimelineStepView,
   VisualizerCommand,
 } from "../../workbench";
 import { Button } from "@/ui/button";
@@ -37,6 +36,12 @@ import {
 import { VISUALIZER_TEST_IDS } from "@/test-ids";
 import { cn } from "@/lib/utils";
 import { MachineCanvasBoard } from "./MachineCanvasBoard";
+import {
+  areMachinePickerRowPropsEqual,
+  areTimelineStepPropsEqual,
+  type MachinePickerRowProps,
+  type TimelineStepProps,
+} from "./MachinesPanel.memo";
 
 const machineTone = (kind: MachinePickerRowView["kind"]): "actor" | "domain" | "muted" => {
   if (kind === "actorTemplate") return "actor";
@@ -99,13 +104,10 @@ const informativeStateBadgeKinds = new Set([
 const pickerRelation = (row: MachinePickerRowView): DensityRowRelation =>
   row.selected ? "selected" : "idle";
 
-const MachinePickerRow = ({
+const MachinePickerRowBase = ({
   machine,
   dispatch,
-}: {
-  machine: MachinePickerRowView;
-  dispatch: (command: VisualizerCommand) => void;
-}) => (
+}: MachinePickerRowProps) => (
   <DensityRow
     relation={pickerRelation(machine)}
     aria-pressed={machine.selected}
@@ -147,6 +149,9 @@ const MachinePickerRow = ({
     </span>
   </DensityRow>
 );
+
+const MachinePickerRow = memo(MachinePickerRowBase, areMachinePickerRowPropsEqual);
+MachinePickerRow.displayName = "MachinePickerRow";
 
 const RowButton = ({
   row,
@@ -391,6 +396,18 @@ const groupedOptions = (
   group: SendEventOptionView["group"],
 ): readonly SendEventOptionView[] => options.filter((option) => option.group === group);
 
+type SendEventOptionGroups = {
+  available: readonly SendEventOptionView[];
+  notAccepted: readonly SendEventOptionView[];
+};
+
+const groupSendEventOptions = (
+  options: readonly SendEventOptionView[],
+): SendEventOptionGroups => ({
+  available: groupedOptions(options, "available"),
+  notAccepted: groupedOptions(options, "not-accepted"),
+});
+
 const SendEventControl = ({
   options,
   disabled,
@@ -400,51 +417,64 @@ const SendEventControl = ({
   disabled: boolean;
   dispatch: (command: VisualizerCommand) => void;
 }) => {
-  const firstAvailableEventType = options.find((option) => option.group === "available")?.eventType;
-  const firstEventType = firstAvailableEventType ?? options[0]?.eventType ?? "";
+  const firstEventType = options.find((option) => option.group === "available")?.eventType ?? options[0]?.eventType ?? "";
   const [requestedEventType, setRequestedEventType] = useState(firstEventType);
+  const [open, setOpen] = useState(false);
   const requestedOption = options.find((option) => option.eventType === requestedEventType);
+  const firstAvailableEventType = options.find((option) => option.group === "available")?.eventType;
   const eventType = !requestedOption || (requestedOption.group !== "available" && firstAvailableEventType)
     ? firstEventType
     : requestedEventType;
   const selectedOption = options.find((option) => option.eventType === eventType);
   const selectedGroup = selectedOption?.group;
-
-  const available = groupedOptions(options, "available");
-  const notAccepted = groupedOptions(options, "not-accepted");
+  const optionGroups = useMemo(
+    () => open ? groupSendEventOptions(options) : { available: [], notAccepted: [] },
+    [open, options],
+  );
   const canSend = !disabled && selectedGroup === "available";
 
   return (
     <div className="flex items-center gap-2">
-      <Select value={eventType} onValueChange={setRequestedEventType} disabled={disabled || options.length === 0}>
+      <Select
+        value={eventType}
+        onValueChange={(nextEventType) => {
+          setRequestedEventType(nextEventType);
+          setOpen(false);
+        }}
+        open={open}
+        onOpenChange={setOpen}
+        disabled={disabled || options.length === 0}
+      >
         <SelectTrigger
           size="sm"
           className="h-8 min-w-0 flex-1 border-(--vf-border) bg-(--vf-surface) font-mono text-[11px]"
           aria-label="Select event type"
           data-testid={VISUALIZER_TEST_IDS.workbench.eventSelect}
         >
-          <SelectValue placeholder="Select event" />
+          <SelectValue placeholder="Select event">{eventType || undefined}</SelectValue>
         </SelectTrigger>
-        <SelectContent>
-          <SelectGroup>
-            <SelectLabel>available now ({available.length})</SelectLabel>
-            {available.map((option) => (
-              <SelectItem key={option.eventType} value={option.eventType}>
-                {option.eventType}
-              </SelectItem>
-            ))}
-          </SelectGroup>
-          {notAccepted.length > 0 ? (
+        {open ? (
+          <SelectContent>
             <SelectGroup>
-              <SelectLabel>not accepted</SelectLabel>
-              {notAccepted.map((option) => (
+              <SelectLabel>available now ({optionGroups.available.length})</SelectLabel>
+              {optionGroups.available.map((option) => (
                 <SelectItem key={option.eventType} value={option.eventType}>
                   {option.eventType}
                 </SelectItem>
               ))}
             </SelectGroup>
-          ) : null}
-        </SelectContent>
+            {optionGroups.notAccepted.length > 0 ? (
+              <SelectGroup>
+                <SelectLabel>not accepted</SelectLabel>
+                {optionGroups.notAccepted.map((option) => (
+                  <SelectItem key={option.eventType} value={option.eventType}>
+                    {option.eventType}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            ) : null}
+          </SelectContent>
+        ) : null}
       </Select>
       <PrimaryActionButton
         type="button"
@@ -468,13 +498,10 @@ const sourceLabelClass = (source: string): string => {
   return "text-(--vf-text-quiet)";
 };
 
-const TimelineStep = ({
+const TimelineStepBase = ({
   step,
   dispatch,
-}: {
-  step: TimelineStepView;
-  dispatch: (command: VisualizerCommand) => void;
-}) => (
+}: TimelineStepProps) => (
   <button
     type="button"
     className={cn(
@@ -516,6 +543,9 @@ const TimelineStep = ({
     </span>
   </button>
 );
+
+const TimelineStep = memo(TimelineStepBase, areTimelineStepPropsEqual);
+TimelineStep.displayName = "TimelineStep";
 
 const SimulationStatusBadge = ({ status }: { status: MachineWorkbenchPanelView["simulationStatus"] }) => {
   const tone = status === "blocked" ? "diagnostic" : status === "running" ? "ready" : "muted";

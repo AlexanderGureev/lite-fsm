@@ -55,6 +55,7 @@ Reducer branches в graph IR символические: compiler сохраня
 
 ```bash
 lite-fsm export-graph --entry store/index.ts --out lite-fsm.graph.json --tsconfig tsconfig.json
+lite-fsm export-graph --entry store/index.ts --out lite-fsm.graph.json --include-source
 ```
 
 | Command              | Назначение                                                                                                      |
@@ -63,8 +64,9 @@ lite-fsm export-graph --entry store/index.ts --out lite-fsm.graph.json --tsconfi
 | `--entry <path>`     | обязательный TypeScript entrypoint с выбранным `MachineManager(...)`                                            |
 | `--out <path>`       | обязательный output file; stdout JSON (`--out -`) не поддерживается                                             |
 | `--tsconfig <path>`  | optional explicit tsconfig для TypeScript module resolution                                                     |
+| `--include-source`   | opt-in: добавляет top-level `sources.files[]` с текстом discovered project files для static source overlay      |
 
-Export format version: `lite-fsm.project-graph-export/v1`. Top-level `diagnostics` содержит только CLI diagnostics `LFC_*`; compiler diagnostics остаются внутри `graph.diagnostics`. JSON export не содержит исходный source text.
+Export format version: `lite-fsm.project-graph-export/v1`. Top-level `diagnostics` содержит только CLI diagnostics `LFC_*`; compiler diagnostics остаются внутри `graph.diagnostics`. По умолчанию JSON export не содержит исходный source text; `--include-source` добавляет его вне `graph`.
 
 ## Experimental graph simulator
 

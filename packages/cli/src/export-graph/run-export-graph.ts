@@ -6,6 +6,7 @@ import type { CommandResult } from "../cli/result.js";
 import { buildProjectGraph, type ProjectGraphBuildResult } from "../project/build-project-graph.js";
 import type { ExportGraphOptions } from "./options.js";
 import { createProjectGraphExportDocument, stringifyProjectGraphExportDocument } from "./export-document.js";
+import { createProjectGraphSourceBundle } from "./source-bundle.js";
 import { writeOutput } from "./write-output.js";
 
 export type ExportGraphRunResult = CommandResult & {
@@ -54,11 +55,18 @@ export const createExportGraphRunResult = (
     return result(diagnostics, graphDiagnostics);
   }
 
+  const sources = options.includeSource
+    ? createProjectGraphSourceBundle(context, buildResult.project.projectRoot, buildResult.graphResult.files)
+    : undefined;
+
+  if (sources && !sources.ok) return result([...diagnostics, ...sources.diagnostics], graphDiagnostics);
+
   const document = createProjectGraphExportDocument({
     entryPath: buildResult.project.entryPath,
     tsconfigPath: buildResult.project.tsconfigPath,
     graphResult: buildResult.graphResult,
     diagnostics,
+    ...(sources ? { sources: sources.sources } : {}),
   });
   const written = writeOutput(context, options.out, stringifyProjectGraphExportDocument(document));
 

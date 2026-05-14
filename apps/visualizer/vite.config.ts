@@ -1,12 +1,15 @@
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
+import react, { reactCompilerPreset } from "@vitejs/plugin-react";
+import babel from "@rolldown/plugin-babel";
 
 const require = createRequire(import.meta.url);
 const fromRoot = (path: string) => fileURLToPath(new URL(path, import.meta.url));
 const elkjsBrowserEntry = require.resolve("elkjs/lib/elk.bundled.js");
 
 export default defineConfig({
+  plugins: [react(), babel({ presets: [reactCompilerPreset()] })],
   resolve: {
     alias: {
       "@": fromRoot("./src"),

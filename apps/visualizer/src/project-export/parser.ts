@@ -74,8 +74,66 @@ const validateProjectFile = (value: unknown, index: number): ProjectGraphExportP
 const validateFiles = (value: unknown): ProjectGraphExportParseResult | undefined => {
   if (!Array.isArray(value)) return invalidDocument("files", "Project graph export files must be an array.");
 
+  const seenFileNames = new Set<string>();
   for (const [index, file] of value.entries()) {
     const issue = validateProjectFile(file, index);
+    if (issue) return issue;
+    const fileName = (file as { fileName: string }).fileName;
+    if (seenFileNames.has(fileName)) {
+      return invalidDocument(`files.${index}.fileName`, "Project graph export fileName must be unique.");
+    }
+    seenFileNames.add(fileName);
+  }
+
+  return undefined;
+};
+
+const validateSourceBundleFile = (
+  value: unknown,
+  index: number,
+  projectFile: { fileName: string; hash: string },
+  seenFileNames: Set<string>,
+): ProjectGraphExportParseResult | undefined => {
+  const prefix = `sources.files.${index}`;
+
+  if (!isRecord(value)) return invalidDocument(prefix, "Project graph export source file must be an object.");
+  if (!isString(value.fileName)) return invalidDocument(`${prefix}.fileName`, "Project graph export source fileName must be a string.");
+  if (value.language !== "ts") return invalidDocument(`${prefix}.language`, "Project graph export source file language must be ts.");
+  if (!isString(value.hash)) return invalidDocument(`${prefix}.hash`, "Project graph export source hash must be a string.");
+  if (!isString(value.text)) return invalidDocument(`${prefix}.text`, "Project graph export source text must be a string.");
+
+  if (seenFileNames.has(value.fileName)) return invalidDocument(`${prefix}.fileName`, "Project graph export source fileName must be unique.");
+  seenFileNames.add(value.fileName);
+
+  if (projectFile.fileName !== value.fileName) {
+    return invalidDocument(`${prefix}.fileName`, "Project graph export source fileName must match the project file at the same index.");
+  }
+  if (projectFile.hash !== value.hash) {
+    return invalidDocument(`${prefix}.hash`, "Project graph export source hash must match the project file at the same index.");
+  }
+
+  return undefined;
+};
+
+const validateSources = (
+  value: unknown,
+  files: readonly unknown[],
+): ProjectGraphExportParseResult | undefined => {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) return invalidDocument("sources", "Project graph export sources must be an object.");
+  if (!Array.isArray(value.files)) return invalidDocument("sources.files", "Project graph export sources.files must be an array.");
+  if (value.files.length !== files.length) {
+    return invalidDocument("sources.files", "Project graph export sources.files must match project files length.");
+  }
+
+  const seenFileNames = new Set<string>();
+  for (const [index, file] of value.files.entries()) {
+    const issue = validateSourceBundleFile(
+      file,
+      index,
+      files[index] as { fileName: string; hash: string },
+      seenFileNames,
+    );
     if (issue) return issue;
   }
 
@@ -133,14 +191,14 @@ const validateProjectGraphExportDocument = (value: unknown): ProjectGraphExportP
     };
   }
 
-  const issue =
-    validateCreatedBy(value.createdBy) ??
-    validateEntry(value.entry) ??
-    validateGraph(value.graph) ??
-    validateFiles(value.files) ??
-    validateCliDiagnostics(value.diagnostics);
-
+  const issue = validateCreatedBy(value.createdBy) ?? validateEntry(value.entry) ?? validateGraph(value.graph) ?? validateFiles(value.files);
   if (issue) return issue;
+
+  const sourcesIssue = validateSources(value.sources, value.files as readonly unknown[]);
+  if (sourcesIssue) return sourcesIssue;
+
+  const diagnosticsIssue = validateCliDiagnostics(value.diagnostics);
+  if (diagnosticsIssue) return diagnosticsIssue;
 
   return { ok: true, document: value as LiteFsmProjectGraphExportDocument };
 };

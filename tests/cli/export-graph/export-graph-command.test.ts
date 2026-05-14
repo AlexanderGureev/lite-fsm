@@ -9,6 +9,7 @@ import { runExportGraphCommand } from "../../../packages/cli/src/export-graph/co
 import { PROJECT_GRAPH_EXPORT_VERSION } from "../../../packages/cli/src/export-graph/export-document";
 import { normalizeExportGraphOptions } from "../../../packages/cli/src/export-graph/options";
 import { createExportGraphRunResult } from "../../../packages/cli/src/export-graph/run-export-graph";
+import { createProjectGraphSourceBundle } from "../../../packages/cli/src/export-graph/source-bundle";
 import { normalizeAbsolutePath } from "../../../packages/cli/src/project/source-cache";
 import { createCliTestContext } from "../helpers/memory-fs";
 
@@ -111,8 +112,32 @@ describe("команда export-graph", () => {
     expect(parsed.version).toBe(PROJECT_GRAPH_EXPORT_VERSION);
     expect(parsed.entry).toEqual({ path: "store.ts", tsconfigPath: "tsconfig.json" });
     expect(parsed.graph.managers[0].machineRefs.map((ref: { key: string }) => ref.key)).toEqual(["machine"]);
+    expect(parsed.sources).toBeUndefined();
     expect(output).not.toBe("old graph");
     expect(output).not.toContain("import { MachineManager");
+  });
+
+  it("встраивает исходники только при --include-source", async () => {
+    const context = createCliTestContext(simpleProjectFiles);
+
+    const result = await runExportGraphCommand(context, {
+      entry: "store.ts",
+      out: "dist/graph-with-source.json",
+      tsconfig: "tsconfig.json",
+      includeSource: true,
+    });
+    const parsed = JSON.parse(context.fs.getFile("/project/dist/graph-with-source.json") ?? "{}");
+
+    expect(result).toEqual({ exitCode: 0, diagnostics: [] });
+    expect(parsed.sources.files).toEqual([
+      {
+        fileName: "store.ts",
+        language: "ts",
+        hash: parsed.files[0].hash,
+        text: simpleProjectFiles["/project/store.ts"],
+      },
+    ]);
+    expect(parsed.graph.source.files).toEqual([{ fileName: "store.ts", language: "ts", hash: parsed.files[0].hash }]);
   });
 
   it("записывает fallback info diagnostics в top-level diagnostics без graph diagnostics copy", async () => {
@@ -159,6 +184,7 @@ describe("команда export-graph", () => {
     const result = createExportGraphRunResult(context, {
       entry: "store.ts",
       out: "graph.json",
+      includeSource: false,
     }, {
       project: {
         entryPath: "store.ts",
@@ -192,6 +218,7 @@ describe("команда export-graph", () => {
     const result = createExportGraphRunResult(context, {
       entry: "store.ts",
       out: "graph.json",
+      includeSource: false,
     }, {
       project: {
         entryPath: "store.ts",
@@ -214,6 +241,7 @@ describe("команда export-graph", () => {
     const result = createExportGraphRunResult(context, {
       entry: "store.ts",
       out: "graph.json",
+      includeSource: false,
     }, {
       project: {
         entryPath: "store.ts",
@@ -245,6 +273,220 @@ describe("команда export-graph", () => {
     expect(result.diagnostics).toEqual([
       expect.objectContaining({ code: "LFC_WRITE_FAILED", severity: "error", file: "/project/graph.json" }),
     ]);
+  });
+
+  it("не пишет JSON, если source bundle не может прочитать discovered file", () => {
+    const context = createCliTestContext({
+      "/project/store.ts": "",
+    });
+    const result = createExportGraphRunResult(context, {
+      entry: "store.ts",
+      out: "graph.json",
+      includeSource: true,
+    }, {
+      project: {
+        entryPath: "store.ts",
+        absoluteEntryPath: "/project/store.ts",
+        projectRoot: "/project",
+      },
+      graphResult: {
+        document: {
+          version: "lite-fsm.graph/v1",
+          source: { filename: "store.ts", language: "ts", kind: "project", entryFileName: "store.ts", files: [] },
+          machines: [],
+          managers: [{ id: "manager", machineRefs: [{ key: "machine", machineId: "machine" }] }],
+          diagnostics: [],
+        },
+        diagnostics: [],
+        files: [{ fileName: "missing.ts", language: "ts", roles: ["machine"], hash: "abc" }],
+      },
+      diagnostics: [],
+      blocking: false,
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({ code: "LFC_SOURCE_BUNDLE_FILE_UNREADABLE", severity: "error", file: "/project/missing.ts" }),
+    ]);
+    expect(context.fs.getFile("/project/graph.json")).toBeUndefined();
+  });
+
+  it("создает пустой source bundle для пустого списка файлов", () => {
+    const context = createCliTestContext({}, "/project");
+
+    expect(createProjectGraphSourceBundle(context, "/project", [])).toEqual({
+      ok: true,
+      sources: { files: [] },
+    });
+  });
+
+  it("читает source bundle относительно projectRoot в порядке discovered files", () => {
+    const context = createCliTestContext({
+      "/project/store/index.ts": "export const root = 1;",
+      "/project/store/machines/player.ts": "export const player = 2;",
+    });
+
+    const result = createProjectGraphSourceBundle(context, "/project", [
+      { fileName: "store/machines/player.ts", language: "ts", roles: ["machine"], hash: "player-hash" },
+      { fileName: "store/index.ts", language: "ts", roles: ["entry"], hash: "entry-hash" },
+    ]);
+
+    expect(result).toEqual({
+      ok: true,
+      sources: {
+        files: [
+          {
+            fileName: "store/machines/player.ts",
+            language: "ts",
+            hash: "player-hash",
+            text: "export const player = 2;",
+          },
+          {
+            fileName: "store/index.ts",
+            language: "ts",
+            hash: "entry-hash",
+            text: "export const root = 1;",
+          },
+        ],
+      },
+    });
+    expect(context.fs.readCounts.get("/project/store/machines/player.ts")).toBe(1);
+    expect(context.fs.readCounts.get("/project/store/index.ts")).toBe(1);
+  });
+
+  it("останавливает source bundle на первом отсутствующем файле и не читает последующие", () => {
+    const context = createCliTestContext({
+      "/project/store/after.ts": "export const after = 1;",
+    });
+
+    const result = createProjectGraphSourceBundle(context, "/project", [
+      { fileName: "store/missing.ts", language: "ts", roles: ["machine"], hash: "missing-hash" },
+      { fileName: "store/after.ts", language: "ts", roles: ["machine"], hash: "after-hash" },
+    ]);
+
+    expect(result).toEqual({
+      ok: false,
+      diagnostics: [
+        expect.objectContaining({
+          code: "LFC_SOURCE_BUNDLE_FILE_UNREADABLE",
+          message: "Source file 'store/missing.ts' could not be embedded in the graph export.",
+          file: "/project/store/missing.ts",
+        }),
+      ],
+    });
+    expect(context.fs.readCounts.get("/project/store/after.ts")).toBeUndefined();
+  });
+
+  it("форматирует fileExists failures при source bundle", () => {
+    const context = createCliTestContext({}, "/project");
+    const result = createProjectGraphSourceBundle(
+      {
+        ...context,
+        fs: {
+          ...context.fs,
+          fileExists: () => {
+            throw new Error("stat failed");
+          },
+        },
+      },
+      "/project",
+      [{ fileName: "store.ts", language: "ts", roles: ["entry"], hash: "abc" }],
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      diagnostics: [
+        expect.objectContaining({
+          code: "LFC_SOURCE_BUNDLE_FILE_UNREADABLE",
+          message: "Source file 'store.ts' could not be embedded in the graph export: stat failed",
+          file: "/project/store.ts",
+        }),
+      ],
+    });
+  });
+
+  it("форматирует non-Error fileExists failures при source bundle", () => {
+    const context = createCliTestContext({}, "/project");
+    const result = createProjectGraphSourceBundle(
+      {
+        ...context,
+        fs: {
+          ...context.fs,
+          fileExists: () => {
+            throw "stat failed";
+          },
+        },
+      },
+      "/project",
+      [{ fileName: "store.ts", language: "ts", roles: ["entry"], hash: "abc" }],
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      diagnostics: [
+        expect.objectContaining({
+          code: "LFC_SOURCE_BUNDLE_FILE_UNREADABLE",
+          message: "Source file 'store.ts' could not be embedded in the graph export: stat failed",
+          file: "/project/store.ts",
+        }),
+      ],
+    });
+  });
+
+  it("форматирует readFile failures при source bundle", () => {
+    const context = createCliTestContext({}, "/project");
+    const result = createProjectGraphSourceBundle(
+      {
+        ...context,
+        fs: {
+          ...context.fs,
+          fileExists: () => true,
+          readFile: () => {
+            throw new Error("permission denied");
+          },
+        },
+      },
+      "/project",
+      [{ fileName: "store.ts", language: "ts", roles: ["entry"], hash: "abc" }],
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      diagnostics: [
+        expect.objectContaining({
+          code: "LFC_SOURCE_BUNDLE_FILE_UNREADABLE",
+          message: "Source file 'store.ts' could not be embedded in the graph export: permission denied",
+        }),
+      ],
+    });
+  });
+
+  it("форматирует non-Error readFile failures при source bundle", () => {
+    const context = createCliTestContext({}, "/project");
+    const result = createProjectGraphSourceBundle(
+      {
+        ...context,
+        fs: {
+          ...context.fs,
+          fileExists: () => true,
+          readFile: () => {
+            throw "readonly";
+          },
+        },
+      },
+      "/project",
+      [{ fileName: "store.ts", language: "ts", roles: ["entry"], hash: "abc" }],
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      diagnostics: [
+        expect.objectContaining({
+          code: "LFC_SOURCE_BUNDLE_FILE_UNREADABLE",
+          message: "Source file 'store.ts' could not be embedded in the graph export: readonly",
+        }),
+      ],
+    });
   });
 
   it("форматирует non-Error write failures", async () => {
@@ -289,6 +531,7 @@ describe("команда export-graph", () => {
       "program-graph.json",
       "--tsconfig",
       "tsconfig.json",
+      "--include-source",
     ]);
 
     expect(unknown.exitCode).toBe(1);
@@ -306,6 +549,9 @@ describe("команда export-graph", () => {
     ]);
     expect(help).toEqual({ exitCode: 0, diagnostics: [] });
     expect(success).toEqual({ exitCode: 0, diagnostics: [] });
+    expect(JSON.parse(context.fs.getFile("/project/program-graph.json") ?? "{}").sources.files[0].text).toBe(
+      simpleProjectFiles["/project/store.ts"],
+    );
     expect(context.stdout.text()).toContain("Usage: lite-fsm");
   });
 
@@ -316,7 +562,19 @@ describe("команда export-graph", () => {
   it("нормализует successful options без optional tsconfig", () => {
     expect(normalizeExportGraphOptions({ entry: "store.ts", out: "graph.json" })).toEqual({
       ok: true,
-      options: { entry: "store.ts", out: "graph.json" },
+      options: { entry: "store.ts", out: "graph.json", includeSource: false },
+    });
+    expect(normalizeExportGraphOptions({ entry: "store.ts", out: "graph.json", includeSource: false })).toEqual({
+      ok: true,
+      options: { entry: "store.ts", out: "graph.json", includeSource: false },
+    });
+    expect(normalizeExportGraphOptions({ entry: "store.ts", out: "graph.json", includeSource: "true" })).toEqual({
+      ok: true,
+      options: { entry: "store.ts", out: "graph.json", includeSource: false },
+    });
+    expect(normalizeExportGraphOptions({ entry: "store.ts", out: "graph.json", includeSource: true })).toEqual({
+      ok: true,
+      options: { entry: "store.ts", out: "graph.json", includeSource: true },
     });
   });
 

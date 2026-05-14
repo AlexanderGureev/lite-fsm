@@ -15,6 +15,17 @@ export type CliDiagnostic = {
   hint?: string;
 };
 
+export type LiteFsmProjectGraphSourceFile = {
+  fileName: string;
+  language: "ts";
+  hash: string;
+  text: string;
+};
+
+export type LiteFsmProjectGraphSourceBundle = {
+  files: readonly LiteFsmProjectGraphSourceFile[];
+};
+
 export type LiteFsmProjectGraphExportDocument = {
   version: typeof PROJECT_GRAPH_EXPORT_VERSION;
   createdBy: {
@@ -28,6 +39,7 @@ export type LiteFsmProjectGraphExportDocument = {
   graph: LiteFsmGraphDocument;
   files: readonly LiteFsmGraphProjectFile[];
   diagnostics: readonly CliDiagnostic[];
+  sources?: LiteFsmProjectGraphSourceBundle;
 };
 
 export type ProjectGraphExportParseIssue = {

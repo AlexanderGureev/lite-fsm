@@ -411,6 +411,7 @@ const projectExportLoaded = (
       document,
       files: command.exportDocument.files,
       entryPath: command.exportDocument.entry.path,
+      ...(command.exportDocument.sources ? { sources: command.exportDocument.sources } : {}),
     },
     inputVersion,
     compile,

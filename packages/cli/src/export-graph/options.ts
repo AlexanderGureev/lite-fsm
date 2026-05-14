@@ -5,12 +5,14 @@ export type ExportGraphOptions = {
   entry: string;
   out: string;
   tsconfig?: string;
+  includeSource: boolean;
 };
 
 export type RawExportGraphOptions = {
   entry?: unknown;
   out?: unknown;
   tsconfig?: unknown;
+  includeSource?: unknown;
 };
 
 export type NormalizeExportGraphOptionsResult =
@@ -25,6 +27,7 @@ export const normalizeExportGraphOptions = (rawOptions: RawExportGraphOptions): 
   const entry = stringOption(rawOptions.entry);
   const out = stringOption(rawOptions.out);
   const tsconfig = stringOption(rawOptions.tsconfig);
+  const includeSource = rawOptions.includeSource === true;
   const diagnostics: CliDiagnostic[] = [];
 
   if (!entry) {
@@ -52,6 +55,7 @@ export const normalizeExportGraphOptions = (rawOptions: RawExportGraphOptions): 
     options: {
       entry: entry as string,
       out: out as string,
+      includeSource,
       ...(tsconfig ? { tsconfig } : {}),
     },
   };
