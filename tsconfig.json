@@ -4,5 +4,5 @@
     "rootDir": "."
   },
   "include": ["packages/*/src", "xstate/**/*.ts"],
-  "exclude": ["apps", "tests", "node_modules", "**/dist"]
+  "exclude": ["apps", "tests", "node_modules", "**/dist", "./internal/"]
 }

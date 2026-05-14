@@ -12,7 +12,7 @@ import type { ManagerCandidate } from "../compiler/candidates";
 import { projectDiagnostic } from "./diagnostics";
 import { readImportTable } from "./imports";
 import type { NamespaceRestBinding, ProjectImportTable, ProjectModuleResolver } from "./imports";
-import { listNamedExports } from "./exports";
+import { listNamedExports, resolveProjectExport } from "./exports";
 import type { ProjectStep } from "./result";
 import { projectFail, projectOk } from "./result";
 import type { ProjectSourceUnit } from "./source-units";
@@ -22,6 +22,7 @@ export type ProjectManagerEntry =
       kind: "expression";
       key: string;
       expression: Expression;
+      unit: ProjectSourceUnit;
       loc?: SourceLocation;
     }
   | {
@@ -89,27 +90,13 @@ const readObjectLiteral = (
   ]);
 };
 
-const expandNamespaceRest = (
-  rest: NamespaceRestBinding,
-  imports: ProjectImportTable,
-  unit: ProjectSourceUnit,
-  resolver: ProjectModuleResolver,
+const objectBindingKey = (unit: ProjectSourceUnit, name: string): string => `${unit.fileName}\0${name}`;
+
+const expandNamespaceExports = (
+  namespaceUnit: ProjectSourceUnit,
+  omittedExports: ReadonlySet<string>,
   loc?: SourceLocation,
 ): ProjectManagerMap => {
-  const namespaceImport = imports.namespaceImports.get(rest.namespaceName)!;
-
-  const namespaceUnit = resolver.readResolvedImport(unit, namespaceImport.moduleSpecifier, "barrel", namespaceImport.loc);
-  if (!namespaceUnit) {
-    return emptyManagerMap(
-      warningDiagnostic(
-        "LFG_PROJECT_NAMESPACE_IMPORT_UNSUPPORTED",
-        `Namespace '${rest.namespaceName}' could not be resolved to a project barrel.`,
-        namespaceImport.loc,
-      ),
-    );
-  }
-
-  const omitted = new Set(rest.omittedExports);
   const entries: ProjectManagerEntry[] = [];
   const diagnostics: GraphDiagnostic[] = [];
 
@@ -125,7 +112,7 @@ const expandNamespaceRest = (
       continue;
     }
 
-    if (omitted.has(namedExport.exportName)) continue;
+    if (omittedExports.has(namedExport.exportName)) continue;
 
     entries.push({
       kind: "namespace-export",
@@ -139,6 +126,129 @@ const expandNamespaceRest = (
   return { entries, diagnostics };
 };
 
+const expandNamespaceImport = (
+  namespaceName: string,
+  imports: ProjectImportTable,
+  unit: ProjectSourceUnit,
+  resolver: ProjectModuleResolver,
+  omittedExports: ReadonlySet<string>,
+  loc?: SourceLocation,
+): ProjectManagerMap => {
+  const namespaceImport = imports.namespaceImports.get(namespaceName)!;
+
+  const namespaceUnit = resolver.readResolvedImport(unit, namespaceImport.moduleSpecifier, "barrel", namespaceImport.loc);
+  if (!namespaceUnit) {
+    return emptyManagerMap(
+      warningDiagnostic(
+        "LFG_PROJECT_NAMESPACE_IMPORT_UNSUPPORTED",
+        `Namespace '${namespaceName}' could not be resolved to a project barrel.`,
+        namespaceImport.loc,
+      ),
+    );
+  }
+
+  return expandNamespaceExports(namespaceUnit, omittedExports, loc);
+};
+
+const expandNamespaceRest = (
+  rest: NamespaceRestBinding,
+  imports: ProjectImportTable,
+  unit: ProjectSourceUnit,
+  resolver: ProjectModuleResolver,
+  loc?: SourceLocation,
+): ProjectManagerMap => {
+  return expandNamespaceImport(rest.namespaceName, imports, unit, resolver, new Set(rest.omittedExports), loc);
+};
+
+const expandNamedImport = (
+  name: string,
+  imports: ProjectImportTable,
+  unit: ProjectSourceUnit,
+  resolver: ProjectModuleResolver,
+  seenObjects: ReadonlySet<string>,
+  loc?: SourceLocation,
+): ProjectManagerMap | undefined => {
+  const namedImport = imports.namedImports.get(name);
+  if (!namedImport) return undefined;
+
+  const resolution = resolver.resolve(unit, namedImport.moduleSpecifier);
+  if (resolution.kind === "external" || resolution.kind === "core") {
+    return emptyManagerMap(
+      warningDiagnostic(
+        "LFG_PROJECT_MANAGER_SPREAD_UNRESOLVED",
+        `Manager map spread '${name}' comes from an external module and was skipped.`,
+        loc,
+      ),
+    );
+  }
+
+  const targetUnit = resolver.readResolvedImport(unit, namedImport.moduleSpecifier, "barrel", namedImport.loc);
+  if (!targetUnit) {
+    return emptyManagerMap(
+      warningDiagnostic(
+        "LFG_PROJECT_MANAGER_SPREAD_UNRESOLVED",
+        `Manager map spread '${name}' could not be resolved to project source.`,
+        loc,
+      ),
+    );
+  }
+
+  const resolved = resolveProjectExport(targetUnit, namedImport.importedName, resolver, "barrel");
+  if (!resolved.ok) return { entries: [], diagnostics: resolved.diagnostics };
+
+  return expandSpreadBinding(resolved.localName, readImportTable(resolved.unit), resolved.unit, resolver, seenObjects, loc);
+};
+
+function expandSpreadBinding(
+  name: string,
+  imports: ProjectImportTable,
+  unit: ProjectSourceUnit,
+  resolver: ProjectModuleResolver,
+  seenObjects: ReadonlySet<string>,
+  loc?: SourceLocation,
+): ProjectManagerMap {
+  const namespaceImport = imports.namespaceImports.get(name);
+  if (namespaceImport) return expandNamespaceImport(namespaceImport.localName, imports, unit, resolver, new Set(), loc);
+
+  const namespaceRest = imports.namespaceRests.get(name);
+  if (namespaceRest) return expandNamespaceRest(namespaceRest, imports, unit, resolver, loc);
+  if (imports.unsupportedNamespaceRests.has(name)) {
+    return emptyManagerMap(
+      warningDiagnostic(
+        "LFG_PROJECT_NAMESPACE_REST_UNSUPPORTED",
+        `Namespace rest '${name}' must destructure a project namespace import.`,
+        imports.unsupportedNamespaceRests.get(name)?.loc,
+      ),
+    );
+  }
+
+  const localConst = unit.catalog.getConstBinding(name);
+  const initializer = localConst ? unwrapTransparent(localConst.initializer) : undefined;
+  if (initializer && Node.isObjectLiteralExpression(initializer)) {
+    const key = objectBindingKey(unit, name);
+    if (seenObjects.has(key)) {
+      return emptyManagerMap(
+        expressionDiagnostic(
+          `Manager map object spread '${name}' depends on itself.`,
+          loc,
+        ),
+      );
+    }
+
+    return expandObjectLiteral(initializer, imports, unit, resolver, new Set([...seenObjects, key]));
+  }
+
+  const imported = expandNamedImport(name, imports, unit, resolver, seenObjects, loc);
+  if (imported) return imported;
+
+  return emptyManagerMap(
+    expressionDiagnostic(
+      `Manager map spread '${name}' is not supported.`,
+      loc,
+    ),
+  );
+}
+
 const expandSpread = (
   expression: Expression,
   imports: ProjectImportTable,
@@ -150,60 +260,14 @@ const expandSpread = (
   if (!Node.isIdentifier(unwrapped)) {
     return emptyManagerMap(
       expressionDiagnostic(
-        "Manager map spread must be a local object, namespace rest binding, or external import.",
+        "Manager map spread must be a local object, namespace import/rest binding, or project import.",
         unit.source.locFromNode(expression),
       ),
     );
   }
 
   const name = unwrapped.getText();
-  const localConst = unit.catalog.getConstBinding(name);
-  const initializer = localConst ? unwrapTransparent(localConst.initializer) : undefined;
-  if (initializer && Node.isObjectLiteralExpression(initializer)) {
-    if (seenObjects.has(name)) {
-      return emptyManagerMap(
-        expressionDiagnostic(
-          `Manager map object spread '${name}' depends on itself.`,
-          unit.source.locFromNode(expression),
-        ),
-      );
-    }
-
-    return expandObjectLiteral(initializer, imports, unit, resolver, new Set([...seenObjects, name]));
-  }
-
-  const namespaceRest = imports.namespaceRests.get(name);
-  if (namespaceRest) return expandNamespaceRest(namespaceRest, imports, unit, resolver, unit.source.locFromNode(expression));
-  if (imports.unsupportedNamespaceRests.has(name)) {
-    return emptyManagerMap(
-      warningDiagnostic(
-        "LFG_PROJECT_NAMESPACE_REST_UNSUPPORTED",
-        `Namespace rest '${name}' must destructure a project namespace import.`,
-        imports.unsupportedNamespaceRests.get(name)?.loc,
-      ),
-    );
-  }
-
-  const namedImport = imports.namedImports.get(name);
-  if (namedImport) {
-    const resolution = resolver.resolve(unit, namedImport.moduleSpecifier);
-    if (resolution.kind === "external" || resolution.kind === "core") {
-      return emptyManagerMap(
-        warningDiagnostic(
-          "LFG_PROJECT_MANAGER_SPREAD_UNRESOLVED",
-          `Manager map spread '${name}' comes from an external module and was skipped.`,
-          unit.source.locFromNode(expression),
-        ),
-      );
-    }
-  }
-
-  return emptyManagerMap(
-    expressionDiagnostic(
-      `Manager map spread '${name}' is not supported.`,
-      unit.source.locFromNode(expression),
-    ),
-  );
+  return expandSpreadBinding(name, imports, unit, resolver, seenObjects, unit.source.locFromNode(expression));
 };
 
 const duplicateKeyDiagnostic = (
@@ -238,6 +302,7 @@ const readShorthandProperty = (
     kind: "expression",
     key,
     expression: property.getNameNode(),
+    unit,
     loc: unit.source.locFromNode(property),
   });
 };
@@ -261,6 +326,7 @@ const readAssignedProperty = (
     kind: "expression",
     key,
     expression: initializer,
+    unit,
     loc: unit.source.locFromNode(property),
   });
 };

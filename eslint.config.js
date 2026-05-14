@@ -30,6 +30,7 @@ export default defineConfig([
     ".preview",
     ".agents",
     ".cursor",
+    "internal/**",
   ]),
   {
     files: ["**/*.{js,mjs,cjs,ts,tsx}"],

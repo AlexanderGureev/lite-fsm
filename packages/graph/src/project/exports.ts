@@ -2,7 +2,7 @@ import { Node, type VariableDeclaration } from "ts-morph";
 import type { GraphDiagnostic } from "../types";
 import { projectDiagnostic } from "./diagnostics";
 import type { ProjectFileRole, ProjectSourceUnit } from "./source-units";
-import type { ProjectModuleResolver } from "./imports";
+import { readImportTable, type ProjectModuleResolver } from "./imports";
 
 export type ProjectExportEntry =
   | {
@@ -168,6 +168,31 @@ export const resolveProjectExport = (
   }
 
   if (entry.kind === "local") {
+    const namedImport = readImportTable(unit).namedImports.get(entry.localName);
+    if (namedImport) {
+      const resolution = resolver.resolve(unit, namedImport.moduleSpecifier);
+      if (resolution.kind === "resolved") {
+        resolver.addRole(unit, "barrel");
+        const diagnosticStart = resolver.diagnostics.length;
+        const target = resolver.readResolvedImport(unit, namedImport.moduleSpecifier, undefined, namedImport.loc);
+        if (!target) return { ok: false, diagnostics: resolver.diagnostics.slice(diagnosticStart) };
+
+        return resolveProjectExport(
+          target,
+          namedImport.importedName,
+          resolver,
+          finalRole,
+          new Set([...seen, cycleKey]),
+        );
+      }
+
+      if (resolution.kind === "not-found" || resolution.kind === "unsupported-extension") {
+        const diagnosticStart = resolver.diagnostics.length;
+        resolver.readResolvedImport(unit, namedImport.moduleSpecifier, undefined, namedImport.loc);
+        return { ok: false, diagnostics: resolver.diagnostics.slice(diagnosticStart) };
+      }
+    }
+
     resolver.addRole(unit, finalRole);
     return {
       ok: true,

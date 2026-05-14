@@ -231,6 +231,61 @@ describe("compileLiteFsmGraphProject", () => {
     ]);
   });
 
+  it("раскрывает manager map spread из project import другой папки", () => {
+    const root = normalize(resolve("/project"));
+    const entry = `${root}/src/store/index.ts`;
+    const host = createMemoryHost({
+      [entry]: `
+        import { MachineManager } from "lite-fsm";
+        import { machines as playerMachines } from "../../player/store";
+        import * as webMachines from "./machines";
+        const { root, ...rest } = webMachines;
+        const cfg = { root, ...rest, ...playerMachines };
+        export const manager = MachineManager(cfg);
+      `,
+      [`${root}/src/store/machines/index.ts`]: `
+        export { root } from "./root";
+        export { app } from "./app";
+      `,
+      [`${root}/src/store/machines/root.ts`]: `
+        import { createMachine } from "lite-fsm";
+        export const root = createMachine({ config: { IDLE: {} }, initialState: "IDLE", initialContext: {} });
+      `,
+      [`${root}/src/store/machines/app.ts`]: `
+        import { createMachine } from "lite-fsm";
+        export const app = createMachine({ config: { READY: {} }, initialState: "READY", initialContext: {} });
+      `,
+      [`${root}/player/store/index.ts`]: `
+        import * as machines from "./machines";
+        export { machines };
+      `,
+      [`${root}/player/store/machines/index.ts`]: `
+        import { playback } from "./playback";
+        import { volume as localVolume } from "./volume";
+        export { playback, localVolume as volume };
+        export { queue } from "./queue";
+      `,
+      [`${root}/player/store/machines/playback.ts`]: `
+        import { createMachine } from "lite-fsm";
+        export const playback = createMachine({ config: { STOPPED: {} }, initialState: "STOPPED", initialContext: {} });
+      `,
+      [`${root}/player/store/machines/volume.ts`]: `
+        import { createMachine } from "lite-fsm";
+        export const volume = createMachine({ config: { MUTED: {} }, initialState: "MUTED", initialContext: {} });
+      `,
+      [`${root}/player/store/machines/queue.ts`]: `
+        import { createMachine } from "lite-fsm";
+        export const queue = createMachine({ config: { EMPTY: {} }, initialState: "EMPTY", initialContext: {} });
+      `,
+    });
+
+    const result = compileLiteFsmGraphProject({ entryFileName: entry, projectRoot: root, host });
+
+    expect(machineKeys(result)).toEqual(["root", "app", "playback", "volume", "queue"]);
+    expect(diagnosticCodes(result)).not.toContain("LFG_PROJECT_MANAGER_MAP_UNSUPPORTED");
+    expect(diagnosticCodes(result)).not.toContain("LFG_PROJECT_MANAGER_SPREAD_UNRESOLVED");
+  });
+
   it("не резолвит type-only и недостижимые imports при export const manager map", () => {
     const root = normalize(resolve("/project"));
     const entry = `${root}/store.ts`;
@@ -838,30 +893,59 @@ describe("compileLiteFsmGraphProject", () => {
   it("поддерживает local export aliases и диагностирует missing/function exports", () => {
     const root = normalize(resolve("/project"));
     const entry = `${root}/store.ts`;
+    const resolvedMissingTarget = `${root}/resolved-missing-target.ts`;
     const host = createMemoryHost({
       [entry]: `
         import { MachineManager } from "@lite-fsm/core";
-        import { alias, fn, weird, noSuch } from "./local-exports";
-        export const manager = MachineManager({ alias, fn, weird, noSuch });
+        import { alias, fn, weird, noSuch, missingAlias, resolvedMissingAlias, unsupportedAlias, externalAlias } from "./local-exports";
+        export const manager = MachineManager({
+          alias,
+          fn,
+          weird,
+          noSuch,
+          missingAlias,
+          resolvedMissingAlias,
+          unsupportedAlias,
+          externalAlias,
+        });
       `,
       [`${root}/local-exports.ts`]: `
         import { createMachine } from "@lite-fsm/core";
+        import { missingAlias } from "./missing-target";
+        import { resolvedMissingAlias } from "./resolved-missing-target";
+        import { unsupportedAlias } from "./unsupported.json";
+        import { externalAlias } from "external-machines";
         const machine = createMachine({ config: { IDLE: {} }, initialState: "IDLE", initialContext: {} });
         const source = { weird: 1 };
         export const { weird } = source;
-        export { machine as alias };
+        export { machine as alias, missingAlias, resolvedMissingAlias, unsupportedAlias, externalAlias };
         export function fn() {
           return null;
         }
         export default function() {}
       `,
     });
+    const hostWithResolvedMissing: LiteFsmGraphProjectHost = {
+      readSource: host.readSource,
+      resolveModule(request) {
+        if (request.moduleSpecifier === "./resolved-missing-target") {
+          return { kind: "resolved", fileName: resolvedMissingTarget };
+        }
 
-    const result = compileLiteFsmGraphProject({ entryFileName: entry, projectRoot: root, host });
+        return host.resolveModule(request);
+      },
+    };
+
+    const result = compileLiteFsmGraphProject({ entryFileName: entry, projectRoot: root, host: hostWithResolvedMissing });
 
     expect(machineKeys(result)).toEqual(["alias"]);
     expect(diagnosticCodes(result)).toEqual(
-      expect.arrayContaining(["LFG_PROJECT_MACHINE_UNRESOLVED", "LFG_PROJECT_EXPORT_NOT_FOUND"]),
+      expect.arrayContaining([
+        "LFG_PROJECT_MACHINE_UNRESOLVED",
+        "LFG_PROJECT_EXPORT_NOT_FOUND",
+        "LFG_PROJECT_MODULE_NOT_FOUND",
+        "LFG_PROJECT_MODULE_UNSUPPORTED_EXTENSION",
+      ]),
     );
   });
 
@@ -970,6 +1054,8 @@ describe("compileLiteFsmGraphProject", () => {
         import * as missingNamespace from "./missing-namespace";
         import * as star from "./star";
         import { localSpread } from "./spread-source";
+        import { missingSpread } from "./missing-spread";
+        import { missingExportSpread } from "./spread-missing-export";
         import { createReducer as coreSpread } from "@lite-fsm/core";
         import { externalSpread } from "external-machines";
         const ok = createMachine({ config: { IDLE: {} }, initialState: "IDLE", initialContext: {} });
@@ -983,6 +1069,8 @@ describe("compileLiteFsmGraphProject", () => {
           ...starRest,
           ...unknownSpread,
           ...localSpread,
+          ...missingSpread,
+          ...missingExportSpread,
           ...coreSpread,
           ...externalSpread,
           ...machines,
@@ -995,6 +1083,7 @@ describe("compileLiteFsmGraphProject", () => {
       [`${root}/star.ts`]: `export * from "./machines";`,
       [`${root}/machines.ts`]: `export const ignored = 1;`,
       [`${root}/spread-source.ts`]: `export const localSpread = {};`,
+      [`${root}/spread-missing-export.ts`]: `export const otherSpread = {};`,
     });
 
     const result = compileLiteFsmGraphProject({ entryFileName: entry, projectRoot: root, host });
@@ -1004,11 +1093,16 @@ describe("compileLiteFsmGraphProject", () => {
       expect.arrayContaining([
         "LFG_PROJECT_NAMESPACE_IMPORT_UNSUPPORTED",
         "LFG_PROJECT_BARREL_UNSUPPORTED",
+        "LFG_PROJECT_MODULE_NOT_FOUND",
+        "LFG_PROJECT_EXPORT_NOT_FOUND",
         "LFG_PROJECT_MANAGER_SPREAD_UNRESOLVED",
         "LFG_PROJECT_MANAGER_MAP_UNSUPPORTED",
       ]),
     );
     expect(diagnosticCodes(result).filter((code) => code === "LFG_PROJECT_MANAGER_MAP_UNSUPPORTED").length).toBeGreaterThanOrEqual(5);
+    expect(result.diagnostics.map((diagnostic) => diagnostic.message)).toEqual(
+      expect.arrayContaining(["Manager map spread 'missingSpread' could not be resolved to project source."]),
+    );
   });
 
   it("доказывает typed helper wrappers через re-export chain и кэширует provenance", () => {

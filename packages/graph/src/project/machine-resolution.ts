@@ -20,7 +20,7 @@ export type ResolvedProjectMachine = {
 };
 
 export type ProjectMachineResolver = {
-  resolve(entry: ProjectManagerEntry, entryUnit: ProjectSourceUnit): ProjectStep<ResolvedProjectMachine>;
+  resolve(entry: ProjectManagerEntry): ProjectStep<ResolvedProjectMachine>;
 };
 
 type CandidateCacheEntry = {
@@ -282,15 +282,12 @@ export const createProjectMachineResolver = (
     return resolveMachineReference(reference.value, unit);
   };
 
-  const resolve = (
-    entry: ProjectManagerEntry,
-    entryUnit: ProjectSourceUnit,
-  ): ProjectStep<ResolvedProjectMachine> => {
+  const resolve = (entry: ProjectManagerEntry): ProjectStep<ResolvedProjectMachine> => {
     if (entry.kind === "namespace-export") {
       return resolveExportedMachine(entry.namespaceUnit, entry.exportName, entry.loc);
     }
 
-    return resolveExpression(entry.expression, entryUnit);
+    return resolveExpression(entry.expression, entry.unit);
   };
 
   return { resolve };

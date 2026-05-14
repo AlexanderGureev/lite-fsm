@@ -179,7 +179,7 @@ export const compileLiteFsmGraphProject = (
     const diagnostics: GraphDiagnostic[] = [...managerMap.value.diagnostics];
 
     for (const entry of managerMap.value.entries) {
-      const resolved = machineResolver.resolve(entry, entryUnit);
+      const resolved = machineResolver.resolve(entry);
       if (!resolved.ok) {
         diagnostics.push(...resolved.diagnostics);
         continue;
