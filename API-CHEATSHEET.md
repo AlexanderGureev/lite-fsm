@@ -49,6 +49,23 @@ Reducer branches в graph IR символические: compiler сохраня
 
 `analyzeLiteFsmGraph` не запускается внутри `compileLiteFsmGraph` автоматически и не мутирует document. Правила v1: `unknown-target`, `unreachable-state`, `dead-end-state`, `actor-template-shape`, `reducer-config-consistency`, `effect-event-acceptance`, `wildcard-shadowing`.
 
+## Experimental CLI
+
+`@lite-fsm/cli` предоставляет binary `lite-fsm` для tooling-сценариев. В MVP публичная поверхность CLI — команда export, а не runtime import.
+
+```bash
+lite-fsm export-graph --entry store/index.ts --out lite-fsm.graph.json --tsconfig tsconfig.json
+```
+
+| Command              | Назначение                                                                                                      |
+| -------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `lite-fsm export-graph` | строит project graph через public `compileLiteFsmGraphProject` и пишет JSON export document для visualizer-а |
+| `--entry <path>`     | обязательный TypeScript entrypoint с выбранным `MachineManager(...)`                                            |
+| `--out <path>`       | обязательный output file; stdout JSON (`--out -`) не поддерживается                                             |
+| `--tsconfig <path>`  | optional explicit tsconfig для TypeScript module resolution                                                     |
+
+Export format version: `lite-fsm.project-graph-export/v1`. Top-level `diagnostics` содержит только CLI diagnostics `LFC_*`; compiler diagnostics остаются внутри `graph.diagnostics`. JSON export не содержит исходный source text.
+
 ## Experimental graph simulator
 
 `@lite-fsm/graph/simulator` запускает headless symbolic simulation поверх готового `LiteFsmGraphDocument`. Root import `@lite-fsm/graph` simulator runtime не реэкспортирует.

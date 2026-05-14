@@ -1,0 +1,972 @@
+{
+  "version": "lite-fsm.project-graph-export/v1",
+  "createdBy": {
+    "version": "0.0.0",
+    "package": "@lite-fsm/cli"
+  },
+  "entry": {
+    "path": "packages/graph/test-fixtures/real-store-shape/store/index.ts",
+    "tsconfigPath": "packages/graph/test-fixtures/real-store-shape/tsconfig.json"
+  },
+  "graph": {
+    "version": "lite-fsm.graph/v1",
+    "source": {
+      "filename": "store/index.ts",
+      "language": "ts",
+      "kind": "project",
+      "entryFileName": "store/index.ts",
+      "files": [
+        {
+          "language": "ts",
+          "fileName": "store/index.ts",
+          "hash": "3b21189f"
+        },
+        {
+          "language": "ts",
+          "fileName": "store/machines/index.ts",
+          "hash": "37f9cdfa"
+        },
+        {
+          "language": "ts",
+          "fileName": "store/machines/root/index.ts",
+          "hash": "69afb2eb"
+        },
+        {
+          "language": "ts",
+          "fileName": "store/create-machine.ts",
+          "hash": "4f735dde"
+        },
+        {
+          "language": "ts",
+          "fileName": "store/machines/router/index.ts",
+          "hash": "345adf5b"
+        },
+        {
+          "language": "ts",
+          "fileName": "store/machines/theme/index.ts",
+          "hash": "d15fa8bc"
+        },
+        {
+          "language": "ts",
+          "fileName": "store/machines/app-analytics/index.ts",
+          "hash": "9204f8e2"
+        },
+        {
+          "language": "ts",
+          "fileName": "store/machines/app-analytics/events/navigation.ts",
+          "hash": "2e7f1017"
+        }
+      ]
+    },
+    "machines": [
+      {
+        "kind": "domain",
+        "diagnostics": [],
+        "loc": {
+          "fileName": "store/machines/root/index.ts",
+          "start": {
+            "line": 26,
+            "column": 21,
+            "offset": 524
+          },
+          "end": {
+            "line": 36,
+            "column": 3,
+            "offset": 706
+          }
+        },
+        "id": "root",
+        "index": 0,
+        "variableName": "root",
+        "exportName": "root",
+        "managerKeys": [
+          "root"
+        ],
+        "states": [
+          {
+            "kind": "normal",
+            "loc": {
+              "fileName": "store/machines/root/index.ts",
+              "start": {
+                "line": 8,
+                "column": 3,
+                "offset": 182
+              },
+              "end": {
+                "line": 10,
+                "column": 4,
+                "offset": 215
+              }
+            },
+            "id": "root:state:IDLE",
+            "key": "IDLE",
+            "isInitial": true,
+            "isPublicActorState": true
+          },
+          {
+            "kind": "normal",
+            "loc": {
+              "fileName": "store/machines/root/index.ts",
+              "start": {
+                "line": 11,
+                "column": 3,
+                "offset": 219
+              },
+              "end": {
+                "line": 13,
+                "column": 4,
+                "offset": 254
+              }
+            },
+            "id": "root:state:READY",
+            "key": "READY",
+            "isInitial": false,
+            "isPublicActorState": true
+          }
+        ],
+        "transitions": [
+          {
+            "source": {
+              "kind": "state",
+              "stateId": "root:state:IDLE"
+            },
+            "loc": {
+              "fileName": "store/machines/root/index.ts",
+              "start": {
+                "line": 9,
+                "column": 5,
+                "offset": 194
+              },
+              "end": {
+                "line": 9,
+                "column": 21,
+                "offset": 210
+              }
+            },
+            "id": "root:transition:config:IDLE:DO_INIT:READY:0",
+            "machineId": "root",
+            "confidence": "exact",
+            "event": {
+              "source": "config",
+              "type": "DO_INIT"
+            },
+            "layer": "config",
+            "order": 0,
+            "target": {
+              "kind": "state",
+              "stateId": "root:state:READY"
+            }
+          },
+          {
+            "source": {
+              "kind": "state",
+              "stateId": "root:state:READY"
+            },
+            "loc": {
+              "fileName": "store/machines/root/index.ts",
+              "start": {
+                "line": 12,
+                "column": 5,
+                "offset": 232
+              },
+              "end": {
+                "line": 12,
+                "column": 22,
+                "offset": 249
+              }
+            },
+            "id": "root:transition:config:READY:APP_MOUNTED:self:0",
+            "machineId": "root",
+            "confidence": "exact",
+            "event": {
+              "source": "config",
+              "type": "APP_MOUNTED"
+            },
+            "layer": "config",
+            "order": 1,
+            "target": {
+              "kind": "self"
+            }
+          },
+          {
+            "source": {
+              "kind": "state",
+              "stateId": "root:state:IDLE"
+            },
+            "loc": {
+              "fileName": "store/machines/root/index.ts",
+              "start": {
+                "line": 17,
+                "column": 17,
+                "offset": 381
+              },
+              "end": {
+                "line": 17,
+                "column": 26,
+                "offset": 390
+              }
+            },
+            "id": "root:transition:reducer:IDLE:DO_INIT:READY:0",
+            "machineId": "root",
+            "confidence": "exact",
+            "event": {
+              "source": "reducer",
+              "type": "DO_INIT"
+            },
+            "layer": "reducer",
+            "order": 2,
+            "reducerCaseId": "root:reducer:DO_INIT:0",
+            "target": {
+              "kind": "state",
+              "stateId": "root:state:READY"
+            }
+          },
+          {
+            "source": {
+              "kind": "state",
+              "stateId": "root:state:READY"
+            },
+            "loc": {
+              "fileName": "store/machines/root/index.ts",
+              "start": {
+                "line": 17,
+                "column": 17,
+                "offset": 381
+              },
+              "end": {
+                "line": 17,
+                "column": 26,
+                "offset": 390
+              }
+            },
+            "id": "root:transition:reducer:READY:APP_MOUNTED:self:0",
+            "machineId": "root",
+            "confidence": "exact",
+            "event": {
+              "source": "reducer",
+              "type": "APP_MOUNTED"
+            },
+            "layer": "reducer",
+            "order": 3,
+            "reducerCaseId": "root:reducer:APP_MOUNTED:0",
+            "target": {
+              "kind": "self"
+            }
+          }
+        ],
+        "emissions": [
+          {
+            "loc": {
+              "fileName": "store/machines/root/index.ts",
+              "start": {
+                "line": 33,
+                "column": 7,
+                "offset": 655
+              },
+              "end": {
+                "line": 33,
+                "column": 42,
+                "offset": 690
+              }
+            },
+            "id": "root:emission:READY:APP_MOUNTED:default:0",
+            "machineId": "root",
+            "confidence": "exact",
+            "event": {
+              "source": "effect",
+              "type": "APP_MOUNTED"
+            },
+            "origin": "effect",
+            "routing": {
+              "kind": "default"
+            },
+            "sourceState": {
+              "kind": "state",
+              "stateId": "root:state:READY"
+            }
+          }
+        ],
+        "reducerCases": [
+          {
+            "loc": {
+              "fileName": "store/machines/root/index.ts",
+              "start": {
+                "line": 17,
+                "column": 3,
+                "offset": 367
+              },
+              "end": {
+                "line": 17,
+                "column": 27,
+                "offset": 391
+              }
+            },
+            "id": "root:reducer:APP_MOUNTED:0",
+            "confidence": "exact",
+            "event": {
+              "source": "reducer",
+              "type": "APP_MOUNTED"
+            },
+            "targets": [
+              {
+                "kind": "self"
+              }
+            ],
+            "writesState": true
+          },
+          {
+            "loc": {
+              "fileName": "store/machines/root/index.ts",
+              "start": {
+                "line": 17,
+                "column": 3,
+                "offset": 367
+              },
+              "end": {
+                "line": 17,
+                "column": 27,
+                "offset": 391
+              }
+            },
+            "id": "root:reducer:DO_INIT:0",
+            "confidence": "exact",
+            "event": {
+              "source": "reducer",
+              "type": "DO_INIT"
+            },
+            "targets": [
+              {
+                "kind": "state",
+                "stateId": "root:state:READY"
+              }
+            ],
+            "writesState": true
+          }
+        ],
+        "initialContextJson": {
+          "initialized": false
+        },
+        "initialContextSummary": {
+          "kind": "object",
+          "text": "initialContext"
+        },
+        "initialState": "IDLE"
+      },
+      {
+        "kind": "domain",
+        "diagnostics": [],
+        "loc": {
+          "fileName": "store/machines/router/index.ts",
+          "start": {
+            "line": 11,
+            "column": 23,
+            "offset": 180
+          },
+          "end": {
+            "line": 18,
+            "column": 3,
+            "offset": 381
+          }
+        },
+        "id": "router",
+        "index": 1,
+        "variableName": "router",
+        "exportName": "router",
+        "managerKeys": [
+          "router"
+        ],
+        "states": [
+          {
+            "kind": "normal",
+            "loc": {
+              "fileName": "store/machines/router/index.ts",
+              "start": {
+                "line": 6,
+                "column": 3,
+                "offset": 119
+              },
+              "end": {
+                "line": 8,
+                "column": 4,
+                "offset": 151
+              }
+            },
+            "id": "router:state:READY",
+            "key": "READY",
+            "isInitial": true,
+            "isPublicActorState": true
+          }
+        ],
+        "transitions": [
+          {
+            "source": {
+              "kind": "state",
+              "stateId": "router:state:READY"
+            },
+            "loc": {
+              "fileName": "store/machines/router/index.ts",
+              "start": {
+                "line": 7,
+                "column": 5,
+                "offset": 132
+              },
+              "end": {
+                "line": 7,
+                "column": 19,
+                "offset": 146
+              }
+            },
+            "id": "router:transition:config:READY:NAVIGATE:self:0",
+            "machineId": "router",
+            "confidence": "exact",
+            "event": {
+              "source": "config",
+              "type": "NAVIGATE"
+            },
+            "layer": "config",
+            "order": 0,
+            "target": {
+              "kind": "self"
+            }
+          }
+        ],
+        "emissions": [],
+        "reducerCases": [],
+        "initialContextJson": {
+          "path": "/"
+        },
+        "initialContextSummary": {
+          "kind": "object",
+          "text": "{ path: \"/\" }"
+        },
+        "initialState": "READY"
+      },
+      {
+        "kind": "domain",
+        "diagnostics": [],
+        "loc": {
+          "fileName": "store/machines/theme/index.ts",
+          "start": {
+            "line": 5,
+            "column": 22,
+            "offset": 94
+          },
+          "end": {
+            "line": 16,
+            "column": 3,
+            "offset": 357
+          }
+        },
+        "id": "theme",
+        "index": 2,
+        "variableName": "theme",
+        "exportName": "theme",
+        "managerKeys": [
+          "theme"
+        ],
+        "states": [
+          {
+            "kind": "normal",
+            "loc": {
+              "fileName": "store/machines/theme/index.ts",
+              "start": {
+                "line": 7,
+                "column": 5,
+                "offset": 126
+              },
+              "end": {
+                "line": 9,
+                "column": 6,
+                "offset": 162
+              }
+            },
+            "id": "theme:state:IDLE",
+            "key": "IDLE",
+            "isInitial": true,
+            "isPublicActorState": true
+          }
+        ],
+        "transitions": [
+          {
+            "source": {
+              "kind": "state",
+              "stateId": "theme:state:IDLE"
+            },
+            "loc": {
+              "fileName": "store/machines/theme/index.ts",
+              "start": {
+                "line": 8,
+                "column": 7,
+                "offset": 140
+              },
+              "end": {
+                "line": 8,
+                "column": 22,
+                "offset": 155
+              }
+            },
+            "id": "theme:transition:config:IDLE:SET_THEME:self:0",
+            "machineId": "theme",
+            "confidence": "exact",
+            "event": {
+              "source": "config",
+              "type": "SET_THEME"
+            },
+            "layer": "config",
+            "order": 0,
+            "target": {
+              "kind": "self"
+            }
+          }
+        ],
+        "emissions": [],
+        "reducerCases": [],
+        "initialContextJson": {
+          "theme": "theme-light"
+        },
+        "initialContextSummary": {
+          "kind": "object",
+          "text": "{ theme: \"theme-light\" }"
+        },
+        "initialState": "IDLE"
+      },
+      {
+        "kind": "domain",
+        "diagnostics": [
+          {
+            "code": "LFG_UNSUPPORTED_EFFECT",
+            "severity": "warning",
+            "message": "Effect compiler requires an object binding parameter containing transition.",
+            "loc": {
+              "fileName": "store/machines/app-analytics/index.ts",
+              "start": {
+                "line": 15,
+                "column": 13,
+                "offset": 320
+              },
+              "end": {
+                "line": 15,
+                "column": 17,
+                "offset": 324
+              }
+            },
+            "machineId": "appAnalytics"
+          }
+        ],
+        "loc": {
+          "fileName": "store/machines/app-analytics/index.ts",
+          "start": {
+            "line": 6,
+            "column": 29,
+            "offset": 166
+          },
+          "end": {
+            "line": 19,
+            "column": 3,
+            "offset": 378
+          }
+        },
+        "id": "appAnalytics",
+        "index": 3,
+        "variableName": "appAnalytics",
+        "exportName": "appAnalytics",
+        "managerKeys": [
+          "appAnalytics"
+        ],
+        "states": [
+          {
+            "kind": "normal",
+            "loc": {
+              "fileName": "store/machines/app-analytics/index.ts",
+              "start": {
+                "line": 8,
+                "column": 5,
+                "offset": 198
+              },
+              "end": {
+                "line": 10,
+                "column": 6,
+                "offset": 241
+              }
+            },
+            "id": "appAnalytics:state:READY",
+            "key": "READY",
+            "isInitial": true,
+            "isPublicActorState": true
+          }
+        ],
+        "transitions": [
+          {
+            "source": {
+              "kind": "state",
+              "stateId": "appAnalytics:state:READY"
+            },
+            "loc": {
+              "fileName": "store/machines/app-analytics/index.ts",
+              "start": {
+                "line": 9,
+                "column": 7,
+                "offset": 213
+              },
+              "end": {
+                "line": 9,
+                "column": 28,
+                "offset": 234
+              }
+            },
+            "id": "appAnalytics:transition:config:READY:UI_BUTTON_CLICK:self:0",
+            "machineId": "appAnalytics",
+            "confidence": "exact",
+            "event": {
+              "source": "config",
+              "type": "UI_BUTTON_CLICK"
+            },
+            "layer": "config",
+            "order": 0,
+            "target": {
+              "kind": "self"
+            }
+          }
+        ],
+        "emissions": [],
+        "reducerCases": [],
+        "initialContextJson": {},
+        "initialContextSummary": {
+          "kind": "empty",
+          "text": "{}"
+        },
+        "initialState": "READY"
+      },
+      {
+        "kind": "domain",
+        "diagnostics": [],
+        "loc": {
+          "fileName": "store/machines/app-analytics/events/navigation.ts",
+          "start": {
+            "line": 18,
+            "column": 32,
+            "offset": 427
+          },
+          "end": {
+            "line": 25,
+            "column": 3,
+            "offset": 554
+          }
+        },
+        "id": "eventNavigation",
+        "index": 4,
+        "variableName": "eventNavigation",
+        "exportName": "eventNavigation",
+        "managerKeys": [
+          "eventNavigation"
+        ],
+        "states": [
+          {
+            "kind": "normal",
+            "loc": {
+              "fileName": "store/machines/app-analytics/events/navigation.ts",
+              "start": {
+                "line": 6,
+                "column": 3,
+                "offset": 133
+              },
+              "end": {
+                "line": 8,
+                "column": 4,
+                "offset": 178
+              }
+            },
+            "id": "eventNavigation:state:READY",
+            "key": "READY",
+            "isInitial": true,
+            "isPublicActorState": true
+          }
+        ],
+        "transitions": [
+          {
+            "source": {
+              "kind": "state",
+              "stateId": "eventNavigation:state:READY"
+            },
+            "loc": {
+              "fileName": "store/machines/app-analytics/events/navigation.ts",
+              "start": {
+                "line": 7,
+                "column": 5,
+                "offset": 146
+              },
+              "end": {
+                "line": 7,
+                "column": 32,
+                "offset": 173
+              }
+            },
+            "id": "eventNavigation:transition:config:READY:NAVIGATION_EVENT_SEND:self:0",
+            "machineId": "eventNavigation",
+            "confidence": "exact",
+            "event": {
+              "source": "config",
+              "type": "NAVIGATION_EVENT_SEND"
+            },
+            "layer": "config",
+            "order": 0,
+            "target": {
+              "kind": "self"
+            }
+          }
+        ],
+        "emissions": [
+          {
+            "loc": {
+              "fileName": "store/machines/app-analytics/events/navigation.ts",
+              "start": {
+                "line": 14,
+                "column": 5,
+                "offset": 339
+              },
+              "end": {
+                "line": 14,
+                "column": 50,
+                "offset": 384
+              }
+            },
+            "id": "eventNavigation:emission:READY:NAVIGATION_EVENT_SEND:default:0",
+            "machineId": "eventNavigation",
+            "confidence": "exact",
+            "event": {
+              "source": "effect",
+              "type": "NAVIGATION_EVENT_SEND"
+            },
+            "origin": "effect",
+            "routing": {
+              "kind": "default"
+            },
+            "sourceState": {
+              "kind": "state",
+              "stateId": "eventNavigation:state:READY"
+            }
+          }
+        ],
+        "reducerCases": [],
+        "initialContextJson": {},
+        "initialContextSummary": {
+          "kind": "empty",
+          "text": "{}"
+        },
+        "initialState": "READY"
+      }
+    ],
+    "managers": [
+      {
+        "loc": {
+          "fileName": "store/index.ts",
+          "start": {
+            "line": 25,
+            "column": 19,
+            "offset": 626
+          },
+          "end": {
+            "line": 31,
+            "column": 5,
+            "offset": 863
+          }
+        },
+        "id": "manager",
+        "variableName": "manager",
+        "machineRefs": [
+          {
+            "loc": {
+              "fileName": "store/index.ts",
+              "start": {
+                "line": 15,
+                "column": 3,
+                "offset": 450
+              },
+              "end": {
+                "line": 15,
+                "column": 7,
+                "offset": 454
+              }
+            },
+            "key": "root",
+            "machineId": "root"
+          },
+          {
+            "loc": {
+              "fileName": "store/index.ts",
+              "start": {
+                "line": 16,
+                "column": 6,
+                "offset": 461
+              },
+              "end": {
+                "line": 16,
+                "column": 10,
+                "offset": 465
+              }
+            },
+            "key": "router",
+            "machineId": "router"
+          },
+          {
+            "loc": {
+              "fileName": "store/index.ts",
+              "start": {
+                "line": 16,
+                "column": 6,
+                "offset": 461
+              },
+              "end": {
+                "line": 16,
+                "column": 10,
+                "offset": 465
+              }
+            },
+            "key": "theme",
+            "machineId": "theme"
+          },
+          {
+            "loc": {
+              "fileName": "store/index.ts",
+              "start": {
+                "line": 16,
+                "column": 6,
+                "offset": 461
+              },
+              "end": {
+                "line": 16,
+                "column": 10,
+                "offset": 465
+              }
+            },
+            "key": "appAnalytics",
+            "machineId": "appAnalytics"
+          },
+          {
+            "loc": {
+              "fileName": "store/index.ts",
+              "start": {
+                "line": 16,
+                "column": 6,
+                "offset": 461
+              },
+              "end": {
+                "line": 16,
+                "column": 10,
+                "offset": 465
+              }
+            },
+            "key": "eventNavigation",
+            "machineId": "eventNavigation"
+          }
+        ]
+      }
+    ],
+    "diagnostics": [
+      {
+        "code": "LFG_PROJECT_MANAGER_SPREAD_UNRESOLVED",
+        "severity": "warning",
+        "message": "Manager map spread 'playerMachines' comes from an external module and was skipped.",
+        "loc": {
+          "fileName": "store/index.ts",
+          "start": {
+            "line": 17,
+            "column": 6,
+            "offset": 472
+          },
+          "end": {
+            "line": 17,
+            "column": 20,
+            "offset": 486
+          }
+        }
+      },
+      {
+        "code": "LFG_UNSUPPORTED_EFFECT",
+        "severity": "warning",
+        "message": "Effect compiler requires an object binding parameter containing transition.",
+        "loc": {
+          "fileName": "store/machines/app-analytics/index.ts",
+          "start": {
+            "line": 15,
+            "column": 13,
+            "offset": 320
+          },
+          "end": {
+            "line": 15,
+            "column": 17,
+            "offset": 324
+          }
+        },
+        "machineId": "appAnalytics"
+      }
+    ]
+  },
+  "files": [
+    {
+      "language": "ts",
+      "fileName": "store/index.ts",
+      "roles": [
+        "entry"
+      ],
+      "hash": "3b21189f"
+    },
+    {
+      "language": "ts",
+      "fileName": "store/machines/index.ts",
+      "roles": [
+        "barrel"
+      ],
+      "hash": "37f9cdfa"
+    },
+    {
+      "language": "ts",
+      "fileName": "store/machines/root/index.ts",
+      "roles": [
+        "machine"
+      ],
+      "hash": "69afb2eb"
+    },
+    {
+      "language": "ts",
+      "fileName": "store/create-machine.ts",
+      "roles": [
+        "helper"
+      ],
+      "hash": "4f735dde"
+    },
+    {
+      "language": "ts",
+      "fileName": "store/machines/router/index.ts",
+      "roles": [
+        "machine"
+      ],
+      "hash": "345adf5b"
+    },
+    {
+      "language": "ts",
+      "fileName": "store/machines/theme/index.ts",
+      "roles": [
+        "machine"
+      ],
+      "hash": "d15fa8bc"
+    },
+    {
+      "language": "ts",
+      "fileName": "store/machines/app-analytics/index.ts",
+      "roles": [
+        "machine"
+      ],
+      "hash": "9204f8e2"
+    },
+    {
+      "language": "ts",
+      "fileName": "store/machines/app-analytics/events/navigation.ts",
+      "roles": [
+        "machine"
+      ],
+      "hash": "2e7f1017"
+    }
+  ],
+  "diagnostics": []
+}

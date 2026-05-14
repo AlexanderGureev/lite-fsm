@@ -47,6 +47,8 @@ export default defineConfig({
         "packages/**/tsup.config.ts",
         "packages/**/*.d.ts",
         "packages/**/src/index.ts",
+        "packages/cli/src/bin/**",
+        "packages/cli/src/cli/node-fs.ts",
         "packages/core/src/types.ts",
         "packages/core/src/interfaces.ts",
         "packages/react/src/types.ts",

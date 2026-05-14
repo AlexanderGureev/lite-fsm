@@ -25,6 +25,7 @@ Project graph build pipeline должен быть command-agnostic: `export-gra
 
 ```txt
 packages/cli/
+tests/cli/
 tests/fixtures/project-graph-export/v1/
 ```
 
@@ -64,7 +65,7 @@ packages/cli/
       module-resolver.ts
       source-cache.ts
       tsconfig.ts
-  tests/
+tests/cli/
     helpers/
       memory-fs.ts
     export-graph/
@@ -98,7 +99,9 @@ packages/cli/
 7. `src/project/**` владеет tsconfig lookup, TypeScript module resolution,
    source cache и созданием `LiteFsmGraphProjectHost`.
 8. `src/output/**` владеет stderr formatting и stable JSON primitives.
-9. Tests используют in-memory `CliFileSystem`; Node fs adapter и bin entrypoint
+9. CLI tests живут в repo-root `tests/cli/**`, чтобы общий `pnpm run test`
+   запускал их вместе с тестами остальных packages.
+10. Tests используют in-memory `CliFileSystem`; Node fs adapter и bin entrypoint
    остаются thin integration adapters.
 
 ### Package Contract
@@ -488,6 +491,9 @@ Exit codes:
 ### Tests
 
 Runtime tests используют Vitest. Названия тестов должны быть на русском.
+CLI runtime tests находятся в `tests/cli/**`, но `@lite-fsm/cli` сохраняет
+package-local `test:unit`/`test:coverage` scripts, которые запускают этот же
+набор тестов с CLI-specific coverage config.
 
 CLI tests:
 
@@ -527,6 +533,8 @@ Coverage requirements:
 Основные команды проверки этапа:
 
 ```bash
+pnpm run test
+pnpm run test:coverage
 pnpm --filter @lite-fsm/cli test:unit
 pnpm --filter @lite-fsm/cli test:coverage
 pnpm --filter @lite-fsm/cli check-types

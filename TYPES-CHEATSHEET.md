@@ -375,6 +375,31 @@ const snapshot: GraphSimulationSnapshot | undefined = createGraphSimulator(docum
 
 `LiteFsmGraphDocument.diagnostics` содержит compiler diagnostics. Diagnostics analyzer-а возвращаются отдельно из `GraphAnalysisResult` и имеют коды `LFG_ANALYZER_*`.
 
+## CLI project graph export document
+
+`lite-fsm export-graph` пишет versioned JSON envelope для передачи project graph document в visualizer без повторного compile source.
+
+```ts
+type LiteFsmProjectGraphExportDocument = {
+  version: "lite-fsm.project-graph-export/v1";
+  createdBy: { package: "@lite-fsm/cli"; version: string };
+  entry: { path: string; tsconfigPath?: string };
+  graph: LiteFsmGraphDocument;
+  files: LiteFsmGraphProjectFile[];
+  diagnostics: CliDiagnostic[];
+};
+```
+
+| Тип / поле        | Назначение                                                                                      |
+| ----------------- | ----------------------------------------------------------------------------------------------- |
+| `entry.path`      | entrypoint path relative to CLI cwd, когда возможно                                             |
+| `entry.tsconfigPath` | присутствует только если CLI использовал explicit или nearest tsconfig                       |
+| `graph`           | ровно `compileLiteFsmGraphProject(...).document`; `graph.diagnostics` хранит `LFG_*` diagnostics |
+| `files`           | ровно `compileLiteFsmGraphProject(...).files`                                                    |
+| `diagnostics`     | только CLI diagnostics `LFC_*`, показанные во время command execution                            |
+
+`CliDiagnostic` имеет форму `{ code, severity, message, file?, loc?, hint? }`, где `severity` — `"info" | "warning" | "error"`, а code в MVP: `LFC_INVALID_OPTIONS`, `LFC_TSCONFIG_NOT_FOUND`, `LFC_TSCONFIG_INVALID`, `LFC_GRAPH_PROJECT_FAILED`, `LFC_NO_MACHINES_EXPORTED`, `LFC_WRITE_FAILED`.
+
 ## Experimental graph simulator types
 
 `@lite-fsm/graph/simulator` экспортирует типы headless simulation runtime. Они не зависят от DOM, React или app modules.

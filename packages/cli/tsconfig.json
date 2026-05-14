@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node", "vitest/globals"],
+    "paths": {
+      "@lite-fsm/graph": ["../graph/src/index.ts"]
+    }
+  },
+  "include": ["src", "../../tests/cli", "tsup.config.ts", "vitest.config.ts"],
+  "exclude": ["dist", "coverage"]
+}

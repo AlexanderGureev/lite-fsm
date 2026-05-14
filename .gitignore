@@ -39,3 +39,4 @@ internal
 .cursor
 *.tsbuildinfo
 .agents
+.tmp

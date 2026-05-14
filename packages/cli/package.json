@@ -1,0 +1,32 @@
+{
+  "name": "@lite-fsm/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Experimental CLI for lite-fsm project graph exports",
+  "license": "MIT",
+  "bin": {
+    "lite-fsm": "./dist/bin/lite-fsm.js"
+  },
+  "files": ["dist"],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "pnpm --filter @lite-fsm/graph build && tsup --config tsup.config.ts && tsc -p tsconfig.build.json && node ../../scripts/dts-to-dcts.mjs dist && chmod +x dist/bin/lite-fsm.js",
+    "check-types": "tsc --noEmit -p tsconfig.json",
+    "test:unit": "vitest run --config vitest.config.ts",
+    "test:coverage": "vitest run --coverage --config vitest.config.ts"
+  },
+  "dependencies": {
+    "@lite-fsm/graph": "workspace:*",
+    "commander": "^14.0.3",
+    "typescript": "^6.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "@vitest/coverage-v8": "^4.1.4",
+    "tsup": "^8.5.1",
+    "vitest": "^4.1.4"
+  }
+}
