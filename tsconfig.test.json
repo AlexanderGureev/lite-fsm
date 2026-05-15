@@ -4,6 +4,6 @@
     "rootDir": ".",
     "types": ["vitest/globals", "node"]
   },
-  "include": ["packages/*/src", "tests", "xstate/**/*.ts"],
+  "include": ["packages/*/src", "tests"],
   "exclude": ["packages/graph/test-fixtures", "tests/types", "tests/types-dist"]
 }
