@@ -11,6 +11,21 @@ import {
 } from "@lite-fsm/core";
 import type { FSMEvent, MachineConfig, MachinesState } from "@lite-fsm/core";
 import {
+  analyzeLiteFsmGraph,
+  compileLiteFsmGraph,
+  compileLiteFsmGraphProject,
+  selectMachineGraph,
+} from "@lite-fsm/graph";
+import type { LiteFsmGraphDocument, LiteFsmGraphResult } from "@lite-fsm/graph";
+import { createGraphSimulator, createMachineGraphSimulator } from "@lite-fsm/graph/simulator";
+import type { GraphSimulator } from "@lite-fsm/graph/simulator";
+import {
+  buildGraphVisualizerModel,
+  buildMachineFlowModel,
+  buildMachineWorkbenchModel,
+} from "@lite-fsm/graph/view-model";
+import type { GraphVisualizerModel, MachineFlowModel } from "@lite-fsm/graph/view-model";
+import {
   FSMContext,
   FSMContextProvider,
   FSMHydrationBoundary,
@@ -46,6 +61,15 @@ void createMachine;
 void createReducer;
 void defineMachine;
 void LiteFsmError;
+void analyzeLiteFsmGraph;
+void compileLiteFsmGraph;
+void compileLiteFsmGraphProject;
+void selectMachineGraph;
+void createGraphSimulator;
+void createMachineGraphSimulator;
+void buildGraphVisualizerModel;
+void buildMachineFlowModel;
+void buildMachineWorkbenchModel;
 void FSMContext;
 void FSMContextProvider;
 void FSMHydrationBoundary;
@@ -66,3 +90,8 @@ void usePersistStatus;
 export type SmokeHydrationBoundaryProps = FSMHydrationBoundaryProps<Record<string, SmokeConfig>>;
 export type SmokePersistStorage = PersistStorage<Record<string, SmokeConfig>>;
 export type SmokePersistController = PersistController;
+export type SmokeGraphDocument = LiteFsmGraphDocument;
+export type SmokeGraphResult = LiteFsmGraphResult;
+export type SmokeGraphSimulator = GraphSimulator;
+export type SmokeGraphVisualizerModel = GraphVisualizerModel;
+export type SmokeMachineFlowModel = MachineFlowModel;

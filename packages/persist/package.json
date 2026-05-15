@@ -1,9 +1,12 @@
 {
   "name": "@lite-fsm/persist",
-  "version": "2.0.0",
+  "version": "1.0.0",
   "type": "module",
   "description": "Persistence helpers for lite-fsm",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -38,6 +41,19 @@
     }
   },
   "files": ["dist"],
+  "keywords": [
+    "lite-fsm",
+    "fsm",
+    "finite-state-machine",
+    "persistence",
+    "storage",
+    "hydration",
+    "localstorage",
+    "react",
+    "state-management",
+    "lightweight",
+    "typescript"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/AlexanderGureev/lite-fsm.git",

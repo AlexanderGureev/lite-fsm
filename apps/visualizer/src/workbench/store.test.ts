@@ -21,7 +21,7 @@ import type { WorkbenchSnapshot } from "./types";
 const documentFixture = { source: { filename: "sample.ts", language: "ts" }, diagnostics: [], machines: [], managers: [] } as unknown as LiteFsmGraphDocument;
 const projectExportDocumentFixture = {
   version: "lite-fsm.project-graph-export/v1" as const,
-  createdBy: { package: "@lite-fsm/cli" as const, version: "0.0.0" },
+  createdBy: { package: "@lite-fsm/cli" as const, version: "0.1.0" },
   entry: { path: "store/index.ts" },
   graph: documentFixture,
   files: [{ fileName: "store/index.ts", language: "ts" as const, roles: ["entry" as const], hash: "abc" }],

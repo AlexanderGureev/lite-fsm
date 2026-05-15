@@ -1,6 +1,9 @@
 const assert = require("node:assert/strict");
 
 const core = require("@lite-fsm/core");
+const graph = require("@lite-fsm/graph");
+const graphSimulator = require("@lite-fsm/graph/simulator");
+const graphViewModel = require("@lite-fsm/graph/view-model");
 const devTools = require("@lite-fsm/middleware/devTools");
 const immer = require("@lite-fsm/middleware/immer");
 const persist = require("@lite-fsm/persist");
@@ -17,6 +20,15 @@ assert.equal(typeof core.createMachine, "function");
 assert.equal(typeof core.createReducer, "function");
 assert.equal(typeof core.defineMachine, "function");
 assert.equal(typeof core.LiteFsmError, "function");
+assert.equal(typeof graph.analyzeLiteFsmGraph, "function");
+assert.equal(typeof graph.compileLiteFsmGraph, "function");
+assert.equal(typeof graph.compileLiteFsmGraphProject, "function");
+assert.equal(typeof graph.selectMachineGraph, "function");
+assert.equal(typeof graphSimulator.createGraphSimulator, "function");
+assert.equal(typeof graphSimulator.createMachineGraphSimulator, "function");
+assert.equal(typeof graphViewModel.buildGraphVisualizerModel, "function");
+assert.equal(typeof graphViewModel.buildMachineFlowModel, "function");
+assert.equal(typeof graphViewModel.buildMachineWorkbenchModel, "function");
 assert.equal(typeof persist.createJsonStorage, "function");
 assert.equal(typeof persist.persistManager, "function");
 assert.equal(typeof persistReact.useIsPersistRestoring, "function");

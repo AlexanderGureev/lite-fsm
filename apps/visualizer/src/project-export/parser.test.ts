@@ -13,7 +13,7 @@ const validDocument = (): LiteFsmProjectGraphExportDocument => ({
   version: "lite-fsm.project-graph-export/v1",
   createdBy: {
     package: "@lite-fsm/cli",
-    version: "0.0.0",
+    version: "0.1.0",
   },
   entry: {
     path: "store/index.ts",

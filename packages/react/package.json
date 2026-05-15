@@ -4,6 +4,9 @@
   "type": "module",
   "description": "React bindings for lite-fsm",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -27,6 +30,18 @@
     }
   },
   "files": ["dist"],
+  "keywords": [
+    "lite-fsm",
+    "fsm",
+    "finite-state-machine",
+    "state-machine",
+    "react",
+    "react-hooks",
+    "react-state",
+    "state-management",
+    "lightweight",
+    "typescript"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/AlexanderGureev/lite-fsm.git",

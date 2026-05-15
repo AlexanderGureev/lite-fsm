@@ -1,15 +1,18 @@
 {
   "name": "@lite-fsm/graph",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "type": "module",
   "description": "Alpha graph compiler for lite-fsm",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "sideEffects": false,
   "exports": {
+    "./package.json": "./package.json",
     ".": {
       "import": {
         "types": "./dist/index.d.ts",
@@ -41,9 +44,37 @@
       }
     }
   },
+  "typesVersions": {
+    "*": {
+      "*": ["dist/index.d.ts"],
+      "simulator": ["dist/simulator/index.d.ts"],
+      "view-model": ["dist/view-model/index.d.ts"]
+    }
+  },
   "files": [
     "dist"
   ],
+  "keywords": [
+    "lite-fsm",
+    "fsm",
+    "finite-state-machine",
+    "state-machine",
+    "statechart",
+    "graph",
+    "visualization",
+    "static-analysis",
+    "state-management",
+    "lightweight",
+    "typescript"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AlexanderGureev/lite-fsm.git",
+    "directory": "packages/graph"
+  },
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
     "ts-morph": "^27.0.2"
   },

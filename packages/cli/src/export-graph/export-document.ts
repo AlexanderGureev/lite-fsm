@@ -4,7 +4,7 @@ import { stringifyStableJson } from "../output/stable-json.js";
 
 export const PROJECT_GRAPH_EXPORT_VERSION = "lite-fsm.project-graph-export/v1";
 export const CLI_PACKAGE_NAME = "@lite-fsm/cli";
-export const CLI_PACKAGE_VERSION = "0.0.0";
+export const CLI_PACKAGE_VERSION = "0.1.0";
 
 export type LiteFsmProjectGraphExportDocument = {
   version: typeof PROJECT_GRAPH_EXPORT_VERSION;

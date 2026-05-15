@@ -1,7 +1,7 @@
 {
   "version": "lite-fsm.project-graph-export/v1",
   "createdBy": {
-    "version": "0.0.0",
+    "version": "0.1.0",
     "package": "@lite-fsm/cli"
   },
   "entry": {

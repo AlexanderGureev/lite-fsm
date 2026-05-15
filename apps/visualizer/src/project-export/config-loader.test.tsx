@@ -16,7 +16,7 @@ import type { LiteFsmProjectGraphExportDocument } from "./types";
 
 const exportDocument: LiteFsmProjectGraphExportDocument = {
   version: "lite-fsm.project-graph-export/v1",
-  createdBy: { package: "@lite-fsm/cli", version: "0.0.0" },
+  createdBy: { package: "@lite-fsm/cli", version: "0.1.0" },
   entry: { path: "store/index.ts" },
   graph: {
     version: "lite-fsm.graph/v1",

@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 
 import * as core from "@lite-fsm/core";
+import * as graph from "@lite-fsm/graph";
+import * as graphSimulator from "@lite-fsm/graph/simulator";
+import * as graphViewModel from "@lite-fsm/graph/view-model";
 import * as devTools from "@lite-fsm/middleware/devTools";
 import * as immer from "@lite-fsm/middleware/immer";
 import * as persist from "@lite-fsm/persist";
@@ -17,6 +20,15 @@ assert.equal(typeof core.createMachine, "function");
 assert.equal(typeof core.createReducer, "function");
 assert.equal(typeof core.defineMachine, "function");
 assert.equal(typeof core.LiteFsmError, "function");
+assert.equal(typeof graph.analyzeLiteFsmGraph, "function");
+assert.equal(typeof graph.compileLiteFsmGraph, "function");
+assert.equal(typeof graph.compileLiteFsmGraphProject, "function");
+assert.equal(typeof graph.selectMachineGraph, "function");
+assert.equal(typeof graphSimulator.createGraphSimulator, "function");
+assert.equal(typeof graphSimulator.createMachineGraphSimulator, "function");
+assert.equal(typeof graphViewModel.buildGraphVisualizerModel, "function");
+assert.equal(typeof graphViewModel.buildMachineFlowModel, "function");
+assert.equal(typeof graphViewModel.buildMachineWorkbenchModel, "function");
 assert.equal(typeof persist.createJsonStorage, "function");
 assert.equal(typeof persist.persistManager, "function");
 assert.equal(typeof persistReact.useIsPersistRestoring, "function");

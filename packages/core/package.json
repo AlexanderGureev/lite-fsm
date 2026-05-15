@@ -4,6 +4,9 @@
   "type": "module",
   "description": "Framework-agnostic runtime for lite-fsm",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -27,7 +30,18 @@
     }
   },
   "files": ["dist"],
-  "keywords": ["fsm", "finite-state machine"],
+  "keywords": [
+    "lite-fsm",
+    "fsm",
+    "finite-state-machine",
+    "state-machine",
+    "statechart",
+    "actor-model",
+    "event-driven",
+    "reducer",
+    "lightweight",
+    "typescript"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/AlexanderGureev/lite-fsm.git",

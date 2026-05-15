@@ -1,14 +1,37 @@
 {
   "name": "@lite-fsm/cli",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "type": "module",
   "description": "Alpha CLI for lite-fsm project graph exports",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "bin": {
     "lite-fsm": "./dist/bin/lite-fsm.js"
   },
+  "exports": {
+    "./package.json": "./package.json"
+  },
   "files": ["dist"],
+  "keywords": [
+    "lite-fsm",
+    "fsm",
+    "finite-state-machine",
+    "cli",
+    "graph",
+    "visualization",
+    "static-analysis",
+    "state-management",
+    "developer-tools",
+    "lightweight",
+    "typescript"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AlexanderGureev/lite-fsm.git",
+    "directory": "packages/cli"
+  },
   "engines": {
     "node": ">=20"
   },

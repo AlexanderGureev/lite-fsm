@@ -6,6 +6,17 @@
 
 Крупный релиз с flat actors: actor templates остаются обычными машинами, а `MachineManager` умеет запускать их как плоские runtime actors с маршрутизацией, lifecycle-состояниями и совместимостью с middleware.
 
+### Monorepo packages
+
+Проект перешёл от единого пакета `lite-fsm` с subpath entrypoints к монорепе с отдельными scoped-пакетами:
+
+- `@lite-fsm/core@2.0.0` — framework-agnostic runtime: `createMachine`, `MachineManager`, effects и core types.
+- `@lite-fsm/react@2.0.0` — React provider, context и hooks.
+- `@lite-fsm/middleware@2.0.0` — optional middleware integrations: DevTools и Immer.
+- `@lite-fsm/persist@1.0.0` — persistence helpers и React hooks для restore/save lifecycle.
+- `@lite-fsm/graph@0.1.0` — alpha graph compiler, analyzer, simulator и visualizer view-model.
+- `@lite-fsm/cli@0.1.0` — alpha CLI с командой `lite-fsm export-graph`.
+
 ### Flat actors
 
 - BREAKING: имена состояний `__INIT`, `__RESOLVED`, `__REJECTED`, `__CANCELLED` зарезервированы для actor templates и terminal lifecycle.
