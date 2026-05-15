@@ -5,11 +5,16 @@ import {
 } from "../canvas";
 import {
   appendConsoleEntries,
+  clearConsoleScope,
   createConsoleEntryFromDiagnostic,
   createInitialConsoleState,
   createSystemConsoleEntry,
   resetConsoleEntries,
+  resetConsoleFilters,
   selectConsoleChannel,
+  setConsoleFilter,
+  setConsoleQuery,
+  setConsoleScope,
 } from "../console";
 import { createWorkbenchDiagnostic, normalizeGraphDiagnostics } from "../diagnostics";
 import { STATIC_HOST_CAPABILITIES } from "../services";
@@ -844,21 +849,41 @@ const openTopicInEventCatalog = (snapshot: WorkbenchSnapshot, eventType: string)
   );
 
 const selectSystemMachine = (snapshot: WorkbenchSnapshot, machineId: string): Reduction => {
-  if (snapshot.state.l1.selectedMachineId === machineId && !snapshot.state.l1.selectedTopic) return unchanged(snapshot);
+  const selected = snapshot.state.l1.selectedMachineId === machineId && !snapshot.state.l1.selectedTopic;
 
   return changed(
     snapshot,
-    { ...snapshot.state, l1: { ...snapshot.state.l1, selectedMachineId: machineId, selectedTopic: undefined } },
+    {
+      ...snapshot.state,
+      l1: {
+        ...snapshot.state.l1,
+        selectedMachineId: selected ? undefined : machineId,
+        selectedTopic: undefined,
+        hoveredMachineId: selected && snapshot.state.l1.hoveredMachineId === machineId
+          ? undefined
+          : snapshot.state.l1.hoveredMachineId,
+      },
+    },
     ["l1"],
   );
 };
 
 const selectSystemTopic = (snapshot: WorkbenchSnapshot, eventType: string): Reduction => {
-  if (snapshot.state.l1.selectedTopic === eventType && !snapshot.state.l1.selectedMachineId) return unchanged(snapshot);
+  const selected = snapshot.state.l1.selectedTopic === eventType && !snapshot.state.l1.selectedMachineId;
 
   return changed(
     snapshot,
-    { ...snapshot.state, l1: { ...snapshot.state.l1, selectedMachineId: undefined, selectedTopic: eventType } },
+    {
+      ...snapshot.state,
+      l1: {
+        ...snapshot.state.l1,
+        selectedMachineId: undefined,
+        selectedTopic: selected ? undefined : eventType,
+        hoveredTopic: selected && snapshot.state.l1.hoveredTopic === eventType
+          ? undefined
+          : snapshot.state.l1.hoveredTopic,
+      },
+    },
     ["l1"],
   );
 };
@@ -879,24 +904,6 @@ const selectConsoleEntry = (snapshot: WorkbenchSnapshot, entryId: string): Reduc
   if (!entry?.target) {
     if (entryId === snapshot.state.panels.console.selectedEntryId) return unchanged(snapshot);
     return changed(snapshot, { ...snapshot.state, panels: basePanels }, ["panels"]);
-  }
-
-  if (entry.target.kind === "source") {
-    return changed(
-      snapshot,
-      {
-        ...snapshot.state,
-        panels: {
-          ...basePanels,
-          sourceOverlay: {
-            sourceVersion: snapshot.state.inputVersion,
-            title: entry.title,
-            anchors: [entry.target.anchor],
-          },
-        },
-      },
-      ["panels"],
-    );
   }
 
   if (entry.target.kind === "graph") {
@@ -1037,6 +1044,41 @@ const reduceUserCommand = (snapshot: WorkbenchSnapshot, command: VisualizerComma
     }
     case "console.channel.selected": {
       const console = selectConsoleChannel(snapshot.state.console, command.channel);
+      if (console === snapshot.state.console) return unchanged(snapshot);
+      return changed(snapshot, { ...snapshot.state, console }, ["console"]);
+    }
+    case "console.query.changed": {
+      const console = setConsoleQuery(snapshot.state.console, command.query);
+      if (console === snapshot.state.console) return unchanged(snapshot);
+      return changed(snapshot, { ...snapshot.state, console }, ["console"]);
+    }
+    case "console.filter.changed": {
+      const console = setConsoleFilter(snapshot.state.console, command.filter, command.value);
+      if (console === snapshot.state.console) return unchanged(snapshot);
+      return changed(snapshot, { ...snapshot.state, console }, ["console"]);
+    }
+    case "console.scope.opened": {
+      const console = setConsoleScope(snapshot.state.console, command.scope);
+      return changed(
+        snapshot,
+        {
+          ...snapshot.state,
+          console,
+          panels: {
+            ...snapshot.state.panels,
+            console: { open: true },
+          },
+        },
+        ["console", "panels"],
+      );
+    }
+    case "console.scope.cleared": {
+      const console = clearConsoleScope(snapshot.state.console);
+      if (console === snapshot.state.console) return unchanged(snapshot);
+      return changed(snapshot, { ...snapshot.state, console }, ["console"]);
+    }
+    case "console.filters.reset": {
+      const console = resetConsoleFilters(snapshot.state.console);
       if (console === snapshot.state.console) return unchanged(snapshot);
       return changed(snapshot, { ...snapshot.state, console }, ["console"]);
     }

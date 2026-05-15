@@ -392,10 +392,10 @@ export const EventCatalogPanel = ({
       <WorkspacePane>
         <header className="flex h-10 shrink-0 items-center gap-2 border-b border-(--vf-border-soft) bg-(--vf-surface-soft) px-3">
           <PanelTitle eyebrow="L2 · Catalog" title="Events" />
-          <div className="relative ml-auto min-w-[140px] max-w-[220px] flex-1">
+          <div className="relative ml-auto min-w-[130px] max-w-[200px] flex-1">
             <Search
               aria-hidden="true"
-              className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-(--vf-text-quiet)"
+              className="pointer-events-none absolute top-1/2 left-2 size-3 -translate-y-1/2 text-(--vf-text-quiet)"
             />
             <Input
               aria-label="Search events"
@@ -403,7 +403,7 @@ export const EventCatalogPanel = ({
               placeholder="filter events"
               data-testid={VISUALIZER_TEST_IDS.events.search}
               onChange={(event) => dispatch({ type: "l2.query.changed", query: event.currentTarget.value })}
-              className="h-8 w-full rounded-md border-(--vf-border-soft) bg-(--vf-surface-soft) pl-7 font-mono text-[11px] focus-visible:border-(--vf-accent-border) focus-visible:ring-1 focus-visible:ring-ring"
+              className="h-7 w-full rounded-[5px] border-(--vf-border-soft) bg-(--vf-surface-soft) pl-6 font-mono text-[9px] focus-visible:border-(--vf-accent-border) focus-visible:ring-1 focus-visible:ring-ring"
             />
           </div>
         </header>

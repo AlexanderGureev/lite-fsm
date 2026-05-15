@@ -1,5 +1,17 @@
 import type { GraphVisualizerModel } from "@lite-fsm/graph/view-model";
-import type { ConsoleChannelFilter, ConsoleChannelView, ConsolePanelView } from "../console";
+import {
+  DEFAULT_CONSOLE_FILTERS,
+  machineIdForConsoleEntry,
+  type ConsoleChannelFilter,
+  type ConsoleChannelView,
+  type ConsoleEntry,
+  type ConsoleFacetOption,
+  type ConsoleHotspotView,
+  type ConsolePanelView,
+  type ConsoleScope,
+  type ConsoleSeverityFilter,
+  type ConsoleSeveritySummary,
+} from "../console";
 import type { WorkbenchDiagnosticRef } from "../diagnostics";
 import { buildSourceOverlayView, type SourceOverlayView } from "./source-overlay";
 import type { VisualizerTab, WorkbenchSelector } from "./types";
@@ -240,24 +252,190 @@ const buildChannelViews = (
     selected: channel === selectedChannel,
   }));
 
+const consoleSeverityOrder = ["error", "warning", "info"] as const satisfies readonly Exclude<ConsoleSeverityFilter, "all">[];
+
+const normalizeConsoleSearch = (value: string): string => value.trim().toLocaleLowerCase();
+
+const consoleEntrySearchText = (entry: ConsoleEntry): string =>
+  [
+    entry.channel,
+    entry.severity,
+    entry.origin,
+    machineIdForConsoleEntry(entry),
+    entry.locationLabel,
+    entry.title,
+    entry.message,
+  ]
+    .filter(Boolean)
+    .join("\n")
+    .toLocaleLowerCase();
+
+const filterEntriesByChannel = (
+  entries: readonly ConsoleEntry[],
+  selectedChannel: ConsoleChannelFilter,
+): readonly ConsoleEntry[] =>
+  selectedChannel === "all" ? entries : entries.filter((entry) => entry.channel === selectedChannel);
+
+const filterEntriesByScope = (
+  entries: readonly ConsoleEntry[],
+  scope: ConsoleScope | undefined,
+): readonly ConsoleEntry[] => {
+  if (!scope) return entries;
+
+  if (scope.kind === "diagnostics") {
+    const diagnosticIds = new Set(scope.diagnosticIds);
+    return entries.filter((entry) => entry.diagnosticId !== undefined && diagnosticIds.has(entry.diagnosticId));
+  }
+
+  return entries;
+};
+
+const filterConsoleEntries = (
+  entries: readonly ConsoleEntry[],
+  filters: ConsolePanelView["filters"],
+): readonly ConsoleEntry[] => {
+  const query = normalizeConsoleSearch(filters.query);
+
+  return entries.filter((entry) => {
+    if (filters.severity !== "all" && entry.severity !== filters.severity) return false;
+    if (filters.origin !== "all" && entry.origin !== filters.origin) return false;
+    if (filters.machineId !== "all" && machineIdForConsoleEntry(entry) !== filters.machineId) return false;
+    if (filters.code !== "all" && entry.title !== filters.code) return false;
+    if (query && !consoleEntrySearchText(entry).includes(query)) return false;
+
+    return true;
+  });
+};
+
+const countEntriesBy = (
+  entries: readonly ConsoleEntry[],
+  readValue: (entry: ConsoleEntry) => string | undefined,
+): Map<string, number> => {
+  const counts = new Map<string, number>();
+
+  for (const entry of entries) {
+    const value = readValue(entry);
+    if (!value) continue;
+
+    counts.set(value, (counts.get(value) ?? 0) + 1);
+  }
+
+  return counts;
+};
+
+const compareConsoleFacetOptions = (left: ConsoleFacetOption, right: ConsoleFacetOption): number =>
+  right.count - left.count || left.label.localeCompare(right.label);
+
+const buildFacetOptions = (
+  entries: readonly ConsoleEntry[],
+  selectedValue: string,
+  readValue: (entry: ConsoleEntry) => string | undefined,
+): readonly ConsoleFacetOption[] =>
+  Array.from(countEntriesBy(entries, readValue), ([value, count]) => ({
+    value,
+    label: value,
+    count,
+    selected: value === selectedValue,
+  })).sort(compareConsoleFacetOptions);
+
+const buildSeveritySummary = (
+  entries: readonly ConsoleEntry[],
+  selectedSeverity: ConsoleSeverityFilter,
+): readonly ConsoleSeveritySummary[] => {
+  const counts = countEntriesBy(entries, (entry) => entry.severity);
+
+  return consoleSeverityOrder.map((severity) => ({
+    severity,
+    count: counts.get(severity) ?? 0,
+    selected: severity === selectedSeverity,
+  }));
+};
+
+const topConsoleFacet = (
+  filter: ConsoleHotspotView["filter"],
+  prefix: string,
+  options: readonly ConsoleFacetOption[],
+): ConsoleHotspotView | undefined => {
+  const option = options[0];
+  if (!option || option.count < 2) return undefined;
+
+  return {
+    filter,
+    value: option.value,
+    label: `${prefix} ${option.label}`,
+    count: option.count,
+    selected: option.selected,
+  };
+};
+
+const buildConsoleHotspots = ({
+  codeOptions,
+  machineOptions,
+  originOptions,
+}: {
+  codeOptions: readonly ConsoleFacetOption[];
+  machineOptions: readonly ConsoleFacetOption[];
+  originOptions: readonly ConsoleFacetOption[];
+}): readonly ConsoleHotspotView[] =>
+  [
+    topConsoleFacet("code", "code", codeOptions),
+    topConsoleFacet("machineId", "machine", machineOptions),
+    topConsoleFacet("origin", "origin", originOptions),
+  ]
+    .filter((hotspot): hotspot is ConsoleHotspotView => Boolean(hotspot))
+    .sort((left, right) => right.count - left.count)
+    .slice(0, 3);
+
+const activeConsoleFilterCount = (
+  selectedChannel: ConsoleChannelFilter,
+  filters: ConsolePanelView["filters"],
+  scope: ConsoleScope | undefined,
+): number => {
+  let count = selectedChannel === "all" ? 0 : 1;
+  if (scope) count += 1;
+  if (normalizeConsoleSearch(filters.query)) count += 1;
+  if (filters.severity !== DEFAULT_CONSOLE_FILTERS.severity) count += 1;
+  if (filters.origin !== DEFAULT_CONSOLE_FILTERS.origin) count += 1;
+  if (filters.machineId !== DEFAULT_CONSOLE_FILTERS.machineId) count += 1;
+  if (filters.code !== DEFAULT_CONSOLE_FILTERS.code) count += 1;
+
+  return count;
+};
+
 export const selectConsolePanel = createSelector(
   (snapshot) => ({
     console: snapshot.state.console,
     panel: snapshot.state.panels.console,
   }),
   ({ console, panel }): ConsolePanelView => {
-    const entries =
-      console.selectedChannel === "all"
-        ? console.entries
-        : console.entries.filter((entry) => entry.channel === console.selectedChannel);
+    const scopedEntries = filterEntriesByScope(console.entries, console.scope);
+    const channelEntries = filterEntriesByChannel(scopedEntries, console.selectedChannel);
+    const entries = filterConsoleEntries(channelEntries, console.filters);
+    const originOptions = buildFacetOptions(channelEntries, console.filters.origin, (entry) => entry.origin);
+    const machineOptions = buildFacetOptions(channelEntries, console.filters.machineId, machineIdForConsoleEntry);
+    const codeOptions = buildFacetOptions(channelEntries, console.filters.code, (entry) => entry.title);
 
     return {
       open: panel.open,
+      scope: console.scope,
       selectedEntryId: panel.selectedEntryId,
       selectedChannel: console.selectedChannel,
-      channels: buildChannelViews(console.entries, console.selectedChannel, console.channels),
+      channels: buildChannelViews(scopedEntries, console.selectedChannel, console.channels),
       entries,
-      totalEntries: console.entries.length,
+      filters: console.filters,
+      severitySummary: buildSeveritySummary(channelEntries, console.filters.severity),
+      originOptions,
+      machineOptions,
+      codeOptions,
+      hotspots: buildConsoleHotspots({ codeOptions, machineOptions, originOptions }),
+      channelEntryCount: channelEntries.length,
+      totalEntries: scopedEntries.length,
+      activeFilterCount: activeConsoleFilterCount(console.selectedChannel, console.filters, console.scope),
+      ...(console.entries.length === 0
+        ? { emptyReason: "no-entries" as const }
+        : entries.length === 0
+          ? { emptyReason: "filtered" as const }
+          : {}),
     };
   },
 );

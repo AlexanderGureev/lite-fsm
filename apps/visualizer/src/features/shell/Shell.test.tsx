@@ -63,8 +63,10 @@ const consoleEntries: readonly ConsoleEntry[] = [
     channel: "diagnostics",
     title: "compile failed",
     message: "unsupported source shape",
+    diagnosticId: "diag-player",
     origin: "compiler",
     severity: "error",
+    machineId: "player",
     locationLabel: "line 3, column 7",
     target: { kind: "none", reason: "no-anchor" },
   },
@@ -488,6 +490,7 @@ describe("оболочка Shell", () => {
     expect(store.getSnapshot().state.console.selectedChannel).toBe("diagnostics");
     expect(screen.getByTestId(ids.console.entry).getAttribute("data-entry-id")).toBe("diagnostic-entry");
     expect(screen.getByTestId(ids.console.entry).getAttribute("data-channel")).toBe("diagnostics");
+    expect(screen.getByTestId(ids.console.entry).getAttribute("data-machine-id")).toBe("player");
     expect(screen.getByTestId(ids.console.entry).textContent).toContain("line 3, column 7");
     expect(screen.getByTestId(ids.tabs.trigger.source).getAttribute("data-diagnostic-count")).toBe("1");
     expect(screen.getByTestId(ids.tabs.trigger.source).getAttribute("data-has-error")).toBe("true");
@@ -498,6 +501,49 @@ describe("оболочка Shell", () => {
       ["system", "false"],
     ]);
 
+    fireEvent.change(screen.getByTestId(ids.console.machineFilter), { target: { value: "player" } });
+    expect(store.getSnapshot().state.console.filters.machineId).toBe("player");
+    expect(screen.getByTestId(ids.console.entries).getAttribute("data-entry-count")).toBe("1");
+
+    fireEvent.click(screen.getByTestId(ids.console.clearFilters));
+    expect(store.getSnapshot().state.console.selectedChannel).toBe("all");
+    expect(store.getSnapshot().state.console.filters.machineId).toBe("all");
+
+    fireEvent.change(screen.getByTestId(ids.console.search), { target: { value: "request completed" } });
+    expect(store.getSnapshot().state.console.filters.query).toBe("request completed");
+    expect(screen.getByTestId(ids.console.entry).getAttribute("data-entry-id")).toBe("debug-entry");
+
+    fireEvent.click(screen.getByTestId(ids.console.clearFilters));
+    fireEvent.change(screen.getByTestId(ids.console.codeFilter), { target: { value: "compile failed" } });
+    expect(store.getSnapshot().state.console.filters.code).toBe("compile failed");
+    expect(screen.getByTestId(ids.console.entry).getAttribute("data-code")).toBe("compile failed");
+
+    fireEvent.click(screen.getByTestId(ids.console.clearFilters));
+    fireEvent.change(screen.getByTestId(ids.console.originFilter), { target: { value: "compiler" } });
+    expect(store.getSnapshot().state.console.filters.origin).toBe("compiler");
+    expect(screen.getByTestId(ids.console.entry).getAttribute("data-origin")).toBe("compiler");
+
+    fireEvent.click(screen.getByTestId(ids.console.clearFilters));
+
+    act(() => {
+      store.dispatch({
+        type: "console.scope.opened",
+        scope: {
+          kind: "diagnostics",
+          owner: { kind: "machine", id: "player", label: "player" },
+          diagnosticIds: ["diag-player"],
+        },
+      });
+    });
+    expect(store.getSnapshot().state.panels.console.open).toBe(true);
+    expect(store.getSnapshot().state.console.selectedChannel).toBe("diagnostics");
+    expect(screen.getByTestId(ids.console.scope).getAttribute("data-scope-kind")).toBe("machine");
+    expect(screen.getByTestId(ids.console.entries).getAttribute("data-entry-count")).toBe("1");
+    expect(screen.getByTestId(ids.console.entry).getAttribute("data-entry-id")).toBe("diagnostic-entry");
+
+    fireEvent.click(screen.getByTestId(ids.console.clearFilters));
+    expect(store.getSnapshot().state.console.scope).toBeUndefined();
+
     fireEvent.click(screen.getByTestId(ids.console.channelDebug));
     expect(store.getSnapshot().state.console.selectedChannel).toBe("debug");
     expect(screen.getByTestId(ids.console.entry).getAttribute("data-entry-id")).toBe("debug-entry");
@@ -507,6 +553,46 @@ describe("оболочка Shell", () => {
 
     fireEvent.click(document.querySelector<HTMLElement>('[data-testid="visualizer-console-entry"][data-entry-id="diagnostic-entry"]')!);
     expect(store.getSnapshot().state.panels.console.selectedEntryId).toBe("diagnostic-entry");
+  });
+
+  it("показывает кнопку open source только для записей с source anchor и открывает source overlay", () => {
+    const base = createInitialWorkbenchSnapshot();
+    const anchoredEntry: ConsoleEntry = {
+      entryId: "anchored-entry",
+      sourceVersion: 1,
+      channel: "diagnostics",
+      title: "LFG_BAD",
+      message: "explicit bad code",
+      origin: "compiler",
+      severity: "warning",
+      sourceAnchor: {
+        kind: "machine",
+        editable: false,
+        loc: {
+          fileName: "sample.ts",
+          start: { line: 7, column: 0, offset: 70 },
+          end: { line: 7, column: 9, offset: 79 },
+        },
+      },
+    };
+    const snapshot: WorkbenchSnapshot = {
+      ...base,
+      state: {
+        ...base.state,
+        panels: { ...base.state.panels, console: { ...base.state.panels.console, open: true } },
+        console: { ...base.state.console, entries: [consoleEntries[0]!, anchoredEntry] },
+      },
+    };
+    const store = renderShell(snapshot);
+
+    const rows = document.querySelectorAll<HTMLElement>(`[data-testid="${ids.console.entry}"]`);
+    expect(rows[0]?.querySelector(`[data-testid="${ids.console.entryViewSource}"]`)).toBeNull();
+    const viewSource = rows[1]?.querySelector<HTMLButtonElement>(`[data-testid="${ids.console.entryViewSource}"]`);
+    expect(viewSource).toBeTruthy();
+
+    fireEvent.click(viewSource!);
+    expect(store.getSnapshot().state.panels.sourceOverlay?.title).toBe("LFG_BAD");
+    expect(store.getSnapshot().state.panels.sourceOverlay?.anchors).toHaveLength(1);
   });
 
   it("рендерит ready source status и singular diagnostic label", () => {

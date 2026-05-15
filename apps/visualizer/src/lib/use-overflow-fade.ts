@@ -2,12 +2,27 @@ import { useEffect, type RefObject } from "react";
 
 const OVERFLOW_EPSILON = 1;
 
-export const useOverflowFade = (ref: RefObject<HTMLElement | null>): void => {
+type OverflowFadeDirection = "horizontal" | "vertical";
+
+export const useOverflowFade = (
+  ref: RefObject<HTMLElement | null>,
+  direction: OverflowFadeDirection = "horizontal",
+): void => {
   useEffect(() => {
     const element = ref.current;
     if (!element) return;
 
     const update = () => {
+      if (direction === "vertical") {
+        const hasOverflow = element.scrollHeight - element.clientHeight > OVERFLOW_EPSILON;
+        const atStart = element.scrollTop <= OVERFLOW_EPSILON;
+        const atEnd = element.scrollTop + element.clientHeight >= element.scrollHeight - OVERFLOW_EPSILON;
+
+        element.dataset.fadeTop = hasOverflow && !atStart ? "true" : "false";
+        element.dataset.fadeBottom = hasOverflow && !atEnd ? "true" : "false";
+        return;
+      }
+
       const hasOverflow = element.scrollWidth - element.clientWidth > OVERFLOW_EPSILON;
       const atStart = element.scrollLeft <= OVERFLOW_EPSILON;
       const atEnd = element.scrollLeft + element.clientWidth >= element.scrollWidth - OVERFLOW_EPSILON;
@@ -26,5 +41,5 @@ export const useOverflowFade = (ref: RefObject<HTMLElement | null>): void => {
       observer?.disconnect();
       element.removeEventListener("scroll", update);
     };
-  }, [ref]);
+  }, [ref, direction]);
 };

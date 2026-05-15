@@ -21,7 +21,7 @@ describe("компонент SourceOverlay", () => {
     expect(screen.queryByTestId("visualizer-source-overlay")).toBeNull();
   });
 
-  it("рендерит fallback и закрывается через header/footer controls", () => {
+  it("рендерит fallback, закрывается через header control и блокирует переключение в full mode без source", () => {
     const onClose = vi.fn();
     render(
       <SourceOverlay
@@ -43,10 +43,12 @@ describe("компонент SourceOverlay", () => {
     expect(screen.getByTestId(ids.source.overlayDescription).getAttribute("data-location-label")).toBe("");
     expect(screen.getByTestId(ids.source.overlayFallback).getAttribute("data-fallback")).toBe("true");
 
-    fireEvent.click(screen.getByTestId(ids.source.overlayClose));
-    fireEvent.click(screen.getByTestId(ids.source.overlayFooterClose));
+    expect(screen.queryByTestId("visualizer-source-overlay-footer-close")).toBeNull();
+    expect(screen.getByTestId(ids.source.overlayModeFull).getAttribute("data-disabled")).toBe("");
 
-    expect(onClose).toHaveBeenCalledTimes(2);
+    fireEvent.click(screen.getByTestId(ids.source.overlayClose));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it("рендерит selected source snippet через read-only CodeMirror", () => {
@@ -78,5 +80,49 @@ describe("компонент SourceOverlay", () => {
     expect(snippet.getAttribute("data-first-line-number")).toBe("10");
     expect(snippet.getAttribute("data-highlighted-line-numbers")).toBe("1");
     expect(snippet.querySelectorAll(".cm-line")).toHaveLength(2);
+  });
+
+  it("переключает между snippet и full file режимами при наличии fullSource", () => {
+    const fullSource = ["one", "two", "three", "four", "five"].join("\n");
+    render(
+      <SourceOverlay
+        view={{
+          open: true,
+          title: "flow",
+          sourceVersion: 7,
+          anchorCount: 1,
+          locationLabel: "line 3, column 1",
+          lines: [
+            { line: 2, code: "two", selected: false },
+            { line: 3, code: "three", selected: true },
+            { line: 4, code: "four", selected: false },
+          ],
+          fullSource,
+        }}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const snippetButton = screen.getByTestId(ids.source.overlayModeSnippet);
+    const fullButton = screen.getByTestId(ids.source.overlayModeFull);
+    expect(snippetButton.getAttribute("data-state")).toBe("on");
+    expect(fullButton.getAttribute("data-disabled")).toBeNull();
+
+    let snippet = screen.getByTestId(ids.source.snippet);
+    expect(snippet.getAttribute("data-first-line-number")).toBe("2");
+    expect(snippet.getAttribute("data-highlighted-line-numbers")).toBe("2");
+
+    fireEvent.click(fullButton);
+    expect(fullButton.getAttribute("data-state")).toBe("on");
+
+    snippet = screen.getByTestId(ids.source.snippet);
+    expect(snippet.getAttribute("data-first-line-number")).toBe("1");
+    expect(snippet.getAttribute("data-highlighted-line-numbers")).toBe("3");
+    expect(snippet.querySelectorAll(".cm-line")).toHaveLength(5);
+
+    fireEvent.click(snippetButton);
+    expect(snippetButton.getAttribute("data-state")).toBe("on");
+    snippet = screen.getByTestId(ids.source.snippet);
+    expect(snippet.getAttribute("data-first-line-number")).toBe("2");
   });
 });

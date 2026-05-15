@@ -33,6 +33,7 @@ const machine = (overrides: Partial<SystemMachineRowView> & Pick<SystemMachineRo
     counts: counts(),
     consumedTopicTypes: ["START"],
     producedTopicTypes: ["DONE"],
+    diagnosticIds: [],
     selected: false,
     related: false,
     dimmed: false,
@@ -49,6 +50,7 @@ const topic = (overrides: Partial<SystemTopicRowView> & Pick<SystemTopicRowView,
     producerCount: 0,
     consumerCount: 0,
     diagnosticCount: 0,
+    diagnosticIds: [],
     selected: false,
     related: false,
     dimmed: false,
@@ -66,6 +68,8 @@ describe("панель SystemPanel", () => {
       kind: "domain",
       groupTag: "core",
       initialState: "idle",
+      counts: counts(2),
+      diagnosticIds: ["diag:machine:one", "diag:machine:two"],
       selected: true,
       sourceAction: { title: "selectedMachine", anchors: [], available: true },
     });
@@ -123,6 +127,7 @@ describe("панель SystemPanel", () => {
     fireEvent.mouseLeave(machineList.parentElement!.parentElement!);
     fireEvent.mouseLeave(topicList.parentElement!.parentElement!);
     fireEvent.click(byData<HTMLButtonElement>(ids.system.topicChip, "data-event-type", "START"));
+    fireEvent.click(screen.getByTestId(ids.system.openDiagnostics));
     fireEvent.click(screen.getByTestId(ids.system.openInWorkbench));
     fireEvent.click(screen.getByTestId(ids.system.viewSource));
 
@@ -138,6 +143,14 @@ describe("панель SystemPanel", () => {
         expect.objectContaining({ type: "l1.topic.hovered", eventType: "IDLE" }),
         expect.objectContaining({ type: "l1.hover.cleared" }),
         expect.objectContaining({ type: "l1.topic.selected", eventType: "START" }),
+        expect.objectContaining({
+          type: "console.scope.opened",
+          scope: {
+            kind: "diagnostics",
+            owner: { kind: "machine", id: "selectedMachine", label: "selectedMachine" },
+            diagnosticIds: ["diag:machine:one", "diag:machine:two"],
+          },
+        }),
         expect.objectContaining({ type: "l1.machine.opened-in-workbench", machineId: "selectedMachine" }),
         expect.objectContaining({ type: "source.overlay.opened", title: "selectedMachine", anchors: [] }),
       ]),
@@ -146,11 +159,19 @@ describe("панель SystemPanel", () => {
 
   it("рендерит detail темы, пустые списки и навигацию topics", () => {
     const dispatch = dispatchOf();
-    const detailTopic = topic({ eventType: "DONE", producerCount: 0, consumerCount: 0 });
+    const detailTopic = topic({
+      eventType: "DONE",
+      producerCount: 0,
+      consumerCount: 0,
+      diagnosticCount: 1,
+      diagnosticIds: ["diag:topic:done"],
+    });
     const view: SystemPanelView = {
       status: "ready",
       machineQuery: "missing",
+      machineScope: { eventType: "DONE", machineCount: 1 },
       topicQuery: "missing",
+      topicScope: { machineId: "workerMachine", topicCount: 1 },
       totalMachines: 1,
       totalTopics: 1,
       machines: [],
@@ -167,13 +188,25 @@ describe("панель SystemPanel", () => {
 
     expect(screen.getByTestId(ids.system.machineEmpty)).toBeTruthy();
     expect(screen.getByTestId(ids.system.topicEmpty)).toBeTruthy();
+    expect(screen.getAllByText("1 related")).toHaveLength(2);
+    expect(screen.getByText("No scoped machines match this search.")).toBeTruthy();
+    expect(screen.getByText("No scoped topics match this search.")).toBeTruthy();
     expect(screen.getByTestId(ids.system.detailProducers).getAttribute("data-empty")).toBe("true");
     expect(screen.getByTestId(ids.system.detailConsumers).getAttribute("data-values")).toBe("workerMachine");
 
     fireEvent.click(byData<HTMLButtonElement>(ids.system.topicChip, "data-event-type", "workerMachine"));
+    fireEvent.click(screen.getByTestId(ids.system.openDiagnostics));
     fireEvent.click(screen.getByTestId(ids.system.openInEvents));
 
     expect(dispatch).toHaveBeenCalledWith({ type: "l1.machine.selected", machineId: "workerMachine" });
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "console.scope.opened",
+      scope: {
+        kind: "diagnostics",
+        owner: { kind: "topic", id: "DONE", label: "DONE" },
+        diagnosticIds: ["diag:topic:done"],
+      },
+    });
     expect(dispatch).toHaveBeenCalledWith({ type: "l1.topic.opened-in-event-catalog", eventType: "DONE" });
 
     rerender(

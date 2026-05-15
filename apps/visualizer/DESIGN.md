@@ -82,6 +82,9 @@ CSS-переменные.
 | `--vf-accent-border`   | `oklch(0.807 0.098 184 / 0.42)`  | Selected borders, ready badges                 |
 | `--vf-counter-surface` | `oklch(0.936 0.008 252 / 0.08)`  | Счётчики внутри tab/row                        |
 | `--vf-row-hover`       | `oklch(0.936 0.008 252 / 0.035)` | Hover плотных строк                            |
+| `--vf-row-selected`    | `oklch(0.735 0.115 225 / 0.16)`  | Selected row fill, отдельный от hover/preview  |
+| `--vf-row-selected-border` | `oklch(0.735 0.115 225 / 0.48)` | Selected row border                        |
+| `--vf-row-selected-line` | `oklch(0.785 0.125 225)`        | Selected row inset line                        |
 | `--vf-row-related`     | `oklch(0.807 0.098 184 / 0.06)`  | Related row tint                               |
 | `--vf-glow-current`    | `oklch(0.807 0.098 184 / 0.55)`  | Pulse-glow для current state                   |
 | `--vf-focus-ring`      | `oklch(0.807 0.098 184 / 0.55)`  | Focus outline для overlay-кнопок               |
@@ -252,9 +255,19 @@ Ownership rules:
 - Machines/Topics panes: `WorkspacePane` с `PanelHeader`, `SectionTitle`
   с количеством в badge и `SectionPaneSearch` (`h-8` input, focus ring).
 - Строки списка — `DensityRow` с layer/domain/actor бейджами и
-  `Counter`-ами. Selected row — `relation="selected"` (accent stripe +
-  accent tint), related — `relation="related"`, выключенные — `dimmed`
-  (opacity 0.4).
+  `Counter`-ами. Selected row — `relation="selected"` (selection-blue
+  tint + inset line, отличимый от hover/preview), related —
+  `relation="related"`, выключенные — `dimmed`
+  (opacity 0.4). Выбранный row пинится первым в своём списке после
+  scope/search фильтрации, чтобы scroll context не терялся.
+  Повторный клик по выбранному row снимает selection и активный relation
+  scope; если этот row был hover-preview, preview тоже очищается.
+- Selection машины в левом pane сужает список `Event topics` до
+  consumed/produced topics этой машины; selection event topic сужает
+  список `Machines` до связанных producers/consumers. Hover не фильтрует:
+  он только даёт мягкий relation/detail preview внутри текущего scope.
+  Ручной поиск применяется внутри активного scope, а header показывает
+  компактный `N related` badge.
 - Detail pane: при отсутствии выбора — компактный empty state с иконкой и
   одной фразой; при выборе — meta, source actions (`IconButton` + tooltip),
   open in workbench — `PrimaryActionButton`.
@@ -346,16 +359,25 @@ Ownership rules:
 
 - Right-side overlay поверх workspace. По умолчанию закрыт. Backdrop —
   `bg-background/70 backdrop-blur-[1px]`. Drawer — `Panel` с
-  `shadow-(--vf-shadow-overlay)`, ширина `min(100vw - 1rem, 460px)`.
+  `shadow-(--vf-shadow-overlay)`, ширина `min(100vw - 1rem, 720px)`.
 - Header: `PanelTitle` `Diagnostics / Console` + `IconButton` close
   (`Tooltip` «Close · Esc»).
 - Channel strip: `Button` ghost/secondary, активный — `--vf-surface-raised`,
   с компактным счётчиком справа.
+- Filter stack: search input + `clear` button, segmented severity controls
+  (`all/error/warning/info`), native dense selects for `machine`, `code`,
+  `origin`. Counts show channel-scoped totals. `clear` resets channel, search
+  and all console facets.
+- Hot strip: up to three count-ranked facet buttons (`code`, `machine`,
+  `origin`) when a repeated cluster has `count >= 2`; click applies the facet
+  filter directly.
 - Entry list: каждая запись — кнопка с `border-soft`, hover →
   `--vf-surface-raised`. Содержимое: badges (channel + severity) +
-  origin + location + title (mono, bold) + message.
-- Empty state: иконка `AlertCircle` + одна фраза.
-- Footer: `N entries / filter · {channel}`, mono `10px`.
+  optional machine badge + origin + location + title (mono, bold) + message.
+  На `sm+` title и message образуют две колонки для плотного сканирования.
+- Empty state: иконка `AlertCircle` + одна фраза; различает отсутствие записей
+  и отсутствие совпадений по активным фильтрам.
+- Footer: `{shown} shown · {total} total / filter · {summary}`, mono `10px`.
 
 ### Empty / Error / Diagnostic States
 

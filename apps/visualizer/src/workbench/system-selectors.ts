@@ -18,6 +18,7 @@ export type SystemMachineRowView = {
   counts: GraphMachineSummary["counts"];
   consumedTopicTypes: readonly string[];
   producedTopicTypes: readonly string[];
+  diagnosticIds: readonly string[];
   selected: boolean;
   related: boolean;
   dimmed: boolean;
@@ -29,6 +30,7 @@ export type SystemTopicRowView = {
   producerCount: number;
   consumerCount: number;
   diagnosticCount: number;
+  diagnosticIds: readonly string[];
   selected: boolean;
   related: boolean;
   dimmed: boolean;
@@ -52,7 +54,15 @@ export type SystemDetailView =
 export type SystemPanelView = {
   status: "empty" | "ready";
   machineQuery: string;
+  machineScope?: {
+    eventType: string;
+    machineCount: number;
+  };
   topicQuery: string;
+  topicScope?: {
+    machineId: string;
+    topicCount: number;
+  };
   totalMachines: number;
   totalTopics: number;
   machines: readonly SystemMachineRowView[];
@@ -69,6 +79,53 @@ const relationContext = (l1: SystemViewState): RelationContext | undefined => {
   if (l1.selectedTopic) return { kind: "topic", eventType: l1.selectedTopic };
 
   return undefined;
+};
+
+const topicScopeMachineId = (l1: SystemViewState): string | undefined =>
+  l1.selectedMachineId;
+
+const machineScopeEventType = (l1: SystemViewState): string | undefined =>
+  l1.selectedTopic;
+
+const relatedMachineIdsForTopic = (
+  model: GraphVisualizerModel,
+  eventType: string | undefined,
+): ReadonlySet<string> | undefined => {
+  if (!eventType) return undefined;
+
+  const relations = model.relations.machineIdsByTopicType[eventType];
+  return new Set(relations?.related ?? []);
+};
+
+const relatedTopicTypesForMachine = (
+  model: GraphVisualizerModel,
+  machineId: string | undefined,
+): ReadonlySet<string> | undefined => {
+  if (!machineId) return undefined;
+
+  const relations = model.relations.topicTypesByMachineId[machineId];
+  return new Set([...(relations?.consumed ?? []), ...(relations?.produced ?? [])]);
+};
+
+const topicMatchesMachineScope = (
+  topic: GraphTopicSummary,
+  relatedTopicTypes: ReadonlySet<string> | undefined,
+): boolean => !relatedTopicTypes || relatedTopicTypes.has(topic.eventType);
+
+const machineMatchesTopicScope = (
+  machine: GraphMachineSummary,
+  relatedMachineIds: ReadonlySet<string> | undefined,
+): boolean => !relatedMachineIds || relatedMachineIds.has(machine.machineId);
+
+const pinSelectedFirst = <Item>(items: readonly Item[], isSelected: (item: Item) => boolean): readonly Item[] => {
+  const selectedIndex = items.findIndex(isSelected);
+  if (selectedIndex <= 0) return items;
+
+  return [
+    items[selectedIndex],
+    ...items.slice(0, selectedIndex),
+    ...items.slice(selectedIndex + 1),
+  ];
 };
 
 const machineSourceAnchors = (
@@ -149,6 +206,7 @@ const systemMachineRow = (
     counts: machine.counts,
     consumedTopicTypes: machine.consumedTopicTypes,
     producedTopicTypes: machine.producedTopicTypes,
+    diagnosticIds: machine.diagnosticIds,
     selected: machine.machineId === l1.selectedMachineId,
     related,
     dimmed: Boolean(context && !related),
@@ -169,6 +227,7 @@ const systemTopicRow = (
     producerCount: topic.producerCount,
     consumerCount: topic.consumerCount,
     diagnosticCount: topic.diagnosticIds.length,
+    diagnosticIds: topic.diagnosticIds,
     selected: topic.eventType === l1.selectedTopic,
     related,
     dimmed: Boolean(context && !related),
@@ -222,7 +281,9 @@ export const selectSystemPanel = createSelector(
       return {
         status: "empty",
         machineQuery: l1.machineQuery,
+        machineScope: undefined,
         topicQuery: l1.topicQuery,
+        topicScope: undefined,
         totalMachines: 0,
         totalTopics: 0,
         machines: [],
@@ -232,22 +293,36 @@ export const selectSystemPanel = createSelector(
     }
 
     const context = relationContext(l1);
+    const scopedEventType = machineScopeEventType(l1);
+    const scopedMachineIds = relatedMachineIdsForTopic(model, scopedEventType);
+    const scopedMachineId = topicScopeMachineId(l1);
+    const scopedTopicTypes = relatedTopicTypesForMachine(model, scopedMachineId);
     const machines = model.machines
+      .filter((machine) => machineMatchesTopicScope(machine, scopedMachineIds))
       .filter((machine) => machineMatches(machine, l1.machineQuery))
       .map((machine) => systemMachineRow(model, machine, l1, context));
     const topics = model.topics
+      .filter((topic) => topicMatchesMachineScope(topic, scopedTopicTypes))
       .filter((topic) => topicMatches(topic, l1.topicQuery))
       .map((topic) => systemTopicRow(model, topic, l1, context));
+    const orderedMachines = pinSelectedFirst(machines, (machine) => machine.selected);
+    const orderedTopics = pinSelectedFirst(topics, (topic) => topic.selected);
 
     return {
       status: "ready",
       machineQuery: l1.machineQuery,
+      machineScope: scopedEventType && scopedMachineIds
+        ? { eventType: scopedEventType, machineCount: scopedMachineIds.size }
+        : undefined,
       topicQuery: l1.topicQuery,
+      topicScope: scopedMachineId && scopedTopicTypes
+        ? { machineId: scopedMachineId, topicCount: scopedTopicTypes.size }
+        : undefined,
       totalMachines: model.machines.length,
       totalTopics: model.topics.length,
-      machines,
-      topics,
-      detail: systemDetail(model, machines, topics, context),
+      machines: orderedMachines,
+      topics: orderedTopics,
+      detail: systemDetail(model, orderedMachines, orderedTopics, context),
     };
   },
 );

@@ -36,6 +36,9 @@
   --vf-accent-border: oklch(0.807 0.098 184 / 0.42);
   --vf-counter-surface: oklch(0.936 0.008 252 / 0.08);
   --vf-row-hover: oklch(0.936 0.008 252 / 0.035);
+  --vf-row-selected: oklch(0.735 0.115 225 / 0.16);
+  --vf-row-selected-border: oklch(0.735 0.115 225 / 0.48);
+  --vf-row-selected-line: oklch(0.785 0.125 225);
   --vf-row-related: oklch(0.807 0.098 184 / 0.06);
   --vf-counter-in: oklch(0.772 0.130 67);
   --vf-counter-out: oklch(0.769 0.087 155);
@@ -848,4 +851,47 @@
 .vf-tabs-scroll[data-fade-left="false"][data-fade-right="true"] {
   -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 24px), transparent 100%);
   mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 24px), transparent 100%);
+}
+
+.vf-pane-fade[data-fade-top="true"][data-fade-bottom="true"] {
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 14px,
+    #000 calc(100% - 14px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 14px,
+    #000 calc(100% - 14px),
+    transparent 100%
+  );
+}
+
+.vf-pane-fade[data-fade-top="true"][data-fade-bottom="false"] {
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 14px, #000 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 14px, #000 100%);
+}
+
+.vf-pane-fade[data-fade-top="false"][data-fade-bottom="true"] {
+  -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 14px), transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 14px), transparent 100%);
+}
+
+@keyframes vfPaneEnter {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.vf-pane-enter {
+  animation: vfPaneEnter var(--vf-duration) var(--vf-ease) both;
+  transform-origin: center;
 }

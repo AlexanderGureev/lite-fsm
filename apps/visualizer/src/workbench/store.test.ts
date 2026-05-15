@@ -1071,13 +1071,15 @@ describe("хранилище workbench визуализатора", () => {
   it("покрывает selection, overlay и panel commands", () => {
     const store = createWorkbenchStore();
     store.dispatch({ type: "l1.machine.selected", machineId: "player" });
-    const beforeSameMachineSelection = store.getSnapshot();
+    store.dispatch({ type: "l1.machine.hovered", machineId: "player" });
     store.dispatch({ type: "l1.machine.selected", machineId: "player" });
-    expect(store.getSnapshot()).toBe(beforeSameMachineSelection);
+    expect(store.getSnapshot().state.l1.selectedMachineId).toBeUndefined();
+    expect(store.getSnapshot().state.l1.hoveredMachineId).toBeUndefined();
     store.dispatch({ type: "l1.topic.selected", eventType: "PLAY" });
-    const beforeSameTopicSelection = store.getSnapshot();
+    store.dispatch({ type: "l1.topic.hovered", eventType: "PLAY" });
     store.dispatch({ type: "l1.topic.selected", eventType: "PLAY" });
-    expect(store.getSnapshot()).toBe(beforeSameTopicSelection);
+    expect(store.getSnapshot().state.l1.selectedTopic).toBeUndefined();
+    expect(store.getSnapshot().state.l1.hoveredTopic).toBeUndefined();
     store.dispatch({ type: "l1.machine.selected", machineId: "player" });
     store.dispatch({ type: "l2.topic.selected", eventType: "PAUSE" });
     store.dispatch({ type: "l3.machine.toggled", machineId: "player" });
@@ -1242,11 +1244,8 @@ describe("хранилище workbench визуализатора", () => {
     expect(store.getSnapshot().state.simulation.scope).toEqual({ kind: "machines", machineIds: ["flow"] });
 
     store.dispatch({ type: "console.entry.selected", entryId: "source-entry" });
-    expect(store.getSnapshot().state.panels.sourceOverlay).toEqual({
-      sourceVersion: 1,
-      title: "source diagnostic",
-      anchors: [sourceAnchor],
-    });
+    expect(store.getSnapshot().state.panels.console.selectedEntryId).toBe("source-entry");
+    expect(store.getSnapshot().state.panels.sourceOverlay).toBeUndefined();
 
     store.dispatch({ type: "console.entry.selected", entryId: "topic-entry" });
     expect(store.getSnapshot().state.activeTab).toBe("events");

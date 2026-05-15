@@ -29,6 +29,7 @@ export type SourceOverlayView =
       anchorCount: number;
       locationLabel?: string;
       lines: readonly SourceOverlayLineView[];
+      fullSource?: string;
       fallback?: string;
     };
 
@@ -103,6 +104,7 @@ const buildSnippetView = (
     anchorCount: overlay.anchors.length,
     locationLabel,
     lines: viewLines,
+    fullSource: source,
   };
 };
 

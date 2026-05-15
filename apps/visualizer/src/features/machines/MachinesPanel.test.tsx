@@ -266,6 +266,34 @@ describe("панель MachinesPanel", () => {
     expect(dispatch).not.toHaveBeenCalled();
   });
 
+  it("сворачивает и возвращает боковые панели без workbench-команд", () => {
+    const dispatch = dispatchOf();
+    renderMachinesPanel(viewFixture(), dispatch);
+
+    fireEvent.click(screen.getByTestId(ids.workbench.collapsePicker));
+
+    expect(screen.queryByTestId(ids.workbench.machinePicker)).toBeNull();
+    expect(screen.getByTestId(ids.workbench.panel).querySelector("[data-picker-panel]")?.getAttribute("data-picker-panel")).toBe("collapsed");
+    expect(screen.getByTestId(ids.workbench.expandPicker)).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId(ids.workbench.expandPicker));
+
+    expect(screen.getByTestId(ids.workbench.machinePicker)).toBeTruthy();
+    expect(screen.getByTestId(ids.workbench.panel).querySelector("[data-picker-panel]")?.getAttribute("data-picker-panel")).toBe("expanded");
+
+    fireEvent.click(screen.getByTestId(ids.workbench.collapseSimulator));
+
+    expect(screen.queryByTestId(ids.workbench.timeline)).toBeNull();
+    expect(screen.getByTestId(ids.workbench.panel).querySelector("[data-simulator-panel]")?.getAttribute("data-simulator-panel")).toBe("collapsed");
+    expect(screen.getByTestId(ids.workbench.expandSimulator)).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId(ids.workbench.expandSimulator));
+
+    expect(screen.getByTestId(ids.workbench.timeline).getAttribute("data-empty")).toBe("false");
+    expect(screen.getByTestId(ids.workbench.panel).querySelector("[data-simulator-panel]")?.getAttribute("data-simulator-panel")).toBe("expanded");
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
   it("не отправляет команды из disabled source buttons", () => {
     const dispatch = dispatchOf();
     renderMachinesPanel(viewFixture(), dispatch);

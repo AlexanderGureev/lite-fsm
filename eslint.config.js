@@ -19,6 +19,7 @@ export default defineConfig([
     "apps/*/test-results/",
     "apps/*/playwright-report/",
     "packages/*/dist/",
+    "packages/*/coverage/",
     "coverage/",
     "apps/docs/",
     "apps/playground/",

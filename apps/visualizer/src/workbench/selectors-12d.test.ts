@@ -120,11 +120,18 @@ describe("12d selectors визуализатора", () => {
     store.dispatch({ type: "l1.topic.selected", eventType: "DONE" });
     const selectedTopic = selectSystemPanel(store.getSnapshot());
     expect(selectedTopic.detail).toMatchObject({ kind: "topic", topic: { eventType: "DONE" }, producers: ["flowMachine"] });
+    expect(selectedTopic.machineScope).toEqual({ eventType: "DONE", machineCount: 2 });
+    expect(selectedTopic.topics[0]).toMatchObject({ eventType: "DONE", selected: true });
+    expect(selectedTopic.machines.map((machine) => machine.machineId)).toEqual(["flowMachine", "workerMachine"]);
     expect(selectedTopic.machines.find((machine) => machine.machineId === "flowMachine")).toMatchObject({ related: true, dimmed: false });
-    expect(selectedTopic.machines.find((machine) => machine.machineId === "auditMachine")).toMatchObject({ related: false, dimmed: true });
 
-    store.dispatch({ type: "l1.machine.hovered", machineId: "auditMachine" });
-    expect(selectSystemPanel(store.getSnapshot()).detail).toMatchObject({ kind: "machine", machine: { machineId: "auditMachine" } });
+    store.dispatch({ type: "l1.machine.hovered", machineId: "workerMachine" });
+    const hoveredMachine = selectSystemPanel(store.getSnapshot());
+    expect(hoveredMachine.detail).toMatchObject({ kind: "machine", machine: { machineId: "workerMachine" } });
+    expect(hoveredMachine.machineScope).toEqual({ eventType: "DONE", machineCount: 2 });
+    expect(hoveredMachine.topicScope).toBeUndefined();
+    expect(hoveredMachine.topics[0]).toMatchObject({ eventType: "DONE", selected: true });
+    expect(hoveredMachine.topics.map((topic) => topic.eventType)).toContain("PING");
     store.dispatch({ type: "l1.hover.cleared" });
     expect(selectSystemPanel(store.getSnapshot()).detail).toMatchObject({ kind: "topic", topic: { eventType: "DONE" } });
   });
@@ -133,25 +140,39 @@ describe("12d selectors визуализатора", () => {
     const store = createWorkbenchStore(readySnapshot());
 
     store.dispatch({ type: "l1.machine.selected", machineId: "flowMachine" });
-    expect(selectSystemPanel(store.getSnapshot()).detail).toMatchObject({ kind: "machine", machine: { machineId: "flowMachine" } });
+    const selectedFlow = selectSystemPanel(store.getSnapshot());
+    expect(selectedFlow.detail).toMatchObject({ kind: "machine", machine: { machineId: "flowMachine" } });
+    expect(selectedFlow.machines[0]).toMatchObject({ machineId: "flowMachine", selected: true });
 
     store.dispatch({ type: "l1.topic.selected", eventType: "DONE" });
     const selectedTopic = selectSystemPanel(store.getSnapshot());
     expect(selectedTopic.detail).toMatchObject({ kind: "topic", topic: { eventType: "DONE" } });
+    expect(selectedTopic.machineScope).toEqual({ eventType: "DONE", machineCount: 2 });
+    expect(selectedTopic.machines.map((machine) => machine.machineId)).toEqual(["flowMachine", "workerMachine"]);
     expect(selectedTopic.machines.find((machine) => machine.machineId === "flowMachine")).toMatchObject({
       selected: false,
       related: true,
       dimmed: false,
     });
 
+    store.dispatch({ type: "l1.topic.selected", eventType: "DONE" });
+    const deselectedTopic = selectSystemPanel(store.getSnapshot());
+    expect(deselectedTopic.detail).toMatchObject({ kind: "empty" });
+    expect(deselectedTopic.machineScope).toBeUndefined();
+    expect(deselectedTopic.machines.map((machine) => machine.machineId)).toEqual(["flowMachine", "workerMachine", "auditMachine"]);
+
     store.dispatch({ type: "l1.machine.selected", machineId: "auditMachine" });
     const selectedMachine = selectSystemPanel(store.getSnapshot());
     expect(selectedMachine.detail).toMatchObject({ kind: "machine", machine: { machineId: "auditMachine" } });
-    expect(selectedMachine.topics.find((topic) => topic.eventType === "DONE")).toMatchObject({
-      selected: false,
-      related: false,
-      dimmed: true,
-    });
+    expect(selectedMachine.machines[0]).toMatchObject({ machineId: "auditMachine", selected: true });
+    expect(selectedMachine.topicScope).toEqual({ machineId: "auditMachine", topicCount: 1 });
+    expect(selectedMachine.topics.map((topic) => topic.eventType)).toEqual(["PING"]);
+
+    store.dispatch({ type: "l1.machine.selected", machineId: "auditMachine" });
+    const deselectedMachine = selectSystemPanel(store.getSnapshot());
+    expect(deselectedMachine.detail).toMatchObject({ kind: "empty" });
+    expect(deselectedMachine.topicScope).toBeUndefined();
+    expect(deselectedMachine.topics.map((topic) => topic.eventType)).toContain("DONE");
   });
 
   it("строит L2 producer, consumer, routing, branch и dynamic/unknown details", () => {
@@ -290,6 +311,8 @@ describe("12d selectors визуализатора", () => {
     };
 
     expect(selectSystemPanel(hoveredTopic).detail).toMatchObject({ kind: "topic", topic: { eventType: "PING" } });
+    expect(selectSystemPanel(hoveredTopic).machineScope).toBeUndefined();
+    expect(selectSystemPanel(hoveredTopic).machines.map((machine) => machine.machineId)).toEqual(["flowMachine", "workerMachine", "auditMachine"]);
 
     const selectedMachineWithoutRelations: WorkbenchSnapshot = {
       ...snapshot,
@@ -304,7 +327,7 @@ describe("12d selectors визуализатора", () => {
       consumedTopics: [],
       producedTopics: [],
     });
-    expect(selectSystemPanel(selectedMachineWithoutRelations).topics.every((topic) => !topic.related)).toBe(true);
+    expect(selectSystemPanel(selectedMachineWithoutRelations).topics).toEqual([]);
 
     const selectedTopicWithoutRelations: WorkbenchSnapshot = {
       ...snapshot,
@@ -319,7 +342,7 @@ describe("12d selectors визуализатора", () => {
       producers: [],
       consumers: [],
     });
-    expect(selectSystemPanel(selectedTopicWithoutRelations).machines.every((machine) => !machine.related)).toBe(true);
+    expect(selectSystemPanel(selectedTopicWithoutRelations).machines).toEqual([]);
   });
 
   it("форматирует все routing target variants в L2", () => {

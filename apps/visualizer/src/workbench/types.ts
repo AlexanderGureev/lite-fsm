@@ -10,7 +10,7 @@ import type {
 import type { GraphSourceAnchor, GraphVisualizerModel, GraphVisualizerSimulationOverlayInput } from "@lite-fsm/graph/view-model";
 import type { CanvasState } from "../canvas";
 import type { CodegenPlanResult, CodegenState, SourceEditIntent } from "../codegen";
-import type { ConsoleChannelFilter, ConsoleState } from "../console";
+import type { ConsoleChannelFilter, ConsoleFilterKey, ConsoleScope, ConsoleState } from "../console";
 import type { WorkbenchDiagnosticRef } from "../diagnostics";
 import type { SourceSession } from "../source";
 import type { VisualizerHostCapabilities, VisualizerHostState, VisualizerWorkbenchRowCommandTarget } from "../services";
@@ -188,6 +188,11 @@ export type VisualizerCommand =
   | { type: "source.overlay.closed" }
   | { type: "panel.console.toggled"; open?: boolean }
   | { type: "console.channel.selected"; channel: ConsoleChannelFilter }
+  | { type: "console.query.changed"; query: string }
+  | { type: "console.filter.changed"; filter: ConsoleFilterKey; value: string }
+  | { type: "console.scope.opened"; scope: ConsoleScope }
+  | { type: "console.scope.cleared" }
+  | { type: "console.filters.reset" }
   | { type: "console.entry.selected"; entryId: string }
   | { type: "codegen.intent.created"; intent: SourceEditIntent };
 

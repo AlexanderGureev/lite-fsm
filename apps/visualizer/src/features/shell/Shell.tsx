@@ -1,17 +1,21 @@
-import { useRef, type ChangeEvent } from "react";
+import { useRef, type ChangeEvent, type KeyboardEvent, type MouseEvent } from "react";
 import {
   AlertCircle,
   ArrowRight,
   Braces,
+  ChevronDown,
   FileCode,
   FileJson,
+  FileSearch,
+  Search,
+  SlidersHorizontal,
   Play,
   RotateCcw,
   Terminal,
   Upload,
   X,
 } from "lucide-react";
-import type { ConsolePanelView } from "../../console";
+import { machineIdForConsoleEntry, type ConsolePanelView } from "../../console";
 import { useWorkbenchContext } from "../../app/workbench-context";
 import { useWorkbenchSelector } from "../../app/use-workbench-selector";
 import { EventCatalogPanel } from "../events/EventCatalogPanel";
@@ -36,6 +40,7 @@ import {
   type VisualizerTab,
 } from "../../workbench";
 import { Button } from "@/ui/button";
+import { Input } from "@/ui/input";
 import { Separator } from "@/ui/separator";
 import { Tabs, TabsList, TabsTrigger } from "@/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/ui/tooltip";
@@ -51,7 +56,6 @@ import {
   PanelTitle,
   PrimaryActionButton,
   SourceEditorShell,
-  StatusBadge,
   WorkspaceHeader,
 } from "@/ui/visualizer";
 import { cn } from "@/lib/utils";
@@ -77,6 +81,239 @@ const compileStatusLabel = (status: string): string => {
   if (status === "failed") return "failed";
 
   return "idle";
+};
+
+const consoleFilterSummary = (consolePanel: ConsolePanelView): string => {
+  const filters = [
+    consolePanel.scope ? `scope:${consolePanel.scope.owner.kind}:${consolePanel.scope.owner.label}` : undefined,
+    consolePanel.selectedChannel !== "all" ? `channel:${consolePanel.selectedChannel}` : undefined,
+    consolePanel.filters.severity !== "all" ? `level:${consolePanel.filters.severity}` : undefined,
+    consolePanel.filters.machineId !== "all" ? `machine:${consolePanel.filters.machineId}` : undefined,
+    consolePanel.filters.code !== "all" ? `code:${consolePanel.filters.code}` : undefined,
+    consolePanel.filters.origin !== "all" ? `origin:${consolePanel.filters.origin}` : undefined,
+    consolePanel.filters.query.trim() ? `search:${consolePanel.filters.query.trim()}` : undefined,
+  ].filter(Boolean);
+
+  return filters.length > 0 ? filters.join(" · ") : "all";
+};
+
+const consoleScopeLabel = (consolePanel: ConsolePanelView): string => {
+  const scope = consolePanel.scope;
+  if (!scope) return "";
+
+  return `${scope.owner.kind} · ${scope.owner.label}`;
+};
+
+const severityToneClass: Record<string, string> = {
+  error: "bg-(--vf-danger-soft) text-(--vf-danger) shadow-[inset_0_0_0_1px_var(--vf-danger-border)]",
+  warning: "bg-(--vf-warning-soft) text-(--vf-warning) shadow-[inset_0_0_0_1px_var(--vf-warning-border)]",
+  info: "bg-(--vf-effect-soft) text-(--vf-effect) shadow-[inset_0_0_0_1px_var(--vf-effect-border)]",
+  blocked: "bg-(--vf-danger-soft) text-(--vf-danger) shadow-[inset_0_0_0_1px_var(--vf-danger-border)]",
+  failed: "bg-(--vf-danger-soft) text-(--vf-danger) shadow-[inset_0_0_0_1px_var(--vf-danger-border)]",
+};
+
+const severityDotClass: Record<string, string> = {
+  error: "bg-(--vf-danger) shadow-[0_0_4px_var(--vf-danger)]",
+  warning: "bg-(--vf-warning)",
+  info: "bg-(--vf-effect)",
+  blocked: "bg-(--vf-danger) shadow-[0_0_4px_var(--vf-danger)]",
+  failed: "bg-(--vf-danger) shadow-[0_0_4px_var(--vf-danger)]",
+};
+
+const channelLabelClass: Record<string, string> = {
+  system: "text-(--vf-effect)",
+  diagnostics: "text-(--vf-warning)",
+  debug: "text-(--vf-routing)",
+};
+
+type ConsoleFilterSelectProps = {
+  label: string;
+  value: string;
+  allLabel: string;
+  allCount: number;
+  options: ConsolePanelView["originOptions"];
+  testId: string;
+  onValueChange: (value: string) => void;
+};
+
+const ConsoleFilterSelect = ({
+  label,
+  value,
+  allLabel,
+  allCount,
+  options,
+  testId,
+  onValueChange,
+}: ConsoleFilterSelectProps) => (
+  <label className="grid min-w-0 gap-1">
+    <span className="font-mono text-[10px] font-medium uppercase tracking-[0.08em] text-(--vf-text-quiet)">
+      {label}
+    </span>
+    <span className="relative block">
+      <select
+        value={value}
+        data-testid={testId}
+        disabled={allCount === 0}
+        onChange={(event) => onValueChange(event.currentTarget.value)}
+        className="h-8 w-full min-w-0 cursor-pointer appearance-none rounded-md border border-(--vf-border) bg-(--vf-surface) py-0 pl-2.5 pr-8 font-mono text-[11px] text-foreground outline-none transition-colors hover:border-(--vf-accent-border) focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-50"
+      >
+        <option value="all">{`${allLabel} · ${allCount}`}</option>
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {`${option.label} · ${option.count}`}
+          </option>
+        ))}
+      </select>
+      <ChevronDown
+        aria-hidden="true"
+        className="pointer-events-none absolute right-2 top-1/2 size-3.5 -translate-y-1/2 text-(--vf-text-quiet)"
+      />
+    </span>
+  </label>
+);
+
+type ConsoleChannelStripProps = {
+  consolePanel: ConsolePanelView;
+  dispatch: (command: VisualizerCommand) => void;
+};
+
+const ConsoleChannelStrip = ({ consolePanel, dispatch }: ConsoleChannelStripProps) => (
+  <div
+    role="tablist"
+    aria-label="Console channels"
+    data-testid={VISUALIZER_TEST_IDS.console.channels}
+    className="scrollbar-none flex min-w-0 shrink-0 items-center gap-1 overflow-x-auto p-1 [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+  >
+    {consolePanel.channels.map((channel) => (
+      <button
+        key={channel.channel}
+        type="button"
+        role="tab"
+        aria-selected={channel.selected}
+        data-testid={consoleChannelTestId(channel.channel)}
+        onClick={() => dispatch({ type: "console.channel.selected", channel: channel.channel })}
+        className={cn(
+          "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2.5 font-mono text-[11px] transition-colors duration-(--vf-duration-fast) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          channel.selected
+            ? cn(
+                "bg-(--vf-surface-raised) shadow-[0_1px_2px_oklch(0_0_0/0.3)]",
+                channel.channel !== "all" && channelLabelClass[channel.channel]
+                  ? channelLabelClass[channel.channel]
+                  : "text-foreground",
+              )
+            : "text-(--vf-text-muted) hover:bg-(--vf-row-hover) hover:text-foreground",
+        )}
+      >
+        <span>{channel.label}</span>
+        <span
+          className={cn(
+            "rounded-full bg-(--vf-counter-surface) px-1.5 font-mono text-[10px] tabular-nums",
+            channel.selected ? "text-(--vf-text-muted)" : "text-(--vf-text-quiet)",
+          )}
+        >
+          {channel.count}
+        </span>
+      </button>
+    ))}
+  </div>
+);
+
+type ConsoleSeverityControlsProps = {
+  consolePanel: ConsolePanelView;
+  dispatch: (command: VisualizerCommand) => void;
+};
+
+const ConsoleSeverityControls = ({ consolePanel, dispatch }: ConsoleSeverityControlsProps) => (
+  <div
+    role="group"
+    aria-label="Console severity filter"
+    data-testid={VISUALIZER_TEST_IDS.console.levelFilter}
+    className="inline-flex h-8 shrink-0 items-center gap-0.5 rounded-md border border-(--vf-border) bg-(--vf-surface) p-[3px]"
+  >
+    <button
+      type="button"
+      aria-pressed={consolePanel.filters.severity === "all"}
+      onClick={() => dispatch({ type: "console.filter.changed", filter: "severity", value: "all" })}
+      className={cn(
+        "inline-flex h-[26px] shrink-0 items-center gap-1.5 rounded-[5px] px-2.5 font-mono text-[11px] transition-colors duration-(--vf-duration-fast)",
+        consolePanel.filters.severity === "all"
+          ? "bg-(--vf-surface-raised) font-semibold text-foreground shadow-[0_1px_2px_oklch(0_0_0/0.35)]"
+          : "text-(--vf-text-muted) hover:text-foreground",
+      )}
+    >
+      all
+      <span className="rounded-full bg-(--vf-counter-surface) px-1.5 text-[10px] text-(--vf-text-quiet) tabular-nums">
+        {consolePanel.channelEntryCount}
+      </span>
+    </button>
+    {consolePanel.severitySummary.map((severity) => (
+      <button
+        key={severity.severity}
+        type="button"
+        aria-pressed={severity.selected}
+        disabled={severity.count === 0}
+        onClick={() => dispatch({ type: "console.filter.changed", filter: "severity", value: severity.severity })}
+        className={cn(
+          "inline-flex h-[26px] shrink-0 items-center gap-1.5 rounded-[5px] px-2.5 font-mono text-[11px] transition-colors duration-(--vf-duration-fast) disabled:opacity-40",
+          severity.selected
+            ? cn(severityToneClass[severity.severity] ?? "bg-(--vf-surface-raised) text-foreground", "font-semibold")
+            : "text-(--vf-text-muted) hover:text-foreground",
+        )}
+      >
+        {severity.severity}
+        <span
+          className={cn(
+            "rounded-full px-1.5 text-[10px] tabular-nums",
+            severity.selected ? "bg-black/15 text-current" : "bg-(--vf-counter-surface) text-(--vf-text-quiet)",
+          )}
+        >
+          {severity.count}
+        </span>
+      </button>
+    ))}
+  </div>
+);
+
+type ConsoleHotspotStripProps = {
+  consolePanel: ConsolePanelView;
+  dispatch: (command: VisualizerCommand) => void;
+};
+
+const ConsoleHotspotStrip = ({ consolePanel, dispatch }: ConsoleHotspotStripProps) => {
+  if (consolePanel.hotspots.length === 0) return null;
+
+  return (
+    <div
+      className="flex min-w-0 flex-wrap items-center gap-1.5"
+      data-testid={VISUALIZER_TEST_IDS.console.hotspots}
+    >
+      <span className="font-mono text-[10px] font-medium uppercase tracking-[0.08em] text-(--vf-text-quiet)">
+        hot
+      </span>
+      {consolePanel.hotspots.map((hotspot) => (
+        <button
+          key={`${hotspot.filter}:${hotspot.value}`}
+          type="button"
+          aria-pressed={hotspot.selected}
+          onClick={() => dispatch({ type: "console.filter.changed", filter: hotspot.filter, value: hotspot.value })}
+          className={cn(
+            "inline-flex h-6 max-w-full shrink-0 items-center gap-1.5 rounded-md px-2 font-mono text-[10px] transition-colors duration-(--vf-duration-fast) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            hotspot.selected
+              ? "bg-(--vf-accent-soft) text-(--vf-accent) shadow-[inset_0_0_0_1px_var(--vf-accent-border)]"
+              : "bg-(--vf-surface) text-(--vf-text-muted) shadow-[inset_0_0_0_1px_var(--vf-border)] hover:text-foreground",
+          )}
+        >
+          <span className="font-semibold uppercase tracking-[0.04em] text-(--vf-text-quiet)">
+            {hotspot.filter === "machineId" ? "machine" : hotspot.filter}
+          </span>
+          <span className="min-w-0 truncate">{hotspot.label}</span>
+          <span className="rounded-full bg-(--vf-counter-surface) px-1.5 text-[10px] tabular-nums">
+            {hotspot.count}
+          </span>
+        </button>
+      ))}
+    </div>
+  );
 };
 
 type InputModeToggleProps = {
@@ -428,6 +665,111 @@ const SourceWorkspace = ({
   );
 };
 
+type ConsoleEntryRowProps = {
+  entry: ConsolePanelView["entries"][number];
+  selected: boolean;
+  dispatch: (command: VisualizerCommand) => void;
+};
+
+const ConsoleEntryRow = ({ entry, selected, dispatch }: ConsoleEntryRowProps) => {
+  const machineId = machineIdForConsoleEntry(entry);
+  const dotClass = entry.severity ? severityDotClass[entry.severity] : "bg-(--vf-text-quiet)";
+  const channelClass = channelLabelClass[entry.channel] ?? "text-(--vf-text-quiet)";
+  const canViewSource = Boolean(entry.sourceAnchor);
+
+  const selectEntry = () => dispatch({ type: "console.entry.selected", entryId: entry.entryId });
+  const openSource = (event: MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    if (!entry.sourceAnchor) return;
+    dispatch({ type: "source.overlay.opened", title: entry.title, anchors: [entry.sourceAnchor] });
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.target !== event.currentTarget) return;
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    selectEntry();
+  };
+
+  return (
+    <li className="contents">
+      <div
+        role="button"
+        tabIndex={0}
+        data-testid={VISUALIZER_TEST_IDS.console.entry}
+        data-entry-id={entry.entryId}
+        data-channel={entry.channel}
+        data-severity={entry.severity ?? ""}
+        data-origin={entry.origin ?? ""}
+        data-machine-id={machineId ?? ""}
+        data-code={entry.title}
+        onClick={selectEntry}
+        onKeyDown={handleKeyDown}
+        className={cn(
+          "group relative grid cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] gap-x-3 border-t border-(--vf-border-soft) px-3 py-2 transition-colors duration-(--vf-duration-fast) first:border-t-0 hover:bg-(--vf-row-hover) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+          selected && "bg-(--vf-row-selected) shadow-[inset_2px_0_0_var(--vf-row-selected-line)] hover:bg-(--vf-row-selected)",
+        )}
+      >
+      <span
+        aria-hidden="true"
+        className={cn("mt-[7px] size-1.5 shrink-0 rounded-full", dotClass)}
+      />
+      <span className="grid min-w-0 gap-0.5">
+        <span className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          <span className={cn("shrink-0 font-mono text-[10px] font-semibold uppercase tracking-[0.08em]", channelClass)}>
+            {entry.channel}
+          </span>
+          {entry.severity ? (
+            <span className="shrink-0 font-mono text-[10px] uppercase tracking-[0.08em] text-(--vf-text-quiet)">
+              {entry.severity}
+            </span>
+          ) : null}
+          <strong className="min-w-0 font-mono text-[11px] font-semibold text-foreground wrap-anywhere">
+            {entry.title}
+          </strong>
+        </span>
+        <span className="min-w-0 text-[12px] leading-snug text-(--vf-text-muted) wrap-anywhere">
+          {entry.message}
+        </span>
+        {machineId || entry.origin || entry.locationLabel ? (
+          <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 pt-0.5 font-mono text-[10px] text-(--vf-text-quiet)">
+            {machineId ? (
+              <span className="rounded-[3px] bg-(--vf-domain-soft) px-1.5 py-0.5 font-semibold text-(--vf-domain)">
+                {machineId}
+              </span>
+            ) : null}
+            {entry.origin ? <span>{entry.origin}</span> : null}
+            {entry.locationLabel ? (
+              <span className="min-w-0 truncate" title={entry.locationLabel}>
+                {entry.locationLabel}
+              </span>
+            ) : null}
+          </span>
+        ) : null}
+      </span>
+      {canViewSource ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              aria-label="Open source code"
+              data-testid={VISUALIZER_TEST_IDS.console.entryViewSource}
+              onClick={openSource}
+              className="inline-flex size-7 shrink-0 items-center justify-center self-start rounded-md border border-(--vf-border-soft) bg-(--vf-surface) text-(--vf-text-muted) opacity-0 transition-all duration-(--vf-duration-fast) hover:border-(--vf-accent-border) hover:bg-(--vf-accent-soft) hover:text-(--vf-accent) focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100"
+            >
+              <FileSearch aria-hidden="true" className="size-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>Open source code</TooltipContent>
+        </Tooltip>
+      ) : (
+        <span aria-hidden="true" className="size-7 shrink-0" />
+      )}
+      </div>
+    </li>
+  );
+};
+
 const ConsoleDrawer = ({
   consolePanel,
   dispatch,
@@ -454,13 +796,18 @@ const ConsoleDrawer = ({
       role="region"
       aria-label="Visualizer console"
       className={cn(
-        "absolute inset-y-2 right-2 w-[min(calc(100vw-1rem),460px)] bg-card shadow-(--vf-shadow-overlay) sm:inset-y-3 sm:right-3",
+        "absolute inset-y-2 right-2 w-[min(calc(100vw-1rem),780px)] bg-card shadow-(--vf-shadow-overlay) sm:inset-y-3 sm:right-3 lg:w-[min(calc(100vw-2rem),960px)] xl:w-[min(62vw,1180px)]",
         !consolePanel.open && "hidden",
       )}
       data-testid={VISUALIZER_TEST_IDS.console.panel}
     >
-      <PanelHeader className="justify-between">
-        <PanelTitle eyebrow="Diagnostics" title="Console" />
+      <PanelHeader className="justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <PanelTitle eyebrow="Diagnostics" title="Console" />
+          <span className="hidden font-mono text-[10px] text-(--vf-text-quiet) tabular-nums sm:inline">
+            {consolePanel.totalEntries} {consolePanel.totalEntries === 1 ? "entry" : "entries"}
+          </span>
+        </div>
         <Tooltip>
           <TooltipTrigger asChild>
             <IconButton
@@ -477,39 +824,91 @@ const ConsoleDrawer = ({
       </PanelHeader>
 
       <PanelBody className="flex flex-col">
-        <div
-          className="flex flex-wrap gap-1 border-b border-(--vf-border-soft) bg-(--vf-surface-soft) p-2"
-          data-testid={VISUALIZER_TEST_IDS.console.channels}
-        >
-          {consolePanel.channels.map((channel) => (
-            <Button
-              key={channel.channel}
-              type="button"
-              variant={channel.selected ? "secondary" : "ghost"}
-              size="sm"
-              aria-pressed={channel.selected}
-              className={cn(
-                "h-7 gap-1.5 px-2 font-mono text-[11px]",
-                channel.selected
-                  ? "bg-(--vf-surface-raised) text-foreground"
-                  : "text-(--vf-text-muted) hover:bg-(--vf-row-hover) hover:text-foreground",
-              )}
-              data-testid={consoleChannelTestId(channel.channel)}
-              onClick={() => dispatch({ type: "console.channel.selected", channel: channel.channel })}
+        <div className="flex flex-col gap-3 border-b border-(--vf-border-soft) bg-(--vf-surface-soft)/40 px-3 py-3">
+          <ConsoleChannelStrip consolePanel={consolePanel} dispatch={dispatch} />
+          {consolePanel.scope ? (
+            <div
+              className="flex min-w-0 flex-wrap items-center gap-2 rounded-md border border-(--vf-warning-border) bg-(--vf-warning-soft) px-2.5 py-2 font-mono text-[11px] text-(--vf-warning)"
+              data-testid={VISUALIZER_TEST_IDS.console.scope}
+              data-scope-kind={consolePanel.scope.owner.kind}
+              data-scope-id={consolePanel.scope.owner.id}
+              data-diagnostic-count={consolePanel.scope.diagnosticIds.length}
             >
-              {channel.label}
-              <span
-                className={cn(
-                  "rounded-full px-1.5 font-mono text-[10px] tabular-nums",
-                  channel.selected
-                    ? "bg-(--vf-counter-surface) text-(--vf-text-muted)"
-                    : "bg-(--vf-counter-surface) text-(--vf-text-quiet)",
-                )}
-              >
-                {channel.count}
+              <span className="font-semibold uppercase tracking-[0.08em]">scope</span>
+              <span className="min-w-0 max-w-full truncate text-foreground" title={consoleScopeLabel(consolePanel)}>
+                {consoleScopeLabel(consolePanel)}
               </span>
-            </Button>
-          ))}
+              <span className="rounded-full bg-black/15 px-1.5 text-[10px] tabular-nums">
+                {consolePanel.scope.diagnosticIds.length}
+              </span>
+            </div>
+          ) : null}
+
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative min-w-0 flex-1 basis-[220px]">
+              <Search
+                aria-hidden="true"
+                className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-(--vf-text-quiet)"
+              />
+              <Input
+                type="search"
+                value={consolePanel.filters.query}
+                placeholder="search code, message, file, machine"
+                aria-label="Search console entries"
+                data-testid={VISUALIZER_TEST_IDS.console.search}
+                className="h-8 rounded-md border-(--vf-border) bg-(--vf-surface) pl-8 font-mono text-[11px] text-foreground placeholder:text-(--vf-text-quiet) focus-visible:ring-2"
+                onChange={(event) => dispatch({ type: "console.query.changed", query: event.currentTarget.value })}
+              />
+            </div>
+            <ConsoleSeverityControls consolePanel={consolePanel} dispatch={dispatch} />
+            <button
+              type="button"
+              disabled={consolePanel.activeFilterCount === 0}
+              data-testid={VISUALIZER_TEST_IDS.console.clearFilters}
+              onClick={() => dispatch({ type: "console.filters.reset" })}
+              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2 font-mono text-[11px] text-(--vf-text-muted) transition-colors duration-(--vf-duration-fast) hover:bg-(--vf-row-hover) hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-(--vf-text-muted)"
+            >
+              <SlidersHorizontal aria-hidden="true" className="size-3.5" />
+              clear
+              {consolePanel.activeFilterCount > 0 ? (
+                <span className="rounded-full bg-(--vf-counter-surface) px-1.5 text-[10px] text-(--vf-text-quiet) tabular-nums">
+                  {consolePanel.activeFilterCount}
+                </span>
+              ) : null}
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <ConsoleFilterSelect
+              label="machine"
+              value={consolePanel.filters.machineId}
+              allLabel="all"
+              allCount={consolePanel.channelEntryCount}
+              options={consolePanel.machineOptions}
+              testId={VISUALIZER_TEST_IDS.console.machineFilter}
+              onValueChange={(value) => dispatch({ type: "console.filter.changed", filter: "machineId", value })}
+            />
+            <ConsoleFilterSelect
+              label="code"
+              value={consolePanel.filters.code}
+              allLabel="all"
+              allCount={consolePanel.channelEntryCount}
+              options={consolePanel.codeOptions}
+              testId={VISUALIZER_TEST_IDS.console.codeFilter}
+              onValueChange={(value) => dispatch({ type: "console.filter.changed", filter: "code", value })}
+            />
+            <ConsoleFilterSelect
+              label="origin"
+              value={consolePanel.filters.origin}
+              allLabel="all"
+              allCount={consolePanel.channelEntryCount}
+              options={consolePanel.originOptions}
+              testId={VISUALIZER_TEST_IDS.console.originFilter}
+              onValueChange={(value) => dispatch({ type: "console.filter.changed", filter: "origin", value })}
+            />
+          </div>
+
+          <ConsoleHotspotStrip consolePanel={consolePanel} dispatch={dispatch} />
         </div>
 
         <PaneScrollArea>
@@ -519,51 +918,24 @@ const ConsoleDrawer = ({
               data-testid={VISUALIZER_TEST_IDS.console.entries}
               data-empty="true"
               data-entry-count="0"
+              data-empty-reason={consolePanel.emptyReason}
             >
               <AlertCircle className="size-4 text-(--vf-text-quiet)" aria-hidden="true" />
-              <p>No console entries in this channel.</p>
+              <p>{consolePanel.emptyReason === "filtered" ? "No entries match the active filters." : "No console entries yet."}</p>
             </div>
           ) : (
             <ol
-              className="flex flex-col gap-1.5 p-2.5"
               data-testid={VISUALIZER_TEST_IDS.console.entries}
               data-empty="false"
               data-entry-count={consolePanel.entries.length}
             >
               {consolePanel.entries.map((entry) => (
-                <li key={entry.entryId}>
-                  <button
-                    type="button"
-                    className="w-full rounded-md border border-(--vf-border-soft) bg-(--vf-surface-soft) p-2 text-left transition-colors duration-(--vf-duration-fast) hover:border-(--vf-border) hover:bg-(--vf-surface-raised) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-                    data-testid={VISUALIZER_TEST_IDS.console.entry}
-                    data-entry-id={entry.entryId}
-                    data-channel={entry.channel}
-                    data-severity={entry.severity ?? ""}
-                    data-origin={entry.origin ?? ""}
-                    onClick={() => dispatch({ type: "console.entry.selected", entryId: entry.entryId })}
-                  >
-                    <span className="flex min-w-0 flex-wrap items-center gap-1.5">
-                      <StatusBadge tone={entry.channel === "diagnostics" ? "diagnostic" : "muted"}>
-                        {entry.channel}
-                      </StatusBadge>
-                      {entry.severity ? (
-                        <StatusBadge tone={statusTone(entry.severity)}>{entry.severity}</StatusBadge>
-                      ) : null}
-                      {entry.origin ? (
-                        <span className="font-mono text-[10px] text-(--vf-text-quiet)">{entry.origin}</span>
-                      ) : null}
-                      {entry.locationLabel ? (
-                        <span className="font-mono text-[10px] text-(--vf-text-quiet)">· {entry.locationLabel}</span>
-                      ) : null}
-                    </span>
-                    <strong className="mt-1.5 block min-w-0 font-mono text-[11px] font-semibold text-foreground wrap-anywhere">
-                      {entry.title}
-                    </strong>
-                    <span className="mt-0.5 block min-w-0 text-[12px] text-(--vf-text-muted) wrap-anywhere">
-                      {entry.message}
-                    </span>
-                  </button>
-                </li>
+                <ConsoleEntryRow
+                  key={entry.entryId}
+                  entry={entry}
+                  selected={consolePanel.selectedEntryId === entry.entryId}
+                  dispatch={dispatch}
+                />
               ))}
             </ol>
           )}
@@ -572,8 +944,10 @@ const ConsoleDrawer = ({
         <Separator />
 
         <div className="flex items-center justify-between gap-2 border-t border-(--vf-border-soft) bg-(--vf-surface-soft) px-3 py-1.5 font-mono text-[10px] text-(--vf-text-quiet)">
-          <span className="tabular-nums">{consolePanel.totalEntries} entries</span>
-          <span>filter · {consolePanel.selectedChannel}</span>
+          <span className="tabular-nums">
+            {consolePanel.entries.length} shown · {consolePanel.totalEntries} total
+          </span>
+          <span className="min-w-0 truncate">filter · {consoleFilterSummary(consolePanel)}</span>
         </div>
       </PanelBody>
     </Panel>

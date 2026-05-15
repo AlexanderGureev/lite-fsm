@@ -1,5 +1,6 @@
-import { memo, useMemo, useState } from "react";
-import { Box, Code2, Network, RotateCcw, Send } from "lucide-react";
+import { memo, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { Box, Code2, Network, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, RotateCcw, Send } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import type { MachineCanvasBoardView } from "../../canvas";
 import type {
   MachineCardView,
@@ -10,7 +11,6 @@ import type {
   SendEventOptionView,
   VisualizerCommand,
 } from "../../workbench";
-import { Button } from "@/ui/button";
 import {
   Select,
   SelectContent,
@@ -35,6 +35,7 @@ import {
 } from "@/ui/visualizer";
 import { VISUALIZER_TEST_IDS } from "@/test-ids";
 import { cn } from "@/lib/utils";
+import { useOverflowFade } from "@/lib/use-overflow-fade";
 import { MachineCanvasBoard } from "./MachineCanvasBoard";
 import {
   areMachinePickerRowPropsEqual,
@@ -550,7 +551,7 @@ TimelineStep.displayName = "TimelineStep";
 const SimulationStatusBadge = ({ status }: { status: MachineWorkbenchPanelView["simulationStatus"] }) => {
   const tone = status === "blocked" ? "diagnostic" : status === "running" ? "ready" : "muted";
 
-  return <StatusBadge tone={tone}>status {status}</StatusBadge>;
+  return <StatusBadge tone={tone}>{status}</StatusBadge>;
 };
 
 const LegendDot = ({ color, label }: { color: string; label: string }) => (
@@ -575,67 +576,138 @@ const Legend = () => (
 
 const WorkbenchTimeline = ({
   view,
+  animateEntry,
+  onCollapse,
   dispatch,
 }: {
   view: MachineWorkbenchPanelView;
+  animateEntry: boolean;
+  onCollapse: () => void;
   dispatch: (command: VisualizerCommand) => void;
 }) => (
-  <WorkspacePane>
-    <header className="flex h-10 shrink-0 items-center gap-2 border-b border-(--vf-border-soft) bg-(--vf-surface-soft) px-3">
-      <PanelTitle eyebrow="L3 · Simulator" title="Event timeline" />
-      <div className="ml-auto flex shrink-0 items-center gap-1.5">
-        <SimulationStatusBadge status={view.simulationStatus} />
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              aria-label="Reset simulation"
-              className="h-7 gap-1 px-2 font-mono text-[10px] border-(--vf-border) bg-(--vf-surface-soft) text-(--vf-text-muted) hover:border-(--vf-danger-border) hover:bg-(--vf-danger-soft) hover:text-(--vf-danger) disabled:opacity-30"
-              disabled={view.timeline.length === 0}
-              data-testid={VISUALIZER_TEST_IDS.workbench.simulationReset}
-              onClick={() => dispatch({ type: "l3.simulation.reset" })}
-            >
-              <RotateCcw aria-hidden="true" className="size-3" />
-              reset
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Reset timeline</TooltipContent>
-        </Tooltip>
+  <WorkspacePane className="h-full">
+    <div className={cn("flex h-full min-h-0 flex-col", animateEntry && "vf-pane-enter")}>
+      <header className="flex h-10 shrink-0 items-center gap-2 border-b border-(--vf-border-soft) bg-(--vf-surface-soft) px-3">
+        <PanelTitle eyebrow="L3 · Simulator" title="Event timeline" />
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">
+          <SimulationStatusBadge status={view.simulationStatus} />
+          <HeaderIconButton
+            ariaLabel="Reset simulation"
+            testId={VISUALIZER_TEST_IDS.workbench.simulationReset}
+            tooltip="Reset timeline"
+            disabled={view.timeline.length === 0}
+            onClick={() => dispatch({ type: "l3.simulation.reset" })}
+          >
+            <RotateCcw aria-hidden="true" className="size-3.5" />
+          </HeaderIconButton>
+          <HeaderIconButton
+            ariaLabel="Collapse simulator panel"
+            testId={VISUALIZER_TEST_IDS.workbench.collapseSimulator}
+            tooltip="Collapse simulator"
+            onClick={onCollapse}
+          >
+            <PanelRightClose aria-hidden="true" className="size-3.5" />
+          </HeaderIconButton>
+        </div>
+      </header>
+
+      <div className="shrink-0 border-b border-(--vf-border-soft) bg-(--vf-surface-soft) p-3">
+        <p className="mb-2 text-[11px] text-(--vf-text-quiet)">
+          Send an external event or click <span className="font-mono text-(--vf-accent)">cfg</span>/
+          <span className="font-mono text-(--vf-effect)">eff</span> rows on cards to step through the system.
+        </p>
+        <SendEventControl options={view.sendOptions} disabled={view.selectedMachineIds.length === 0} dispatch={dispatch} />
       </div>
-    </header>
 
-    <div className="shrink-0 border-b border-(--vf-border-soft) bg-(--vf-surface-soft) p-3">
-      <p className="mb-2 text-[11px] text-(--vf-text-quiet)">
-        Send an external event or click <span className="font-mono text-(--vf-accent)">cfg</span>/
-        <span className="font-mono text-(--vf-effect)">eff</span> rows on cards to step through the system.
-      </p>
-      <SendEventControl options={view.sendOptions} disabled={view.selectedMachineIds.length === 0} dispatch={dispatch} />
-    </div>
+      <PaneScrollArea>
+        <div
+          className="flex flex-col py-1"
+          data-testid={VISUALIZER_TEST_IDS.workbench.timeline}
+          data-empty={view.timeline.length === 0}
+        >
+          {view.timeline.length === 0 ? (
+            <p className="p-4 text-center text-[11px] text-(--vf-text-quiet)">
+              No events yet. Send an external event to start.
+            </p>
+          ) : (
+            view.timeline.map((step) => <TimelineStep key={step.stepId} step={step} dispatch={dispatch} />)
+          )}
+        </div>
+      </PaneScrollArea>
 
-    <PaneScrollArea>
-      <div
-        className="flex flex-col py-1"
-        data-testid={VISUALIZER_TEST_IDS.workbench.timeline}
-        data-empty={view.timeline.length === 0}
-      >
-        {view.timeline.length === 0 ? (
-          <p className="p-4 text-center text-[11px] text-(--vf-text-quiet)">
-            No events yet. Send an external event to start.
-          </p>
-        ) : (
-          view.timeline.map((step) => <TimelineStep key={step.stepId} step={step} dispatch={dispatch} />)
-        )}
+      <div className="flex shrink-0 items-center border-t border-(--vf-border-soft) bg-(--vf-surface-soft) px-3 py-1.5">
+        <span className="font-mono text-[10px] text-(--vf-text-quiet) tabular-nums">
+          {view.timeline.length} {view.timeline.length === 1 ? "step" : "steps"}
+        </span>
       </div>
-    </PaneScrollArea>
-
-    <div className="flex shrink-0 items-center border-t border-(--vf-border-soft) bg-(--vf-surface-soft) px-3 py-1.5">
-      <span className="font-mono text-[10px] text-(--vf-text-quiet) tabular-nums">
-        {view.timeline.length} {view.timeline.length === 1 ? "step" : "steps"}
-      </span>
     </div>
   </WorkspacePane>
+);
+
+type HeaderIconButtonProps = {
+  ariaLabel: string;
+  testId: string;
+  tooltip: string;
+  onClick: () => void;
+  children: ReactNode;
+  disabled?: boolean;
+};
+
+const HeaderIconButton = ({ ariaLabel, testId, tooltip, onClick, children, disabled = false }: HeaderIconButtonProps) => (
+  <Tooltip>
+    <TooltipTrigger asChild>
+      <button
+        type="button"
+        aria-label={ariaLabel}
+        title={tooltip}
+        data-testid={testId}
+        onClick={onClick}
+        disabled={disabled}
+        className="inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-transparent text-(--vf-text-quiet) transition-colors duration-(--vf-duration-fast) hover:border-(--vf-border) hover:bg-(--vf-surface-raised) hover:text-(--vf-accent) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-transparent disabled:hover:bg-transparent disabled:hover:text-(--vf-text-quiet)"
+      >
+        {children}
+      </button>
+    </TooltipTrigger>
+    <TooltipContent>{tooltip}</TooltipContent>
+  </Tooltip>
+);
+
+type SidePanelRailProps = {
+  eyebrow: string;
+  label: string;
+  icon: LucideIcon;
+  ariaLabel: string;
+  testId: string;
+  tooltip: string;
+  onClick: () => void;
+};
+
+const SidePanelRail = ({ eyebrow, label, icon: ExpandIcon, ariaLabel, testId, tooltip, onClick }: SidePanelRailProps) => (
+  <Tooltip>
+    <TooltipTrigger asChild>
+      <button
+        type="button"
+        aria-label={ariaLabel}
+        data-testid={testId}
+        onClick={onClick}
+        className="group flex h-full w-full min-w-0 flex-col items-center gap-3 overflow-hidden rounded-(--vf-radius-lg) border bg-card py-3 text-(--vf-text-muted) transition-colors duration-(--vf-duration-fast) hover:border-(--vf-accent-border) hover:bg-(--vf-accent-soft)/30 hover:text-(--vf-accent) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+      >
+        <span className="vf-pane-enter grid size-7 place-items-center rounded-md border border-(--vf-border) bg-(--vf-surface-soft) text-(--vf-text-muted) transition-colors duration-(--vf-duration-fast) group-hover:border-(--vf-accent-border) group-hover:bg-(--vf-accent-soft) group-hover:text-(--vf-accent)">
+          <ExpandIcon aria-hidden="true" className="size-3.5" />
+        </span>
+        <span aria-hidden="true" className="vf-pane-enter flex min-h-0 flex-1 items-center justify-center">
+          <span className="select-none font-mono text-[10px] uppercase tracking-[0.18em] [writing-mode:vertical-rl]">
+            <span className="text-(--vf-text-quiet)">{eyebrow}</span>
+            <span className="mx-1.5 text-(--vf-text-quiet)">·</span>
+            <span className="font-semibold text-(--vf-text-muted) transition-colors duration-(--vf-duration-fast) group-hover:text-(--vf-accent)">
+              {label}
+            </span>
+          </span>
+        </span>
+      </button>
+    </TooltipTrigger>
+    <TooltipContent>{tooltip}</TooltipContent>
+  </Tooltip>
 );
 
 export const MachinesPanel = ({
@@ -651,6 +723,22 @@ export const MachinesPanel = ({
     () => `${view.selectedMachineIds.length}/${view.totalMachines}`,
     [view.selectedMachineIds.length, view.totalMachines],
   );
+  const [pickerCollapsed, setPickerCollapsedState] = useState(false);
+  const [simulatorCollapsed, setSimulatorCollapsedState] = useState(false);
+  const [pickerInteracted, setPickerInteracted] = useState(false);
+  const [simulatorInteracted, setSimulatorInteracted] = useState(false);
+  const setPickerCollapsed = (next: boolean) => {
+    setPickerInteracted(true);
+    setPickerCollapsedState(next);
+  };
+  const setSimulatorCollapsed = (next: boolean) => {
+    setSimulatorInteracted(true);
+    setSimulatorCollapsedState(next);
+  };
+  const pickerColumn = pickerCollapsed ? "44px" : "minmax(220px,260px)";
+  const simulatorColumn = simulatorCollapsed ? "44px" : "minmax(280px,360px)";
+  const cardsViewportRef = useRef<HTMLDivElement>(null);
+  useOverflowFade(cardsViewportRef, "vertical");
 
   return (
     <section
@@ -673,39 +761,72 @@ export const MachinesPanel = ({
         </div>
       </WorkspaceHeader>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[minmax(220px,260px)_minmax(0,1fr)_minmax(280px,360px)]">
-        <WorkspacePane>
-          <header className="flex h-10 shrink-0 items-center gap-2 border-b border-(--vf-border-soft) bg-(--vf-surface-soft) px-3">
-            <PanelTitle eyebrow="L3 · Picker" title="Machines" />
-            <button
-              type="button"
-              className="ml-auto shrink-0 inline-flex h-6 items-center rounded-full border border-(--vf-border) bg-(--vf-counter-surface) px-2.5 font-mono text-[10px] text-(--vf-text-muted) transition-colors duration-(--vf-duration-fast) hover:border-(--vf-accent-border) hover:text-(--vf-accent) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-(--vf-border) disabled:hover:text-(--vf-text-muted)"
-              disabled={view.selectedMachineIds.length === 0}
-              data-testid={VISUALIZER_TEST_IDS.workbench.clearSelection}
-              onClick={() => dispatch({ type: "l3.selection.cleared" })}
-            >
-              clear
-            </button>
-          </header>
-          <PaneScrollArea>
-            <div className="flex flex-col" data-testid={VISUALIZER_TEST_IDS.workbench.machinePicker}>
-              {view.machineRows.length === 0 ? (
-                <p className="p-4 text-[12px] text-(--vf-text-quiet)">
-                  Open the visualizer to build machines.
-                </p>
-              ) : (
-                view.machineRows.map((machine) => (
-                  <MachinePickerRow key={machine.machineId} machine={machine} dispatch={dispatch} />
-                ))
-              )}
+      <div
+        className="relative grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-(--vf-workbench-cols)"
+        style={{ "--vf-workbench-cols": `${pickerColumn} minmax(0,1fr) ${simulatorColumn}` } as CSSProperties}
+        data-picker-panel={pickerCollapsed ? "collapsed" : "expanded"}
+        data-simulator-panel={simulatorCollapsed ? "collapsed" : "expanded"}
+      >
+        {pickerCollapsed ? (
+          <SidePanelRail
+            eyebrow="L3"
+            label="Machines"
+            icon={PanelLeftOpen}
+            ariaLabel="Show machine picker"
+            testId={VISUALIZER_TEST_IDS.workbench.expandPicker}
+            tooltip="Show picker"
+            onClick={() => setPickerCollapsed(false)}
+          />
+        ) : (
+          <WorkspacePane className="h-full">
+            <div className={cn("flex h-full min-h-0 flex-col", pickerInteracted && "vf-pane-enter")}>
+              <header className="flex h-10 shrink-0 items-center gap-2 border-b border-(--vf-border-soft) bg-(--vf-surface-soft) px-3">
+                <PanelTitle eyebrow="L3 · Picker" title="Machines" />
+                <div className="ml-auto flex shrink-0 items-center gap-1.5">
+                  <button
+                    type="button"
+                    className="shrink-0 inline-flex h-6 items-center rounded-full border border-(--vf-border) bg-(--vf-counter-surface) px-2.5 font-mono text-[10px] text-(--vf-text-muted) transition-colors duration-(--vf-duration-fast) hover:border-(--vf-accent-border) hover:text-(--vf-accent) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-(--vf-border) disabled:hover:text-(--vf-text-muted)"
+                    disabled={view.selectedMachineIds.length === 0}
+                    data-testid={VISUALIZER_TEST_IDS.workbench.clearSelection}
+                    onClick={() => dispatch({ type: "l3.selection.cleared" })}
+                  >
+                    clear
+                  </button>
+                  <HeaderIconButton
+                    ariaLabel="Collapse machine picker"
+                    testId={VISUALIZER_TEST_IDS.workbench.collapsePicker}
+                    tooltip="Collapse picker"
+                    onClick={() => setPickerCollapsed(true)}
+                  >
+                    <PanelLeftClose aria-hidden="true" className="size-3.5" />
+                  </HeaderIconButton>
+                </div>
+              </header>
+              <PaneScrollArea>
+                <div className="flex flex-col" data-testid={VISUALIZER_TEST_IDS.workbench.machinePicker}>
+                  {view.machineRows.length === 0 ? (
+                    <p className="p-4 text-[12px] text-(--vf-text-quiet)">
+                      Open the visualizer to build machines.
+                    </p>
+                  ) : (
+                    view.machineRows.map((machine) => (
+                      <MachinePickerRow key={machine.machineId} machine={machine} dispatch={dispatch} />
+                    ))
+                  )}
+                </div>
+              </PaneScrollArea>
+              <Legend />
             </div>
-          </PaneScrollArea>
-          <Legend />
-        </WorkspacePane>
+          </WorkspacePane>
+        )}
 
-        <PaneScrollArea className="min-h-0">
+        <PaneScrollArea
+          className="h-full min-h-0"
+          viewportRef={cardsViewportRef}
+          viewportClassName="vf-pane-fade"
+        >
           {view.cards.length === 0 ? (
-            <div className="flex min-h-[280px] flex-col items-center justify-center gap-3 rounded-(--vf-radius-lg) border border-dashed border-(--vf-border) p-8 text-center">
+            <div className="flex h-full min-h-[280px] flex-col items-center justify-center gap-3 rounded-(--vf-radius-lg) border border-dashed border-(--vf-border) p-8 text-center">
               <Box aria-hidden="true" className="size-7 text-(--vf-text-quiet) opacity-50" />
               <div>
                 <p className="font-mono text-[12px] font-medium text-(--vf-text-muted)">Select machines to inspect.</p>
@@ -713,13 +834,30 @@ export const MachinesPanel = ({
               </div>
             </div>
           ) : (
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] content-start gap-3">
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] content-start gap-3">
               {view.cards.map((card) => <MachineCard key={card.machineId} card={card} dispatch={dispatch} />)}
             </div>
           )}
         </PaneScrollArea>
 
-        <WorkbenchTimeline view={view} dispatch={dispatch} />
+        {simulatorCollapsed ? (
+          <SidePanelRail
+            eyebrow="L3"
+            label="Event timeline"
+            icon={PanelRightOpen}
+            ariaLabel="Show simulator panel"
+            testId={VISUALIZER_TEST_IDS.workbench.expandSimulator}
+            tooltip="Show simulator"
+            onClick={() => setSimulatorCollapsed(false)}
+          />
+        ) : (
+          <WorkbenchTimeline
+            view={view}
+            animateEntry={simulatorInteracted}
+            onCollapse={() => setSimulatorCollapsed(true)}
+            dispatch={dispatch}
+          />
+        )}
       </div>
       <MachineCanvasBoard view={canvasBoard} dispatch={dispatch} />
     </section>

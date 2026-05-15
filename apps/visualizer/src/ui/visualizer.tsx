@@ -460,7 +460,7 @@ export type DensityRowRelation = "idle" | "selected" | "related" | "dimmed";
 const densityRowRelationClass: Record<DensityRowRelation, string> = {
   idle: "border-transparent bg-transparent hover:bg-(--vf-row-hover)",
   selected:
-    "border-transparent bg-(--vf-accent-soft) shadow-[inset_2px_0_0_var(--vf-accent)] hover:bg-(--vf-accent-soft)",
+    "border-(--vf-row-selected-border) bg-(--vf-row-selected) shadow-[inset_2px_0_0_var(--vf-row-selected-line)] hover:bg-(--vf-row-selected)",
   related:
     "border-transparent bg-(--vf-row-related) hover:bg-(--vf-row-related)",
   dimmed: "border-transparent bg-transparent opacity-40 hover:bg-(--vf-row-hover)",

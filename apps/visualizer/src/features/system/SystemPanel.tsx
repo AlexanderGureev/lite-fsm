@@ -1,4 +1,5 @@
-import { Box, ExternalLink, Eye, Search } from "lucide-react";
+import { Box, ExternalLink, Eye, Search, Terminal } from "lucide-react";
+import type { ConsoleScope } from "../../console";
 import type { SystemDetailView, SystemMachineRowView, SystemPanelView, SystemTopicRowView, VisualizerCommand } from "../../workbench";
 import { Button } from "@/ui/button";
 import { Input } from "@/ui/input";
@@ -145,6 +146,42 @@ const SectionTitle = ({ children, count }: { children: React.ReactNode; count?: 
   </p>
 );
 
+const diagnosticsScope = (
+  owner: ConsoleScope["owner"],
+  diagnosticIds: readonly string[],
+): ConsoleScope => ({
+  kind: "diagnostics",
+  owner,
+  diagnosticIds,
+});
+
+const OpenDiagnosticsButton = ({
+  scope,
+  dispatch,
+}: {
+  scope: ConsoleScope;
+  dispatch: (command: VisualizerCommand) => void;
+}) => {
+  if (scope.diagnosticIds.length === 0) return null;
+
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      className="h-8 border-(--vf-warning-border) bg-(--vf-warning-soft) text-(--vf-warning) hover:border-(--vf-warning-border) hover:bg-(--vf-warning-soft)/80 hover:text-(--vf-warning)"
+      data-testid={VISUALIZER_TEST_IDS.system.openDiagnostics}
+      onClick={() => dispatch({ type: "console.scope.opened", scope })}
+    >
+      <Terminal data-icon="inline-start" aria-hidden="true" />
+      Open diagnostics
+      <span className="rounded-full bg-black/15 px-1.5 font-mono text-[10px] tabular-nums">
+        {scope.diagnosticIds.length}
+      </span>
+    </Button>
+  );
+};
+
 const MachineDetail = ({
   detail,
   dispatch,
@@ -202,6 +239,13 @@ const MachineDetail = ({
 
     <SectionTitle>Open</SectionTitle>
     <div className="flex flex-wrap gap-1.5">
+      <OpenDiagnosticsButton
+        scope={diagnosticsScope(
+          { kind: "machine", id: detail.machine.machineId, label: detail.machine.machineId },
+          detail.machine.diagnosticIds,
+        )}
+        dispatch={dispatch}
+      />
       <Button
         type="button"
         variant="outline"
@@ -316,6 +360,13 @@ const TopicDetail = ({
 
     <SectionTitle>Open</SectionTitle>
     <div className="flex flex-wrap gap-1.5">
+      <OpenDiagnosticsButton
+        scope={diagnosticsScope(
+          { kind: "topic", id: detail.topic.eventType, label: detail.topic.eventType },
+          detail.topic.diagnosticIds,
+        )}
+        dispatch={dispatch}
+      />
       <Button
         type="button"
         variant="outline"
@@ -366,10 +417,10 @@ const SectionPaneSearch = ({
   value: string;
   onChange: (value: string) => void;
 }) => (
-  <div className="relative ml-auto min-w-[140px] max-w-[220px] flex-1">
+  <div className="relative ml-auto min-w-[130px] max-w-[200px] flex-1">
     <Search
       aria-hidden="true"
-      className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-(--vf-text-quiet)"
+      className="pointer-events-none absolute top-1/2 left-2 size-3 -translate-y-1/2 text-(--vf-text-quiet)"
     />
     <Input
       aria-label={placeholder}
@@ -377,7 +428,7 @@ const SectionPaneSearch = ({
       placeholder={placeholder}
       data-testid={testId}
       onChange={(event) => onChange(event.currentTarget.value)}
-      className="h-8 w-full rounded-md border-(--vf-border-soft) bg-(--vf-surface-soft) pl-7 font-mono text-[11px] focus-visible:border-(--vf-accent-border) focus-visible:ring-1 focus-visible:ring-ring"
+      className="h-7 w-full rounded-[5px] border-(--vf-border-soft) bg-(--vf-surface-soft) pl-6 font-mono text-[9px] focus-visible:border-(--vf-accent-border) focus-visible:ring-1 focus-visible:ring-ring"
     />
   </div>
 );
@@ -385,6 +436,7 @@ const SectionPaneSearch = ({
 const SectionPane = ({
   eyebrow,
   title,
+  headerMeta,
   searchPlaceholder,
   searchTestId,
   searchValue,
@@ -394,6 +446,7 @@ const SectionPane = ({
 }: {
   eyebrow: string;
   title: string;
+  headerMeta?: React.ReactNode;
   searchPlaceholder: string;
   searchTestId: string;
   searchValue: string;
@@ -404,6 +457,7 @@ const SectionPane = ({
   <WorkspacePane>
     <header className="flex h-10 shrink-0 items-center gap-2 border-b border-(--vf-border-soft) bg-(--vf-surface-soft) px-3">
       <PanelTitle eyebrow={eyebrow} title={title} />
+      {headerMeta}
       <SectionPaneSearch
         placeholder={searchPlaceholder}
         testId={searchTestId}
@@ -442,6 +496,15 @@ export const SystemPanel = ({
       <SectionPane
         eyebrow="L1 · Inventory"
         title="Machines"
+        headerMeta={view.machineScope ? (
+          <StatusBadge
+            tone="ready"
+            className="max-w-[120px] shrink-0 truncate tabular-nums"
+            title={`filtered by ${view.machineScope.eventType}`}
+          >
+            {view.machineScope.machineCount} related
+          </StatusBadge>
+        ) : null}
         searchPlaceholder="filter machines"
         searchTestId={VISUALIZER_TEST_IDS.system.machineSearch}
         searchValue={view.machineQuery}
@@ -454,7 +517,9 @@ export const SystemPanel = ({
               className="p-4 text-[12px] text-(--vf-text-quiet)"
               data-testid={VISUALIZER_TEST_IDS.system.machineEmpty}
             >
-              No machines match this search.
+              {view.machineScope
+                ? (view.machineQuery.trim() ? "No scoped machines match this search." : "This event has no related machines.")
+                : "No machines match this search."}
             </p>
           ) : (
             view.machines.map((machine) => (
@@ -467,6 +532,15 @@ export const SystemPanel = ({
       <SectionPane
         eyebrow="L1 · Bus"
         title="Event topics"
+        headerMeta={view.topicScope ? (
+          <StatusBadge
+            tone="ready"
+            className="max-w-[120px] shrink-0 truncate tabular-nums"
+            title={`filtered by ${view.topicScope.machineId}`}
+          >
+            {view.topicScope.topicCount} related
+          </StatusBadge>
+        ) : null}
         searchPlaceholder="filter events"
         searchTestId={VISUALIZER_TEST_IDS.system.topicSearch}
         searchValue={view.topicQuery}
@@ -479,7 +553,9 @@ export const SystemPanel = ({
               className="p-4 text-[12px] text-(--vf-text-quiet)"
               data-testid={VISUALIZER_TEST_IDS.system.topicEmpty}
             >
-              No topics match this search.
+              {view.topicScope
+                ? (view.topicQuery.trim() ? "No scoped topics match this search." : "This machine has no event topics.")
+                : "No topics match this search."}
             </p>
           ) : (
             view.topics.map((topic) => (
