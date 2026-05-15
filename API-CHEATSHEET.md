@@ -12,14 +12,14 @@
 | `@lite-fsm/middleware`                                         | `immerMiddleware`, `devToolsMiddleware`                                                                                                           |
 | `@lite-fsm/middleware/immer` · `@lite-fsm/middleware/devTools` | per-feature entry points                                                                                                                          |
 | `@lite-fsm/react`                                              | `FSMContext`, `FSMContextProvider`, `FSMHydrationBoundary`, `useHydrateSnapshot`, `useManager`, `useSelector`, `useTransition`, `defineMachine`   |
-| `@lite-fsm/graph`                                              | experimental: `compileLiteFsmGraph`, `compileLiteFsmGraphProject`, `selectMachineGraph`, `analyzeLiteFsmGraph` и IR-типы для graph tooling         |
-| `@lite-fsm/graph/simulator`                                    | experimental: `createGraphSimulator`, `createMachineGraphSimulator` для headless symbolic simulation поверх graph IR                               |
-| `@lite-fsm/graph/view-model`                                   | experimental: `buildGraphVisualizerModel`, `buildMachineWorkbenchModel`, `buildMachineFlowModel` для read-only visualizer projections              |
+| `@lite-fsm/graph`                                              | alpha: `compileLiteFsmGraph`, `compileLiteFsmGraphProject`, `selectMachineGraph`, `analyzeLiteFsmGraph` и IR-типы для graph tooling                |
+| `@lite-fsm/graph/simulator`                                    | alpha: `createGraphSimulator`, `createMachineGraphSimulator` для headless symbolic simulation поверх graph IR                                      |
+| `@lite-fsm/graph/view-model`                                   | alpha: `buildGraphVisualizerModel`, `buildMachineWorkbenchModel`, `buildMachineFlowModel` для read-only visualizer projections                     |
 |                                                                |
 
 `@lite-fsm/react` помечен `"use client"`. Импортировать можно из SSR/RSC, hooks/provider — только в client tree.
 
-## Experimental graph compiler
+## Alpha graph compiler
 
 `@lite-fsm/graph` принимает строку TypeScript/JavaScript или project entrypoint через host и возвращает JSON-документ графа без исполнения пользовательского кода.
 
@@ -49,7 +49,7 @@ Reducer branches в graph IR символические: compiler сохраня
 
 `analyzeLiteFsmGraph` не запускается внутри `compileLiteFsmGraph` автоматически и не мутирует document. Правила v1: `unknown-target`, `unreachable-state`, `dead-end-state`, `actor-template-shape`, `reducer-config-consistency`, `effect-event-acceptance`, `wildcard-shadowing`.
 
-## Experimental CLI
+## Alpha CLI
 
 `@lite-fsm/cli` предоставляет binary `lite-fsm` для tooling-сценариев. В MVP публичная поверхность CLI — команда export, а не runtime import.
 
@@ -68,7 +68,7 @@ lite-fsm export-graph --entry store/index.ts --out lite-fsm.graph.json --include
 
 Export format version: `lite-fsm.project-graph-export/v1`. Top-level `diagnostics` содержит только CLI diagnostics `LFC_*`; compiler diagnostics остаются внутри `graph.diagnostics`. По умолчанию JSON export не содержит исходный source text; `--include-source` добавляет его вне `graph`.
 
-## Experimental graph simulator
+## Alpha graph simulator
 
 `@lite-fsm/graph/simulator` запускает headless symbolic simulation поверх готового `LiteFsmGraphDocument`. Root import `@lite-fsm/graph` simulator runtime не реэкспортирует.
 
@@ -96,7 +96,7 @@ const sent = simulator.send({ event: { type: "SUBMIT", payload: { id: 1 } } });
 
 Simulator не исполняет user reducer/effect/guard code. Context берется из `initialContextJson`, initial overrides или summary/unknown fallback; `GraphValueSummary.text` не парсится.
 
-## Experimental graph view-model
+## Alpha graph view-model
 
 `@lite-fsm/graph/view-model` строит синхронную read-only projection поверх `LiteFsmGraphDocument` для будущего visualizer-а. Root import `@lite-fsm/graph` view-model не реэкспортирует.
 

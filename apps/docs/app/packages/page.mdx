@@ -1,0 +1,63 @@
+# Пакеты lite-fsm
+
+`lite-fsm` распространяется как набор npm-пакетов. `@lite-fsm/core` содержит независимый runtime для описания и запуска машин. Остальные пакеты добавляют React-интеграцию, middleware, persistence, анализ графа и CLI.
+
+Базовый пакет — `@lite-fsm/core`. Остальные пакеты подключаются по необходимости, чтобы не добавлять в приложение лишние зависимости.
+
+## Карта пакетов
+
+| Пакет | Роль | Когда нужен |
+| --- | --- | --- |
+| [`@lite-fsm/core`](/packages/core) | Runtime без привязки к UI | Машины, `MachineManager`, эффекты, акторы, snapshots |
+| [`@lite-fsm/react`](/packages/react) | Интеграция с React | Context provider, хуки, hydration boundary |
+| [`@lite-fsm/middleware`](/packages/middleware) | Middleware для manager-а | Immer reducers, Redux DevTools, пользовательские middleware |
+| [`@lite-fsm/persist`](/packages/persist) | Сохранение состояния | Storage adapters, восстановление, синхронизация между вкладками |
+| [`@lite-fsm/graph`](/packages/graph) | Анализ графа машин | Alpha: Graph IR, diagnostics, simulator, модель для visualizer-а |
+| [`@lite-fsm/cli`](/packages/cli) | Командная строка | Alpha: экспорт graph JSON из TypeScript entrypoint |
+
+## Установка по сценариям
+
+Минимальный runtime:
+
+```bash copy
+pnpm add @lite-fsm/core
+```
+
+Runtime с Immer reducer-ами:
+
+```bash copy
+pnpm add @lite-fsm/core @lite-fsm/middleware immer
+```
+
+React-приложение:
+
+```bash copy
+pnpm add @lite-fsm/core @lite-fsm/react @lite-fsm/middleware
+```
+
+React + сохранение состояния:
+
+```bash copy
+pnpm add @lite-fsm/core @lite-fsm/react @lite-fsm/persist
+```
+
+Анализ и визуализация графа:
+
+```bash copy
+pnpm add -D @lite-fsm/graph @lite-fsm/cli
+```
+
+## Выбор пакетов
+
+Начинайте с [`@lite-fsm/core`](/packages/core): он содержит модель машины, `MachineManager`, эффекты, акторы и snapshot API. Подключайте [`@lite-fsm/react`](/packages/react), когда состояние нужно читать из React-компонентов через provider и хуки.
+
+[`@lite-fsm/middleware`](/packages/middleware) нужен для reducer-ов в стиле Immer, Redux DevTools и собственных middleware. [`@lite-fsm/persist`](/packages/persist) используйте, когда состояние нужно сохранять между перезагрузками, восстанавливать из внешнего хранилища или синхронизировать между вкладками.
+
+[`@lite-fsm/graph`](/packages/graph) и [`@lite-fsm/cli`](/packages/cli) предназначены для анализа и визуализации. Эти пакеты находятся в alpha-версии. Они строят статическое представление машин и не выполняют пользовательские reducer-ы или effects.
+
+## Связанные разделы
+
+- [API](/api): карта публичных entrypoints по пакетам.
+- [Руководство](/guide): концепции FSM, actors, effects и hydration.
+- [Практика](/usage): TypeScript и Next.js сценарии.
+- [Инструменты](/tools): playground и visualizer.

@@ -1,0 +1,93 @@
+# React API
+
+`@lite-fsm/react` помечен `"use client"`. Модуль можно импортировать из SSR/RSC, но provider и hooks должны работать в client tree.
+
+## Импорт
+
+```ts copy
+import {
+  FSMContext,
+  FSMContextProvider,
+  FSMHydrationBoundary,
+  defineMachine,
+  useHydrateSnapshot,
+  useManager,
+  useSelector,
+  useTransition,
+} from "@lite-fsm/react";
+```
+
+## Components
+
+### `FSMContextProvider`
+
+```tsx copy
+<FSMContextProvider machineManager={manager}>
+  <App />
+</FSMContextProvider>
+```
+
+| Prop | Назначение |
+| --- | --- |
+| `machineManager` | Экземпляр `MachineManager` |
+| `persist?` | Один `PersistController` или массив controllers |
+| `children` | React subtree |
+
+### `FSMHydrationBoundary`
+
+```tsx copy
+<FSMHydrationBoundary snapshot={snapshot} strategy="merge">
+  <Page />
+</FSMHydrationBoundary>
+```
+
+Boundary применяет snapshot к subtree так, чтобы `useSelector()` внутри видел hydrated state уже на render. После mount manager догоняет это состояние в layout effect.
+
+| Prop | Назначение |
+| --- | --- |
+| `snapshot` | `MachineManagerSnapshot` |
+| `strategy?` | `"merge"` или `"replace"` |
+| `transitionAfterHydrate?` | Событие или массив событий после hydrate |
+| `children` | React subtree |
+
+## Hooks
+
+| Hook | Что возвращает |
+| --- | --- |
+| `useSelector(selector, equalityFn?)` | Выбранную часть manager state |
+| `useTransition()` | Функцию `manager.transition` |
+| `useManager()` | Текущий `MachineManager` |
+| `useHydrateSnapshot(snapshot, opts?)` | Применяет snapshot в layout effect |
+
+```tsx showLineNumbers copy
+function Counter() {
+  const count = useSelector((state) => state.counter.context.count);
+  const transition = useTransition();
+
+  return <button onClick={() => transition({ type: "INC" })}>{count}</button>;
+}
+```
+
+## `defineMachine`
+
+React entrypoint экспортирует `defineMachine` для standalone hook-сценариев:
+
+```tsx copy
+import { defineMachine } from "@lite-fsm/react";
+```
+
+Используйте его, когда машине не нужен общий `MachineManager` в context. Для приложения с несколькими машинами чаще удобнее `MachineManager` + `FSMContextProvider`.
+
+## Types
+
+| Тип | Назначение |
+| --- | --- |
+| `FSMContextType` | Context shape |
+| `FSMContextProviderProps` | Props provider-а |
+| `FSMPersistLifecycle` | Persist lifecycle shape для provider-а |
+| `FSMHydrationBoundaryProps` | Props hydration boundary |
+| `TypedUseSelectorHook` | Типизированный selector hook alias |
+| `TypedUseTransitionHook` | Типизированный transition hook alias |
+| `TypedUseManagerHook` | Типизированный manager hook alias |
+
+Подробное руководство: [@lite-fsm/react](/packages/react).

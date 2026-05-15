@@ -1,0 +1,71 @@
+# Graph API
+
+`@lite-fsm/graph` строит read-only IR для machines/managers и инструментов анализа. Пакет находится в alpha-версии.
+
+## Root entrypoint
+
+```ts copy
+import {
+  analyzeLiteFsmGraph,
+  compileLiteFsmGraph,
+  compileLiteFsmGraphProject,
+  selectMachineGraph,
+} from "@lite-fsm/graph";
+```
+
+| API | Назначение |
+| --- | --- |
+| `compileLiteFsmGraph(source, opts)` | Построить `LiteFsmGraphDocument` из строки source |
+| `compileLiteFsmGraphProject(opts)` | Построить project graph из entrypoint через host |
+| `selectMachineGraph(doc, selector?)` | Выбрать одну machine из document |
+| `analyzeLiteFsmGraph(doc, opts?)` | Запустить semantic analyzer поверх IR |
+
+## Project compiler
+
+```ts copy
+const project = compileLiteFsmGraphProject({
+  entryFileName: "/repo/store/index.ts",
+  projectRoot: "/repo",
+  host,
+});
+```
+
+`LiteFsmGraphProjectHost` отвечает за чтение файлов и module resolution. Это позволяет использовать graph package в CLI, IDE integrations и тестах без жесткой привязки к Node FS.
+
+## Simulator entrypoint
+
+```ts copy
+import {
+  createGraphSimulator,
+  createMachineGraphSimulator,
+} from "@lite-fsm/graph/simulator";
+```
+
+| API | Назначение |
+| --- | --- |
+| `createGraphSimulator(document, options?)` | Simulator для document/manager/machine scope |
+| `createMachineGraphSimulator(document, machineId, options?)` | Удобный wrapper для одной machine |
+
+Simulator не исполняет пользовательский reducer/effect/guard code. Он работает символически поверх graph IR.
+
+## View-model entrypoint
+
+```ts copy
+import {
+  buildGraphVisualizerModel,
+  buildMachineFlowModel,
+  buildMachineWorkbenchModel,
+} from "@lite-fsm/graph/view-model";
+```
+
+| API | Назначение |
+| --- | --- |
+| `buildGraphVisualizerModel(doc, opts?)` | L1/L2/L3 projection: machines, managers, topics, diagnostics |
+| `buildMachineWorkbenchModel(machine, opts?)` | Workbench model одной machine |
+| `buildMachineFlowModel(input)` | Semantic state graph для canvas/flow renderer |
+
+## Основные типы
+
+`LiteFsmGraphDocument`, `LiteFsmGraphMachine`, `LiteFsmGraphManager`, `GraphTransition`, `GraphEmission`, `GraphDiagnostic`, `GraphAnalysisResult`, `GraphSimulator`, `GraphSimulationSnapshot`, `GraphVisualizerModel`, `MachineFlowModel`.
+
+Подробное описание пакета: [@lite-fsm/graph](/packages/graph).

@@ -81,7 +81,7 @@ import type { AppEvents } from "./types";
 
 // Создаем типизированные версии хуков.
 // TypedUseSelectorHook принимает store config (FSMConfigType), не computed AppState —
-// internal `MachinesState<S>` будет вычислен автоматически.
+// `MachinesState<S>` будет вычислен автоматически.
 export const useTransition: TypedUseTransitionHook<AppEvents> = _useTransition;
 export const useSelector: TypedUseSelectorHook<FSMConfigType> = _useSelector;
 export const useManager: TypedUseManagerHook<FSMConfigType, AppEvents> = _useManager;

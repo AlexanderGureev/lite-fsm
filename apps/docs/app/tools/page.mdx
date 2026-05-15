@@ -1,0 +1,40 @@
+# Инструменты
+
+Инструменты помогают проверять машины не только через текст документации: запускать готовые демо, смотреть graph IR и исследовать transitions визуально.
+
+## Playground
+
+[Playground](/playground/) это Next.js-приложение с рабочими примерами:
+
+- минимальный toggle/lamp;
+- async effects и optimistic updates;
+- actor templates и routing;
+- SSR/hydration сценарии;
+- persist и синхронизация между вкладками.
+
+Локальный запуск:
+
+```bash copy
+pnpm --filter @lite-fsm/playground dev
+```
+
+## Visualizer
+
+[Visualizer](/visualizer/) открывает graph JSON, построенный для машин lite-fsm. Он использует `@lite-fsm/graph` и помогает читать states, transitions, reducer branches, effect emissions и diagnostics.
+
+Visualizer находится в alpha-версии.
+
+Для project graph используйте CLI:
+
+```bash copy
+lite-fsm export-graph --entry store/index.ts --out lite-fsm.graph.json
+```
+
+## Когда что использовать
+
+| Инструмент | Что проверять |
+| --- | --- |
+| Playground | Поведение готовых examples и UI-интеграцию |
+| Visualizer | Alpha-инструмент для структуры графа, routing, emissions, diagnostics |
+| CLI | Project export из вашего TypeScript-кода |
+| `@lite-fsm/graph` | Собственные инструменты анализа и headless-проверки |

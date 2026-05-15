@@ -1,0 +1,165 @@
+# Core API
+
+`@lite-fsm/core` это runtime-ядро без привязки к фреймворкам.
+
+## Импорт
+
+```ts copy
+import {
+  MachineManager,
+  createActorMeta,
+  createConfig,
+  createEffect,
+  createMachine,
+  createReducer,
+  defineMachine,
+  Machine,
+  LiteFsmError,
+} from "@lite-fsm/core";
+```
+
+## Machine config
+
+```ts showLineNumbers copy
+import { createMachine } from "@lite-fsm/core";
+
+const counter = createMachine({
+  config: {
+    IDLE: { INC: "IDLE", RESET: null },
+    "*": { BOOT: "IDLE" },
+  },
+  initialState: "IDLE",
+  initialContext: { count: 0 },
+  reducer: (slice, action, { nextState }) => ({
+    state: nextState,
+    context: {
+      count: action.type === "RESET" ? 0 : slice.context.count + 1,
+    },
+  }),
+});
+```
+
+| Поле | Назначение |
+| --- | --- |
+| `config` | Граф `{ [state]: { [eventType]: target } }`; `"*"` задает fallback transitions |
+| `initialState` | Стартовое состояние |
+| `initialContext` | Стартовые данные machine slice |
+| `reducer?` | Собирает следующий `{ state, context }` |
+| `effects?` | Sync/async effects по target state или `"*"` |
+| `hydrate?`, `dehydrate?` | Кастомная транспортная форма snapshot |
+| `groupTag?` | Тег actor group для actor template |
+| `persistence?` | Actor persistence: `"runtime"` или `"snapshot"` |
+
+## Targets
+
+| Target | Поведение |
+| --- | --- |
+| `"NEXT_STATE"` | Переход в указанное состояние |
+| `null` | Self-transition: state не меняется, reducer/effects получают action |
+| `undefined` или отсутствующий ключ | Action игнорируется |
+| `"__RESOLVED"`, `"__REJECTED"`, `"__CANCELLED"` | Terminal target actor template |
+
+Явный `config[state][type]` имеет приоритет над wildcard `"*"`.
+
+## Factories
+
+| API | Назначение |
+| --- | --- |
+| `createMachine(cfg)` | Typed identity helper для полного machine config |
+| `createConfig(cfg)` | Typed helper для графа переходов |
+| `createReducer(fn)` | Typed helper для reducer-а |
+| `createEffect(opts)` | Effect wrapper с `every` или `latest` семантикой |
+| `createActorMeta(meta)` | Frozen `Readonly<ActorMeta>` |
+
+`createEffect`:
+
+```ts showLineNumbers copy
+import { createEffect } from "@lite-fsm/core";
+
+const load = createEffect({
+  type: "latest",
+  cancelFn: ({ signal }) => () => signal.aborted,
+  effect: async ({ transition }) => {
+    transition({ type: "DONE" });
+  },
+});
+```
+
+## MachineManager
+
+```ts showLineNumbers copy
+import { MachineManager } from "@lite-fsm/core";
+
+const manager = MachineManager(
+  { counter },
+  {
+    schemaVersion: 1,
+    onError: console.error,
+  },
+);
+
+manager.transition({ type: "INC" });
+```
+
+### Опции
+
+| Опция | Назначение |
+| --- | --- |
+| `middleware?` | Цепочка middleware для user actions |
+| `snapshot?` | Начальный snapshot |
+| `schemaVersion?` | Версия snapshot |
+| `onError?` | Ошибки effects и `condition` |
+| `onUnknownMachineKey?` | Unknown key при hydrate/snapshot |
+| `onSchemaVersionMismatch?` | Несовпадение schema version |
+| `originId?` | Префикс owner id для распределенного spawn |
+| `generateActorId?` | Пользовательский actor id generator |
+| `generateGroupId?` | Пользовательский group id generator |
+
+### Методы
+
+| Метод | Назначение |
+| --- | --- |
+| `transition(action)` | Отправить событие через middleware/reducer/effects pipeline |
+| `getState()` | Получить committed manager state |
+| `onTransition(cb)` | Подписаться на успешные transitions |
+| `setDependencies(depsOrUpdater)` | Задать effect dependencies |
+| `replaceReducer(enhancer)` | Обернуть root reducer |
+| `condition(predicate)` | Promise ближайшего matching action |
+| `dehydrate(opts?)` | Собрать transport snapshot |
+| `hydrate(snapshot, opts?)` | Применить snapshot |
+| `previewHydrate(snapshot, opts?)` | Рассчитать state без commit |
+
+## Actors
+
+Actor template определяется через `__INIT` в `config`.
+
+```ts showLineNumbers copy
+const request = createMachine({
+  config: {
+    __INIT: { START: "PENDING" },
+    PENDING: { DONE: "__RESOLVED", FAIL: "__REJECTED" },
+  },
+  initialState: "__INIT",
+  initialContext: { id: "" },
+});
+```
+
+Routing выполняется через `action.meta.actorId`, `groupId`, `groupTag` или sender meta. Подробности: [Акторы](/guide/actors).
+
+## Типы
+
+Чаще всего используются:
+
+- `FSMEvent`
+- `MachineConfig`
+- `MachineReducer`
+- `MachineEffect`
+- `MachineStore`
+- `MachinesState`
+- `MachineEvents`
+- `MachineDependencies`
+- `MachineManagerSnapshot`
+- `HydrateStrategy`
+- `Middleware`
+
+Полный список: [`TYPES-CHEATSHEET.md`](https://github.com/AlexanderGureev/lite-fsm/blob/main/TYPES-CHEATSHEET.md).

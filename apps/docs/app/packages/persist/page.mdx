@@ -2,9 +2,7 @@ export const playgroundBasePath = process.env.NEXT_PUBLIC_PLAYGROUND_BASE_PATH ?
 
 export const playgroundExamplePath = (id) => `${playgroundBasePath}/examples/${id}/`;
 
-# Persist
-
-> Раздел переехал в [Пакеты / @lite-fsm/persist](/packages/persist). Эта страница оставлена для старых внешних ссылок.
+# @lite-fsm/persist
 
 `@lite-fsm/persist` — это отдельный модуль, который сохраняет состояние `MachineManager` в любое хранилище и восстанавливает его обратно. Внутри он опирается на методы менеджера: `dehydrate()` для выгрузки снимка, `hydrate()` для применения и `onTransition()` для отслеживания изменений.
 

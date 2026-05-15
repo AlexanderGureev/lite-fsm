@@ -1,0 +1,84 @@
+# @lite-fsm/core
+
+`@lite-fsm/core` содержит runtime библиотеки: описание машин, `MachineManager`, эффекты, actor templates, snapshot/hydration и публичные типы. Пакет не зависит от React и подходит для браузера, Node.js, workers и тестов.
+
+## Установка
+
+```bash copy
+pnpm add @lite-fsm/core
+```
+
+Для reducer-ов в стиле Immer обычно добавляют middleware-пакет:
+
+```bash copy
+pnpm add @lite-fsm/core @lite-fsm/middleware immer
+```
+
+## Entry point
+
+```ts copy
+import {
+  MachineManager,
+  createEffect,
+  createMachine,
+  defineMachine,
+} from "@lite-fsm/core";
+```
+
+Основной импорт `@lite-fsm/core` экспортирует:
+
+| Экспорт | Назначение |
+| --- | --- |
+| `createMachine` | Typed identity helper для полного machine config |
+| `createConfig` | Typed helper для графа переходов |
+| `createReducer` | Typed helper для reducer-а |
+| `createEffect` | Обертка эффекта с `every` или `latest` семантикой |
+| `createActorMeta` | Frozen actor meta для replacement/time-travel входов |
+| `MachineManager` | Runtime store для нескольких машин |
+| `Machine` | Standalone pure machine |
+| `defineMachine` | Standalone factory с зависимостями |
+| `LiteFsmError` | Ошибка runtime с кодом |
+| types | `FSMEvent`, `MachineConfig`, `MachinesState`, `MachineEvents`, snapshot/actor/middleware types |
+
+## Минимальный пример
+
+```ts showLineNumbers copy
+import { MachineManager, createMachine } from "@lite-fsm/core";
+
+const toggle = createMachine({
+  config: {
+    OFF: { TOGGLE: "ON" },
+    ON: { TOGGLE: "OFF" },
+  },
+  initialState: "OFF",
+  initialContext: { count: 0 },
+  reducer: (slice, action, { nextState }) => ({
+    state: nextState,
+    context: {
+      count: action.type === "TOGGLE" ? slice.context.count + 1 : slice.context.count,
+    },
+  }),
+});
+
+const manager = MachineManager({ toggle });
+
+manager.transition({ type: "TOGGLE" });
+manager.getState().toggle.state; // "ON"
+```
+
+## Что входит в core
+
+- Граф переходов `config` с явными targets и wildcard `"*"`.
+- Reducer pipeline: default merge, custom reducer, `replaceReducer`.
+- Effects: state effects, wildcard effects, `condition`, nested `transition`.
+- Actor templates: spawn, routing через `meta`, groups, terminal states.
+- Snapshot: `dehydrate`, `hydrate`, preview и schema version hooks.
+- Middleware API: `getState`, `transition`, `replaceReducer`, `onTransition`, `condition`.
+
+## Связанные разделы
+
+- [Core API](/api/core)
+- [Конечные автоматы](/guide/state-machines)
+- [Акторы](/guide/actors)
+- [Hydration и snapshots](/guide/hydration)
+- [TypeScript](/usage/typescript)

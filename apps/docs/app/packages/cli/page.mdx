@@ -1,0 +1,39 @@
+# @lite-fsm/cli
+
+`@lite-fsm/cli` предоставляет команду `lite-fsm` для работы с графом машин из терминала. В alpha-версии основной сценарий — экспортировать project graph JSON из TypeScript entrypoint и открыть его в visualizer-е.
+
+Пакет находится в alpha-версии.
+
+## Установка
+
+```bash copy
+pnpm add -D @lite-fsm/cli @lite-fsm/graph
+```
+
+## Команда export-graph
+
+```bash copy
+lite-fsm export-graph --entry store/index.ts --out lite-fsm.graph.json --tsconfig tsconfig.json
+```
+
+`--entry` должен указывать на TypeScript entrypoint, где виден выбранный `MachineManager(...)`. `--out` записывает JSON-файл. Stdout JSON через `--out -` не поддерживается.
+
+## Source overlay
+
+```bash copy
+lite-fsm export-graph --entry store/index.ts --out lite-fsm.graph.json --include-source
+```
+
+`--include-source` добавляет в export document `sources.files[]` с исходным текстом найденных project files. Это удобно для visualizer overlay, но для публичных артефактов лучше включать опцию осознанно.
+
+## Output
+
+Формат export document: `lite-fsm.project-graph-export/v1`.
+
+Top-level `diagnostics` содержит CLI diagnostics с кодами `LFC_*`. Diagnostics компилятора остаются внутри `graph.diagnostics`, чтобы инструменты могли отдельно показывать проблемы запуска CLI и проблемы анализа машин.
+
+## Связанные разделы
+
+- [CLI API](/api/cli)
+- [@lite-fsm/graph](/packages/graph)
+- [Инструменты](/tools)

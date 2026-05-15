@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Experimental graph compiler workspace for lite-fsm",
+  "description": "Alpha graph compiler for lite-fsm",
   "license": "MIT",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",

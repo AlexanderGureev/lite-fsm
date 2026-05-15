@@ -11,9 +11,9 @@
 | `@lite-fsm/persist`       | `MaybePromise`, `PersistedRecord`, `PersistStorage`, `PersistStatus`, `PersistRestoreSettledResult`, `PersistManagerOptions`, `PersistController`                                                                                                                  |
 | `@lite-fsm/persist/react` | runtime hooks only: `usePersistStatus`, `useIsPersistRestoring`                                                                                                                                                                                                    |
 | `@lite-fsm/middleware`    | только runtime middleware                                                                                                                                                                                                                                          |
-| `@lite-fsm/graph`         | experimental graph compiler/analyzer IR-типы                                                                                                                                                                                                                       |
-| `@lite-fsm/graph/simulator` | experimental simulator-типы: snapshots, slices, timeline, choices, available transitions, suggested emissions                                                                                                                                                     |
-| `@lite-fsm/graph/view-model` | experimental visualizer projection-типы: summaries, topics, workbench rows, anchors, row mappings, overlay inputs, Machine Flow Model                                                                                                                            |
+| `@lite-fsm/graph`         | alpha graph compiler/analyzer IR-типы                                                                                                                                                                                                                              |
+| `@lite-fsm/graph/simulator` | alpha simulator-типы: snapshots, slices, timeline, choices, available transitions, suggested emissions                                                                                                                                                            |
+| `@lite-fsm/graph/view-model` | alpha visualizer projection-типы: summaries, topics, workbench rows, anchors, row mappings, overlay inputs, Machine Flow Model                                                                                                                                   |
 |                           |
 
 ## Generics
@@ -320,7 +320,7 @@ export const defineEffect: TypedCreateEffectFn<AppEvent, Deps> = createEffect;
 | `TypedCreateMachineFn<P, D>` | union событий и deps эффектов |
 | `TypedCreateEffectFn<P, D>`  | union событий и deps эффектов |
 
-## Experimental graph IR
+## Alpha graph IR
 
 `@lite-fsm/graph` экспортирует типы JSON-документа для tooling-слоя. Runtime-пакеты от него не зависят.
 
@@ -409,7 +409,7 @@ type LiteFsmProjectGraphExportDocument = {
 
 `CliDiagnostic` имеет форму `{ code, severity, message, file?, loc?, hint? }`, где `severity` — `"info" | "warning" | "error"`, а code в MVP: `LFC_INVALID_OPTIONS`, `LFC_TSCONFIG_NOT_FOUND`, `LFC_TSCONFIG_INVALID`, `LFC_GRAPH_PROJECT_FAILED`, `LFC_NO_MACHINES_EXPORTED`, `LFC_SOURCE_BUNDLE_FILE_UNREADABLE`, `LFC_WRITE_FAILED`.
 
-## Experimental graph simulator types
+## Alpha graph simulator types
 
 `@lite-fsm/graph/simulator` экспортирует типы headless simulation runtime. Они не зависят от DOM, React или app modules.
 
@@ -428,7 +428,7 @@ type LiteFsmProjectGraphExportDocument = {
 
 `sendFromTransition` принимает `payload`, но не принимает routing `meta`: routing override задается только через обычный `send({ event })` или через IR routing у `sendFromEmission`.
 
-## Experimental graph view-model types
+## Alpha graph view-model types
 
 `@lite-fsm/graph/view-model` типизирует read-only данные для visualizer-а. Эти типы не содержат React, DOM, CodeMirror, layout или simulator runtime lifecycle.
 

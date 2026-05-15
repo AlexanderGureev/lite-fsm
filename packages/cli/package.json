@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Experimental CLI for lite-fsm project graph exports",
+  "description": "Alpha CLI for lite-fsm project graph exports",
   "license": "MIT",
   "bin": {
     "lite-fsm": "./dist/bin/lite-fsm.js"

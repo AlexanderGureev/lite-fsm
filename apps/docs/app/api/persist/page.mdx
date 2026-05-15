@@ -1,0 +1,81 @@
+# Persist API
+
+`@lite-fsm/persist` сохраняет `MachineManager` snapshot в произвольное хранилище и восстанавливает его обратно.
+
+## Импорт
+
+```ts copy
+import { createJsonStorage, persistManager } from "@lite-fsm/persist";
+import type {
+  PersistController,
+  PersistManagerOptions,
+  PersistStatus,
+  PersistStorage,
+  PersistedRecord,
+} from "@lite-fsm/persist";
+
+import { useIsPersistRestoring, usePersistStatus } from "@lite-fsm/persist/react";
+```
+
+## `persistManager(manager, options)`
+
+```ts showLineNumbers copy
+const persist = persistManager(manager, {
+  storage: createJsonStorage({
+    key: "app:state:v1",
+    storage: window.localStorage,
+  }),
+  storageVersion: 1,
+  machines: ["counter"],
+  throttleMs: 500,
+});
+```
+
+### Options
+
+| Опция | Назначение |
+| --- | --- |
+| `storage` | Adapter `{ get, set, remove, subscribe? }` |
+| `machines?` | Какие machines попадают в snapshot |
+| `strategy?` | `"merge"` или `"replace"` для hydrate |
+| `storageVersion?` | Версия записи |
+| `maxAge?` | TTL записи в миллисекундах |
+| `throttleMs?` | Минимальный интервал между save |
+| `shouldSave?` | Фильтр transitions перед save |
+| `migrate?` | Миграция старой записи |
+| `onRestoreSettled?` | Колбэк результата restore |
+| `onError?` | Колбэк ошибок restore/save/clear |
+
+### Controller
+
+| Метод | Назначение |
+| --- | --- |
+| `start()` | Подписаться на manager/storage и восстановить запись |
+| `restore()` | Прочитать storage и применить snapshot |
+| `save()` | Сразу записать текущий snapshot |
+| `flush()` | Дописать отложенное сохранение |
+| `clear()` | Удалить запись и сбросить статус |
+| `getStatus()` | Вернуть текущий `PersistStatus` |
+| `subscribeStatus(cb)` | Подписка на изменение статуса |
+
+## Storage
+
+```ts copy
+type PersistStorage<S> = {
+  get(): MaybePromise<PersistedRecord<S> | undefined>;
+  set(record: PersistedRecord<S>): MaybePromise<void>;
+  remove(): MaybePromise<void>;
+  subscribe?(cb: () => void): () => void;
+};
+```
+
+`createJsonStorage` подходит для синхронных storage API с `getItem`, `setItem`, `removeItem`.
+
+## React hooks
+
+```tsx copy
+const status = usePersistStatus(persist);
+const restoring = useIsPersistRestoring(persist);
+```
+
+Подробное руководство: [@lite-fsm/persist](/packages/persist).

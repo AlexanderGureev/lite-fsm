@@ -8,25 +8,36 @@ export default {
     title: "Руководство",
     type: "page",
   },
-  usage: {
-    title: "Использование lite-fsm",
+  packages: {
+    title: "Пакеты",
     type: "page",
   },
   api: {
-    title: "API Справочник",
+    title: "API",
+    type: "page",
+  },
+  usage: {
+    title: "Практика",
+    type: "page",
+  },
+  tools: {
+    title: "Инструменты",
     type: "page",
   },
   react: {
     title: "React",
     type: "page",
+    display: "hidden",
   },
   middleware: {
     title: "Middleware",
     type: "page",
+    display: "hidden",
   },
   persist: {
     title: "Persist",
     type: "page",
+    display: "hidden",
   },
   comparison: {
     title: "Сравнение",
@@ -40,11 +51,13 @@ export default {
     title: "Playground",
     type: "page",
     href: "/playground/",
+    display: "hidden",
   },
   visualizer: {
     title: "Visualizer",
     type: "page",
     href: "/visualizer/",
+    display: "hidden",
   },
   releases: {
     title: "Релизы",
