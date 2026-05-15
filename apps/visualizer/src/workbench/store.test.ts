@@ -10,6 +10,7 @@ import {
   selectActiveTab,
   selectConsolePanel,
   selectCurrentEmptyPanel,
+  selectSourceInputMode,
   selectSourceOverlay,
   selectSourcePanel,
   selectTabItems,
@@ -271,6 +272,30 @@ describe("хранилище workbench визуализатора", () => {
     });
   });
 
+  it("selectSourceInputMode отражает текущий режим ввода и метаданные JSON импорта", () => {
+    const store = createWorkbenchStore();
+
+    expect(selectSourceInputMode(store.getSnapshot())).toEqual({ kind: "pasted-source" });
+
+    store.dispatch({
+      type: "project-export.loaded",
+      fileName: "graph.json",
+      exportDocument: projectExportDocumentWithSourcesFixture,
+    });
+
+    expect(selectSourceInputMode(store.getSnapshot())).toEqual({
+      kind: "project-export",
+      jsonFileName: "graph.json",
+      entryPath: "store/index.ts",
+      fileCount: 1,
+      hasSources: true,
+      sourceFileCount: 1,
+    });
+
+    store.dispatch({ type: "input-mode.use-pasted-source" });
+    expect(selectSourceInputMode(store.getSnapshot())).toEqual({ kind: "pasted-source" });
+  });
+
   it("блокирует Open visualizer для пустого source и для running стадий", () => {
     const snapshot = createInitialWorkbenchSnapshot();
     const emptySource = createWorkbenchStore({
@@ -449,7 +474,7 @@ describe("хранилище workbench визуализатора", () => {
     const store = createWorkbenchStore();
     const sourceBefore = store.getSnapshot().state.source;
 
-    const output = store.dispatch({ type: "project-export.loaded", exportDocument: projectExportDocumentFixture });
+    const output = store.dispatch({ type: "project-export.loaded", fileName: "graph.json", exportDocument: projectExportDocumentFixture });
 
     expect(output.effects).toEqual([
       {
@@ -463,6 +488,7 @@ describe("хранилище workbench визуализатора", () => {
     expect(store.getSnapshot().state.inputVersion).toBe(2);
     expect(store.getSnapshot().state.inputMode).toEqual({
       kind: "project-export",
+      fileName: "graph.json",
       document: documentFixture,
       files: projectExportDocumentFixture.files,
       entryPath: "store/index.ts",
@@ -485,11 +511,12 @@ describe("хранилище workbench визуализатора", () => {
     const store = createWorkbenchStore();
     const sourceBefore = store.getSnapshot().state.source;
 
-    store.dispatch({ type: "project-export.loaded", exportDocument: projectExportDocumentWithSourcesFixture });
+    store.dispatch({ type: "project-export.loaded", fileName: "graph-with-sources.json", exportDocument: projectExportDocumentWithSourcesFixture });
 
     expect(store.getSnapshot().state.source).toBe(sourceBefore);
     expect(store.getSnapshot().state.inputMode).toEqual({
       kind: "project-export",
+      fileName: "graph-with-sources.json",
       document: documentFixture,
       files: projectExportDocumentWithSourcesFixture.files,
       entryPath: "store/index.ts",
@@ -499,7 +526,7 @@ describe("хранилище workbench визуализатора", () => {
 
   it("selector source overlay использует embedded sources project export", () => {
     const store = createWorkbenchStore();
-    store.dispatch({ type: "project-export.loaded", exportDocument: projectExportDocumentWithSourcesFixture });
+    store.dispatch({ type: "project-export.loaded", fileName: "graph-with-sources.json", exportDocument: projectExportDocumentWithSourcesFixture });
     store.dispatch({
       type: "source.overlay.opened",
       title: "manager",
@@ -613,7 +640,7 @@ describe("хранилище workbench визуализатора", () => {
       },
     });
 
-    const output = store.dispatch({ type: "project-export.loaded", exportDocument: projectExportDocumentFixture });
+    const output = store.dispatch({ type: "project-export.loaded", fileName: "graph.json", exportDocument: projectExportDocumentFixture });
 
     expect(output.effects).toEqual([
       { kind: "simulation.dispose", sourceVersion: 4 },
@@ -677,7 +704,7 @@ describe("хранилище workbench визуализатора", () => {
 
   it("проверяет stale responses через inputVersion project export", () => {
     const store = createWorkbenchStore();
-    store.dispatch({ type: "project-export.loaded", exportDocument: projectExportDocumentFixture });
+    store.dispatch({ type: "project-export.loaded", fileName: "graph.json", exportDocument: projectExportDocumentFixture });
     const projectSnapshot = store.getSnapshot();
 
     store.dispatch({ type: "source.changed", source: "export const next = 1;" });
@@ -698,7 +725,7 @@ describe("хранилище workbench визуализатора", () => {
   it("игнорирует stale compile response после перехода на project export inputVersion", () => {
     const store = createWorkbenchStore();
     store.dispatch({ type: "source.open-visualizer" });
-    store.dispatch({ type: "project-export.loaded", exportDocument: projectExportDocumentFixture });
+    store.dispatch({ type: "project-export.loaded", fileName: "graph.json", exportDocument: projectExportDocumentFixture });
     const projectSnapshot = store.getSnapshot();
 
     const staleCompile = store.dispatch({
@@ -715,7 +742,7 @@ describe("хранилище workbench визуализатора", () => {
   it("возвращает source.changed из project export в pasted-source даже при том же source text", () => {
     const store = createWorkbenchStore();
     const originalSource = store.getSnapshot().state.source.source;
-    store.dispatch({ type: "project-export.loaded", exportDocument: projectExportDocumentFixture });
+    store.dispatch({ type: "project-export.loaded", fileName: "graph.json", exportDocument: projectExportDocumentFixture });
 
     const output = store.dispatch({ type: "source.changed", source: originalSource });
 
@@ -734,7 +761,7 @@ describe("хранилище workbench визуализатора", () => {
 
   it("переключается с project export обратно на pasted source compile с новой inputVersion", () => {
     const store = createWorkbenchStore();
-    store.dispatch({ type: "project-export.loaded", exportDocument: projectExportDocumentFixture });
+    store.dispatch({ type: "project-export.loaded", fileName: "graph.json", exportDocument: projectExportDocumentFixture });
 
     const output = store.dispatch({ type: "source.open-visualizer" });
 
@@ -748,6 +775,30 @@ describe("хранилище workbench визуализатора", () => {
         source: store.getSnapshot().state.source,
       },
     ]);
+  });
+
+  it("команда input-mode.use-pasted-source возвращает из project export режима без compile", () => {
+    const store = createWorkbenchStore();
+    const sourceTextBefore = store.getSnapshot().state.source.source;
+    store.dispatch({ type: "project-export.loaded", fileName: "graph.json", exportDocument: projectExportDocumentFixture });
+
+    const output = store.dispatch({ type: "input-mode.use-pasted-source" });
+
+    expect(output.effects).toEqual([]);
+    expect(store.getSnapshot().state.inputMode.kind).toBe("pasted-source");
+    expect(store.getSnapshot().state.inputVersion).toBe(3);
+    expect(store.getSnapshot().state.source.source).toBe(sourceTextBefore);
+    expect(store.getSnapshot().state.compile).toEqual({ status: "idle", sequence: 0, diagnostics: [] });
+  });
+
+  it("команда input-mode.use-pasted-source - no-op если уже в pasted source режиме", () => {
+    const store = createWorkbenchStore();
+    const before = store.getSnapshot();
+
+    const output = store.dispatch({ type: "input-mode.use-pasted-source" });
+
+    expect(output).toEqual({ result: { ok: true }, effects: [] });
+    expect(store.getSnapshot()).toBe(before);
   });
 
   it("ведет analysis к model descriptor и model к validation descriptor", () => {

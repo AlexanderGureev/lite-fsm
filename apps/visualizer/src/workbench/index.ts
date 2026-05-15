@@ -14,6 +14,7 @@ export {
   selectActiveTab,
   selectConsolePanel,
   selectCurrentEmptyPanel,
+  selectSourceInputMode,
   selectSourceOverlay,
   selectSourcePanel,
   selectTabItems,
@@ -25,6 +26,7 @@ export { selectMachineWorkbenchPanel } from "./machine-workbench-selectors";
 export { selectSystemPanel } from "./system-selectors";
 export type {
   EmptyPanelView,
+  SourceInputModeView,
   SourcePanelView,
   TabItemView,
 } from "./selectors";

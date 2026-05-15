@@ -274,6 +274,7 @@ describe("оболочка Shell", () => {
     });
     expect(store.getSnapshot().state.inputMode).toMatchObject({
       kind: "project-export",
+      fileName: "graph.json",
       entryPath: "store/index.ts",
       files: projectExportDocument.files,
     });
@@ -293,6 +294,60 @@ describe("оболочка Shell", () => {
 
     expect(input.getAttribute("type")).toBe("file");
     expect(input.getAttribute("accept")).toBe(".json,application/json");
+  });
+
+  it("показывает JSON loaded card после импорта и скрывает редактор", async () => {
+    const services: EffectRunnerServices = {
+      compiler: { compile: vi.fn(async (input) => ({ ok: true as const, sourceVersion: input.sourceVersion, document: projectExportDocument.graph as never, diagnostics: [] })) },
+      analyzer: { analyze: vi.fn(async (input) => ({ ok: true as const, sourceVersion: input.sourceVersion, diagnostics: [] })) },
+      visualizerModel: { build: vi.fn(async (input) => ({ ok: true as const, sourceVersion: input.sourceVersion, model: machineCanvasModelFixture() })) },
+      simulation: createLocalSimulationService(),
+      validation: createNoopValidationRegistry(),
+      codegen: createNoopCodegenPlanner(),
+    };
+    const store = renderShell(createInitialWorkbenchSnapshot(), services);
+
+    fireEvent.change(screen.getByTestId(ids.source.projectExportFile), {
+      target: { files: [new File([JSON.stringify(projectExportDocument)], "graph.json", { type: "application/json" })] },
+    });
+
+    await waitFor(() => expect(store.getSnapshot().state.model.status).toBe("ready"));
+
+    fireEvent.mouseDown(screen.getByTestId(ids.tabs.trigger.source), { button: 0, ctrlKey: false });
+
+    const card = screen.getByTestId(ids.source.jsonLoadedCard);
+    expect(card.getAttribute("data-file-name")).toBe("graph.json");
+    expect(card.textContent).toContain("graph.json");
+    expect(card.textContent).toContain("store/index.ts");
+    expect(screen.queryByTestId(ids.source.editor)).toBeNull();
+    expect(screen.queryByTestId(ids.source.open)).toBeNull();
+    expect(screen.getByTestId(ids.source.panel).getAttribute("data-input-mode")).toBe("project-export");
+  });
+
+  it("возвращает к paste source режиму через input-mode toggle сохраняя предыдущий source", async () => {
+    const services: EffectRunnerServices = {
+      compiler: { compile: vi.fn(async (input) => ({ ok: true as const, sourceVersion: input.sourceVersion, document: projectExportDocument.graph as never, diagnostics: [] })) },
+      analyzer: { analyze: vi.fn(async (input) => ({ ok: true as const, sourceVersion: input.sourceVersion, diagnostics: [] })) },
+      visualizerModel: { build: vi.fn(async (input) => ({ ok: true as const, sourceVersion: input.sourceVersion, model: machineCanvasModelFixture() })) },
+      simulation: createLocalSimulationService(),
+      validation: createNoopValidationRegistry(),
+      codegen: createNoopCodegenPlanner(),
+    };
+    const store = renderShell(createInitialWorkbenchSnapshot(), services);
+    const sourceBefore = store.getSnapshot().state.source.source;
+
+    fireEvent.change(screen.getByTestId(ids.source.projectExportFile), {
+      target: { files: [new File([JSON.stringify(projectExportDocument)], "graph.json", { type: "application/json" })] },
+    });
+    await waitFor(() => expect(store.getSnapshot().state.model.status).toBe("ready"));
+
+    fireEvent.mouseDown(screen.getByTestId(ids.tabs.trigger.source), { button: 0, ctrlKey: false });
+    fireEvent.click(screen.getByTestId(ids.source.inputModeUseSource));
+
+    expect(store.getSnapshot().state.inputMode.kind).toBe("pasted-source");
+    expect(store.getSnapshot().state.source.source).toBe(sourceBefore);
+    expect(screen.getByTestId(ids.source.editor)).toBeTruthy();
+    expect(screen.queryByTestId(ids.source.jsonLoadedCard)).toBeNull();
   });
 
   it("показывает diagnostic для invalid project export file без смены source", async () => {

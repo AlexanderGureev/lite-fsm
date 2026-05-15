@@ -26,6 +26,7 @@ export type VisualizerInputMode =
   | { kind: "pasted-source"; source: SourceSession }
   | {
       kind: "project-export";
+      fileName: string;
       document: LiteFsmGraphDocument;
       files: readonly LiteFsmGraphProjectFile[];
       entryPath: string;
@@ -154,7 +155,8 @@ export type VisualizerCommand =
   | { type: "source.changed"; source: string }
   | { type: "source.reset-to-sample" }
   | { type: "source.open-visualizer" }
-  | { type: "project-export.loaded"; exportDocument: LiteFsmProjectGraphExportDocument }
+  | { type: "project-export.loaded"; fileName: string; exportDocument: LiteFsmProjectGraphExportDocument }
+  | { type: "input-mode.use-pasted-source" }
   | { type: "project-export.load.failed"; fileName: string; issue: ProjectGraphExportParseIssue }
   | { type: "tab.selected"; tab: VisualizerTab }
   | { type: "l1.machine-query.changed"; query: string }

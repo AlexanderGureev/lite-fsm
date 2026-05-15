@@ -822,3 +822,30 @@
 .vf-tabs-scroll::-webkit-scrollbar {
   display: none;
 }
+
+.vf-tabs-scroll[data-fade-left="true"][data-fade-right="true"] {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 16px,
+    #000 calc(100% - 24px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 16px,
+    #000 calc(100% - 24px),
+    transparent 100%
+  );
+}
+
+.vf-tabs-scroll[data-fade-left="true"][data-fade-right="false"] {
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 100%);
+  mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 100%);
+}
+
+.vf-tabs-scroll[data-fade-left="false"][data-fade-right="true"] {
+  -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 24px), transparent 100%);
+  mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 24px), transparent 100%);
+}

@@ -277,6 +277,12 @@ const sourceChanged = (snapshot: WorkbenchSnapshot, source: string): Reduction =
 
 const resetToSample = (snapshot: WorkbenchSnapshot): Reduction => sourceChanged(snapshot, MUSIC_APP_SAMPLE_SOURCE);
 
+const switchToPastedSource = (snapshot: WorkbenchSnapshot): Reduction => {
+  if (snapshot.state.inputMode.kind === "pasted-source") return unchanged(snapshot);
+
+  return sourceChanged(snapshot, snapshot.state.source.source);
+};
+
 const ensurePastedSourceInput = (state: VisualizerWorkbenchState): VisualizerWorkbenchState => {
   if (state.inputMode.kind === "pasted-source" && state.inputVersion === state.source.version) return state;
 
@@ -400,7 +406,7 @@ const projectExportLoaded = (
       inputVersion,
       `project-export:${sequence}`,
       "Project export pipeline started",
-      `Loaded ${command.exportDocument.entry.path} from CLI JSON export.`,
+      `Loaded ${command.fileName} (entry ${command.exportDocument.entry.path}) from CLI JSON export.`,
     ),
   ]);
   const state = {
@@ -408,6 +414,7 @@ const projectExportLoaded = (
     host: { capabilities: STATIC_HOST_CAPABILITIES },
     inputMode: {
       kind: "project-export" as const,
+      fileName: command.fileName,
       document,
       files: command.exportDocument.files,
       entryPath: command.exportDocument.entry.path,
@@ -934,6 +941,8 @@ const reduceUserCommand = (snapshot: WorkbenchSnapshot, command: VisualizerComma
       return resetToSample(snapshot);
     case "source.open-visualizer":
       return openVisualizer(snapshot);
+    case "input-mode.use-pasted-source":
+      return switchToPastedSource(snapshot);
     case "project-export.loaded":
       return projectExportLoaded(snapshot, command);
     case "project-export.load.failed":

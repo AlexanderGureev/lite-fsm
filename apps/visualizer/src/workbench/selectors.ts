@@ -36,6 +36,17 @@ export type SourcePanelView = {
   running: boolean;
 };
 
+export type SourceInputModeView =
+  | { kind: "pasted-source" }
+  | {
+      kind: "project-export";
+      jsonFileName: string;
+      entryPath: string;
+      fileCount: number;
+      hasSources: boolean;
+      sourceFileCount: number;
+    };
+
 export const shallowEqualObject = <Input>(left: Input, right: Input): boolean => {
   if (Object.is(left, right)) return true;
   if (typeof left !== "object" || left === null || typeof right !== "object" || right === null) return false;
@@ -282,6 +293,22 @@ export const selectSourcePanel = createSelector(
       topicCount: model.model?.topics.length ?? 0,
       canOpen: source.source.trim().length > 0 && !running,
       running,
+    };
+  },
+);
+
+export const selectSourceInputMode = createSelector(
+  (snapshot) => ({ inputMode: snapshot.state.inputMode }),
+  ({ inputMode }): SourceInputModeView => {
+    if (inputMode.kind !== "project-export") return { kind: "pasted-source" };
+
+    return {
+      kind: "project-export",
+      jsonFileName: inputMode.fileName,
+      entryPath: inputMode.entryPath,
+      fileCount: inputMode.files.length,
+      hasSources: Boolean(inputMode.sources?.files?.length),
+      sourceFileCount: inputMode.sources?.files?.length ?? 0,
     };
   },
 );
