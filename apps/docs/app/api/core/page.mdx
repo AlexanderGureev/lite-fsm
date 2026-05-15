@@ -1,6 +1,6 @@
 # Core API
 
-`@lite-fsm/core` это runtime-ядро без привязки к фреймворкам.
+`@lite-fsm/core` — runtime без привязки к UI-фреймворкам.
 
 ## Импорт
 
@@ -20,6 +20,8 @@ import {
 
 ## Machine config
 
+> Reducer в примере написан в стиле Immer: при запуске такой машины через `MachineManager` подключите `immerMiddleware`. Без middleware reducer должен вернуть новый объект `{ state, context }`.
+
 ```ts showLineNumbers copy
 import { createMachine } from "@lite-fsm/core";
 
@@ -30,46 +32,44 @@ const counter = createMachine({
   },
   initialState: "IDLE",
   initialContext: { count: 0 },
-  reducer: (slice, action, { nextState }) => ({
-    state: nextState,
-    context: {
-      count: action.type === "RESET" ? 0 : slice.context.count + 1,
-    },
-  }),
+  reducer: (slice, action, { nextState }) => {
+    slice.state = nextState;
+    slice.context.count = action.type === "RESET" ? 0 : slice.context.count + 1;
+  },
 });
 ```
 
-| Поле | Назначение |
-| --- | --- |
-| `config` | Граф `{ [state]: { [eventType]: target } }`; `"*"` задает fallback transitions |
-| `initialState` | Стартовое состояние |
-| `initialContext` | Стартовые данные machine slice |
-| `reducer?` | Собирает следующий `{ state, context }` |
-| `effects?` | Sync/async effects по target state или `"*"` |
-| `hydrate?`, `dehydrate?` | Кастомная транспортная форма snapshot |
-| `groupTag?` | Тег actor group для actor template |
-| `persistence?` | Actor persistence: `"runtime"` или `"snapshot"` |
+| Поле                     | Назначение                                                                   |
+| ------------------------ | ---------------------------------------------------------------------------- |
+| `config`                 | Граф `{ [state]: { [eventType]: target } }`; `"*"` задаёт резервные переходы |
+| `initialState`           | Стартовое состояние                                                          |
+| `initialContext`         | Стартовые данные машины                                                      |
+| `reducer?`               | Собирает следующий `{ state, context }`                                      |
+| `effects?`               | Синхронные или асинхронные effects для нового state или `"*"`                |
+| `hydrate?`, `dehydrate?` | Кастомная транспортная форма snapshot                                        |
+| `groupTag?`              | Тег actor group для actor template                                           |
+| `persistence?`           | Actor persistence: `"runtime"` или `"snapshot"`                              |
 
 ## Targets
 
-| Target | Поведение |
-| --- | --- |
-| `"NEXT_STATE"` | Переход в указанное состояние |
-| `null` | Self-transition: state не меняется, reducer/effects получают action |
-| `undefined` или отсутствующий ключ | Action игнорируется |
-| `"__RESOLVED"`, `"__REJECTED"`, `"__CANCELLED"` | Terminal target actor template |
+| Target                                          | Поведение                                                                                     |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `"NEXT_STATE"`                                  | Переход в указанное состояние                                                                 |
+| `null`                                          | Переход без смены state: reducer получает action, effect для конкретного state не запускается |
+| `undefined` или отсутствующий ключ              | Action игнорируется                                                                           |
+| `"__RESOLVED"`, `"__REJECTED"`, `"__CANCELLED"` | Terminal target actor template                                                                |
 
 Явный `config[state][type]` имеет приоритет над wildcard `"*"`.
 
 ## Factories
 
-| API | Назначение |
-| --- | --- |
-| `createMachine(cfg)` | Typed identity helper для полного machine config |
-| `createConfig(cfg)` | Typed helper для графа переходов |
-| `createReducer(fn)` | Typed helper для reducer-а |
-| `createEffect(opts)` | Effect wrapper с `every` или `latest` семантикой |
-| `createActorMeta(meta)` | Frozen `Readonly<ActorMeta>` |
+| API                     | Назначение                                       |
+| ----------------------- | ------------------------------------------------ |
+| `createMachine(cfg)`    | Типизированная фабрика полного machine config    |
+| `createConfig(cfg)`     | Типизированная фабрика графа переходов           |
+| `createReducer(fn)`     | Типизированная фабрика reducer-а                 |
+| `createEffect(opts)`    | Обёртка effect с `every` или `latest` семантикой |
+| `createActorMeta(meta)` | Замороженный `Readonly<ActorMeta>`               |
 
 `createEffect`:
 
@@ -78,7 +78,6 @@ import { createEffect } from "@lite-fsm/core";
 
 const load = createEffect({
   type: "latest",
-  cancelFn: ({ signal }) => () => signal.aborted,
   effect: async ({ transition }) => {
     transition({ type: "DONE" });
   },
@@ -103,31 +102,31 @@ manager.transition({ type: "INC" });
 
 ### Опции
 
-| Опция | Назначение |
-| --- | --- |
-| `middleware?` | Цепочка middleware для user actions |
-| `snapshot?` | Начальный snapshot |
-| `schemaVersion?` | Версия snapshot |
-| `onError?` | Ошибки effects и `condition` |
-| `onUnknownMachineKey?` | Unknown key при hydrate/snapshot |
-| `onSchemaVersionMismatch?` | Несовпадение schema version |
-| `originId?` | Префикс owner id для распределенного spawn |
-| `generateActorId?` | Пользовательский actor id generator |
-| `generateGroupId?` | Пользовательский group id generator |
+| Опция                      | Назначение                                      |
+| -------------------------- | ----------------------------------------------- |
+| `middleware?`              | Цепочка middleware для пользовательских actions |
+| `snapshot?`                | Начальный snapshot                              |
+| `schemaVersion?`           | Версия snapshot                                 |
+| `onError?`                 | Ошибки effects и `condition`                    |
+| `onUnknownMachineKey?`     | Неизвестный ключ машины при hydrate/snapshot    |
+| `onSchemaVersionMismatch?` | Несовпадение schema version                     |
+| `originId?`                | Префикс источника id для распределённого spawn  |
+| `generateActorId?`         | Функция генерации actor id                      |
+| `generateGroupId?`         | Функция генерации group id                      |
 
 ### Методы
 
-| Метод | Назначение |
-| --- | --- |
-| `transition(action)` | Отправить событие через middleware/reducer/effects pipeline |
-| `getState()` | Получить committed manager state |
-| `onTransition(cb)` | Подписаться на успешные transitions |
-| `setDependencies(depsOrUpdater)` | Задать effect dependencies |
-| `replaceReducer(enhancer)` | Обернуть root reducer |
-| `condition(predicate)` | Promise ближайшего matching action |
-| `dehydrate(opts?)` | Собрать transport snapshot |
-| `hydrate(snapshot, opts?)` | Применить snapshot |
-| `previewHydrate(snapshot, opts?)` | Рассчитать state без commit |
+| Метод                               | Назначение                                                       |
+| ----------------------------------- | ---------------------------------------------------------------- |
+| `transition(action)`                | Отправить событие через middleware/reducer/effects pipeline      |
+| `getState()`                        | Получить состояние manager после завершённого перехода           |
+| `getSnapshot()`                     | Получить текущий snapshot без пользовательских `dehydrate` hooks |
+| `onTransition(cb)`                  | Подписаться на успешные transitions                              |
+| `setDependencies(depsOrUpdater)`    | Задать effect dependencies                                       |
+| `replaceReducer(enhancer)`          | Обернуть root reducer                                            |
+| `dehydrate(opts?)`                  | Собрать snapshot для передачи или сохранения                     |
+| `hydrate(snapshot, opts?)`          | Применить snapshot                                               |
+| `getHydratedState(snapshot, opts?)` | Рассчитать состояние после hydrate без изменения manager         |
 
 ## Actors
 

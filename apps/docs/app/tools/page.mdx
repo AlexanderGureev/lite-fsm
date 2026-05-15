@@ -1,26 +1,12 @@
-# Инструменты
+# Инструменты анализа
 
-Инструменты помогают проверять машины не только через текст документации: запускать готовые демо, смотреть graph IR и исследовать transitions визуально.
+`@lite-fsm/graph`, Visualizer и CLI помогают разбирать автоматы и систему в целом: строить статическую модель FSM-логики, проверять переходы, связи событий и согласованность структуры.
 
-## Playground
-
-[Playground](/playground/) это Next.js-приложение с рабочими примерами:
-
-- минимальный toggle/lamp;
-- async effects и optimistic updates;
-- actor templates и routing;
-- SSR/hydration сценарии;
-- persist и синхронизация между вкладками.
-
-Локальный запуск:
-
-```bash copy
-pnpm --filter @lite-fsm/playground dev
-```
+На этой модели работает анализатор `@lite-fsm/graph`. Он выводит диагностику для неизвестных targets, недостижимых и тупиковых states, рассинхронизации reducer/config, событий, которые effects отправляют без получателя, и других признаков некорректной FSM-структуры.
 
 ## Visualizer
 
-[Visualizer](/visualizer/) открывает graph JSON, построенный для машин lite-fsm. Он использует `@lite-fsm/graph` и помогает читать states, transitions, reducer branches, effect emissions и diagnostics.
+[Visualizer](/visualizer/) открывает graph JSON, построенный для машин lite-fsm, и превращает его в визуальную модель системы. Он показывает автоматы, managers, event-связи, маршрутизацию effects, диагностику анализа и симуляцию выполнения: можно отправлять события, видеть доступные переходы и разбирать историю шагов.
 
 Visualizer находится в alpha-версии.
 
@@ -30,11 +16,10 @@ Visualizer находится в alpha-версии.
 lite-fsm export-graph --entry store/index.ts --out lite-fsm.graph.json
 ```
 
-## Когда что использовать
+## Когда что открывать
 
-| Инструмент | Что проверять |
-| --- | --- |
-| Playground | Поведение готовых examples и UI-интеграцию |
-| Visualizer | Alpha-инструмент для структуры графа, routing, emissions, diagnostics |
-| CLI | Project export из вашего TypeScript-кода |
-| `@lite-fsm/graph` | Собственные инструменты анализа и headless-проверки |
+| Инструмент        | Задача                                                                       |
+| ----------------- | ---------------------------------------------------------------------------- |
+| Visualizer        | Разобрать FSM-модель, проверить диагностику анализа и симулировать события   |
+| CLI               | Project export из вашего TypeScript-кода                                     |
+| `@lite-fsm/graph` | Собственные инструменты анализа, диагностики и headless-симуляции FSM-модели |

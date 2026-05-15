@@ -1,6 +1,6 @@
 # Работа с TypeScript
 
-TypeScript предоставляет мощные возможности для обеспечения типобезопасности в приложениях, использующих `lite-fsm`. В этом разделе мы рассмотрим, как настроить типизацию автоматов и переиспользовать типы для создания строго типизированных приложений.
+TypeScript проверяет события, payload-ы, состояния и зависимости effects на этапе компиляции. В этом разделе показано, как настроить типизированные фабрики и React-хуки для приложения на `lite-fsm`.
 
 ## Структура проекта
 
@@ -20,7 +20,7 @@ src/
 
 ## Предварительная типизация функций API
 
-Одним из ключевых преимуществ использования TypeScript с `lite-fsm` является возможность создать предварительно типизированные версии функций API (таких как `createMachine`, `createEffect` и т.д.), которые будут автоматически применять ваши пользовательские типы ко всем автоматам в приложении.
+Обычный паттерн для TypeScript-проектов — создать локальные типизированные версии функций API (`createMachine`, `createEffect` и т.д.). Они фиксируют union событий и тип зависимостей приложения, чтобы не повторять generics в каждой машине.
 
 ### Шаг 1: Определение базовых типов событий и зависимостей
 
@@ -47,7 +47,12 @@ export type Dependencies = {
 Создайте файл, который будет реэкспортировать функции `lite-fsm` с предварительно примененными типами:
 
 ```ts showLineNumbers copy filename="src/store/create-machine.ts"
-import type { TypedCreateConfigFn, TypedCreateEffectFn, TypedCreateMachineFn, TypedCreateReducerFn } from "@lite-fsm/core";
+import type {
+  TypedCreateConfigFn,
+  TypedCreateEffectFn,
+  TypedCreateMachineFn,
+  TypedCreateReducerFn,
+} from "@lite-fsm/core";
 import {
   createConfig as _createConfig,
   createEffect as _createEffect,
@@ -57,7 +62,7 @@ import {
 
 import type { AppEvents, Dependencies } from "./types";
 
-// Создаем типизированные версии функций
+// Типизированные версии функций для приложения
 export const createMachine: TypedCreateMachineFn<AppEvents, Dependencies> = _createMachine;
 export const createReducer: TypedCreateReducerFn<AppEvents> = _createReducer;
 export const createConfig: TypedCreateConfigFn<AppEvents> = _createConfig;
@@ -79,7 +84,7 @@ import {
 import type { FSMConfigType } from ".";
 import type { AppEvents } from "./types";
 
-// Создаем типизированные версии хуков.
+// Типизированные версии хуков.
 // TypedUseSelectorHook принимает store config (FSMConfigType), не computed AppState —
 // `MachinesState<S>` будет вычислен автоматически.
 export const useTransition: TypedUseTransitionHook<AppEvents> = _useTransition;
@@ -110,7 +115,7 @@ export const makeStore = () => {
     onError: console.error,
   });
 
-  manager.setDependencies<Dependencies>({
+  manager.setDependencies({
     getState: manager.getState,
     logger: console,
   });
@@ -143,7 +148,7 @@ export const counter = createMachine({
 
 ## Автоматический вывод типов событий и состояний
 
-При использовании типизированных функций, TypeScript может автоматически выводить доступные состояния и события из конфигурации автомата. Это позволяет избежать дублирования кода и ошибок синхронизации между константами и типами.
+При использовании типизированных функций TypeScript выводит доступные состояния из конфигурации автомата. Это уменьшает дублирование между config и типами.
 
 ```ts showLineNumbers copy filename="src/store/machines/counter.ts"
 import { createConfig, createMachine } from "../create-machine";
@@ -179,11 +184,13 @@ export const counter = createMachine({
 });
 ```
 
-Такой подход минимизирует дублирование и гарантирует, что типы всегда соответствуют реальной конфигурации автомата. При изменении конфигурации TypeScript автоматически обновит выведенные типы.
+Такой подход уменьшает дублирование: при изменении `config` выведенный union состояний обновится вместе с ним.
 
 ## Использование FSMEvent для типизации событий
 
-Библиотека `lite-fsm` предоставляет встроенный тип `FSMEvent`, который можно использовать для создания типов событий с поддержкой payload:
+Библиотека `lite-fsm` предоставляет встроенный тип `FSMEvent` для описания событий с payload:
+
+Reducer в следующем примере написан в стиле Immer и рассчитан на `immerMiddleware`, подключенный в `makeStore` выше. Если middleware не используется, reducer должен вернуть новый объект `{ state, context }`.
 
 ```ts showLineNumbers copy
 import type { FSMEvent } from "@lite-fsm/core";
@@ -242,11 +249,11 @@ export const counter = createMachine({
 // Ошибка TypeScript: manager.transition({ type: "INCREMENT", payload: { value: 5 } }); // Лишний payload
 ```
 
-Использование `FSMEvent` упрощает типизацию событий и гарантирует правильную структуру payload для каждого типа события.
+`FSMEvent` делает форму событий явной: событие без payload не принимает `payload`, а событие с payload требует поле `payload` нужной формы.
 
 ## Использование типизированных хуков в компонентах
 
-Теперь в компонентах React можно использовать типизированные хуки:
+В компонентах React используйте типизированные хуки:
 
 ```tsx showLineNumbers copy filename="src/App.tsx"
 import "./styles.css";
@@ -291,21 +298,21 @@ export default function App() {
 
 ## Преимущества типизации
 
-Предварительная типизация функций API `lite-fsm` дает следующие преимущества:
+Предварительная типизация функций API `lite-fsm` даёт следующие преимущества:
 
-1. **Проверка типов во время компиляции** - TypeScript предупредит вас о несоответствии типов в вашем коде.
-2. **Автодополнение в IDE** - получите подсказки о доступных состояниях, событиях и контексте.
-3. **Проще рефакторинг** - при изменении типов TypeScript укажет на места, которые нужно обновить.
-4. **Документирование кода** - типы служат документацией, которая всегда актуальна.
-5. **Предотвращение ошибок типов** - избегайте ошибок из-за неправильных типов данных.
+1. **Проверка типов во время компиляции** — TypeScript подсветит несоответствие событий, payload-ов и состояний.
+2. **Автодополнение в IDE** — доступны подсказки по состояниям, событиям и контексту.
+3. **Рефакторинг** — при изменении типов TypeScript укажет места, которые нужно обновить.
+4. **Документирование контракта** — типы показывают форму событий, контекста и dependencies.
+5. **Меньше runtime-ошибок** — часть ошибок переходов и payload-ов ловится до запуска приложения.
 
 ## Дополнительные рекомендации
 
-- **Разделяйте типы по машинам** - определяйте типы `Context`, `State` и `Events` для каждого автомата отдельно.
-- **Используйте union типы для событий** - это даст TypeScript возможность проверять все варианты действий.
-- **Используйте автоматический вывод типов** - вместо дублирования констант и типов позвольте TypeScript выводить типы из конфигурации автоматов.
-- **Применяйте строгий режим TypeScript** - установите `"strict": true` в `tsconfig.json`.
+- **Разделяйте типы по машинам** — определяйте `Context`, `State` и `Events` рядом с конкретным автоматом.
+- **Используйте union-типы для событий** — так TypeScript сможет сужать action по `action.type`.
+- **Используйте вывод типов** — выводите union состояний из `config`, когда это возможно.
+- **Включайте строгий режим TypeScript** — используйте `"strict": true` в `tsconfig.json`.
 
 ## Заключение
 
-Использование TypeScript с `lite-fsm` позволяет создавать надежные и понятные приложения, где многие ошибки выявляются на этапе компиляции. Предварительно типизированные функции API избавляют от необходимости повторно указывать типы и обеспечивают согласованность типов во всем приложении.
+TypeScript с `lite-fsm` делает контракты машин явными. Локальные типизированные фабрики и хуки уменьшают повторение generics и дают единый способ проверять события, состояния, context shape и dependencies во всём приложении.

@@ -1,10 +1,12 @@
 # Создание автомата
 
-В lite-fsm автоматы создаются из отдельных логических компонентов: конфигурации, начального состояния, контекста, редьюсера и эффектов. Такой модульный подход улучшает организацию кода и упрощает тестирование.
+В lite-fsm автомат состоит из конфигурации, начального состояния, контекста, reducer-а и effects. Эти части можно вынести в отдельные модули, когда автомат становится слишком крупным для одного файла.
+
+> Примеры reducer-ов на этой странице написаны в стиле Immer: они мутируют draft `state` и предполагают, что `MachineManager` создан с `immerMiddleware`. Без middleware reducer должен вернуть новый объект `{ state, context }`.
 
 ## Разбиение автомата на части
 
-В `lite-fsm` вы можете разбить определение автомата на логические компоненты, что значительно упрощает его поддержку и понимание. Это дополнительная возможность библиотеки, которая особенно полезна для сложных автоматов с множеством состояний и переходов. В большинстве случаев можно определять автомат как единое целое, но возможность модульного определения дает гибкость при работе со сложными системами.
+Разбивайте определение автомата на `config`, `initialState`, `initialContext`, `reducer` и `effects`, когда единый файл уже мешает чтению. Для небольших машин храните описание рядом, чтобы модель была видна целиком.
 
 ## Пример использования
 
@@ -16,35 +18,36 @@
 import { createConfig, createMachine } from "@lite-fsm/core";
 
 const config = createConfig({
-  IDLE: {
-    CHANGE_TRACK: "LOAD_TRACK_META_PENDING",
-  },
-  LOAD_TRACK_META_PENDING: {
-    LOAD_TRACK_META_RESOLVE: "LOAD_STREAMS_PENDING",
-  },
-  LOAD_STREAMS_PENDING: {
-    LOAD_STREAMS_RESOLVE: "SELECT_STREAM_PENDING",
-  },
-  SELECT_STREAM_PENDING: {
-    SELECT_STREAM_RESOLVE: "SET_STREAM_PENDING",
-  },
-  SET_STREAM_PENDING: {},
+IDLE: {
+CHANGE_TRACK: "LOAD_TRACK_META_PENDING",
+},
+LOAD_TRACK_META_PENDING: {
+LOAD_TRACK_META_RESOLVE: "LOAD_STREAMS_PENDING",
+},
+LOAD_STREAMS_PENDING: {
+LOAD_STREAMS_RESOLVE: "SELECT_STREAM_PENDING",
+},
+SELECT_STREAM_PENDING: {
+SELECT_STREAM_RESOLVE: "SET_STREAM_PENDING",
+},
+SET_STREAM_PENDING: {},
 });
 
 const initialState = "IDLE";
 const initialContext = {
-  trackId: null,
+trackId: null,
 };
 
 const reducer = (state, action, { nextState }) => {
-  state.state = nextState;
-  if (action.type === "CHANGE_TRACK") {
-    state.context.trackId = action.payload.trackId;
-  }
+state.state = nextState;
+
+if (action.type === "CHANGE_TRACK") {
+state.context.trackId = action.payload.trackId;
+}
 };
 
 const effects = {
-  // эффекты для разных состояний
+// эффекты для разных состояний
 };
 
 export const player = createMachine({
@@ -62,40 +65,42 @@ import type { FSMEvent } from "@lite-fsm/core";
 
 import { createConfig, createEffect, createMachine, createReducer } from "../create-machine";
 
-export type AuthEvent = FSMEvent<"DO_INIT"> | FSMEvent<"DO_READY">;
+export type AuthEvent =
+  | FSMEvent<"DO_INIT", { sessionId: string }>
+  | FSMEvent<"DO_READY">;
 
 type AuthContext = {
-  sessionId: string;
+sessionId: string;
 };
 
 const initialContext: AuthContext = {
-  sessionId: "",
+sessionId: "",
 };
 
 const config = createConfig({
-  IDLE: {
-    DO_INIT: "PENDING",
-  },
-  PENDING: {
-    DO_READY: "READY",
-  },
-  READY: {},
+IDLE: {
+DO_INIT: "PENDING",
+},
+PENDING: {
+DO_READY: "READY",
+},
+READY: {},
 });
 
 const reducer = createReducer<typeof config, AuthContext>((state, action, { nextState }) => {
-  state.state = nextState;
+state.state = nextState;
 
-  if (action.type === "DO_INIT") {
-    state.context.sessionId = action.payload.sessionId;
-  }
+if (action.type === "DO_INIT") {
+state.context.sessionId = action.payload.sessionId;
+}
 });
 
 const PENDING = createEffect<typeof config, "PENDING">({
-  type: "latest",
-  effect: async ({ transition }) => {
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    transition({ type: "DO_READY" });
-  },
+type: "latest",
+effect: async ({ transition }) => {
+await new Promise((resolve) => setTimeout(resolve, 200));
+transition({ type: "DO_READY" });
+},
 });
 
 export const auth = createMachine({
@@ -115,18 +120,18 @@ export const auth = createMachine({
 
 ## Преимущества композиции
 
-1. **Улучшенная читаемость** - разбивка на логические компоненты делает код более понятным
-2. **Упрощенное тестирование** - можно тестировать отдельные части автомата изолированно
-3. **Лучшая организация кода** - каждая часть автомата имеет свое специализированное назначение
-4. **Переиспользование** - отдельные части можно переиспользовать в разных автоматах
+1. **Читаемость** — `config`, reducer и effects можно читать как отдельные части модели.
+2. **Изолированные тесты** — reducer и effects можно проверять без полного UI-сценария.
+3. **Чёткая ответственность** — config описывает переходы, reducer обновляет данные, effects выполняют побочные действия.
+4. **Переиспользование** — используйте общие config-фрагменты или effects в нескольких машинах, если у них совпадает контракт.
 
 ## Структура файлов для сложных случаев
 
-Важно отметить, что разделение автомата на отдельные файлы — это скорее возможность, а не универсальная рекомендация. В большинстве случаев лучше стараться держать автомат в одном месте как единую модель и разделять его только при необходимости или когда логика уже сильно разрослась.
+Разделение автомата на отдельные файлы — опция для сложных машин, а не базовая рекомендация. В большинстве случаев держите автомат в одном месте как единую модель и разделяйте его только при росте логики.
 
-Как правило, эффективнее разделять бизнес-логику по разным автоматам с чёткими зонами ответственности. При таком подходе отдельные автоматы не так быстро разрастаются, и необходимость в их фрагментации на отдельные файлы возникает реже.
+Чаще эффективнее разделять бизнес-логику по разным автоматам с чёткими зонами ответственности. При таком подходе отдельные автоматы растут медленнее, и необходимость дробить их на файлы возникает реже.
 
-Однако, если автомат всё же стал слишком сложным, для его организации можно использовать следующую структуру:
+Если автомат всё же стал слишком сложным, используйте такую структуру:
 
 ```
 /machines
@@ -144,4 +149,4 @@ export const auth = createMachine({
     // аналогичная структура
 ```
 
-Такой подход может быть полезен для очень сложных автоматов, но не должен применяться преждевременно. 
+Такой подход полезен для сложных автоматов, но не должен применяться преждевременно.

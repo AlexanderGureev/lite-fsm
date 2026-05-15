@@ -1,6 +1,6 @@
 # Persist API
 
-`@lite-fsm/persist` сохраняет `MachineManager` snapshot в произвольное хранилище и восстанавливает его обратно.
+`@lite-fsm/persist` сохраняет snapshot `MachineManager` в произвольное хранилище и восстанавливает его.
 
 ## Импорт
 
@@ -31,34 +31,34 @@ const persist = persistManager(manager, {
 });
 ```
 
-### Options
+### Опции
 
-| Опция | Назначение |
-| --- | --- |
-| `storage` | Adapter `{ get, set, remove, subscribe? }` |
-| `machines?` | Какие machines попадают в snapshot |
-| `strategy?` | `"merge"` или `"replace"` для hydrate |
-| `storageVersion?` | Версия записи |
-| `maxAge?` | TTL записи в миллисекундах |
-| `throttleMs?` | Минимальный интервал между save |
-| `shouldSave?` | Фильтр transitions перед save |
-| `migrate?` | Миграция старой записи |
-| `onRestoreSettled?` | Колбэк результата restore |
-| `onError?` | Колбэк ошибок restore/save/clear |
+| Опция               | Назначение                                 |
+| ------------------- | ------------------------------------------ |
+| `storage`           | Adapter `{ get, set, remove, subscribe? }` |
+| `machines?`         | Какие machines попадают в snapshot         |
+| `strategy?`         | `"merge"` или `"replace"` для hydrate      |
+| `storageVersion?`   | Версия записи                              |
+| `maxAge?`           | TTL записи в миллисекундах                 |
+| `throttleMs?`       | Минимальный интервал между сохранениями    |
+| `shouldSave?`       | Фильтр transitions перед сохранением       |
+| `migrate?`          | Миграция старой записи                     |
+| `onRestoreSettled?` | Колбэк результата restore                  |
+| `onError?`          | Колбэк ошибок restore/save/clear           |
 
-### Controller
+### Контроллер
 
-| Метод | Назначение |
-| --- | --- |
-| `start()` | Подписаться на manager/storage и восстановить запись |
-| `restore()` | Прочитать storage и применить snapshot |
-| `save()` | Сразу записать текущий snapshot |
-| `flush()` | Дописать отложенное сохранение |
-| `clear()` | Удалить запись и сбросить статус |
-| `getStatus()` | Вернуть текущий `PersistStatus` |
-| `subscribeStatus(cb)` | Подписка на изменение статуса |
+| Метод                 | Назначение                                           |
+| --------------------- | ---------------------------------------------------- |
+| `start()`             | Подписаться на manager/storage и восстановить запись |
+| `restore()`           | Прочитать storage и применить snapshot               |
+| `save()`              | Сразу записать текущий snapshot                      |
+| `flush()`             | Дописать отложенное сохранение                       |
+| `clear()`             | Удалить запись и сбросить статус                     |
+| `getStatus()`         | Вернуть текущий `PersistStatus`                      |
+| `subscribeStatus(cb)` | Подписка на изменение статуса                        |
 
-## Storage
+## Хранилище
 
 ```ts copy
 type PersistStorage<S> = {
@@ -71,7 +71,7 @@ type PersistStorage<S> = {
 
 `createJsonStorage` подходит для синхронных storage API с `getItem`, `setItem`, `removeItem`.
 
-## React hooks
+## React-хуки
 
 ```tsx copy
 const status = usePersistStatus(persist);

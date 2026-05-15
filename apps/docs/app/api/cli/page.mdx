@@ -1,6 +1,6 @@
 # CLI
 
-`@lite-fsm/cli` публикует binary `lite-fsm`. Пакет находится в alpha-версии.
+`@lite-fsm/cli` публикует команду `lite-fsm`. Пакет находится в alpha-версии.
 
 ## `lite-fsm export-graph`
 
@@ -8,14 +8,14 @@
 lite-fsm export-graph --entry store/index.ts --out lite-fsm.graph.json
 ```
 
-Команда строит project graph через `@lite-fsm/graph` и пишет JSON export document.
+Команда строит project graph через `@lite-fsm/graph` и записывает JSON export document.
 
-| Опция | Обязательна | Назначение |
-| --- | --- | --- |
-| `--entry <path>` | Да | TypeScript entrypoint с выбранным `MachineManager(...)` |
-| `--out <path>` | Да | Output JSON file |
-| `--tsconfig <path>` | Нет | Явный tsconfig для module resolution |
-| `--include-source` | Нет | Добавить source text в `sources.files[]` |
+| Опция               | Обязательна | Назначение                                                |
+| ------------------- | ----------- | --------------------------------------------------------- |
+| `--entry <path>`    | Да          | Входной TypeScript-файл с выбранным `MachineManager(...)` |
+| `--out <path>`      | Да          | Путь к JSON-файлу                                         |
+| `--tsconfig <path>` | Нет         | Явный `tsconfig.json` для module resolution               |
+| `--include-source`  | Нет         | Добавить source text в `sources.files[]`                  |
 
 `--out -` не поддерживается: команда пишет только в файл.
 

@@ -1,8 +1,8 @@
 # Graph API
 
-`@lite-fsm/graph` строит read-only IR для machines/managers и инструментов анализа. Пакет находится в alpha-версии.
+`@lite-fsm/graph` строит неизменяемый IR для машин, менеджеров и инструментов анализа. Пакет находится в alpha-версии.
 
-## Root entrypoint
+## Основная точка входа
 
 ```ts copy
 import {
@@ -13,12 +13,12 @@ import {
 } from "@lite-fsm/graph";
 ```
 
-| API | Назначение |
-| --- | --- |
-| `compileLiteFsmGraph(source, opts)` | Построить `LiteFsmGraphDocument` из строки source |
-| `compileLiteFsmGraphProject(opts)` | Построить project graph из entrypoint через host |
-| `selectMachineGraph(doc, selector?)` | Выбрать одну machine из document |
-| `analyzeLiteFsmGraph(doc, opts?)` | Запустить semantic analyzer поверх IR |
+| API                                  | Назначение                                           |
+| ------------------------------------ | ---------------------------------------------------- |
+| `compileLiteFsmGraph(source, opts)`  | Построить `LiteFsmGraphDocument` из строки source    |
+| `compileLiteFsmGraphProject(opts)`   | Построить project graph из входного файла через host |
+| `selectMachineGraph(doc, selector?)` | Выбрать одну machine из document                     |
+| `analyzeLiteFsmGraph(doc, opts?)`    | Запустить semantic analyzer поверх IR                |
 
 ## Project compiler
 
@@ -32,23 +32,20 @@ const project = compileLiteFsmGraphProject({
 
 `LiteFsmGraphProjectHost` отвечает за чтение файлов и module resolution. Это позволяет использовать graph package в CLI, IDE integrations и тестах без жесткой привязки к Node FS.
 
-## Simulator entrypoint
+## Точка входа simulator
 
 ```ts copy
-import {
-  createGraphSimulator,
-  createMachineGraphSimulator,
-} from "@lite-fsm/graph/simulator";
+import { createGraphSimulator, createMachineGraphSimulator } from "@lite-fsm/graph/simulator";
 ```
 
-| API | Назначение |
-| --- | --- |
-| `createGraphSimulator(document, options?)` | Simulator для document/manager/machine scope |
-| `createMachineGraphSimulator(document, machineId, options?)` | Удобный wrapper для одной machine |
+| API                                                          | Назначение                                        |
+| ------------------------------------------------------------ | ------------------------------------------------- |
+| `createGraphSimulator(document, options?)`                   | Simulator для document, manager или machine scope |
+| `createMachineGraphSimulator(document, machineId, options?)` | Simulator, ограниченный одной machine             |
 
 Simulator не исполняет пользовательский reducer/effect/guard code. Он работает символически поверх graph IR.
 
-## View-model entrypoint
+## Точка входа view-model
 
 ```ts copy
 import {
@@ -58,11 +55,11 @@ import {
 } from "@lite-fsm/graph/view-model";
 ```
 
-| API | Назначение |
-| --- | --- |
-| `buildGraphVisualizerModel(doc, opts?)` | L1/L2/L3 projection: machines, managers, topics, diagnostics |
-| `buildMachineWorkbenchModel(machine, opts?)` | Workbench model одной machine |
-| `buildMachineFlowModel(input)` | Semantic state graph для canvas/flow renderer |
+| API                                          | Назначение                                                   |
+| -------------------------------------------- | ------------------------------------------------------------ |
+| `buildGraphVisualizerModel(doc, opts?)`      | L1/L2/L3 projection: machines, managers, topics, diagnostics |
+| `buildMachineWorkbenchModel(machine, opts?)` | Workbench model одной machine                                |
+| `buildMachineFlowModel(input)`               | Semantic state graph для canvas/flow renderer                |
 
 ## Основные типы
 

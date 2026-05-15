@@ -2,14 +2,14 @@
 
 > Раздел переехал в [Пакеты / @lite-fsm/react](/packages/react). Эта страница оставлена для старых внешних ссылок.
 
-`@lite-fsm/react` предоставляет минимальный набор хуков и компонентов для подключения автоматов к React. Модуль помечен `"use client"`: его можно импортировать в SSR/RSC, но провайдер и хуки работают только в client tree.
+`@lite-fsm/react` предоставляет небольшой набор хуков и компонентов для подключения автоматов к React. Модуль помечен `"use client"`: его можно импортировать из SSR/RSC, но провайдер и хуки должны выполняться в клиентском дереве React.
 
 ## Установка
 
-React-интеграция публикуется отдельным workspace/package entrypoint:
+React-интеграция публикуется отдельным npm-пакетом:
 
 ```bash showLineNumbers copy
-pnpm add @lite-fsm/core @lite-fsm/react @lite-fsm/middleware
+pnpm add @lite-fsm/core @lite-fsm/react @lite-fsm/middleware immer
 ```
 
 ## Импорт
@@ -35,10 +35,7 @@ import { createMachine, MachineManager, type FSMEvent } from "@lite-fsm/core";
 import { immerMiddleware } from "@lite-fsm/middleware/immer";
 import { FSMContextProvider, useSelector, useTransition } from "@lite-fsm/react";
 
-type CounterEvent =
-  | FSMEvent<"INCREMENT">
-  | FSMEvent<"DECREMENT">
-  | FSMEvent<"RESET">;
+type CounterEvent = FSMEvent<"INCREMENT"> | FSMEvent<"DECREMENT"> | FSMEvent<"RESET">;
 
 const counter = createMachine({
   config: {
@@ -104,20 +101,20 @@ function Counter() {
 </FSMContextProvider>
 ```
 
-| Свойство          | Назначение                                 |
-| ----------------- | ------------------------------------------ |
-| `machineManager`  | Объект менеджера, созданный `MachineManager` |
-| `children`        | Дочерние компоненты                        |
+| Свойство         | Назначение                                   |
+| ---------------- | -------------------------------------------- |
+| `machineManager` | Объект менеджера, созданный `MachineManager` |
+| `children`       | Дочерние компоненты                          |
 
 ### `useSelector`
 
-Подписка на часть состояния. Реализован поверх `useSyncExternalStoreWithSelector`. Default equality — `===`.
+Подписка на часть состояния. Хук реализован поверх `useSyncExternalStoreWithSelector`. Проверка равенства по умолчанию — `===`.
 
 ```tsx showLineNumbers copy
 function Counter() {
   const count = useSelector((s) => s.counter.context.count);
 
-  // Несколько значений — обернуть в объект и передать кастомный equalityFn
+  // Несколько значений — оберните в объект и передайте свой equalityFn
   const view = useSelector(
     (s) => ({
       count: s.counter.context.count,
@@ -149,7 +146,7 @@ function Controls() {
 
 ### `useManager`
 
-Прямой доступ к `MachineManager` из контекста. Полезно для отладки, дебаг-панелей или когда нужно вызвать менее частые методы (например, `setDependencies`, `dehydrate`).
+Прямой доступ к `MachineManager` из контекста. Полезно для отладки, отладочных панелей или когда нужно вызвать менее частые методы (например, `setDependencies`, `dehydrate`).
 
 ```tsx showLineNumbers copy
 import { useEffect } from "react";
@@ -170,7 +167,7 @@ function DebugPanel() {
 
 ### `FSMHydrationBoundary`
 
-Применяет snapshot к React-subtree так, чтобы `useSelector()` внутри boundary видел hydrated state уже на render, а сам manager догонял это состояние в layout effect.
+Даёт `useSelector()` внутри `FSMHydrationBoundary` состояние, рассчитанное из snapshot, уже во время отрисовки. После монтирования manager применяет тот же snapshot в `useLayoutEffect`.
 
 ```tsx showLineNumbers copy
 import { FSMHydrationBoundary } from "@lite-fsm/react";
@@ -186,24 +183,21 @@ function App({ snapshot }) {
 }
 ```
 
-`useManager().getState()` до layout effect вернёт ещё не обновлённый state; для одинаковой разметки на сервере и клиенте читайте состояние через `useSelector()`.
+`useManager().getState()` до `useLayoutEffect` вернёт исходное состояние manager-а; для одинаковой разметки на сервере и клиенте читайте состояние через `useSelector()`.
 
 Если после применения snapshot нужно отправить событие в manager, передайте `transitionAfterHydrate`. Это может быть одно событие или массив событий.
 
 ```tsx showLineNumbers copy
-<FSMHydrationBoundary
-  snapshot={snapshot}
-  transitionAfterHydrate={{ type: "CHECK_ONBOARDING" }}
->
+<FSMHydrationBoundary snapshot={snapshot} transitionAfterHydrate={{ type: "CHECK_ONBOARDING" }}>
   <Page />
 </FSMHydrationBoundary>
 ```
 
-`transitionAfterHydrate` выполняется только в браузере, после `manager.hydrate()`. Повторный mount в React StrictMode не отправляет те же события повторно для того же snapshot.
+`transitionAfterHydrate` выполняется только в браузере, после `manager.hydrate()`. Повторное монтирование в React StrictMode не отправляет те же события повторно для того же snapshot.
 
 ### `useHydrateSnapshot`
 
-Применяет snapshot в `useLayoutEffect` без preview. Подходит для фоновой гидратации после mount, когда временное наложение состояния не нужно.
+Применяет snapshot в `useLayoutEffect` без предварительного расчёта состояния для первой отрисовки. Используйте для фоновой гидратации после монтирования.
 
 ```tsx showLineNumbers copy
 import { useHydrateSnapshot } from "@lite-fsm/react";
@@ -218,7 +212,7 @@ function Hydrator({ snapshot }: { snapshot: AppSnapshot }) {
 
 ### `defineMachine` (React)
 
-Standalone-машина в виде хука. Возвращает hook + методы standalone machine (`transition`, `getState`, `onTransition`, `addMiddleware`).
+Изолированная машина в виде хука. Возвращает hook и методы этой машины (`transition`, `getState`, `onTransition`, `addMiddleware`).
 
 ```tsx showLineNumbers copy
 import { defineMachine } from "@lite-fsm/react";
@@ -228,19 +222,17 @@ const useCounter = defineMachine<CounterEvent>().create(counter);
 function Counter() {
   const count = useCounter((s) => s.context.count);
 
-  return (
-    <button onClick={() => useCounter.transition({ type: "INCREMENT" })}>
-      {count}
-    </button>
-  );
+  return <button onClick={() => useCounter.transition({ type: "INCREMENT" })}>{count}</button>;
 }
 ```
 
-Несколько компонентов с одним и тем же `useCounter` делят общий state. `defineMachine` не поддерживает actor templates — для актёров используйте `MachineManager` + `FSMContextProvider`.
+Несколько компонентов с одним и тем же `useCounter` используют общее состояние этой изолированной машины. `defineMachine` не поддерживает actor templates — для актёров используйте `MachineManager` + `FSMContextProvider`.
 
 ## Практический пример: форма авторизации
 
 Бизнес-логика живёт в автомате `auth`, компонент только рендерит и отправляет события.
+
+> Reducer в примере написан в стиле Immer: он мутирует draft `state` и предполагает, что `MachineManager` создан с `immerMiddleware`. Без middleware reducer должен вернуть новый объект `{ state, context }`.
 
 ```tsx showLineNumbers copy
 import { createMachine, type FSMEvent } from "@lite-fsm/core";

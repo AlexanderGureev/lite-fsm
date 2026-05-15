@@ -1,6 +1,6 @@
 # React API
 
-`@lite-fsm/react` помечен `"use client"`. Модуль можно импортировать из SSR/RSC, но provider и hooks должны работать в client tree.
+`@lite-fsm/react` помечен `"use client"`. Модуль можно импортировать из SSR/RSC, но provider и hooks должны выполняться в клиентском дереве React.
 
 ## Импорт
 
@@ -17,7 +17,7 @@ import {
 } from "@lite-fsm/react";
 ```
 
-## Components
+## Компоненты
 
 ### `FSMContextProvider`
 
@@ -27,11 +27,11 @@ import {
 </FSMContextProvider>
 ```
 
-| Prop | Назначение |
-| --- | --- |
-| `machineManager` | Экземпляр `MachineManager` |
-| `persist?` | Один `PersistController` или массив controllers |
-| `children` | React subtree |
+| Prop             | Назначение                                      |
+| ---------------- | ----------------------------------------------- |
+| `machineManager` | Экземпляр `MachineManager`                      |
+| `persist?`       | Один `PersistController` или массив controllers |
+| `children`       | React-поддерево                                 |
 
 ### `FSMHydrationBoundary`
 
@@ -41,23 +41,23 @@ import {
 </FSMHydrationBoundary>
 ```
 
-Boundary применяет snapshot к subtree так, чтобы `useSelector()` внутри видел hydrated state уже на render. После mount manager догоняет это состояние в layout effect.
+`FSMHydrationBoundary` даёт `useSelector()` состояние, рассчитанное из snapshot, уже во время отрисовки. После монтирования manager применяет тот же snapshot в `useLayoutEffect`.
 
-| Prop | Назначение |
-| --- | --- |
-| `snapshot` | `MachineManagerSnapshot` |
-| `strategy?` | `"merge"` или `"replace"` |
+| Prop                      | Назначение                               |
+| ------------------------- | ---------------------------------------- |
+| `snapshot`                | `MachineManagerSnapshot`                 |
+| `strategy?`               | `"merge"` или `"replace"`                |
 | `transitionAfterHydrate?` | Событие или массив событий после hydrate |
-| `children` | React subtree |
+| `children`                | React-поддерево                          |
 
-## Hooks
+## Хуки
 
-| Hook | Что возвращает |
-| --- | --- |
-| `useSelector(selector, equalityFn?)` | Выбранную часть manager state |
-| `useTransition()` | Функцию `manager.transition` |
-| `useManager()` | Текущий `MachineManager` |
-| `useHydrateSnapshot(snapshot, opts?)` | Применяет snapshot в layout effect |
+| Hook                                  | Что возвращает                         |
+| ------------------------------------- | -------------------------------------- |
+| `useSelector(selector, equalityFn?)`  | Выбранную часть manager state          |
+| `useTransition()`                     | Функцию `manager.transition`           |
+| `useManager()`                        | Текущий `MachineManager`               |
+| `useHydrateSnapshot(snapshot, opts?)` | Применяет snapshot в `useLayoutEffect` |
 
 ```tsx showLineNumbers copy
 function Counter() {
@@ -70,24 +70,24 @@ function Counter() {
 
 ## `defineMachine`
 
-React entrypoint экспортирует `defineMachine` для standalone hook-сценариев:
+React-пакет экспортирует `defineMachine` для сценариев без общего `MachineManager`:
 
 ```tsx copy
 import { defineMachine } from "@lite-fsm/react";
 ```
 
-Используйте его, когда машине не нужен общий `MachineManager` в context. Для приложения с несколькими машинами чаще удобнее `MachineManager` + `FSMContextProvider`.
+Используйте его, когда машине не нужен общий `MachineManager` в React context. Для приложения с несколькими машинами используйте `MachineManager` + `FSMContextProvider`.
 
-## Types
+## Типы
 
-| Тип | Назначение |
-| --- | --- |
-| `FSMContextType` | Context shape |
-| `FSMContextProviderProps` | Props provider-а |
-| `FSMPersistLifecycle` | Persist lifecycle shape для provider-а |
-| `FSMHydrationBoundaryProps` | Props hydration boundary |
-| `TypedUseSelectorHook` | Типизированный selector hook alias |
-| `TypedUseTransitionHook` | Типизированный transition hook alias |
-| `TypedUseManagerHook` | Типизированный manager hook alias |
+| Тип                         | Назначение                            |
+| --------------------------- | ------------------------------------- |
+| `FSMContextType`            | Форма React context                   |
+| `FSMContextProviderProps`   | Props провайдера                      |
+| `FSMPersistLifecycle`       | Lifecycle-контракт persist-провайдера |
+| `FSMHydrationBoundaryProps` | Props границы гидратации              |
+| `TypedUseSelectorHook`      | Alias типизированного selector hook   |
+| `TypedUseTransitionHook`    | Alias типизированного transition hook |
+| `TypedUseManagerHook`       | Типизированный manager hook alias     |
 
 Подробное руководство: [@lite-fsm/react](/packages/react).

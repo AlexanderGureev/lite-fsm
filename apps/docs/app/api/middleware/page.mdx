@@ -1,6 +1,6 @@
 # Middleware API
 
-`@lite-fsm/middleware` содержит готовые middleware и re-export per-feature entrypoints.
+`@lite-fsm/middleware` содержит готовые middleware и реэкспортирует точечные точки входа.
 
 ## Импорт
 
@@ -18,10 +18,7 @@ import { devToolsMiddleware } from "@lite-fsm/middleware/devTools";
 ```ts showLineNumbers copy
 import { immerMiddleware } from "@lite-fsm/middleware/immer";
 
-const manager = MachineManager(
-  { todos },
-  { middleware: [immerMiddleware] },
-);
+const manager = MachineManager({ todos }, { middleware: [immerMiddleware] });
 ```
 
 `immerMiddleware` ставит marker `__liteFsmAllowVoidReducer`, поэтому core не бросает `VOID_REDUCER_ERROR`, когда reducer ничего не вернул.
@@ -36,20 +33,18 @@ import { devToolsMiddleware } from "@lite-fsm/middleware/devTools";
 const manager = MachineManager(
   { app },
   {
-    middleware: [
-      devToolsMiddleware({ blacklistActions: ["TIMER_TICK"] }),
-    ],
+    middleware: [devToolsMiddleware({ blacklistActions: ["TIMER_TICK"] })],
   },
 );
 ```
 
-| Опция | Назначение |
-| --- | --- |
+| Опция                         | Назначение                                       |
+| ----------------------------- | ------------------------------------------------ |
 | `blacklistActions?: string[]` | Action types, которые не отправляются в DevTools |
 
 Без `window.__REDUX_DEVTOOLS_EXTENSION__` middleware пропускает события без side effects.
 
-## Custom middleware shape
+## Форма custom middleware
 
 ```ts copy
 const middleware = (api) => (next) => (action) => {

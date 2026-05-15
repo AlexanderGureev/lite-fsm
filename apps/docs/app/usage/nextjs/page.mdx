@@ -1,30 +1,30 @@
 # Интеграция с Next.js
 
-Next.js представляет собой популярный фреймворк для серверного рендеринга React-приложений, который требует особого подхода к интеграции с менеджерами состояний. В этом разделе рассмотрим, как правильно использовать `lite-fsm` с Next.js, особенно с архитектурой App Router.
+Next.js совмещает серверный рендеринг, React Server Components и клиентскую навигацию. Для `lite-fsm` это означает: manager нельзя делать общим для всех запросов, а серверный snapshot нужно передавать в клиентское дерево через механизм гидратации.
 
-## Проблемы и особенности
+## Требования интеграции
 
-При использовании менеджера состояний с Next.js возникают следующие проблемы:
+При использовании менеджера состояния с Next.js учитывайте:
 
 1. **Создание независимого стора для каждого запроса**: Сервер Next.js обрабатывает множество запросов одновременно, поэтому хранилище должно создаваться для каждого запроса отдельно, а не использоваться как глобальная переменная.
 
-2. **Гидратация данных при SSR**: Next.js рендерит приложение дважды - на сервере и затем на клиенте. Данные в хранилище должны быть одинаковыми при обоих рендерах, иначе возникнет ошибка гидратации.
+2. **Гидратация данных при SSR**: Next.js рендерит приложение на сервере и затем гидратирует его на клиенте. Данные в хранилище должны быть согласованы, иначе возникнет ошибка гидратации.
 
-3. **Поддержка SPA-маршрутизации**: Next.js поддерживает гибридную модель клиентской маршрутизации, и при переходе между страницами нужно правильно обрабатывать данные, специфичные для маршрута.
+3. **Поддержка SPA-маршрутизации**: Next.js поддерживает гибридную модель клиентской маршрутизации, поэтому данные, привязанные к маршруту, нужно обновлять или сбрасывать при переходах между страницами.
 
-4. **Совместимость с кешированием**: Новые версии Next.js (особенно использующие App Router) поддерживают агрессивное кеширование на сервере, и архитектура хранилища должна быть с этим совместима.
+4. **Совместимость с кешированием App Router**: серверные данные и изменяемое клиентское состояние должны храниться отдельно.
 
 ## Рекомендации по использованию
 
 Для работы с Next.js App Router рекомендуется:
 
-- **Не использовать глобальные хранилища** - вместо этого создавать хранилище для каждого запроса.
-- **React Server Components не должны читать или писать в хранилище** - RSC не могут использовать хуки или контекст.
-- **Хранилище должно содержать только мутабельные данные** - `lite-fsm` следует использовать только для тех данных, которые предназначены быть глобальными и изменяемыми.
+- **Не используйте глобальный manager на сервере** — создавайте manager для каждого запроса или сценария.
+- **React Server Components не должны читать или писать в клиентский manager** — RSC не используют клиентские хуки и контекст.
+- **Держите в `lite-fsm` только изменяемое клиентское состояние** — серверные данные Next.js, search params и route params не нужно дублировать в manager без отдельного требования.
 
 ## Структура проекта
 
-Типичная структура проекта с Next.js App Router может выглядеть так:
+Структура проекта с Next.js App Router может выглядеть так:
 
 ```
 /app
@@ -51,7 +51,7 @@ package.json
 
 ## Настройка хранилища
 
-Вместо определения `store` как глобальной переменной, мы создаем функцию `makeStore`, которая возвращает новый экземпляр хранилища для каждого запроса:
+Вместо глобального `store` создайте функцию `makeStore`, которая возвращает новый `MachineManager`:
 
 ```ts showLineNumbers copy
 // src/store/index.ts
@@ -75,7 +75,7 @@ export const makeStore = () => {
     onError: console.error,
   });
 
-  manager.setDependencies<Dependencies>({
+  manager.setDependencies({
     getState: manager.getState,
     playerService: {
       play: () => undefined,
@@ -91,7 +91,7 @@ export type AppStore = ReturnType<typeof makeStore>;
 
 ## Предоставление хранилища компонентам
 
-Создаем компонент-провайдер для Next.js:
+Создайте client provider для Next.js:
 
 ```tsx showLineNumbers copy
 // app/StoreProvider.tsx
@@ -114,7 +114,7 @@ export default function StoreProvider({ children }: { children: ReactNode }) {
 
 ## Использование хуков
 
-Создаем типизированные версии хуков для удобного использования:
+Создайте типизированные версии хуков:
 
 ```ts showLineNumbers copy
 // src/store/hooks.ts
@@ -135,7 +135,7 @@ export const useManager: TypedUseManagerHook<FSMConfigType, AppEvents> = _useMan
 
 ## Интеграция с приложением
 
-Для Next.js необходимо включить провайдер в корневой layout файл внутри `body`, чтобы корневой `html` оставался серверной частью layout:
+В App Router provider обычно размещают внутри `body`, чтобы корневой `html` оставался серверной частью layout:
 
 ```tsx showLineNumbers copy
 // app/layout.tsx
@@ -154,64 +154,66 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
 ## Гидратация состояния с сервера
 
-Когда серверу нужно подготовить состояние и доставить его клиенту, используйте пару `manager.dehydrate()` / `useHydrateSnapshot` — клиент применит снапшот синхронно при первом рендере, без ошибок гидратации. Подробности — в разделе [Сохранение состояния](/guide/hydration).
+Когда серверу нужно подготовить состояние и доставить его клиенту, передайте результат `manager.dehydrate()` в клиентский компонент-обёртку на базе `FSMHydrationBoundary`. Компонент рассчитывает состояние после гидратации во время отрисовки, поэтому серверная разметка и первая клиентская отрисовка читают один и тот же snapshot через `useSelector()`.
+
+`useHydrateSnapshot()` применяет snapshot только в `useLayoutEffect`. Используйте его для фонового восстановления после монтирования; он не устраняет SSR hydration mismatch на первой отрисовке. Подробности — в разделе [Сохранение состояния](/guide/hydration).
 
 ```tsx showLineNumbers copy
 // app/page.tsx — Server Component
 import { makeStore } from "../src/store";
-import StoreProvider from "./StoreProvider";
+import { StoreSnapshotBoundary } from "./StoreSnapshotBoundary";
 
 export default async function Page() {
   const manager = makeStore();
   manager.transition({ type: "BOOTSTRAP", payload: await loadInitialData() });
 
   return (
-    <StoreProvider snapshot={manager.dehydrate()}>
+    <StoreSnapshotBoundary snapshot={manager.dehydrate()}>
       <PageContent />
-    </StoreProvider>
+    </StoreSnapshotBoundary>
   );
 }
 ```
 
 ```tsx showLineNumbers copy
-// app/StoreProvider.tsx
+// app/StoreSnapshotBoundary.tsx
 "use client";
 
-import { useRef, type ReactNode } from "react";
-import { FSMContextProvider, useHydrateSnapshot } from "@lite-fsm/react";
-import type { Snapshot } from "@lite-fsm/core";
+import { type ReactNode } from "react";
+import type { MachineManagerSnapshot } from "@lite-fsm/core";
+import { FSMHydrationBoundary } from "@lite-fsm/react";
 
-import { makeStore } from "../src/store";
-import type { AppStore } from "../src/store";
+import type { FSMConfigType } from "../src/store";
 
 type Props = {
   children: ReactNode;
-  snapshot?: Snapshot;
+  snapshot: MachineManagerSnapshot<FSMConfigType>;
 };
 
-export default function StoreProvider({ children, snapshot }: Props) {
-  const storeRef = useRef<AppStore | null>(null);
-  if (!storeRef.current) storeRef.current = makeStore();
-
-  useHydrateSnapshot(storeRef.current, snapshot);
-
-  return <FSMContextProvider machineManager={storeRef.current}>{children}</FSMContextProvider>;
+export function StoreSnapshotBoundary({ children, snapshot }: Props) {
+  return (
+    <FSMHydrationBoundary snapshot={snapshot} strategy="merge">
+      {children}
+    </FSMHydrationBoundary>
+  );
 }
 ```
 
+Если `StoreProvider` подключен не в корневом layout, разместите `StoreSnapshotBoundary` внутри того же провайдера: `FSMHydrationBoundary` получает manager из React-контекста.
+
 ## Рекомендации по архитектуре
 
-Архитектура App Router в Next.js резко отличается от традиционной SPA-архитектуры. При интеграции lite-fsm с Next.js рекомендуем пересмотреть подход к управлению состоянием:
+App Router отличается от традиционной SPA-архитектуры. При интеграции lite-fsm с Next.js разделяйте данные по месту хранения и жизненному циклу:
 
-- **Используйте lite-fsm только для глобальных, изменяемых данных**
-- **Используйте комбинацию состояния Next.js** (параметры поиска, параметры маршрута, состояние формы и т.д.), контекст React и хуки React для всего остального управления состоянием.
-- **Разделяйте серверные и клиентские компоненты** - помните, что серверные компоненты не могут использовать контекст React или хуки.
+- **Используйте lite-fsm для глобальных изменяемых данных** и процессов с явными состояниями.
+- **Оставляйте route/search params в Next.js**, а локальное состояние форм — рядом с компонентами, если оно не нужно другим частям приложения.
+- **Разделяйте серверные и клиентские компоненты** — серверные компоненты не используют React-контекст или хуки `@lite-fsm/react`.
 
 ## Проверка работоспособности
 
-Проверьте следующие аспекты, чтобы убедиться, что вы правильно настроили lite-fsm с Next.js:
+Проверьте следующие аспекты интеграции:
 
-1. **Серверный рендеринг** - Проверьте HTML-вывод сервера, чтобы убедиться, что данные в хранилище присутствуют в результате серверного рендеринга.
-2. **Изоляция хранилища** - Убедитесь, что создается отдельное хранилище для каждого запроса.
-3. **Изменение маршрута** - Перемещайтесь между страницами, чтобы убедиться, что данные, специфичные для маршрута, правильно инициализируются.
-4. **Мутации и кеширование** - Проверьте, что хранилище совместимо с кешами Next.js App Router, выполнив мутацию, а затем перейдя с маршрута и вернувшись на исходный маршрут.
+1. **Серверный рендеринг** — проверьте HTML-вывод сервера и первую клиентскую отрисовку.
+2. **Изоляция manager-а** — убедитесь, что на сервере создаётся отдельный manager для каждого запроса.
+3. **Изменение маршрута** — проверьте переходы между страницами и повторную инициализацию route-specific данных.
+4. **Мутации и кеширование** — проверьте сценарий: мутация, переход на другой маршрут, возврат на исходный маршрут.

@@ -1,19 +1,19 @@
 # Пакеты lite-fsm
 
-`lite-fsm` распространяется как набор npm-пакетов. `@lite-fsm/core` содержит независимый runtime для описания и запуска машин. Остальные пакеты добавляют React-интеграцию, middleware, persistence, анализ графа и CLI.
+`lite-fsm` распространяется как набор npm-пакетов. `@lite-fsm/core` содержит независимый runtime для описания и запуска машин. Остальные пакеты добавляют React-интеграцию, middleware, persist-сценарии, анализ графа и CLI.
 
 Базовый пакет — `@lite-fsm/core`. Остальные пакеты подключаются по необходимости, чтобы не добавлять в приложение лишние зависимости.
 
 ## Карта пакетов
 
-| Пакет | Роль | Когда нужен |
-| --- | --- | --- |
-| [`@lite-fsm/core`](/packages/core) | Runtime без привязки к UI | Машины, `MachineManager`, эффекты, акторы, snapshots |
-| [`@lite-fsm/react`](/packages/react) | Интеграция с React | Context provider, хуки, hydration boundary |
-| [`@lite-fsm/middleware`](/packages/middleware) | Middleware для manager-а | Immer reducers, Redux DevTools, пользовательские middleware |
-| [`@lite-fsm/persist`](/packages/persist) | Сохранение состояния | Storage adapters, восстановление, синхронизация между вкладками |
-| [`@lite-fsm/graph`](/packages/graph) | Анализ графа машин | Alpha: Graph IR, diagnostics, simulator, модель для visualizer-а |
-| [`@lite-fsm/cli`](/packages/cli) | Командная строка | Alpha: экспорт graph JSON из TypeScript entrypoint |
+| Пакет                                          | Роль                      | Когда нужен                                                      |
+| ---------------------------------------------- | ------------------------- | ---------------------------------------------------------------- |
+| [`@lite-fsm/core`](/packages/core)             | Runtime без привязки к UI | Машины, `MachineManager`, эффекты, акторы, snapshots             |
+| [`@lite-fsm/react`](/packages/react)           | Интеграция с React        | Context provider, хуки, hydration boundary                       |
+| [`@lite-fsm/middleware`](/packages/middleware) | Middleware для manager-а  | Immer reducers, Redux DevTools, пользовательские middleware      |
+| [`@lite-fsm/persist`](/packages/persist)       | Сохранение состояния      | Storage adapters, восстановление, синхронизация между вкладками  |
+| [`@lite-fsm/graph`](/packages/graph)           | Анализ графа машин        | Alpha: graph IR, diagnostics, simulator, модель для visualizer-а |
+| [`@lite-fsm/cli`](/packages/cli)               | Командная строка          | Alpha: экспорт graph JSON из входного TypeScript-файла           |
 
 ## Установка по сценариям
 
@@ -32,7 +32,7 @@ pnpm add @lite-fsm/core @lite-fsm/middleware immer
 React-приложение:
 
 ```bash copy
-pnpm add @lite-fsm/core @lite-fsm/react @lite-fsm/middleware
+pnpm add @lite-fsm/core @lite-fsm/react @lite-fsm/middleware immer
 ```
 
 React + сохранение состояния:
@@ -57,7 +57,7 @@ pnpm add -D @lite-fsm/graph @lite-fsm/cli
 
 ## Связанные разделы
 
-- [API](/api): карта публичных entrypoints по пакетам.
+- [API](/api): карта публичных точек входа по пакетам.
 - [Руководство](/guide): концепции FSM, actors, effects и hydration.
 - [Практика](/usage): TypeScript и Next.js сценарии.
-- [Инструменты](/tools): playground и visualizer.
+- [Инструменты](/tools): visualizer, CLI export и `@lite-fsm/graph`.

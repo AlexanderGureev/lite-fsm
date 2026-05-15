@@ -4,34 +4,34 @@
 
 ## Entry points
 
-| Импорт | Runtime exports |
-| --- | --- |
-| [`@lite-fsm/core`](/api/core) | `createMachine`, `createConfig`, `createReducer`, `createEffect`, `createActorMeta`, `Machine`, `defineMachine`, `MachineManager`, `LiteFsmError` |
-| [`@lite-fsm/react`](/api/react) | `FSMContext`, `FSMContextProvider`, `FSMHydrationBoundary`, `useHydrateSnapshot`, `useManager`, `useSelector`, `useTransition`, `defineMachine` |
-| [`@lite-fsm/middleware`](/api/middleware) | `immerMiddleware`, `devToolsMiddleware` |
-| [`@lite-fsm/middleware/immer`](/api/middleware) | `immerMiddleware` |
-| [`@lite-fsm/middleware/devTools`](/api/middleware) | `devToolsMiddleware` |
-| [`@lite-fsm/persist`](/api/persist) | `persistManager`, `createJsonStorage` |
-| [`@lite-fsm/persist/react`](/api/persist) | `usePersistStatus`, `useIsPersistRestoring` |
-| [`@lite-fsm/graph`](/api/graph) | `compileLiteFsmGraph`, `compileLiteFsmGraphProject`, `selectMachineGraph`, `analyzeLiteFsmGraph` |
-| [`@lite-fsm/graph/simulator`](/api/graph) | `createGraphSimulator`, `createMachineGraphSimulator` |
-| [`@lite-fsm/graph/view-model`](/api/graph) | `buildGraphVisualizerModel`, `buildMachineWorkbenchModel`, `buildMachineFlowModel` |
-| [`@lite-fsm/cli`](/api/cli) | binary `lite-fsm` |
+| Импорт                                             | Runtime exports                                                                                                                                   |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`@lite-fsm/core`](/api/core)                      | `createMachine`, `createConfig`, `createReducer`, `createEffect`, `createActorMeta`, `Machine`, `defineMachine`, `MachineManager`, `LiteFsmError` |
+| [`@lite-fsm/react`](/api/react)                    | `FSMContext`, `FSMContextProvider`, `FSMHydrationBoundary`, `useHydrateSnapshot`, `useManager`, `useSelector`, `useTransition`, `defineMachine`   |
+| [`@lite-fsm/middleware`](/api/middleware)          | `immerMiddleware`, `devToolsMiddleware`                                                                                                           |
+| [`@lite-fsm/middleware/immer`](/api/middleware)    | `immerMiddleware`                                                                                                                                 |
+| [`@lite-fsm/middleware/devTools`](/api/middleware) | `devToolsMiddleware`                                                                                                                              |
+| [`@lite-fsm/persist`](/api/persist)                | `persistManager`, `createJsonStorage`                                                                                                             |
+| [`@lite-fsm/persist/react`](/api/persist)          | `usePersistStatus`, `useIsPersistRestoring`                                                                                                       |
+| [`@lite-fsm/graph`](/api/graph)                    | `compileLiteFsmGraph`, `compileLiteFsmGraphProject`, `selectMachineGraph`, `analyzeLiteFsmGraph`                                                  |
+| [`@lite-fsm/graph/simulator`](/api/graph)          | `createGraphSimulator`, `createMachineGraphSimulator`                                                                                             |
+| [`@lite-fsm/graph/view-model`](/api/graph)         | `buildGraphVisualizerModel`, `buildMachineWorkbenchModel`, `buildMachineFlowModel`                                                                |
+| [`@lite-fsm/cli`](/api/cli)                        | команда `lite-fsm`                                                                                                                                |
 
 ## Быстрая карта
 
-| Нужно | Куда идти |
-| --- | --- |
-| Описать машину и запустить manager | [Core API](/api/core) |
-| Подключить состояние к React | [React API](/api/react) |
+| Нужно                                                  | Куда идти                         |
+| ------------------------------------------------------ | --------------------------------- |
+| Описать машину и запустить manager                     | [Core API](/api/core)             |
+| Подключить состояние к React                           | [React API](/api/react)           |
 | Мутировать reducer draft или подключить Redux DevTools | [Middleware API](/api/middleware) |
-| Сохранить snapshot в storage | [Persist API](/api/persist) |
-| Построить graph IR или diagnostics | [Graph API](/api/graph) |
-| Экспортировать graph JSON из проекта | [CLI](/api/cli) |
+| Сохранить snapshot в storage                           | [Persist API](/api/persist)       |
+| Построить graph IR или diagnostics                     | [Graph API](/api/graph)           |
+| Экспортировать graph JSON из проекта                   | [CLI](/api/cli)                   |
 
 ## Типы
 
-Основные типы живут рядом с runtime entrypoints:
+Основные типы живут рядом с публичными точками входа:
 
 - `@lite-fsm/core`: events, configs, reducers, effects, managers, actors, snapshots, middleware.
 - `@lite-fsm/react`: props и typed hook aliases.
