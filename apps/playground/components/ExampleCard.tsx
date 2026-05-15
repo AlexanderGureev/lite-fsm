@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Braces } from "lucide-react";
 
 import { ExampleDiagram } from "@/components/ExampleDiagram";
 import {
@@ -9,6 +9,7 @@ import {
   type ExampleTag,
 } from "@/lib/examples-manifest";
 import { cn } from "@/lib/utils";
+import { exampleVisualizerUrl } from "@/lib/visualizer-links";
 
 const tagLabel: Record<ExampleTag, string> = {
   basics: "basics",
@@ -33,8 +34,7 @@ export function ExampleCard({ example, index }: ExampleCardProps) {
   } as React.CSSProperties;
 
   return (
-    <Link
-      href={examplePath(example.id)}
+    <article
       data-glow-card
       style={glowVars}
       className="group relative flex h-full overflow-hidden rounded-md bg-canvas outline-none ring-1 ring-hairline transition-shadow duration-300 hover:shadow-card focus-visible:ring-2 focus-visible:ring-primary-focus/40"
@@ -83,19 +83,34 @@ export function ExampleCard({ example, index }: ExampleCardProps) {
             {example.description}
           </p>
 
-          <div className="mt-auto flex items-center justify-end gap-3 border-t border-dashed border-hairline/70 pt-3">
-            <span
+          <div className="mt-auto flex flex-wrap items-center justify-between gap-2 border-t border-dashed border-hairline/70 pt-3">
+            <a
+              href={exampleVisualizerUrl(example.id)}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={`Open ${example.title} in visualizer`}
+              className={cn(
+                "inline-flex shrink-0 items-center gap-1 rounded-sm px-0.5 py-0.5 font-mono text-[11px] uppercase tracking-[0.14em] text-ink-muted-48 transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-focus/40",
+                styles.hoverText,
+              )}
+            >
+              <Braces className="size-3" strokeWidth={2.25} />
+              visualizer
+            </a>
+            <Link
+              href={examplePath(example.id)}
+              aria-label={`Open ${example.title} demo`}
               className={cn(
                 "inline-flex shrink-0 items-center gap-1 font-mono text-[11px] uppercase tracking-[0.14em] text-ink-muted-48 transition-all duration-200 group-hover:translate-x-0.5",
                 styles.hoverText,
               )}
             >
-              open
+              demo
               <ArrowRight className="size-3" strokeWidth={2.25} />
-            </span>
+            </Link>
           </div>
         </div>
       </div>
-    </Link>
+    </article>
   );
 }

@@ -7,6 +7,9 @@ on:
       - "packages/**"
       - "apps/docs/**"
       - "apps/playground/**"
+      - "apps/visualizer/**"
+      - "scripts/build-pages.mjs"
+      - "scripts/generate-playground-visualizer-ir.mjs"
       - "package.json"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
@@ -48,7 +51,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build docs and playground
+      - name: Build docs, playground, and visualizer
         run: pnpm run pages:build:fast
 
       - name: Upload artifact

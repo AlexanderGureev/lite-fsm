@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ArrowUpRight, FolderGit2 } from "lucide-react";
+import { ArrowUpRight, Braces, FolderGit2 } from "lucide-react";
 
 import { githubSourceUrl } from "@/components/TopBar";
 import { exampleById, exampleSourcePath } from "@/lib/examples-manifest";
+import { exampleVisualizerUrl } from "@/lib/visualizer-links";
 
 export function ExamplesSubNav() {
   const pathname = usePathname();
@@ -34,6 +35,16 @@ export function ExamplesSubNav() {
           >
             <FolderGit2 className="size-4" strokeWidth={1.75} />
             Source
+            <ArrowUpRight className="size-3.5" strokeWidth={2} />
+          </a>
+          <a
+            href={exampleVisualizerUrl(current.id)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 text-button-utility text-ink-muted-80 transition-colors hover:text-primary"
+          >
+            <Braces className="size-4" strokeWidth={1.75} />
+            Visualizer
             <ArrowUpRight className="size-3.5" strokeWidth={2} />
           </a>
           <Link href="/" className="text-button-utility text-primary hover:text-primary-focus">

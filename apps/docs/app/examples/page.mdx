@@ -11,19 +11,19 @@ pnpm install
 pnpm --filter @lite-fsm/playground dev
 ```
 
-После запуска откройте [http://localhost:3000](http://localhost:3000) — там собраны все примеры ниже.
+После запуска откройте [http://localhost:3000](http://localhost:3000) — там собраны все примеры ниже. На каждой странице примера есть ссылка **Visualizer**, которая открывает заранее сгенерированный JSON IR.
 
 ## Что можно посмотреть
 
-| Пример | Что показывает | Ссылка на код |
+| Пример | Что показывает | Ссылки |
 | --- | --- | --- |
-| **lamp** | Минимальный автомат: `OFF`/`ON`, immer-reducer, типизированные `Typed`-фабрики и React-хуки. Хорошая стартовая точка. | [examples/lamp](https://github.com/AlexanderGureev/lite-fsm/tree/main/apps/playground/app/examples/lamp) |
-| **likes / likes-v2** | Оптимистичные апдейты, отмена эффектов, очередь pending-операций. | [examples/likes](https://github.com/AlexanderGureev/lite-fsm/tree/main/apps/playground/app/examples/likes), [examples/likes-v2](https://github.com/AlexanderGureev/lite-fsm/tree/main/apps/playground/app/examples/likes-v2) |
-| **album-download** | Шаблоны акторов: динамические загрузки треков, маршрутизация по `meta.actorId`, `groupTag`, доступ к `getState`. | [examples/album-download](https://github.com/AlexanderGureev/lite-fsm/tree/main/apps/playground/app/examples/album-download) |
-| **actor-canvas** | Расширенный сценарий с акторами и canvas-рендерингом. | [examples/actor-canvas](https://github.com/AlexanderGureev/lite-fsm/tree/main/apps/playground/app/examples/actor-canvas) |
-| **roguelite** | Комплексный пример с параллельными автоматами и игровым циклом. | [examples/roguelite](https://github.com/AlexanderGureev/lite-fsm/tree/main/apps/playground/app/examples/roguelite) |
-| **persist** | Чат на `persistManager`: история в `localStorage`, синхронизация между вкладками через `storage` event. | [examples/persist](https://github.com/AlexanderGureev/lite-fsm/tree/main/apps/playground/app/examples/persist) |
-| **ssr-demo / ssr-demo-2 / ssr-demo-3** | Гидратация состояния с Next.js App Router: `dehydrate` на сервере и `useHydrateSnapshot` на клиенте. | [examples/ssr-demo](https://github.com/AlexanderGureev/lite-fsm/tree/main/apps/playground/app/examples/ssr-demo) |
+| **lamp** | Минимальный автомат: `OFF`/`ON`, immer-reducer, типизированные `Typed`-фабрики и React-хуки. Хорошая стартовая точка. | [код](https://github.com/AlexanderGureev/lite-fsm/tree/main/apps/playground/app/examples/lamp) · [визуализатор](/visualizer/?config=%2Flite-fsm%2Fplayground%2Fvisualizer-ir%2Fexamples%2Flamp.json) |
+| **likes / likes-v2** | Оптимистичные апдейты, отмена эффектов, очередь pending-операций. | [likes](https://github.com/AlexanderGureev/lite-fsm/tree/main/apps/playground/app/examples/likes) · [likes visualizer](/visualizer/?config=%2Flite-fsm%2Fplayground%2Fvisualizer-ir%2Fexamples%2Flikes.json) · [likes-v2](https://github.com/AlexanderGureev/lite-fsm/tree/main/apps/playground/app/examples/likes-v2) · [likes-v2 visualizer](/visualizer/?config=%2Flite-fsm%2Fplayground%2Fvisualizer-ir%2Fexamples%2Flikes-v2.json) |
+| **album-download** | Шаблоны акторов: динамические загрузки треков, маршрутизация по `meta.actorId`, `groupTag`, доступ к `getState`. | [код](https://github.com/AlexanderGureev/lite-fsm/tree/main/apps/playground/app/examples/album-download) · [визуализатор](/visualizer/?config=%2Flite-fsm%2Fplayground%2Fvisualizer-ir%2Fexamples%2Falbum-download.json) |
+| **actor-canvas** | Расширенный сценарий с акторами и canvas-рендерингом. | [код](https://github.com/AlexanderGureev/lite-fsm/tree/main/apps/playground/app/examples/actor-canvas) · [визуализатор](/visualizer/?config=%2Flite-fsm%2Fplayground%2Fvisualizer-ir%2Fexamples%2Factor-canvas.json) |
+| **roguelite** | Комплексный пример с параллельными автоматами и игровым циклом. | [код](https://github.com/AlexanderGureev/lite-fsm/tree/main/apps/playground/app/examples/roguelite) · [визуализатор](/visualizer/?config=%2Flite-fsm%2Fplayground%2Fvisualizer-ir%2Fexamples%2Froguelite.json) |
+| **persist** | Чат на `persistManager`: история в `localStorage`, синхронизация между вкладками через `storage` event. | [код](https://github.com/AlexanderGureev/lite-fsm/tree/main/apps/playground/app/examples/persist) · [визуализатор](/visualizer/?config=%2Flite-fsm%2Fplayground%2Fvisualizer-ir%2Fexamples%2Fpersist.json) |
+| **ssr-demo / ssr-demo-2 / ssr-demo-3** | Гидратация состояния с Next.js App Router: `dehydrate` на сервере и `useHydrateSnapshot` на клиенте. | [код](https://github.com/AlexanderGureev/lite-fsm/tree/main/apps/playground/app/examples/ssr-demo) · [ssr-demo visualizer](/visualizer/?config=%2Flite-fsm%2Fplayground%2Fvisualizer-ir%2Fexamples%2Fssr-demo.json) · [ssr-demo-2 visualizer](/visualizer/?config=%2Flite-fsm%2Fplayground%2Fvisualizer-ir%2Fexamples%2Fssr-demo-2.json) · [ssr-demo-3 visualizer](/visualizer/?config=%2Flite-fsm%2Fplayground%2Fvisualizer-ir%2Fexamples%2Fssr-demo-3.json) |
 
 ## С чего начать
 

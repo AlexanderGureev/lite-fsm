@@ -23,6 +23,7 @@
     "docs:start": "pnpm --filter @lite-fsm/docs start",
     "playground:dev": "turbo run dev --filter=@lite-fsm/playground",
     "playground:build": "turbo run build --filter=@lite-fsm/playground",
+    "playground:visualizer-ir": "pnpm run build:packages && node scripts/generate-playground-visualizer-ir.mjs",
     "pages:build": "node scripts/build-pages.mjs",
     "pages:build:fast": "node scripts/build-pages.mjs --skip-install",
     "pages:preview": "node scripts/preview-pages.mjs",

@@ -41,6 +41,11 @@ export default {
     type: "page",
     href: "/playground/",
   },
+  visualizer: {
+    title: "Visualizer",
+    type: "page",
+    href: "/visualizer/",
+  },
   releases: {
     title: "Релизы",
     type: "page",
