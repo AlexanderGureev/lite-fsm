@@ -10,7 +10,7 @@ export const album = {
   label: "Kestrel Index",
   releaseType: "EP",
   year: "2026",
-  cover: publicAssetPath("/examples/album-download/cover-00.png"),
+  cover: publicAssetPath("/examples/album-download/cover-00.webp"),
 } as const;
 
 export const tracks = [
@@ -20,7 +20,7 @@ export const tracks = [
     title: "Primer Glow",
     duration: "3:24",
     sizeMb: 8.4,
-    cover: publicAssetPath("/examples/album-download/cover-01.png"),
+    cover: publicAssetPath("/examples/album-download/cover-01.webp"),
   },
   {
     id: "track-02",
@@ -28,7 +28,7 @@ export const tracks = [
     title: "Thin Signal",
     duration: "4:02",
     sizeMb: 10.1,
-    cover: publicAssetPath("/examples/album-download/cover-02.png"),
+    cover: publicAssetPath("/examples/album-download/cover-02.webp"),
   },
   {
     id: "track-03",
@@ -36,7 +36,7 @@ export const tracks = [
     title: "Arc Minute",
     duration: "2:58",
     sizeMb: 7.2,
-    cover: publicAssetPath("/examples/album-download/cover-03.png"),
+    cover: publicAssetPath("/examples/album-download/cover-03.webp"),
   },
   {
     id: "track-04",
@@ -44,7 +44,7 @@ export const tracks = [
     title: "Hollow Carrier",
     duration: "5:16",
     sizeMb: 12.8,
-    cover: publicAssetPath("/examples/album-download/cover-04.png"),
+    cover: publicAssetPath("/examples/album-download/cover-04.webp"),
   },
   {
     id: "track-05",
@@ -52,7 +52,7 @@ export const tracks = [
     title: "Soft Reset",
     duration: "3:47",
     sizeMb: 9.5,
-    cover: publicAssetPath("/examples/album-download/cover-05.png"),
+    cover: publicAssetPath("/examples/album-download/cover-05.webp"),
   },
   {
     id: "track-06",
@@ -60,7 +60,7 @@ export const tracks = [
     title: "Return Path",
     duration: "4:31",
     sizeMb: 11.4,
-    cover: publicAssetPath("/examples/album-download/cover-06.png"),
+    cover: publicAssetPath("/examples/album-download/cover-06.webp"),
   },
 ] as const;
 

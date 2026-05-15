@@ -44,11 +44,11 @@ type CursorKeysLike = { left?: KeyLike; right?: KeyLike; up?: KeyLike; down?: Ke
 type WasdKeysLike = { W?: KeyLike; A?: KeyLike; S?: KeyLike; D?: KeyLike };
 type HitFeedbackEntry = { ring: PhaserArc; effect: PhaserImage };
 
-const START_SCREEN_IMAGE = publicAssetPath("/examples/roguelite/start-screen.png");
+const START_SCREEN_IMAGE = publicAssetPath("/examples/roguelite/start-screen.webp");
 const ROGUELITE_ASSETS = {
-  actors: publicAssetPath("/examples/roguelite/assets/actors.png"),
-  projectiles: publicAssetPath("/examples/roguelite/assets/projectiles.png"),
-  hitEffect: publicAssetPath("/examples/roguelite/assets/hit-effect.png"),
+  actors: publicAssetPath("/examples/roguelite/assets/actors.webp"),
+  projectiles: publicAssetPath("/examples/roguelite/assets/projectiles.webp"),
+  hitEffect: publicAssetPath("/examples/roguelite/assets/hit-effect.webp"),
 } as const;
 const ROGUELITE_TEXTURES = {
   actors: "roguelite-actors",

@@ -27,7 +27,7 @@ type TrackMeta = {
 };
 
 const numberFormatter = new Intl.NumberFormat("ru-RU");
-const posterSrc = publicAssetPath("/examples/likes/track-poster-placeholder.png");
+const posterSrc = publicAssetPath("/examples/likes/track-poster-placeholder.webp");
 
 const trackMetaById: Partial<Record<string, TrackMeta>> = {
   "item-1": {
