@@ -1,82 +1,152 @@
 # lite-fsm
 
-`lite-fsm` — TypeScript-библиотека для описания конечных автоматов и управления состоянием через явные события, состояния и переходы. Базовый runtime не зависит от UI-фреймворков; дополнительные пакеты подключают React, middleware, сохранение состояния и инструменты анализа графа.
+<div
+  style={{
+    display: "flex",
+    flexDirection: "row",
+    flexWrap: "nowrap",
+    gap: "4px",
+    marginBottom: "24px",
+    overflowX: "auto",
+    padding: "4px 0",
+  }}
+>
+  <a href="https://github.com/AlexanderGureev/lite-fsm/actions" target="_blank" rel="noopener noreferrer">
+    <img
+      src="https://github.com/AlexanderGureev/lite-fsm/actions/workflows/deploy-pages.yml/badge.svg"
+      alt="Build Status"
+    />
+  </a>
+  <a href="https://bundlephobia.com/package/@lite-fsm/core" target="_blank" rel="noopener noreferrer">
+    <img src="https://img.shields.io/bundlephobia/minzip/@lite-fsm/core" alt="Bundle Size" />
+  </a>
+  <a href="https://www.npmjs.com/package/@lite-fsm/core" target="_blank" rel="noopener noreferrer">
+    <img src="https://img.shields.io/npm/v/@lite-fsm/core.svg" alt="npm version" />
+  </a>
+  <a href="https://www.npmjs.com/package/@lite-fsm/core" target="_blank" rel="noopener noreferrer">
+    <img src="https://img.shields.io/npm/dm/@lite-fsm/core.svg" alt="npm downloads" />
+  </a>
+  <a href="https://coveralls.io/github/AlexanderGureev/lite-fsm" target="_blank" rel="noopener noreferrer">
+    <img src="https://coveralls.io/repos/github/AlexanderGureev/lite-fsm/badge.svg" alt="Coverage Status" />
+  </a>
+</div>
+
+**lite-fsm** — минималистичная и эффективная библиотека для работы с конечными автоматами в JavaScript и TypeScript проектах. Она помогает структурировать и упорядочить логику приложения через формализацию состояний, событий и переходов между ними.
+
+## О библиотеке
+
+lite-fsm предлагает простой способ создания надёжных и предсказуемых систем через декларативное описание их поведения. В основе библиотеки лежит концепция конечных автоматов — математической модели, позволяющей организовать логику вашего приложения в виде набора состояний и правил перехода между ними.
+
+С помощью lite-fsm вы сможете:
+
+- Структурировать сложную интерактивную логику UI-компонентов
+- Организовывать и контролировать жизненные циклы процессов
+- Упрощать тестирование и отладку кода
+- Создавать прозрачные и понятные потоки управления данными
+- Избегать ошибок, связанных с неучтёнными состояниями
+
+Библиотека специально разработана с фокусом на простоту и производительность, что делает её подходящей как для небольших компонентов, так и для сложных систем.
+
+## Почему конечные автоматы?
+
+- **Ясная логика**: Когда все возможные состояния и переходы определены явно, код становится более читаемым и поддерживаемым
+- **Надёжность**: Нельзя попасть в неопределённое состояние или выполнить недопустимый переход — все варианты учтены на этапе проектирования
+- **Самодокументируемость**: Структура автомата естественным образом документирует поведение компонента или процесса
+- **Снижение сложности**: Даже запутанная бизнес-логика становится более управляемой благодаря разделению на дискретные состояния
+- **Наглядность**: Состояния и переходы явно описаны, их легко визуализировать, что облегчает анализ кода проекта
+- **Лёгкое тестирование**: Полный детерминизм упрощает тестирование
+
+## Ключевые возможности
+
+- **Лаконичный API**: Интуитивно понятный интерфейс без лишних абстракций
+- **Архитектурный фреймворк**: Готовые паттерны для управления состоянием приложения и организации бизнес-логики
+- **Интеграция с React**: Специализированные хуки и компоненты для простого встраивания в React-приложения
+- **Расширяемость через middleware**: Возможность встраивать дополнительную функциональность по аналогии с Redux middleware
+- **Надёжная типизация**: Поддержка TypeScript с выводом типов и проверками на уровне компиляции
+- **Оптимальный размер**: Минимальный вес зависимостей для быстрой загрузки
+- **Поддержка advanced паттернов**: Реализация концепций statecharts для сложных приложений
+- **Прозрачная иммутабельность**: Поддержка reducer-ов в стиле Immer через middleware
 
 ## Быстрый старт
 
-Минимальный runtime:
+### Установка
 
-```bash copy
-pnpm add @lite-fsm/core
-```
-
-С reducer-ами в стиле Immer:
+Runtime-пакеты доступны через npm и другие популярные пакетные менеджеры.
 
 ```bash copy
 pnpm add @lite-fsm/core @lite-fsm/middleware immer
 ```
 
-React-приложение:
-
-```bash copy
-pnpm add @lite-fsm/core @lite-fsm/react @lite-fsm/middleware
-```
+### Пример использования
 
 ```ts showLineNumbers copy
-import { MachineManager, createMachine } from "@lite-fsm/core";
+import { createMachine, MachineManager } from "@lite-fsm/core";
+import { immerMiddleware } from "@lite-fsm/middleware/immer";
 
 const lamp = createMachine({
   config: {
-    OFF: { TURN_ON: "ON", RESET: "OFF" },
-    ON: { TURN_OFF: "OFF", RESET: "OFF" },
+    OFF: {
+      TURN_ON: "ON",
+      RESET: "OFF",
+    },
+    ON: {
+      TURN_OFF: "OFF",
+      RESET: "OFF",
+    },
   },
   initialState: "OFF",
-  initialContext: { toggleCount: 0 },
-  reducer: (slice, action, { nextState }) => ({
-    state: nextState,
-    context: {
-      toggleCount: action.type === "RESET" ? 0 : slice.context.toggleCount + 1,
-    },
-  }),
+  initialContext: {
+    toggleCount: 0,
+  },
+  reducer: (state, action, { nextState }) => {
+    state.state = nextState;
+
+    if (action.type === "RESET") {
+      state.context.toggleCount = 0;
+      return;
+    }
+
+    state.context.toggleCount += 1;
+  },
 });
 
-const manager = MachineManager({ lamp });
+const manager = MachineManager({ lamp }, { middleware: [immerMiddleware] });
+
+manager.onTransition((prev, next, action) => {
+  console.log("[onTransition]", action.type, next.lamp);
+});
 
 manager.transition({ type: "TURN_ON" });
 manager.transition({ type: "TURN_OFF" });
+manager.transition({ type: "RESET" });
 
-manager.getState().lamp;
+const { state, context } = manager.getState().lamp;
 ```
 
-## Пакеты
+> Состояния и события рекомендуем писать в `UPPER_SNAKE_CASE`. Reducer выше использует `immerMiddleware` — это позволяет мутировать `state` напрямую без `return`. Без middleware reducer должен возвращать новый объект `{ state, context }`.
 
-| Пакет | Для чего |
-| --- | --- |
-| [`@lite-fsm/core`](/packages/core) | Машины, manager, effects, actors, snapshots, types |
-| [`@lite-fsm/react`](/packages/react) | React provider, hooks, hydration boundary |
-| [`@lite-fsm/middleware`](/packages/middleware) | Immer и Redux DevTools middleware |
-| [`@lite-fsm/persist`](/packages/persist) | Storage adapters, restore, синхронизация между вкладками |
-| [`@lite-fsm/graph`](/packages/graph) | Graph IR, analyzer, simulator, visualizer model |
-| [`@lite-fsm/cli`](/packages/cli) | Команда `lite-fsm export-graph` для экспорта graph JSON |
+> **React**: Для интеграции lite-fsm с React используйте специализированные хуки и компоненты, описанные в разделе [@lite-fsm/react](/packages/react).
 
-## Основные сценарии
+> **TypeScript**: Если вы используете TypeScript, обязательно ознакомьтесь с разделом [TypeScript](/usage/typescript) для получения информации о строгой типизации и полном использовании возможностей статической проверки типов.
 
-- [Руководство](/guide): базовая модель FSM, effects, actors и hydration.
-- [Пакеты](/packages): какие npm-пакеты подключать для разных сценариев.
-- [API](/api): runtime exports и типы по каждому пакету.
-- [Практика](/usage): TypeScript и Next.js интеграции.
-- [Примеры](/examples): готовые сценарии из playground.
-- [Инструменты](/tools): playground, visualizer и CLI export.
+> **Playground**: Живые примеры с исходниками — sync-машины, async-эффекты, actor-шаблоны и SSR-streaming — доступны в [интерактивном playground](/playground/).
 
-## Когда использовать lite-fsm
+## Куда дальше?
 
-`lite-fsm` хорошо подходит, когда поведение приложения удобнее описать явными состояниями и событиями:
+После ознакомления с основами, вы можете изучить другие разделы документации:
 
-- UI-компоненты с несколькими режимами и недопустимыми переходами;
-- async flows с loading, success, error, cancel и retry;
-- независимые подсистемы, объединенные общим `MachineManager`;
-- динамические actor instances: запросы, задачи, вкладки, элементы списка;
-- SSR/hydration, snapshot restore и persistence;
-- визуальный анализ графа через JSON IR.
-
-Если нужно быстро увидеть поведение вживую, откройте [playground](/playground/). Если нужно разобрать граф проекта, используйте [visualizer](/visualizer/) или [`@lite-fsm/cli`](/packages/cli).
+- [Конечные автоматы](/guide/state-machines): Подробное описание концепций FSM и statecharts
+- [Акторы](/guide/actors): Динамические шаблоны автоматов для параллельных процессов и задач
+- [Hydration и snapshots](/guide/hydration): SSR, snapshot, hydrate/dehydrate и `FSMHydrationBoundary`
+- [Продвинутые концепции](/guide/advanced-concepts): Углублённое изучение возможностей библиотеки
+- [Лучшие практики](/guide/best-practices): Рекомендации по эффективному использованию
+- [Пакеты](/packages): Обзор `@lite-fsm/core`, `@lite-fsm/react`, `@lite-fsm/middleware`, `@lite-fsm/persist`, `@lite-fsm/graph` и `@lite-fsm/cli`
+- [@lite-fsm/react](/packages/react): Руководство по интеграции с React-приложениями
+- [Практика](/usage): TypeScript и Next.js интеграции
+- [API](/api): Полная документация по всем функциям и параметрам
+- [@lite-fsm/middleware](/packages/middleware): Расширение функциональности с помощью промежуточных обработчиков
+- [@lite-fsm/persist](/packages/persist): Долговременное хранение состояния `MachineManager` и синхронизация между вкладками
+- [Инструменты](/tools): Playground, visualizer и CLI export
+- [Сравнение](/comparison): Сравнение lite-fsm с другими решениями для управления состоянием
+- [Примеры](/examples): Готовые решения типовых задач и паттерны использования
+- [Playground](/playground/): Интерактивные демо на Next.js с подсветкой переходов FSM
