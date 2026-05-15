@@ -1,6 +1,8 @@
 # @lite-fsm/cli
 
-`@lite-fsm/cli` предоставляет команду `lite-fsm` для работы с графом машин из терминала. В alpha-версии основной сценарий — экспортировать project graph JSON из TypeScript entrypoint и открыть его в visualizer-е.
+`@lite-fsm/cli` предоставляет команду `lite-fsm` для работы с проектом из терминала. В alpha-версии пакет решает одну основную задачу: строит JSON-файл с графом машин `lite-fsm` по TypeScript-файлам проекта.
+
+CLI использует `@lite-fsm/graph`: находит `MachineManager`, определяет машины, переданные в этот менеджер, строит граф состояний, переходов, reducer-веток, событий effects и сохраняет результат в файл. Команда не запускает приложение и не выполняет пользовательский код.
 
 Пакет находится в alpha-версии.
 
@@ -10,27 +12,210 @@
 pnpm add -D @lite-fsm/cli @lite-fsm/graph
 ```
 
+После установки доступна команда `lite-fsm`.
+
 ## Команда export-graph
 
 ```bash copy
 lite-fsm export-graph --entry store/index.ts --out lite-fsm.graph.json --tsconfig tsconfig.json
 ```
 
-`--entry` должен указывать на TypeScript entrypoint, где виден выбранный `MachineManager(...)`. `--out` записывает JSON-файл. Stdout JSON через `--out -` не поддерживается.
+`export-graph` строит проектный граф и записывает JSON-файл. Это основной способ подготовить данные для визуализатора, проверок и собственных инструментов анализа.
 
-## Source overlay
+Команда принимает входной TypeScript-файл, ищет в нем выбранный `MachineManager(...)`, затем проходит по импортам, которые нужны для машин этого менеджера.
+
+## Минимальный пример
+
+```ts copy
+// store/index.ts
+import { MachineManager, createMachine } from "@lite-fsm/core";
+
+export const lamp = createMachine({
+  config: {
+    off: { SWITCH: "on" },
+    on: { SWITCH: "off" },
+  },
+  initialState: "off",
+  initialContext: {},
+});
+
+export const manager = MachineManager({ lamp });
+```
+
+```bash copy
+lite-fsm export-graph --entry store/index.ts --out lite-fsm.graph.json
+```
+
+Результат будет записан в `lite-fsm.graph.json`.
+
+## Опции
+
+| Опция               | Обязательна | Назначение                                                         |
+| ------------------- | ----------- | ------------------------------------------------------------------ |
+| `--entry <path>`    | Да          | Входной TypeScript-файл, где виден выбранный `MachineManager(...)` |
+| `--out <path>`      | Да          | Путь к JSON-файлу, который нужно записать                          |
+| `--tsconfig <path>` | Нет         | Явный `tsconfig.json` для разрешения импортов                      |
+| `--include-source`  | Нет         | Добавить исходный текст найденных файлов в JSON                    |
+
+Значение `--out -` не поддерживается. Здесь `-` — это не пустой путь, а специальное значение, которое в некоторых CLI означает «вывести результат в терминал». `lite-fsm export-graph` так не работает: передайте обычный путь к файлу, например `--out lite-fsm.graph.json`.
+
+## Входной файл
+
+`--entry` указывает на файл, от которого начинается обход проекта. Обычно это файл, где создается основной `MachineManager`.
+
+Поддерживаемый вариант:
+
+```ts copy
+import { MachineManager } from "@lite-fsm/core";
+import { auth } from "./machines/auth";
+import { profile } from "./machines/profile";
+
+export const manager = MachineManager({
+  auth,
+  profile,
+});
+```
+
+CLI ожидает, что карта машин в `MachineManager` читается статически: через объект, локальную константу, поддерживаемые именованные импорты или повторные экспорты. Если карта строится динамически, команда вернет диагностику и не будет притворяться, что граф полный.
+
+На этом этапе проектный обход рассчитан на `.ts` файлы. Импорты с неподдерживаемым расширением попадают в диагностику.
+
+## Работа с tsconfig
+
+```bash copy
+lite-fsm export-graph --entry src/store/index.ts --out graph.json --tsconfig tsconfig.json
+```
+
+Если `--tsconfig` передан явно, CLI использует именно этот файл. Если файл не найден или содержит ошибку, команда завершится с ошибкой.
+
+Если `--tsconfig` не передан, CLI ищет ближайший `tsconfig.json` от папки входного файла вверх по дереву каталогов. Если файл найден, команда использует его `compilerOptions`, включая `baseUrl` и `paths`.
+
+Если `tsconfig.json` не найден, CLI использует настройки разрешения импортов по умолчанию и добавляет информационную диагностику `LFC_TSCONFIG_NOT_FOUND` в итоговый JSON.
+
+## Включение исходников
 
 ```bash copy
 lite-fsm export-graph --entry store/index.ts --out lite-fsm.graph.json --include-source
 ```
 
-`--include-source` добавляет в export document `sources.files[]` с исходным текстом найденных project files. Это удобно для visualizer overlay, но для публичных артефактов лучше включать опцию осознанно.
+Без `--include-source` JSON содержит только граф, список найденных файлов, их роли и хеши. Исходный текст файлов в результат не попадает.
 
-## Output
+С `--include-source` команда добавляет `sources.files[]`:
 
-Формат export document: `lite-fsm.project-graph-export/v1`.
+```json copy
+{
+  "sources": {
+    "files": [
+      {
+        "fileName": "store/index.ts",
+        "language": "ts",
+        "hash": "abc",
+        "text": "import { MachineManager } from \"@lite-fsm/core\";"
+      }
+    ]
+  }
+}
+```
 
-Top-level `diagnostics` содержит CLI diagnostics с кодами `LFC_*`. Diagnostics компилятора остаются внутри `graph.diagnostics`, чтобы инструменты могли отдельно показывать проблемы запуска CLI и проблемы анализа машин.
+Эта опция полезна для интерфейсов, которые показывают граф вместе с исходным кодом. Для публичных артефактов включайте ее осознанно: JSON будет содержать текст файлов проекта.
+
+## Формат результата
+
+Формат JSON-файла: `lite-fsm.project-graph-export/v1`.
+
+```ts copy
+type LiteFsmProjectGraphExportDocument = {
+  version: "lite-fsm.project-graph-export/v1";
+  createdBy: {
+    package: "@lite-fsm/cli";
+    version: string;
+  };
+  entry: {
+    path: string;
+    tsconfigPath?: string;
+  };
+  graph: LiteFsmGraphDocument;
+  files: LiteFsmGraphProjectFile[];
+  diagnostics: CliDiagnostic[];
+  sources?: LiteFsmProjectGraphSourceBundle;
+};
+```
+
+Основные поля:
+
+- `version` — версия формата экспортируемого документа.
+- `createdBy` — пакет и версия CLI, который создал файл.
+- `entry` — входной файл и использованный `tsconfig`, если он был найден или передан явно.
+- `graph` — граф `@lite-fsm/graph` с машинами, менеджерами, переходами и diagnostics компилятора.
+- `files` — найденные файлы проекта, их роли и хеши.
+- `diagnostics` — сообщения CLI.
+- `sources` — исходный текст файлов, только если передан `--include-source`.
+
+JSON записывается в стабильном порядке ключей и заканчивается переводом строки. Это удобно для сравнения файлов в тестах и проверках.
+
+## Роли файлов
+
+`files[]` показывает, зачем файл попал в граф:
+
+| Роль      | Значение                                     |
+| --------- | -------------------------------------------- |
+| `entry`   | входной файл из `--entry`                    |
+| `machine` | файл с найденной машиной                     |
+| `barrel`  | файл с повторными экспортами                 |
+| `helper`  | файл с локальной оберткой над API `lite-fsm` |
+
+Роли помогают визуализатору и собственным инструментам объяснить, откуда взялась каждая машина.
+
+## Диагностика
+
+Диагностика CLI использует коды `LFC_*` и находится в верхнем поле `diagnostics`.
+
+Диагностика компилятора графа использует коды `LFG_*` и остается внутри `graph.diagnostics`. При выводе в терминал команда показывает оба набора сообщений, но в JSON они разделены.
+
+Такое разделение важно:
+
+- `diagnostics` описывает запуск CLI: параметры, `tsconfig`, чтение файлов, запись результата.
+- `graph.diagnostics` описывает сам граф: неподдержанные формы кода, проблемы поиска машин, ошибки компиляции графа.
+
+Коды CLI:
+
+| Код                                 | Значение                                        |
+| ----------------------------------- | ----------------------------------------------- |
+| `LFC_INVALID_OPTIONS`               | неверные или неполные параметры команды         |
+| `LFC_TSCONFIG_NOT_FOUND`            | `tsconfig.json` не найден                       |
+| `LFC_TSCONFIG_INVALID`              | `tsconfig.json` не прочитан или содержит ошибку |
+| `LFC_GRAPH_PROJECT_FAILED`          | граф проекта не удалось построить               |
+| `LFC_NO_MACHINES_EXPORTED`          | в графе нет машин, подключенных к менеджеру     |
+| `LFC_SOURCE_BUNDLE_FILE_UNREADABLE` | файл нельзя встроить через `--include-source`   |
+| `LFC_WRITE_FAILED`                  | итоговый JSON нельзя записать                   |
+
+## Поведение при ошибках
+
+Команда возвращает код выхода `0`, если нет сообщений с серьезностью `error`.
+
+Команда возвращает код выхода `1`, если есть хотя бы одна ошибка. В этом случае JSON не записывается, если результат был бы неполным или недостоверным.
+
+CLI не пишет частичный JSON, когда:
+
+- не передан `--entry` или `--out`;
+- `--out` равен `-`;
+- явный `--tsconfig` не найден или некорректен;
+- компилятор графа вернул блокирующие diagnostics;
+- в найденном менеджере нет машин;
+- не удалось прочитать файл для `--include-source`;
+- не удалось записать итоговый файл.
+
+## Что использовать дальше
+
+JSON, созданный CLI, можно:
+
+- открыть в визуализаторе;
+- хранить как артефакт проверки;
+- сравнивать в тестах;
+- передавать собственным инструментам анализа;
+- использовать вместе с `@lite-fsm/graph/view-model`.
+
+Для программного построения графа без терминальной команды используйте [`@lite-fsm/graph`](/packages/graph).
 
 ## Связанные разделы
 

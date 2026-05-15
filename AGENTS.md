@@ -8,6 +8,14 @@
 - `@lite-fsm/react`: React-контекст и хуки.
 - `@lite-fsm/middleware`: опциональные интеграции, такие как DevTools и Immer.
 - `@lite-fsm/persist`: persistence helpers.
+- `@lite-fsm/graph`: alpha graph compiler, simulator и view-model helpers для анализа и визуализации FSM.
+- `@lite-fsm/cli`: alpha CLI для project graph exports и интеграции с `@lite-fsm/graph`.
+
+Workspace также содержит приватные приложения:
+
+- `@lite-fsm/docs`: документация на Next/Nextra.
+- `@lite-fsm/playground`: Next playground и demos.
+- `@lite-fsm/visualizer`: Vite/React visualizer для graph tooling.
 
 ## Жесткие правила
 
@@ -43,9 +51,12 @@
 - `packages/react/src/`: React provider, context и hooks.
 - `packages/middleware/src/`: middleware entrypoints и integrations.
 - `packages/persist/src/`: persistence helpers.
-- `packages/graph/`: private/experimental graph tooling workspace.
-- `tests/`: runtime tests, smoke tests и Tstyche type tests.
-- `apps/docs/` и `apps/playground/`: документация и demos.
+- `packages/graph/src/`: graph compiler, analyzer rules, simulator и view-model exports.
+- `packages/cli/src/`: CLI bin, project discovery, graph export и output adapters.
+- `apps/docs/`: Next/Nextra документация.
+- `apps/playground/`: Next playground и demos.
+- `apps/visualizer/`: Vite/React visualizer, canvas/workbench UI и e2e tests.
+- `tests/`: runtime tests, smoke tests, CLI/graph fixtures и Tstyche type tests.
 
 ## Команды
 

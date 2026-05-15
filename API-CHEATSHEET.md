@@ -15,6 +15,7 @@
 | `@lite-fsm/graph`                                              | alpha: `compileLiteFsmGraph`, `compileLiteFsmGraphProject`, `selectMachineGraph`, `analyzeLiteFsmGraph` и IR-типы для graph tooling                |
 | `@lite-fsm/graph/simulator`                                    | alpha: `createGraphSimulator`, `createMachineGraphSimulator` для headless symbolic simulation поверх graph IR                                      |
 | `@lite-fsm/graph/view-model`                                   | alpha: `buildGraphVisualizerModel`, `buildMachineWorkbenchModel`, `buildMachineFlowModel` для read-only visualizer projections                     |
+| `@lite-fsm/cli`                                                | alpha binary `lite-fsm`; JS runtime entrypoint не публикуется                                                                                      |
 |                                                                |
 
 `@lite-fsm/react` помечен `"use client"`. Импортировать можно из SSR/RSC, hooks/provider — только в client tree.
@@ -28,6 +29,7 @@ const result = compileLiteFsmGraph(source, {
   filename: "machine.ts",
   parser: "static",
 });
+const document = result.document;
 
 const project = compileLiteFsmGraphProject({
   entryFileName: "/repo/store/index.ts",
@@ -36,14 +38,15 @@ const project = compileLiteFsmGraphProject({
 });
 ```
 
-| API                               | Назначение                                                                                                         |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `compileLiteFsmGraph(src)`        | строит `LiteFsmGraphDocument`; компилирует machines/managers, refs, config/reducer transitions и effect emissions  |
-| `compileLiteFsmGraphProject(opts)` | синхронно строит project graph из entrypoint через `LiteFsmGraphProjectHost`, не читая filesystem из graph package |
-| `selectMachineGraph(doc, sel?)`   | выбирает одну machine по `index`, `id`, `variableName`, `exportName`, `managerKey` или `{ managerId, managerKey }` |
-| `analyzeLiteFsmGraph(doc, opts?)` | запускает semantic analyzer поверх готового IR; возвращает отдельные diagnostics `LFG_ANALYZER_*`                  |
-| `LiteFsmGraphDocument`            | универсальный IR для будущих визуализаторов, CLI, analyzer-а и simulator-а                                         |
-| `GraphDiagnostic`                 | diagnostic как часть результата; compiler не должен падать на частично неподдержанном коде                         |
+| API                                | Назначение                                                                                                                     |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `compileLiteFsmGraph(src, opts?)`  | возвращает `LiteFsmGraphResult`; компилирует machines/managers, refs, config/reducer transitions и effect emissions            |
+| `compileLiteFsmGraphProject(opts)` | возвращает `LiteFsmGraphProjectResult` с `document`, `diagnostics` и discovered `files`; filesystem остается за host/CLI-слоем |
+| `selectMachineGraph(doc, sel?)`    | выбирает одну machine по `index`, `id`, `variableName`, `exportName`, `managerKey` или `{ managerId, managerKey }`             |
+| `analyzeLiteFsmGraph(doc, opts?)`  | запускает semantic analyzer поверх готового IR; возвращает отдельные diagnostics `LFG_ANALYZER_*`                              |
+| `LiteFsmGraphDocument`             | универсальный IR для visualizer-а, CLI, analyzer-а и simulator-а                                                               |
+| `LiteFsmGraphProjectFile`          | metadata project-файла: exported `fileName`, `language: "ts"`, `roles`, `hash`                                                 |
+| `GraphDiagnostic`                  | diagnostic как часть результата; compiler не должен падать на частично неподдержанном коде                                     |
 
 Reducer branches в graph IR символические: compiler сохраняет `reducerCases` и отдельные `GraphTransition` со слоем `"reducer"`, не проверяя consistency с `config`. Effect emissions сохраняются как `GraphEmission`: это suggested events при входе в state, а не state transitions.
 
@@ -51,22 +54,32 @@ Reducer branches в graph IR символические: compiler сохраня
 
 ## Alpha CLI
 
-`@lite-fsm/cli` предоставляет binary `lite-fsm` для tooling-сценариев. В MVP публичная поверхность CLI — команда export, а не runtime import.
+`@lite-fsm/cli` предоставляет binary `lite-fsm` для tooling-сценариев. Публичная поверхность CLI — команда export и JSON contract, а не runtime import.
 
 ```bash
 lite-fsm export-graph --entry store/index.ts --out lite-fsm.graph.json --tsconfig tsconfig.json
 lite-fsm export-graph --entry store/index.ts --out lite-fsm.graph.json --include-source
 ```
 
-| Command              | Назначение                                                                                                      |
-| -------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `lite-fsm export-graph` | строит project graph через public `compileLiteFsmGraphProject` и пишет JSON export document для visualizer-а |
-| `--entry <path>`     | обязательный TypeScript entrypoint с выбранным `MachineManager(...)`                                            |
-| `--out <path>`       | обязательный output file; stdout JSON (`--out -`) не поддерживается                                             |
-| `--tsconfig <path>`  | optional explicit tsconfig для TypeScript module resolution                                                     |
-| `--include-source`   | opt-in: добавляет top-level `sources.files[]` с текстом discovered project files для static source overlay      |
+| Command                  | Назначение                                                                                                      |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| `lite-fsm export-graph`  | строит project graph через public `compileLiteFsmGraphProject` и пишет JSON export document для visualizer-а   |
+| `--entry <path>`         | обязательный TypeScript entrypoint с выбранным top-level `MachineManager(...)`                                  |
+| `--out <path>`           | обязательный output file; stdout JSON (`--out -`) не поддерживается                                             |
+| `--tsconfig <path>`      | optional explicit tsconfig; без него CLI ищет ближайший `tsconfig.json`, затем fallback к default TS resolution |
+| `--include-source`       | opt-in: добавляет top-level `sources.files[]` с текстом discovered project files для static source overlay      |
 
-Export format version: `lite-fsm.project-graph-export/v1`. Top-level `diagnostics` содержит только CLI diagnostics `LFC_*`; compiler diagnostics остаются внутри `graph.diagnostics`. По умолчанию JSON export не содержит исходный source text; `--include-source` добавляет его вне `graph`.
+| Export document field | Назначение                                                                                       |
+| --------------------- | ------------------------------------------------------------------------------------------------ |
+| `version`             | `"lite-fsm.project-graph-export/v1"`                                                             |
+| `createdBy`           | `{ package: "@lite-fsm/cli", version }`                                                          |
+| `entry`               | display path entrypoint-а и optional `tsconfigPath`                                               |
+| `graph`               | `LiteFsmGraphDocument` из `compileLiteFsmGraphProject(...).document`                              |
+| `files`               | discovered project files из `LiteFsmGraphProjectResult.files`: path, language, roles и hash       |
+| `diagnostics`         | только CLI diagnostics `LFC_*`; graph compiler diagnostics остаются в `graph.diagnostics`         |
+| `sources`             | optional bundle из `--include-source`; хранит source `text` вне `graph`                           |
+
+CLI не пишет export, если опции невалидны, tsconfig не читается, graph compile вернул blocking diagnostics, manager не содержит resolved machine refs или output file нельзя записать. По умолчанию JSON export не содержит исходный source text; `--include-source` добавляет его вне `graph`.
 
 ## Alpha graph simulator
 

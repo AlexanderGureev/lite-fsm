@@ -14,6 +14,7 @@
 | `@lite-fsm/graph`         | alpha graph compiler/analyzer IR-типы                                                                                                                                                                                                                              |
 | `@lite-fsm/graph/simulator` | alpha simulator-типы: snapshots, slices, timeline, choices, available transitions, suggested emissions                                                                                                                                                            |
 | `@lite-fsm/graph/view-model` | alpha visualizer projection-типы: summaries, topics, workbench rows, anchors, row mappings, overlay inputs, Machine Flow Model                                                                                                                                   |
+| `@lite-fsm/cli`           | public TS entrypoint не публикуется; типовой contract CLI — JSON export document `lite-fsm.project-graph-export/v1`                                                                                                                                                |
 |                           |
 
 ## Generics
@@ -344,40 +345,46 @@ const analysis = analyzeLiteFsmGraph(document, { strict: true });
 const snapshot: GraphSimulationSnapshot | undefined = createGraphSimulator(document).getSnapshot();
 ```
 
-| Тип                          | Форма                                                                                                                                                                               |
-| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `LiteFsmGraphResult`         | `{ document: LiteFsmGraphDocument; diagnostics: GraphDiagnostic[] }`                                                                                                                |
-| `LiteFsmGraphProjectResult`  | `LiteFsmGraphResult & { files: LiteFsmGraphProjectFile[] }` для project graph compiler                                                                                              |
-| `GraphAnalysisResult`        | `{ diagnostics: GraphDiagnostic[] }` для semantic analyzer-а                                                                                                                        |
-| `LiteFsmGraphDocument`       | `{ version, source, machines, managers, diagnostics }`                                                                                                                              |
-| `GraphSource`                | `{ filename?, language, hash?, kind?, entryFileName?, files? }`; project mode использует `kind: "project"` и file-aware metadata                                                     |
-| `GraphSourceFile`            | `{ fileName, language, hash? }` для source files внутри project document                                                                                                            |
-| `LiteFsmGraphManager`        | manager metadata плюс `machineRefs: { key, machineId, loc? }[]`                                                                                                                     |
-| `LiteFsmGraphMachine`        | machine metadata плюс `states`, `transitions`, `emissions`, `reducerCases`, `initialContextSummary`, `initialContextJson?`                                                          |
-| `GraphJsonValue/Object`      | JSON-safe values для graph IR, simulator payload и initial context overrides                                                                                                          |
-| `GraphTransition`            | accepted event edge слоя `config` или `reducer`                                                                                                                                     |
-| `GraphReducerCase`           | symbolic reducer branch: event, guard, state-write targets, confidence                                                                                                              |
-| `GraphEmission`              | событие, которое может отправить effect при входе в state; не является transition                                                                                                   |
-| `GraphRouting`               | routing emission-а: `default`, `unscoped`, `actor`, `group`, `tag` или `unknown`                                                                                                    |
-| `GraphRoutingTarget`         | literal, array, `self.actorId/groupId/groupTag` или dynamic routing target                                                                                                          |
-| `GraphDiagnostic`            | `{ code, severity, message, machineId?, loc? }`                                                                                                                                     |
-| `SourceLocation`             | `{ fileName?, start, end }`; `fileName` заполняется в project mode                                                                                                                  |
-| `MachineSelector`            | `{ index }`, `{ id }`, `{ variableName }`, `{ exportName }`, `{ managerKey }` или `{ managerId, managerKey }`                                                                       |
-| `SelectMachineGraphResult`   | success `{ ok: true, machine, diagnostics }` или failure `{ ok: false, candidates, diagnostics }`                                                                                   |
-| `CompileLiteFsmGraphOptions` | `{ filename?, language?, parser?: "static", maxMachines? }`                                                                                                                         |
-| `CompileLiteFsmGraphProjectOptions` | `{ entryFileName, projectRoot?, host }`; host владеет чтением source и module resolution                                                                                     |
-| `LiteFsmGraphProjectHost`    | `{ readSource(fileName), resolveModule({ fromFileName, moduleSpecifier }) }`                                                                                                        |
-| `LiteFsmGraphProjectModuleResolution` | discriminated union `resolved`/`core`/`external`/`not-found`/`unsupported-extension`                                                                                 |
-| `LiteFsmGraphProjectFile`    | `{ fileName, language: "ts", roles, hash }`; roles: `entry`, `machine`, `barrel`, `helper`                                                                                         |
-| `AnalyzeLiteFsmGraphOptions` | `{ rules?: GraphAnalysisRuleId[], strict?: boolean, scope?: GraphAnalysisScope }`                                                                                                   |
-| `GraphAnalysisScope`         | `{ kind: "document" }`, `{ kind: "machine", machineId }` или `{ kind: "manager", managerId }`                                                                                       |
-| `GraphAnalysisRuleId`        | analyzer rule union: `unknown-target`, `unreachable-state`, `dead-end-state`, `actor-template-shape`, `reducer-config-consistency`, `effect-event-acceptance`, `wildcard-shadowing` |
+| Тип                                  | Форма                                                                                                                                                                               |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LiteFsmGraphResult`                 | `{ document: LiteFsmGraphDocument; diagnostics: GraphDiagnostic[] }`                                                                                                                |
+| `LiteFsmGraphProjectResult`          | `LiteFsmGraphResult & { files: readonly LiteFsmGraphProjectFile[] }` для project graph compiler                                                                                     |
+| `GraphAnalysisResult`                | `{ diagnostics: GraphDiagnostic[] }` для semantic analyzer-а                                                                                                                        |
+| `LiteFsmGraphDocument`               | `{ version: "lite-fsm.graph/v1", source, machines, managers, diagnostics }`                                                                                                        |
+| `GraphLanguage`                      | `"ts" \| "tsx" \| "js" \| "jsx" \| "unknown"`                                                                                                                                     |
+| `GraphSource`                        | `{ filename?, language, hash?, kind?, entryFileName?, files? }`; project mode использует `kind: "project"` и file-aware metadata                                                     |
+| `GraphSourceFile`                    | `{ fileName, language, hash? }` для source files внутри project document                                                                                                            |
+| `LiteFsmGraphManager`                | manager metadata плюс `machineRefs: { key, machineId, loc? }[]`                                                                                                                     |
+| `LiteFsmGraphMachine`                | machine metadata плюс `kind`, `states`, `transitions`, `emissions`, `reducerCases`, `initialContextSummary`, `initialContextJson?`, `persistence?`                                  |
+| `GraphState`                         | state metadata: `key`, `kind`, `isInitial`, `isPublicActorState`, optional `loc`                                                                                                    |
+| `GraphStateRef` / `GraphEventRef`    | symbolic refs для source state и event type без привязки к runtime union                                                                                                            |
+| `GraphJsonValue/Object`              | JSON-safe values для graph IR, simulator payload и initial context overrides                                                                                                        |
+| `GraphTarget`                        | target union: concrete state, self, actor terminal, dynamic, blocked или unknown                                                                                                    |
+| `GraphTransition`                    | accepted event edge слоя `config` или `reducer`                                                                                                                                     |
+| `GraphReducerCase`                   | symbolic reducer branch: event, guard, state-write targets, confidence                                                                                                              |
+| `GraphEmission`                      | событие, которое может отправить effect при входе в state; не является transition                                                                                                   |
+| `GraphRouting`                       | routing emission-а: `default`, `unscoped`, `actor`, `group`, `tag` или `unknown`                                                                                                    |
+| `GraphRoutingTarget`                 | literal, array, `self.actorId/groupId/groupTag` или dynamic routing target                                                                                                          |
+| `GraphCondition`                     | captured guard/branch condition: text, kind и optional source location                                                                                                              |
+| `GraphValueSummary`                  | summary для initial context или dynamic values: `empty`, `literal`, `object`, `array`, `external`, `dynamic`, `unknown`                                                             |
+| `GraphDiagnostic`                    | `{ code, severity, message, machineId?, loc? }`                                                                                                                                     |
+| `SourceLocation`                     | `{ fileName?, start, end }`; `fileName` заполняется в project mode                                                                                                                  |
+| `MachineSelector`                    | `{ index }`, `{ id }`, `{ variableName }`, `{ exportName }`, `{ managerKey }` или `{ managerId, managerKey }`                                                                       |
+| `SelectMachineGraphResult`           | success `{ ok: true, machine, diagnostics }` или failure `{ ok: false, candidates, diagnostics }`                                                                                   |
+| `CompileLiteFsmGraphOptions`         | `{ filename?, language?, parser?: "static", maxMachines? }`                                                                                                                         |
+| `CompileLiteFsmGraphProjectOptions`  | `{ entryFileName, projectRoot?, host }`; host владеет чтением source и module resolution                                                                                            |
+| `LiteFsmGraphProjectHost`            | `{ readSource(fileName), resolveModule({ fromFileName, moduleSpecifier }) }`                                                                                                        |
+| `LiteFsmGraphProjectModuleResolution` | discriminated union `resolved`/`core`/`external`/`not-found`/`unsupported-extension`                                                                                                |
+| `LiteFsmGraphProjectFile`            | `{ fileName, language: "ts", roles, hash }`; roles: `entry`, `machine`, `barrel`, `helper`                                                                                         |
+| `AnalyzeLiteFsmGraphOptions`         | `{ rules?: GraphAnalysisRuleId[], strict?: boolean, scope?: GraphAnalysisScope }`                                                                                                   |
+| `GraphAnalysisScope`                 | `{ kind: "document" }`, `{ kind: "machine", machineId }` или `{ kind: "manager", managerId }`                                                                                       |
+| `GraphAnalysisRuleId`                | analyzer rule union: `unknown-target`, `unreachable-state`, `dead-end-state`, `actor-template-shape`, `reducer-config-consistency`, `effect-event-acceptance`, `wildcard-shadowing` |
 
 `LiteFsmGraphDocument.diagnostics` содержит compiler diagnostics. Diagnostics analyzer-а возвращаются отдельно из `GraphAnalysisResult` и имеют коды `LFG_ANALYZER_*`.
 
 ## CLI project graph export document
 
-`lite-fsm export-graph` пишет versioned JSON envelope для передачи project graph document в visualizer без повторного compile source.
+`lite-fsm export-graph` пишет versioned JSON envelope для передачи project graph document в visualizer без повторного compile source. `@lite-fsm/cli` не публикует public TS entrypoint, поэтому типы ниже описывают JSON contract, а не импортируемые exports пакета.
 
 ```ts
 type LiteFsmProjectGraphExportDocument = {
@@ -385,10 +392,10 @@ type LiteFsmProjectGraphExportDocument = {
   createdBy: { package: "@lite-fsm/cli"; version: string };
   entry: { path: string; tsconfigPath?: string };
   graph: LiteFsmGraphDocument;
-  files: LiteFsmGraphProjectFile[];
-  diagnostics: CliDiagnostic[];
+  files: readonly LiteFsmGraphProjectFile[];
+  diagnostics: readonly CliDiagnostic[];
   sources?: {
-    files: Array<{
+    files: ReadonlyArray<{
       fileName: string;
       language: "ts";
       hash: string;
@@ -404,7 +411,7 @@ type LiteFsmProjectGraphExportDocument = {
 | `entry.tsconfigPath` | присутствует только если CLI использовал explicit или nearest tsconfig                       |
 | `graph`           | ровно `compileLiteFsmGraphProject(...).document`; `graph.diagnostics` хранит `LFG_*` diagnostics |
 | `files`           | ровно `compileLiteFsmGraphProject(...).files`                                                    |
-| `diagnostics`     | только CLI diagnostics `LFC_*`, показанные во время command execution                            |
+| `diagnostics`     | только CLI diagnostics `LFC_*`; graph diagnostics печатаются командой, но в JSON остаются внутри `graph.diagnostics` |
 | `sources`         | optional `--include-source` bundle; порядок и metadata совпадают с `files`, `text` не входит в `graph` |
 
 `CliDiagnostic` имеет форму `{ code, severity, message, file?, loc?, hint? }`, где `severity` — `"info" | "warning" | "error"`, а code в MVP: `LFC_INVALID_OPTIONS`, `LFC_TSCONFIG_NOT_FOUND`, `LFC_TSCONFIG_INVALID`, `LFC_GRAPH_PROJECT_FAILED`, `LFC_NO_MACHINES_EXPORTED`, `LFC_SOURCE_BUNDLE_FILE_UNREADABLE`, `LFC_WRITE_FAILED`.

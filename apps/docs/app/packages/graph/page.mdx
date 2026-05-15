@@ -1,6 +1,8 @@
 # @lite-fsm/graph
 
-`@lite-fsm/graph` строит статическое представление lite-fsm машин: JSON IR, связи между machines/managers, diagnostics, simulator input и read-only view-model для visualizer-а. Пакет не исполняет пользовательские reducer-ы и effects.
+`@lite-fsm/graph` строит статическое описание машин `lite-fsm`. Пакет читает TypeScript-код, находит `createMachine` и `MachineManager`, собирает граф состояний, переходов, событий, эффектов и связей между машинами.
+
+Пакет нужен для анализа, визуализации, автоматических проверок и инструментов для конечных автоматов. Он не запускает приложение, не вызывает пользовательские `reducer`, `effect` и `guard`-условия и не выполняет пользовательский код.
 
 Пакет находится в alpha-версии.
 
@@ -10,7 +12,7 @@
 pnpm add -D @lite-fsm/graph
 ```
 
-## Entry points
+## Импорты
 
 ```ts copy
 import {
@@ -24,33 +26,111 @@ import { createGraphSimulator } from "@lite-fsm/graph/simulator";
 import { buildGraphVisualizerModel } from "@lite-fsm/graph/view-model";
 ```
 
-| Entry point | Что дает |
-| --- | --- |
-| `@lite-fsm/graph` | Compiler, project compiler, selector, analyzer и IR-типы |
-| `@lite-fsm/graph/simulator` | Headless symbolic simulation поверх graph document |
-| `@lite-fsm/graph/view-model` | Projection для visualizer/workbench без React или DOM state |
+| Импорт                       | Назначение                                                                     |
+| ---------------------------- | ------------------------------------------------------------------------------ |
+| `@lite-fsm/graph`            | Компилятор, компилятор проекта, выбор машины, анализатор и основные типы графа |
+| `@lite-fsm/graph/simulator`  | Симуляция событий поверх готового графа                                        |
+| `@lite-fsm/graph/view-model` | Модель данных для интерфейса визуализации                                      |
 
-## Compiler
+## Что строит пакет
+
+Основной результат работы пакета — `LiteFsmGraphDocument`.
+
+```ts copy
+type LiteFsmGraphDocument = {
+  version: "lite-fsm.graph/v1";
+  source: GraphSource;
+  machines: LiteFsmGraphMachine[];
+  managers: LiteFsmGraphManager[];
+  diagnostics: GraphDiagnostic[];
+};
+```
+
+Документ содержит:
+
+- `machines` — найденные машины, их состояния, переходы, reducer-ветки и события из effects.
+- `managers` — найденные `MachineManager` и ключи, под которыми машины подключены к менеджеру.
+- `diagnostics` — сообщения компилятора о неполном, неоднозначном или неподдержанном коде.
+- `source` — сведения об исходнике: язык, имя файла, список файлов проекта и хеш (`hash`), если он доступен.
+
+`LiteFsmGraphDocument` — обычные данные. Его можно сериализовать в JSON, сохранить в файл, передать в визуализатор или использовать в тестах.
+
+## Общий поток работы
+
+```ts showLineNumbers copy
+import { analyzeLiteFsmGraph, compileLiteFsmGraph } from "@lite-fsm/graph";
+import { createGraphSimulator } from "@lite-fsm/graph/simulator";
+
+const compiled = compileLiteFsmGraph(source, {
+  filename: "store/machines/order.ts",
+});
+
+const analysis = analyzeLiteFsmGraph(compiled.document);
+
+const simulator = createGraphSimulator(compiled.document);
+const started = simulator.start();
+
+if (!started.ok) {
+  console.log(started.diagnostics);
+}
+
+console.log(compiled.document.machines);
+console.log(analysis.diagnostics);
+```
+
+Обычно работа делится на три шага:
+
+1. Компилятор строит граф из исходного кода.
+2. Анализатор проверяет готовый граф и возвращает дополнительные сообщения.
+3. Симулятор помогает пройти по событиям и посмотреть, какие переходы сработают.
+
+## Компилятор одного файла
+
+`compileLiteFsmGraph(source, options?)` принимает строку с исходным кодом и возвращает `LiteFsmGraphResult`.
 
 ```ts showLineNumbers copy
 import { compileLiteFsmGraph } from "@lite-fsm/graph";
 
 const result = compileLiteFsmGraph(source, {
   filename: "store/machines/toggle.ts",
+  language: "ts",
   parser: "static",
+  maxMachines: 10,
 });
 
-if (result.diagnostics.length === 0) {
-  console.log(result.document.machines);
+for (const machine of result.document.machines) {
+  console.log(machine.id, machine.initialState);
 }
 ```
 
-Compiler сохраняет graph config transitions, reducer branches и effect emissions как read-only данные. Он не проверяет бизнес-логику через выполнение кода, поэтому подходит для visualizer-а, CI diagnostics и offline анализа.
+Компилятор извлекает из статически читаемого кода:
 
-## Project graph
+- состояния из `config`;
+- переходы из `config`;
+- переходы, которые reducer записывает в `state`;
+- события, которые effects отправляют через `transition`;
+- `initialState`;
+- `initialContext` в виде JSON, если значение можно безопасно прочитать;
+- связи между `MachineManager` и машинами;
+- координаты исходного кода для состояний, переходов и сообщений.
+
+Компилятор не исполняет reducer-ы и effects. Если цель перехода или условие зависит от значения времени выполнения, граф получает частичную информацию и диагностическое сообщение. Это поведение важно: анализ остается безопасным и не требует запускать приложение.
+
+## Компилятор проекта
+
+`compileLiteFsmGraphProject(options)` строит граф по входному TypeScript-файлу проекта. Этот режим используется CLI-командой `lite-fsm export-graph`.
 
 ```ts showLineNumbers copy
-import { compileLiteFsmGraphProject } from "@lite-fsm/graph";
+import { compileLiteFsmGraphProject, type LiteFsmGraphProjectHost } from "@lite-fsm/graph";
+
+const host: LiteFsmGraphProjectHost = {
+  readSource(fileName) {
+    return readFile(fileName);
+  },
+  resolveModule({ fromFileName, moduleSpecifier }) {
+    return resolveImport(fromFileName, moduleSpecifier);
+  },
+};
 
 const result = compileLiteFsmGraphProject({
   entryFileName: "/repo/store/index.ts",
@@ -59,20 +139,184 @@ const result = compileLiteFsmGraphProject({
 });
 ```
 
-Project compiler работает через `LiteFsmGraphProjectHost`: пакет не читает файловую систему напрямую. CLI использует этот слой для команды `lite-fsm export-graph`.
+Проектный компилятор работает через `LiteFsmGraphProjectHost`. Сам пакет не читает файловую систему напрямую: вызывающий код передает функции чтения файла и разрешения импортов.
 
-## Analyzer
+Этот режим нужен, когда `MachineManager` находится в одном файле, а машины импортируются из других файлов. Компилятор проходит только по файлам, которые нужны для найденного менеджера, раскрывает поддерживаемые именованные экспорты и собирает список файлов в `result.files`.
+
+`result.files` показывает роль каждого файла:
+
+| Роль      | Значение                                     |
+| --------- | -------------------------------------------- |
+| `entry`   | входной файл проекта                         |
+| `machine` | файл с найденной машиной                     |
+| `barrel`  | файл с повторными экспортами                 |
+| `helper`  | файл с локальной оберткой над API `lite-fsm` |
+
+Если проектный компилятор не может прочитать файл, разрешить импорт или однозначно определить карту машин, он возвращает диагностику вместо исключения.
+
+## Выбор машины
+
+`selectMachineGraph(document, selector?)` выбирает одну машину из готового документа.
+
+```ts showLineNumbers copy
+import { selectMachineGraph } from "@lite-fsm/graph";
+
+const selected = selectMachineGraph(document, {
+  exportName: "orderMachine",
+});
+
+if (selected.ok) {
+  console.log(selected.machine.states);
+} else {
+  console.log(selected.diagnostics);
+}
+```
+
+Машину можно выбрать по `index`, `id`, `variableName`, `exportName`, ключу в менеджере или паре `managerId` + `managerKey`. Если выбор неоднозначен или машина не найдена, функция возвращает `ok: false` и диагностические сообщения.
+
+## Анализатор
+
+`analyzeLiteFsmGraph(document, options?)` запускает проверки поверх уже построенного графа.
 
 ```ts showLineNumbers copy
 import { analyzeLiteFsmGraph } from "@lite-fsm/graph";
 
-const analysis = analyzeLiteFsmGraph(document);
+const analysis = analyzeLiteFsmGraph(document, {
+  rules: ["unknown-target", "unreachable-state", "effect-event-acceptance"],
+  scope: { kind: "document" },
+  strict: true,
+});
+
+for (const diagnostic of analysis.diagnostics) {
+  console.log(diagnostic.code, diagnostic.message);
+}
 ```
 
-Analyzer возвращает diagnostics поверх готового IR. Правила alpha-версии покрывают неизвестные targets, недостижимые состояния, dead-end states, actor template shape, расхождения reducer/config, effect event acceptance и wildcard shadowing.
+Анализатор не меняет `document`. Он возвращает отдельный список сообщений, чтобы инструменты могли показывать ошибки компиляции и результаты анализа раздельно.
+
+Доступные правила:
+
+| Правило                      | Что проверяет                                                                                       |
+| ---------------------------- | --------------------------------------------------------------------------------------------------- |
+| `unknown-target`             | переход или reducer ссылается на неизвестную цель                                                   |
+| `unreachable-state`          | обычное состояние недостижимо из `initialState` по переходам `config`                               |
+| `dead-end-state`             | достижимое обычное состояние не имеет исходящих переходов `config`                                  |
+| `actor-template-shape`       | actor template объявлен без корректного `__INIT`, terminal states или публичных служебных состояний |
+| `reducer-config-consistency` | reducer пишет состояние для события, которое не принимает `config`, или пишет неизвестную цель      |
+| `effect-event-acceptance`    | effect отправляет событие, которое не принимает ни одна машина в выбранной области анализа          |
+| `wildcard-shadowing`         | переход конкретного состояния перекрывает wildcard-переход с тем же событием                        |
+
+По умолчанию анализатор запускает все правила для всего документа. Через `rules` можно оставить только нужные проверки. Через `scope` можно ограничить анализ одной машиной или одним менеджером. В режиме `strict: true` часть сообщений, которые обычно имеют уровень `info`, возвращаются с уровнем `warning`.
+
+## Симулятор
+
+Симулятор работает с готовым `LiteFsmGraphDocument` и показывает, как событие проходит через граф. Он не вызывает пользовательский reducer или effect. Вместо этого он использует данные, которые уже есть в графе: состояния, переходы, события effects и статически известные изменения состояния.
+
+```ts showLineNumbers copy
+import { createMachineGraphSimulator } from "@lite-fsm/graph/simulator";
+
+const simulator = createMachineGraphSimulator(document, "checkout");
+
+const started = simulator.start();
+if (!started.ok) {
+  console.log(started.reason, started.diagnostics);
+}
+
+const result = simulator.send({
+  event: { type: "START", payload: { source: "button" } },
+});
+
+if (result.ok) {
+  console.log(result.snapshot.slices);
+  console.log(result.step.consumed);
+}
+```
+
+Симулятор умеет:
+
+- стартовать документ, менеджер или выбранные машины;
+- возвращать текущий снимок через `getSnapshot()`;
+- показывать доступные переходы через `getAvailableTransitions()`;
+- показывать события, которые могут быть отправлены effects, через `getSuggestedEmissions()`;
+- отправлять внешнее событие через `send()`;
+- отправлять событие из конкретного перехода через `sendFromTransition()`;
+- отправлять событие из конкретного effect через `sendFromEmission()`;
+- фиксировать ручной выбор перехода через `choose()`.
+
+Снимок симуляции содержит `slices`, текущие состояния, контекст, историю шагов, потребленные переходы, предложенные события effects и диагностику. Снимок неизменяемый: его можно безопасно передавать в интерфейс или хранить для сравнения.
+
+Если одно событие подходит сразу под несколько переходов, поведение задает `branchPolicy`:
+
+| Политика                         | Поведение                                                                                                                                                                                      |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `manual`                         | симулятор возвращает `choice-required`, а вызывающий код выбирает переход через `choose()`                                                                                                     |
+| `origin-explicit-default-others` | если событие отправлено из конкретного перехода и у этой же машины есть несколько вариантов, симулятор попросит выбрать вариант вручную; для остальных машин выберет первый подходящий переход |
+| `deterministic-first`            | выбирается первый подходящий переход в стабильном порядке                                                                                                                                      |
+
+Для сложной логики можно передать `evaluationPolicy`. Она позволяет вызывающему коду выбрать переход и обновить контекст без запуска настоящего reducer-а.
+
+## Модель для визуализации
+
+`@lite-fsm/graph/view-model` строит готовые структуры для интерфейсов. Этот слой не зависит от React и DOM.
+
+```ts showLineNumbers copy
+import {
+  buildGraphVisualizerModel,
+  buildMachineFlowModel,
+  buildMachineWorkbenchModel,
+} from "@lite-fsm/graph/view-model";
+
+const model = buildGraphVisualizerModel(document, {
+  analysisDiagnostics: analysis.diagnostics,
+});
+
+const machine = document.machines[0];
+
+if (machine) {
+  const workbench = buildMachineWorkbenchModel(machine);
+  const flow = buildMachineFlowModel({
+    model,
+    machineId: machine.id,
+  });
+}
+```
+
+Модель визуализации включает:
+
+- краткие сведения о машинах и менеджерах;
+- группировку по типам событий: какие машины отправляют событие и какие машины его принимают;
+- строки для состояний, переходов, reducer-веток, effects и диагностики;
+- ссылки на исходный код;
+- наложение данных симуляции: текущее состояние, доступные переходы, предложенные события и недавно выполненные строки.
+
+Этот слой нужен приложениям вроде визуализатора: они получают готовые данные для списков, схем и панели выбранной машины.
+
+## Ограничения
+
+`@lite-fsm/graph` намеренно строит статическую картину. Он не заменяет тесты поведения во время выполнения и не доказывает, что reducer или effect корректно работают при любых данных.
+
+Важно учитывать:
+
+- динамические значения могут быть отмечены как `dynamic`, `unknown` или диагностикой;
+- пользовательский код не выполняется;
+- анализатор проверяет структуру графа, а не бизнес-правила приложения;
+- симулятор работает по данным графа и пользовательским политикам, а не по настоящему коду времени выполнения.
+
+## Когда использовать
+
+Используйте `@lite-fsm/graph`, если нужно:
+
+- экспортировать граф машин в JSON;
+- построить визуализатор или внутренний инструмент анализа;
+- проверить недостижимые состояния и неизвестные цели переходов;
+- изучить, какие события производят effects и какие машины их принимают;
+- написать тесты, которые проверяют структуру машин без запуска приложения;
+- симулировать сценарии переходов на уровне графа.
+
+Для экспорта графа из реального проекта обычно удобнее начать с CLI: [`@lite-fsm/cli`](/packages/cli). Для точного описания сигнатур смотрите [Graph API](/api/graph).
 
 ## Связанные разделы
 
 - [Graph API](/api/graph)
-- [Visualizer](/tools)
+- [Инструменты](/tools)
 - [@lite-fsm/cli](/packages/cli)
