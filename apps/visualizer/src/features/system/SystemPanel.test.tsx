@@ -194,6 +194,11 @@ describe("панель SystemPanel", () => {
     expect(screen.getByTestId(ids.system.detailProducers).getAttribute("data-empty")).toBe("true");
     expect(screen.getByTestId(ids.system.detailConsumers).getAttribute("data-values")).toBe("workerMachine");
 
+    rerender(<SystemPanel view={{ ...view, machineQuery: "", topicQuery: "" }} dispatch={dispatch} />);
+
+    expect(screen.getByText("This event has no related machines.")).toBeTruthy();
+    expect(screen.getByText("This machine has no event topics.")).toBeTruthy();
+
     fireEvent.click(byData<HTMLButtonElement>(ids.system.topicChip, "data-event-type", "workerMachine"));
     fireEvent.click(screen.getByTestId(ids.system.openDiagnostics));
     fireEvent.click(screen.getByTestId(ids.system.openInEvents));

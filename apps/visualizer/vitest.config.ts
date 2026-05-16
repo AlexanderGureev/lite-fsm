@@ -1,8 +1,36 @@
+import type { PluginOption } from "vite";
 import { defineConfig } from "vitest/config";
 import viteConfig from "./vite.config";
 
-export default defineConfig({
+const coverageNoisePluginNames = new Set(["rolldown:babel", "@rolldown/plugin-babel"]);
+
+const withoutCoverageNoisePlugins = async (
+  plugins: readonly PluginOption[] | undefined,
+): Promise<PluginOption[]> => {
+  const nextPlugins: PluginOption[] = [];
+
+  for (const plugin of plugins ?? []) {
+    const resolvedPlugin = await Promise.resolve(plugin);
+    if (!resolvedPlugin) continue;
+
+    if (Array.isArray(resolvedPlugin)) {
+      nextPlugins.push(...(await withoutCoverageNoisePlugins(resolvedPlugin)));
+      continue;
+    }
+
+    if (!coverageNoisePluginNames.has(resolvedPlugin.name)) nextPlugins.push(resolvedPlugin);
+  }
+
+  return nextPlugins;
+};
+
+const testViteConfig = {
   ...viteConfig,
+  plugins: await withoutCoverageNoisePlugins(viteConfig.plugins),
+};
+
+export default defineConfig({
+  ...testViteConfig,
   test: {
     environment: "jsdom",
     globals: true,

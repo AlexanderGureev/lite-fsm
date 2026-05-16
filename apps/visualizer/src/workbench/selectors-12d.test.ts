@@ -314,6 +314,36 @@ describe("12d selectors визуализатора", () => {
     expect(selectSystemPanel(hoveredTopic).machineScope).toBeUndefined();
     expect(selectSystemPanel(hoveredTopic).machines.map((machine) => machine.machineId)).toEqual(["flowMachine", "workerMachine", "auditMachine"]);
 
+    const hoveredTopicWithoutRelations: WorkbenchSnapshot = {
+      ...snapshot,
+      state: {
+        ...snapshot.state,
+        l1: { ...snapshot.state.l1, hoveredTopic: "DONE" },
+        model: { status: "ready", diagnostics: [], model: missingRelations },
+      },
+    };
+    expect(selectSystemPanel(hoveredTopicWithoutRelations).machines).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ machineId: "flowMachine", related: false, dimmed: true }),
+        expect.objectContaining({ machineId: "workerMachine", related: false, dimmed: true }),
+      ]),
+    );
+
+    const hoveredMachineWithoutRelations: WorkbenchSnapshot = {
+      ...snapshot,
+      state: {
+        ...snapshot.state,
+        l1: { ...snapshot.state.l1, hoveredMachineId: "flowMachine" },
+        model: { status: "ready", diagnostics: [], model: missingRelations },
+      },
+    };
+    expect(selectSystemPanel(hoveredMachineWithoutRelations).topics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ eventType: "DONE", related: false, dimmed: true }),
+        expect.objectContaining({ eventType: "DYNAMIC", related: false, dimmed: true }),
+      ]),
+    );
+
     const selectedMachineWithoutRelations: WorkbenchSnapshot = {
       ...snapshot,
       state: {

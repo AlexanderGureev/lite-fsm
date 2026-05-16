@@ -133,13 +133,13 @@ export const SourceOverlay = ({
   const fullAvailable = view.open && Boolean(view.fullSource) && !view.fallback;
   const mode: Mode = desiredMode === "full" && fullAvailable ? "full" : "snippet";
 
-  const handleOpenChange = (open: boolean) => {
-    if (!open) setDesiredMode("snippet");
-    sourceOverlayOpenChange(open, onClose);
+  const handleClose = () => {
+    setDesiredMode("snippet");
+    onClose();
   };
 
   return (
-    <Dialog open={view.open} onOpenChange={handleOpenChange}>
+    <Dialog open={view.open} onOpenChange={(open) => sourceOverlayOpenChange(open, handleClose)}>
       <DialogContent
         className="grid h-[min(860px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[min(1280px,calc(100vw-1.5rem))] max-w-[min(1280px,calc(100vw-1.5rem))] grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden border bg-card p-0 sm:max-w-[min(1280px,calc(100vw-1.5rem))]"
         showCloseButton={false}

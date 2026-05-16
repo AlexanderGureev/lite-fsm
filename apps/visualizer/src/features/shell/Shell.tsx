@@ -15,7 +15,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { machineIdForConsoleEntry, type ConsolePanelView } from "../../console";
+import { machineIdForConsoleEntry, type ConsoleEntry, type ConsolePanelView } from "../../console";
 import { useWorkbenchContext } from "../../app/workbench-context";
 import { useWorkbenchSelector } from "../../app/use-workbench-selector";
 import { EventCatalogPanel } from "../events/EventCatalogPanel";
@@ -97,30 +97,22 @@ const consoleFilterSummary = (consolePanel: ConsolePanelView): string => {
   return filters.length > 0 ? filters.join(" · ") : "all";
 };
 
-const consoleScopeLabel = (consolePanel: ConsolePanelView): string => {
-  const scope = consolePanel.scope;
-  if (!scope) return "";
+const consoleScopeLabel = (scope: NonNullable<ConsolePanelView["scope"]>): string =>
+  `${scope.owner.kind} · ${scope.owner.label}`;
 
-  return `${scope.owner.kind} · ${scope.owner.label}`;
-};
-
-const severityToneClass: Record<string, string> = {
+const severityToneClass: Record<NonNullable<ConsoleEntry["severity"]>, string> = {
   error: "bg-(--vf-danger-soft) text-(--vf-danger) shadow-[inset_0_0_0_1px_var(--vf-danger-border)]",
   warning: "bg-(--vf-warning-soft) text-(--vf-warning) shadow-[inset_0_0_0_1px_var(--vf-warning-border)]",
   info: "bg-(--vf-effect-soft) text-(--vf-effect) shadow-[inset_0_0_0_1px_var(--vf-effect-border)]",
-  blocked: "bg-(--vf-danger-soft) text-(--vf-danger) shadow-[inset_0_0_0_1px_var(--vf-danger-border)]",
-  failed: "bg-(--vf-danger-soft) text-(--vf-danger) shadow-[inset_0_0_0_1px_var(--vf-danger-border)]",
 };
 
-const severityDotClass: Record<string, string> = {
+const severityDotClass: Record<NonNullable<ConsoleEntry["severity"]>, string> = {
   error: "bg-(--vf-danger) shadow-[0_0_4px_var(--vf-danger)]",
   warning: "bg-(--vf-warning)",
   info: "bg-(--vf-effect)",
-  blocked: "bg-(--vf-danger) shadow-[0_0_4px_var(--vf-danger)]",
-  failed: "bg-(--vf-danger) shadow-[0_0_4px_var(--vf-danger)]",
 };
 
-const channelLabelClass: Record<string, string> = {
+const channelLabelClass: Record<ConsoleEntry["channel"], string> = {
   system: "text-(--vf-effect)",
   diagnostics: "text-(--vf-warning)",
   debug: "text-(--vf-routing)",
@@ -256,7 +248,7 @@ const ConsoleSeverityControls = ({ consolePanel, dispatch }: ConsoleSeverityCont
         className={cn(
           "inline-flex h-[26px] shrink-0 items-center gap-1.5 rounded-[5px] px-2.5 font-mono text-[11px] transition-colors duration-(--vf-duration-fast) disabled:opacity-40",
           severity.selected
-            ? cn(severityToneClass[severity.severity] ?? "bg-(--vf-surface-raised) text-foreground", "font-semibold")
+            ? cn(severityToneClass[severity.severity], "font-semibold")
             : "text-(--vf-text-muted) hover:text-foreground",
         )}
       >
@@ -822,14 +814,13 @@ type ConsoleEntryRowProps = {
 const ConsoleEntryRow = ({ entry, selected, dispatch }: ConsoleEntryRowProps) => {
   const machineId = machineIdForConsoleEntry(entry);
   const dotClass = entry.severity ? severityDotClass[entry.severity] : "bg-(--vf-text-quiet)";
-  const channelClass = channelLabelClass[entry.channel] ?? "text-(--vf-text-quiet)";
-  const canViewSource = Boolean(entry.sourceAnchor);
+  const channelClass = channelLabelClass[entry.channel];
+  const sourceAnchor = entry.sourceAnchor;
 
   const selectEntry = () => dispatch({ type: "console.entry.selected", entryId: entry.entryId });
-  const openSource = (event: MouseEvent<HTMLButtonElement>) => {
+  const openSource = (event: MouseEvent<HTMLButtonElement>, anchor: NonNullable<typeof sourceAnchor>) => {
     event.stopPropagation();
-    if (!entry.sourceAnchor) return;
-    dispatch({ type: "source.overlay.opened", title: entry.title, anchors: [entry.sourceAnchor] });
+    dispatch({ type: "source.overlay.opened", title: entry.title, anchors: [anchor] });
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -895,14 +886,14 @@ const ConsoleEntryRow = ({ entry, selected, dispatch }: ConsoleEntryRowProps) =>
           </span>
         ) : null}
       </span>
-      {canViewSource ? (
+      {sourceAnchor ? (
         <Tooltip>
           <TooltipTrigger asChild>
             <button
               type="button"
               aria-label="Open source code"
               data-testid={VISUALIZER_TEST_IDS.console.entryViewSource}
-              onClick={openSource}
+              onClick={(event) => openSource(event, sourceAnchor)}
               className="inline-flex size-7 shrink-0 items-center justify-center self-start rounded-md border border-(--vf-border-soft) bg-(--vf-surface) text-(--vf-text-muted) opacity-0 transition-all duration-(--vf-duration-fast) hover:border-(--vf-accent-border) hover:bg-(--vf-accent-soft) hover:text-(--vf-accent) focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100"
             >
               <FileSearch aria-hidden="true" className="size-3.5" />
@@ -983,8 +974,8 @@ const ConsoleDrawer = ({
               data-diagnostic-count={consolePanel.scope.diagnosticIds.length}
             >
               <span className="font-semibold uppercase tracking-[0.08em]">scope</span>
-              <span className="min-w-0 max-w-full truncate text-foreground" title={consoleScopeLabel(consolePanel)}>
-                {consoleScopeLabel(consolePanel)}
+              <span className="min-w-0 max-w-full truncate text-foreground" title={consoleScopeLabel(consolePanel.scope)}>
+                {consoleScopeLabel(consolePanel.scope)}
               </span>
               <span className="rounded-full bg-black/15 px-1.5 text-[10px] tabular-nums">
                 {consolePanel.scope.diagnosticIds.length}

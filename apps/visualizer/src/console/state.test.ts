@@ -11,11 +11,20 @@ import {
   setConsoleQuery,
   setConsoleScope,
 } from "./state";
-import { createConsoleEntryFromDiagnostic, createSystemConsoleEntry, DEFAULT_CONSOLE_FILTERS } from "./types";
+import { createConsoleEntryFromDiagnostic, createSystemConsoleEntry, DEFAULT_CONSOLE_FILTERS, machineIdForConsoleEntry } from "./types";
 
 describe("состояние консоли", () => {
   it("создает системные и диагностические записи с каналами и целями", () => {
     const diagnostic = createControlledDiagnostic(1, "host", "failed", "Failure");
+    const topicDiagnostic = createConsoleEntryFromDiagnostic({
+      diagnosticId: "analyzer:1:topic",
+      sourceVersion: 1,
+      origin: "analyzer",
+      diagnostic: { code: "topic", severity: "warning", message: "Topic relation issue" },
+      graphItemRef: { kind: "topic", eventType: "DONE" },
+      sourceAnchors: [],
+      primaryTarget: { kind: "graph", ref: { kind: "topic", eventType: "DONE" } },
+    });
 
     expect(createSystemConsoleEntry(1, "open", "Started", "Compiling")).toEqual({
       entryId: "system:1:open",
@@ -35,6 +44,8 @@ describe("состояние консоли", () => {
       severity: "warning",
       target: { kind: "console" },
     });
+    expect(topicDiagnostic.machineId).toBeUndefined();
+    expect(machineIdForConsoleEntry(topicDiagnostic)).toBeUndefined();
   });
 
   it("добавляет line/column label из source anchors или diagnostic loc", () => {

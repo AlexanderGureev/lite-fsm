@@ -189,6 +189,12 @@ describe("оболочка Shell", () => {
     expect(screen.getByTestId(ids.source.status).getAttribute("data-status")).toBe("idle");
     expect(screen.getByTestId(ids.console.entries).getAttribute("data-empty")).toBe("true");
 
+    fireEvent.click(screen.getByTestId(ids.source.inputModeUseSource));
+    expect(store.getSnapshot().state.inputMode.kind).toBe("pasted-source");
+
+    fireEvent.click(screen.getByLabelText("Go to Source · TS input · sample.ts"));
+    expect(store.getSnapshot().state.activeTab).toBe("source");
+
     fireEvent.click(screen.getByTestId(ids.source.open));
     expect(store.getSnapshot().state.compile.status).toBe("running");
 
@@ -301,6 +307,12 @@ describe("оболочка Shell", () => {
   });
 
   it("показывает JSON loaded card после импорта и скрывает редактор", async () => {
+    const projectExportWithSources = {
+      ...projectExportDocument,
+      sources: {
+        files: [{ fileName: "store/index.ts", language: "ts" as const, hash: "abc", text: "export const value = 1;" }],
+      },
+    };
     const services: EffectRunnerServices = {
       compiler: { compile: vi.fn(async (input) => ({ ok: true as const, sourceVersion: input.sourceVersion, document: projectExportDocument.graph as never, diagnostics: [] })) },
       analyzer: { analyze: vi.fn(async (input) => ({ ok: true as const, sourceVersion: input.sourceVersion, diagnostics: [] })) },
@@ -313,7 +325,7 @@ describe("оболочка Shell", () => {
     const store = renderShell(createInitialWorkbenchSnapshot(), services);
 
     fireEvent.change(screen.getByTestId(ids.source.projectExportFile), {
-      target: { files: [new File([JSON.stringify(projectExportDocument)], "graph.json", { type: "application/json" })] },
+      target: { files: [new File([JSON.stringify(projectExportWithSources)], "graph.json", { type: "application/json" })] },
     });
 
     await waitFor(() => expect(store.getSnapshot().state.model.status).toBe("ready"));
@@ -324,9 +336,13 @@ describe("оболочка Shell", () => {
     expect(card.getAttribute("data-file-name")).toBe("graph.json");
     expect(card.textContent).toContain("graph.json");
     expect(card.textContent).toContain("store/index.ts");
+    expect(card.textContent).toContain("embedded · 1");
     expect(screen.queryByTestId(ids.source.editor)).toBeNull();
     expect(screen.queryByTestId(ids.source.open)).toBeNull();
     expect(screen.getByTestId(ids.source.panel).getAttribute("data-input-mode")).toBe("project-export");
+
+    fireEvent.click(screen.getByText("Explore system"));
+    expect(store.getSnapshot().state.activeTab).toBe("system");
   });
 
   it("показывает local-session card без действия Compile & open", () => {
@@ -663,6 +679,90 @@ describe("оболочка Shell", () => {
 
     fireEvent.keyDown(diagnosticRow, { key: " " });
     expect(store.getSnapshot().state.panels.console.selectedEntryId).toBe("diagnostic-entry");
+  });
+
+  it("фильтрует консоль по severity, hotspot и показывает filtered empty state", () => {
+    const base = createInitialWorkbenchSnapshot();
+    const entries: readonly ConsoleEntry[] = [
+      {
+        entryId: "dup-one",
+        sourceVersion: 1,
+        channel: "diagnostics",
+        title: "LFG_DUP",
+        message: "first duplicate",
+        origin: "compiler",
+        severity: "warning",
+        machineId: "player",
+        target: { kind: "console" },
+      },
+      {
+        entryId: "dup-two",
+        sourceVersion: 1,
+        channel: "diagnostics",
+        title: "LFG_DUP",
+        message: "second duplicate",
+        origin: "compiler",
+        severity: "warning",
+        machineId: "player",
+        target: { kind: "console" },
+      },
+      {
+        entryId: "system-line",
+        sourceVersion: 1,
+        channel: "system",
+        title: "system ready",
+        message: "no origin, but machine metadata is available",
+        machineId: "host",
+      },
+    ];
+    const snapshot: WorkbenchSnapshot = {
+      ...base,
+      state: {
+        ...base.state,
+        panels: { ...base.state.panels, console: { ...base.state.panels.console, open: true } },
+        console: { ...base.state.console, entries },
+      },
+    };
+    const store = renderShell(snapshot);
+    const severityButton = (label: string): HTMLButtonElement => {
+      const button = Array.from(screen.getByTestId(ids.console.levelFilter).querySelectorAll("button")).find(
+        (candidate) => candidate.textContent?.includes(label),
+      );
+      if (!button) throw new Error(`Missing severity button: ${label}`);
+
+      return button;
+    };
+    const hotspotButton = (label: string): HTMLButtonElement => {
+      const button = Array.from(screen.getByTestId(ids.console.hotspots).querySelectorAll("button")).find(
+        (candidate) => candidate.textContent?.includes(label),
+      );
+      if (!button) throw new Error(`Missing hotspot button: ${label}`);
+
+      return button;
+    };
+
+    expect(screen.getByTestId(ids.console.hotspots)).toBeTruthy();
+    expect(hotspotButton("code LFG_DUP")).toBeTruthy();
+
+    fireEvent.click(severityButton("warning"));
+    expect(store.getSnapshot().state.console.filters.severity).toBe("warning");
+    expect(screen.getByTestId(ids.console.entries).getAttribute("data-entry-count")).toBe("2");
+    expect(screen.getByText("filter · level:warning")).toBeTruthy();
+
+    fireEvent.click(severityButton("all"));
+    expect(store.getSnapshot().state.console.filters.severity).toBe("all");
+
+    const machineHotspot = hotspotButton("machine player");
+    fireEvent.click(machineHotspot);
+
+    expect(store.getSnapshot().state.console.filters.machineId).toBe("player");
+    expect(machineHotspot.getAttribute("aria-pressed")).toBe("true");
+
+    fireEvent.change(screen.getByTestId(ids.console.search), { target: { value: "missing console row" } });
+
+    expect(screen.getByTestId(ids.console.entries).getAttribute("data-empty")).toBe("true");
+    expect(screen.getByTestId(ids.console.entries).getAttribute("data-empty-reason")).toBe("filtered");
+    expect(screen.getByText("No entries match the active filters.")).toBeTruthy();
   });
 
   it("показывает кнопку open source только для записей с source anchor и открывает source overlay", () => {
