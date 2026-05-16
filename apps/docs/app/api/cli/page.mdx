@@ -2,6 +2,13 @@
 
 `@lite-fsm/cli` публикует команду `lite-fsm`. Пакет находится в alpha-версии.
 
+## Команды
+
+| Команда        | Назначение                                      |
+| -------------- | ----------------------------------------------- |
+| `export-graph` | Записать project graph в JSON export document   |
+| `visualize`    | Запустить локальный Visualizer для project graph |
+
 ## `lite-fsm export-graph`
 
 ```bash copy
@@ -18,6 +25,23 @@ lite-fsm export-graph --entry store/index.ts --out lite-fsm.graph.json
 | `--include-source`  | Нет         | Добавить source text в `sources.files[]`                  |
 
 `--out -` не поддерживается: команда пишет только в файл.
+
+## `lite-fsm visualize`
+
+```bash copy
+lite-fsm visualize --entry store/index.ts
+```
+
+Команда строит project graph, запускает локальный server на `127.0.0.1` и открывает Visualizer с session URL.
+
+| Опция               | Обязательна | Назначение                                           |
+| ------------------- | ----------- | ---------------------------------------------------- |
+| `--entry <path>`    | Да          | Входной TypeScript-файл с выбранным `MachineManager` |
+| `--tsconfig <path>` | Нет         | Явный `tsconfig.json` для module resolution          |
+| `--port <number>`   | Нет         | Локальный порт, по умолчанию `3030`                  |
+| `--no-open`         | Нет         | Напечатать URL без автоматического открытия браузера |
+
+Session API доступен только с token из URL. `/api/session` возвращает graph export document, `/api/source` отдает исходники только для файлов из текущего graph document.
 
 ## Diagnostics
 

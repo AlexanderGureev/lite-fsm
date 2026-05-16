@@ -13,7 +13,7 @@
 | [`@lite-fsm/middleware`](/packages/middleware) | Middleware для manager-а  | Immer reducers, Redux DevTools, пользовательские middleware      |
 | [`@lite-fsm/persist`](/packages/persist)       | Сохранение состояния      | Storage adapters, восстановление, синхронизация между вкладками  |
 | [`@lite-fsm/graph`](/packages/graph)           | Анализ графа машин        | Alpha: graph IR, diagnostics, simulator, модель для visualizer-а |
-| [`@lite-fsm/cli`](/packages/cli)               | Командная строка          | Alpha: экспорт graph JSON из входного TypeScript-файла           |
+| [`@lite-fsm/cli`](/packages/cli)               | Командная строка          | Alpha: export graph JSON и локальный запуск Visualizer-а         |
 
 ## Установка по сценариям
 
@@ -44,7 +44,7 @@ pnpm add @lite-fsm/core @lite-fsm/react @lite-fsm/persist
 Анализ и визуализация графа:
 
 ```bash copy
-pnpm add -D @lite-fsm/graph @lite-fsm/cli
+pnpm add -D @lite-fsm/cli
 ```
 
 ## Выбор пакетов
@@ -60,4 +60,4 @@ pnpm add -D @lite-fsm/graph @lite-fsm/cli
 - [API](/api): карта публичных точек входа по пакетам.
 - [Руководство](/guide): концепции FSM, actors, effects и hydration.
 - [Практика](/usage): TypeScript и Next.js сценарии.
-- [Инструменты](/tools): visualizer, CLI export и `@lite-fsm/graph`.
+- [Инструменты](/tools): visualizer, CLI export/visualize и `@lite-fsm/graph`.

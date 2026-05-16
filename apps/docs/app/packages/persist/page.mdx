@@ -1,10 +1,12 @@
-export const playgroundBasePath = process.env.NEXT_PUBLIC_PLAYGROUND_BASE_PATH ?? "/playground";
-
-export const playgroundExamplePath = (id) => `${playgroundBasePath}/examples/${id}/`;
-
 # @lite-fsm/persist
 
 `@lite-fsm/persist` — отдельный модуль для сохранения состояния `MachineManager` в хранилище и последующего восстановления. Внутри он опирается на методы менеджера: `dehydrate()` для выгрузки снимка, `hydrate()` для применения и `onTransition()` для отслеживания изменений.
+
+## Установка
+
+```bash copy
+pnpm add @lite-fsm/persist
+```
 
 Подключайте этот модуль, когда нужно:
 
@@ -348,7 +350,7 @@ stop();
 
 ## Практический пример: чат с синхронизацией между вкладками
 
-В <a href={playgroundExamplePath("persist")} style={{ color: "#2563eb", textDecoration: "underline", textUnderlineOffset: "2px" }}>примере persist в playground</a> история чата сохраняется в `localStorage`, а соседние вкладки получают её через событие `storage`. В хранилище попадает только машина `chatThread`: машина ввода (`chatComposer`) и сессия (`chatSession`) живут только в текущей вкладке.
+В [примере persist в playground](/playground/examples/persist/) история чата сохраняется в `localStorage`, а соседние вкладки получают её через событие `storage`. В хранилище попадает только машина `chatThread`: машина ввода (`chatComposer`) и сессия (`chatSession`) живут только в текущей вкладке.
 
 ```ts showLineNumbers copy
 const machines = { chatThread, chatComposer, chatSession };
