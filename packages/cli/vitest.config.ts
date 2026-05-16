@@ -16,7 +16,7 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "json", "html", "lcov"],
-      include: ["src/cli/**/*.ts", "src/export-graph/**/*.ts", "src/output/**/*.ts", "src/project/**/*.ts"],
+      include: ["src/cli/**/*.ts", "src/export-graph/**/*.ts", "src/output/**/*.ts", "src/project/**/*.ts", "src/visualize/**/*.ts"],
       exclude: ["src/cli/node-fs.ts"],
       thresholds: {
         statements: 100,

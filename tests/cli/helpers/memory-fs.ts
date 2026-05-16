@@ -54,6 +54,14 @@ export const createMemoryFileSystem = (
 
       return contents;
     },
+    readFileBuffer(path) {
+      const normalized = normalizeAbsolutePath(path);
+      readCounts.set(normalized, (readCounts.get(normalized) ?? 0) + 1);
+      const contents = fileMap.get(normalized);
+      if (contents === undefined) throw new Error(`Missing file: ${normalized}`);
+
+      return Buffer.from(contents, "utf8");
+    },
     writeFile(path, contents) {
       if (options.writeError) throw options.writeError;
 

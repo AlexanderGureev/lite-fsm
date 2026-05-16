@@ -5,6 +5,7 @@ import type { CommandResult } from "./result.js";
 import { createCommandResult } from "./result.js";
 import { registerExportGraphCommand } from "../export-graph/command.js";
 import { formatDiagnostics } from "../output/format-diagnostics.js";
+import { registerVisualizeCommand } from "../visualize/command.js";
 
 export type CliProgram = {
   parse(argv: readonly string[]): Promise<CommandResult>;
@@ -41,6 +42,9 @@ export const createProgram = (context: CliContext): CliProgram => {
     });
 
   registerExportGraphCommand(program, context, (result) => {
+    commandResult = result;
+  });
+  registerVisualizeCommand(program, context, (result) => {
     commandResult = result;
   });
 

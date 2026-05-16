@@ -54,20 +54,25 @@ Reducer branches в graph IR символические: compiler сохраня
 
 ## Alpha CLI
 
-`@lite-fsm/cli` предоставляет binary `lite-fsm` для tooling-сценариев. Публичная поверхность CLI — команда export и JSON contract, а не runtime import.
+`@lite-fsm/cli` предоставляет binary `lite-fsm` для tooling-сценариев. Публичная поверхность CLI — команды graph export/local visualize и JSON/HTTP contracts, а не runtime import.
 
 ```bash
 lite-fsm export-graph --entry store/index.ts --out lite-fsm.graph.json --tsconfig tsconfig.json
 lite-fsm export-graph --entry store/index.ts --out lite-fsm.graph.json --include-source
+lite-fsm visualize --entry store/index.ts --tsconfig tsconfig.json
+lite-fsm visualize --entry store/index.ts --port 3030 --no-open
 ```
 
 | Command                  | Назначение                                                                                                      |
 | ------------------------ | --------------------------------------------------------------------------------------------------------------- |
 | `lite-fsm export-graph`  | строит project graph через public `compileLiteFsmGraphProject` и пишет JSON export document для visualizer-а   |
+| `lite-fsm visualize`     | строит project graph, запускает local host `127.0.0.1:<port>` и отдает visualizer static + session/source API  |
 | `--entry <path>`         | обязательный TypeScript entrypoint с выбранным top-level `MachineManager(...)`                                  |
 | `--out <path>`           | обязательный output file; stdout JSON (`--out -`) не поддерживается                                             |
 | `--tsconfig <path>`      | optional explicit tsconfig; без него CLI ищет ближайший `tsconfig.json`, затем fallback к default TS resolution |
 | `--include-source`       | opt-in: добавляет top-level `sources.files[]` с текстом discovered project files для static source overlay      |
+| `--port <number>`        | `visualize` only: local host port, default `3030`, допустимы integer `1..65535`                                  |
+| `--no-open`              | `visualize` only: не запускать browser opener, только напечатать session URL                                    |
 
 | Export document field | Назначение                                                                                       |
 | --------------------- | ------------------------------------------------------------------------------------------------ |
@@ -80,6 +85,8 @@ lite-fsm export-graph --entry store/index.ts --out lite-fsm.graph.json --include
 | `sources`             | optional bundle из `--include-source`; хранит source `text` вне `graph`                           |
 
 CLI не пишет export, если опции невалидны, tsconfig не читается, graph compile вернул blocking diagnostics, manager не содержит resolved machine refs или output file нельзя записать. По умолчанию JSON export не содержит исходный source text; `--include-source` добавляет его вне `graph`.
+
+`visualize` печатает URL вида `http://127.0.0.1:<port>/?session=<token>` после успешного старта. Graph diagnostics выводятся в stderr, но не блокируют local server, если graph document построен. API endpoints требуют token: `GET /api/session?token=...` возвращает JSON export document, `GET /api/source?token=...&fileName=...` читает только discovered project files и возвращает `409 source-stale`, если файл изменился после graph build. Static visualizer files публикуются внутри `@lite-fsm/cli` в `dist/visualizer`.
 
 ## Alpha graph simulator
 

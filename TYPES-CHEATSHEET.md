@@ -14,7 +14,7 @@
 | `@lite-fsm/graph`         | alpha graph compiler/analyzer IR-типы                                                                                                                                                                                                                              |
 | `@lite-fsm/graph/simulator` | alpha simulator-типы: snapshots, slices, timeline, choices, available transitions, suggested emissions                                                                                                                                                            |
 | `@lite-fsm/graph/view-model` | alpha visualizer projection-типы: summaries, topics, workbench rows, anchors, row mappings, overlay inputs, Machine Flow Model                                                                                                                                   |
-| `@lite-fsm/cli`           | public TS entrypoint не публикуется; типовой contract CLI — JSON export document `lite-fsm.project-graph-export/v1`                                                                                                                                                |
+| `@lite-fsm/cli`           | public TS entrypoint не публикуется; типовые contracts CLI — JSON export document `lite-fsm.project-graph-export/v1` и local visualize HTTP API                                                                                                                    |
 |                           |
 
 ## Generics
@@ -384,7 +384,7 @@ const snapshot: GraphSimulationSnapshot | undefined = createGraphSimulator(docum
 
 ## CLI project graph export document
 
-`lite-fsm export-graph` пишет versioned JSON envelope для передачи project graph document в visualizer без повторного compile source. `@lite-fsm/cli` не публикует public TS entrypoint, поэтому типы ниже описывают JSON contract, а не импортируемые exports пакета.
+`lite-fsm export-graph` пишет versioned JSON envelope для передачи project graph document в visualizer без повторного compile source. `lite-fsm visualize` использует тот же envelope внутри local session response. `@lite-fsm/cli` не публикует public TS entrypoint, поэтому типы ниже описывают JSON/HTTP contracts, а не импортируемые exports пакета.
 
 ```ts
 type LiteFsmProjectGraphExportDocument = {
@@ -414,7 +414,49 @@ type LiteFsmProjectGraphExportDocument = {
 | `diagnostics`     | только CLI diagnostics `LFC_*`; graph diagnostics печатаются командой, но в JSON остаются внутри `graph.diagnostics` |
 | `sources`         | optional `--include-source` bundle; порядок и metadata совпадают с `files`, `text` не входит в `graph` |
 
-`CliDiagnostic` имеет форму `{ code, severity, message, file?, loc?, hint? }`, где `severity` — `"info" | "warning" | "error"`, а code в MVP: `LFC_INVALID_OPTIONS`, `LFC_TSCONFIG_NOT_FOUND`, `LFC_TSCONFIG_INVALID`, `LFC_GRAPH_PROJECT_FAILED`, `LFC_NO_MACHINES_EXPORTED`, `LFC_SOURCE_BUNDLE_FILE_UNREADABLE`, `LFC_WRITE_FAILED`.
+`CliDiagnostic` имеет форму `{ code, severity, message, file?, loc?, hint? }`, где `severity` — `"info" | "warning" | "error"`, а code в MVP: `LFC_INVALID_OPTIONS`, `LFC_TSCONFIG_NOT_FOUND`, `LFC_TSCONFIG_INVALID`, `LFC_GRAPH_PROJECT_FAILED`, `LFC_NO_MACHINES_EXPORTED`, `LFC_SOURCE_BUNDLE_FILE_UNREADABLE`, `LFC_VISUALIZER_STATIC_MISSING`, `LFC_VISUALIZER_PORT_UNAVAILABLE`, `LFC_VISUALIZER_SERVER_FAILED`, `LFC_VISUALIZER_OPEN_FAILED`, `LFC_WRITE_FAILED`.
+
+### CLI visualize local session API
+
+`lite-fsm visualize` печатает browser URL `/?session=<token>`. Query parameter `session` содержит token; API routes принимают тот же token через `token`.
+
+```ts
+type VisualizeSessionResponse = {
+  ok: true;
+  sessionId: string;
+  capabilities: {
+    mode: "local";
+    canReadFiles: true;
+    canWriteFiles: false;
+    canApplyPatch: false;
+    projectRoot: string;
+  };
+  entry: { path: string; tsconfigPath?: string };
+  projectRoot: string;
+  exportDocument: LiteFsmProjectGraphExportDocument;
+};
+
+type VisualizeSourceResponse = {
+  ok: true;
+  fileName: string;
+  language: "ts";
+  hash: string;
+  text: string;
+};
+
+type VisualizeApiError = {
+  ok: false;
+  code: string;
+  message: string;
+};
+```
+
+| Route                                    | Contract                                                                                 |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `GET /api/session?token=...`             | возвращает current session metadata и `LiteFsmProjectGraphExportDocument` без source text |
+| `GET /api/source?token=...&fileName=...` | возвращает source только для `exportDocument.files[].fileName`; hash совместим с graph file hash |
+
+`/api/source` отклоняет absolute paths, `..`, encoded traversal и файлы вне allowlist. `409 source-stale` означает, что текущий file text уже не совпадает с `exportDocument.files[].hash`.
 
 ## Alpha graph simulator types
 

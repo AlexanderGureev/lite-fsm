@@ -36,7 +36,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "pnpm --filter @lite-fsm/graph build && tsup --config tsup.config.ts && tsc -p tsconfig.build.json && node ../../scripts/dts-to-dcts.mjs dist && chmod +x dist/bin/lite-fsm.js",
+    "build": "pnpm --filter @lite-fsm/graph build && node scripts/build-visualizer.mjs && tsup --config tsup.config.ts && tsc -p tsconfig.build.json && node ../../scripts/dts-to-dcts.mjs dist && chmod +x dist/bin/lite-fsm.js && node scripts/copy-visualizer.mjs && node scripts/check-visualizer-artifact.mjs",
     "check-types": "tsc --noEmit -p tsconfig.json",
     "test:unit": "vitest run --config vitest.config.ts",
     "test:coverage": "vitest run --coverage --config vitest.config.ts"

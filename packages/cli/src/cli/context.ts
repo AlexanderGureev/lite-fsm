@@ -2,6 +2,7 @@ import type { Writable } from "node:stream";
 
 export type CliFileSystem = {
   readFile(path: string): string;
+  readFileBuffer?(path: string): Uint8Array;
   writeFile(path: string, contents: string): void;
   mkdir(path: string, options: { recursive: true }): void;
   rename(from: string, to: string): void;

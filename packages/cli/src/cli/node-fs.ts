@@ -5,6 +5,9 @@ export const createNodeFileSystem = (): CliFileSystem => ({
   readFile(path) {
     return readFileSync(path, "utf8");
   },
+  readFileBuffer(path) {
+    return readFileSync(path);
+  },
   writeFile(path, contents) {
     writeFileSync(path, contents, "utf8");
   },
