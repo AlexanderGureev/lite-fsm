@@ -40,3 +40,4 @@ internal
 *.tsbuildinfo
 .agents
 .tmp
+.codex*
