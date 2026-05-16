@@ -407,28 +407,27 @@ const SourceMetadataItem = ({
   </div>
 );
 
+const loadedInputCardClass =
+  "flex min-h-[420px] min-w-0 flex-1 flex-col gap-4 rounded-(--vf-radius-lg) border border-(--vf-accent-border) bg-linear-to-br from-(--vf-accent-soft) to-(--vf-routing-soft) p-5 lg:min-h-0";
+
 const LoadedInputHeader = ({
   icon,
-  iconClassName,
   kicker,
   title,
-  titleClassName,
   description,
 }: {
   icon: ReactNode;
-  iconClassName: string;
   kicker: string;
   title: string;
-  titleClassName?: string;
   description: ReactNode;
 }) => (
   <div className="flex items-start gap-3">
-    <div className={cn("grid size-10 shrink-0 place-items-center rounded-md border border-(--vf-accent-border) text-(--vf-accent)", iconClassName)}>
+    <div className="grid size-10 shrink-0 place-items-center rounded-md border border-(--vf-accent-border) bg-(--vf-surface) text-(--vf-accent)">
       {icon}
     </div>
     <div className="min-w-0 flex-1">
       <PanelKicker>{kicker}</PanelKicker>
-      <h3 className={cn("mt-0.5 min-w-0 truncate text-[15px] font-semibold text-foreground", titleClassName)}>
+      <h3 className="mt-0.5 min-w-0 truncate text-[15px] font-semibold text-foreground">
         {title}
       </h3>
       {description}
@@ -489,13 +488,12 @@ const JsonLoadedCard = ({
   dispatch: (command: VisualizerCommand) => void;
 }) => (
   <div
-    className="flex min-h-[420px] min-w-0 flex-1 flex-col gap-4 rounded-(--vf-radius-lg) border border-(--vf-accent-border) bg-linear-to-br from-(--vf-accent-soft) to-(--vf-routing-soft) p-5 lg:min-h-0"
+    className={loadedInputCardClass}
     data-testid={VISUALIZER_TEST_IDS.source.jsonLoadedCard}
     data-file-name={inputMode.jsonFileName}
   >
     <LoadedInputHeader
       icon={<FileJson aria-hidden="true" className="size-5" />}
-      iconClassName="bg-(--vf-surface)"
       kicker="JSON export · loaded"
       title={inputMode.jsonFileName}
       description={
@@ -544,7 +542,7 @@ const LocalSessionLoadedCard = ({
   dispatch: (command: VisualizerCommand) => void;
 }) => (
   <div
-    className="flex min-h-[420px] min-w-0 flex-1 flex-col gap-4 rounded-(--vf-radius-lg) border border-(--vf-accent-border) bg-card p-5 shadow-[inset_3px_0_0_var(--vf-accent)] lg:min-h-0"
+    className={loadedInputCardClass}
     data-testid={VISUALIZER_TEST_IDS.source.localSessionCard}
     data-session-id={inputMode.sessionId}
     data-entry-path={inputMode.entryPath}
@@ -552,18 +550,16 @@ const LocalSessionLoadedCard = ({
   >
     <LoadedInputHeader
       icon={<Terminal aria-hidden="true" className="size-5" />}
-      iconClassName="bg-(--vf-accent-soft)"
       kicker="Local session · loaded"
       title={inputMode.entryPath}
-      titleClassName="font-mono"
       description={
-        <p className="mt-1 font-mono text-[11px] text-(--vf-text-muted)">
-          session {inputMode.sessionId}
+        <p className="mt-1 text-[12px] text-(--vf-text-muted)">
+          Graph document is loaded from the CLI host. Source overlays read files through the local session API.
         </p>
       }
     />
 
-    <SourceMetadataGrid className="bg-(--vf-surface-soft)">
+    <SourceMetadataGrid className="bg-card/80">
       <SourceMetadataItem label="entry" title={inputMode.entryPath}>
         {inputMode.entryPath}
       </SourceMetadataItem>
