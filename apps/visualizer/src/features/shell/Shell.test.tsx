@@ -30,6 +30,7 @@ const compileFailureServices: EffectRunnerServices = {
   simulation: createLocalSimulationService(),
   validation: createNoopValidationRegistry(),
   codegen: createNoopCodegenPlanner(),
+  sourceAccess: { fetch: vi.fn() },
 };
 
 const renderShell = (
@@ -93,7 +94,7 @@ const projectExportDocument = {
     managers: [],
     diagnostics: [],
   },
-  files: [{ fileName: "store/index.ts", language: "ts", roles: ["entry"], hash: "abc" }],
+  files: [{ fileName: "store/index.ts", language: "ts" as const, roles: ["entry" as const], hash: "abc" }],
   diagnostics: [],
 };
 
@@ -256,6 +257,7 @@ describe("оболочка Shell", () => {
       simulation: createLocalSimulationService(),
       validation: createNoopValidationRegistry(),
       codegen: createNoopCodegenPlanner(),
+      sourceAccess: { fetch: vi.fn() },
     };
     const store = renderShell(createInitialWorkbenchSnapshot(), services);
     const sourceBefore = store.getSnapshot().state.source;
@@ -306,6 +308,7 @@ describe("оболочка Shell", () => {
       simulation: createLocalSimulationService(),
       validation: createNoopValidationRegistry(),
       codegen: createNoopCodegenPlanner(),
+      sourceAccess: { fetch: vi.fn() },
     };
     const store = renderShell(createInitialWorkbenchSnapshot(), services);
 
@@ -326,6 +329,97 @@ describe("оболочка Shell", () => {
     expect(screen.getByTestId(ids.source.panel).getAttribute("data-input-mode")).toBe("project-export");
   });
 
+  it("показывает local-session card без действия Compile & open", () => {
+    const base = createInitialWorkbenchSnapshot();
+    const snapshot: WorkbenchSnapshot = {
+      ...base,
+      state: {
+        ...base.state,
+        inputMode: {
+          kind: "local-session",
+          sessionId: "session-1",
+          token: "token-1",
+          capabilities: {
+            mode: "local",
+            canReadFiles: true,
+            canWriteFiles: false,
+            canApplyPatch: false,
+            projectRoot: "/project",
+          },
+          files: projectExportDocument.files,
+          entryPath: "store/index.ts",
+          tsconfigPath: "tsconfig.json",
+        },
+        model: { status: "ready", model: machineCanvasModelFixture(), diagnostics: [] },
+      },
+    };
+
+    const store = renderShell(snapshot);
+
+    const card = screen.getByTestId(ids.source.localSessionCard);
+    expect(card.getAttribute("data-session-id")).toBe("session-1");
+    expect(card.getAttribute("data-entry-path")).toBe("store/index.ts");
+    expect(card.getAttribute("data-file-count")).toBe("1");
+    expect(card.textContent).toContain("/project");
+    expect(card.textContent).toContain("tsconfig.json");
+    expect(screen.getByTestId(ids.source.inputModeToggle).getAttribute("data-mode")).toBe("local-session");
+    expect(screen.getByTestId(ids.source.inputModeUseLocal)).toBeTruthy();
+    expect(screen.queryByTestId(ids.source.editor)).toBeNull();
+    expect(screen.queryByTestId(ids.source.open)).toBeNull();
+    expect(screen.getByTestId(ids.source.panel).getAttribute("data-input-mode")).toBe("local-session");
+    expect(screen.getByLabelText("Go to Source · LOCAL input · store/index.ts").textContent).toContain("LOCAL");
+
+    const clickSpy = vi.spyOn(HTMLInputElement.prototype, "click").mockImplementation(() => undefined);
+    fireEvent.click(screen.getByRole("button", { name: "Import JSON" }));
+    expect(clickSpy).toHaveBeenCalledTimes(1);
+    clickSpy.mockRestore();
+
+    fireEvent.click(screen.getByText("Explore system"));
+    expect(store.getSnapshot().state.activeTab).toBe("system");
+
+    fireEvent.click(screen.getByLabelText("Go to Source"));
+    fireEvent.click(screen.getByText("Switch to paste source"));
+    expect(store.getSnapshot().state.inputMode.kind).toBe("pasted-source");
+    expect(screen.getByTestId(ids.source.editor)).toBeTruthy();
+  });
+
+  it("показывает local-session card с fallback projectRoot и capabilities", () => {
+    const base = createInitialWorkbenchSnapshot();
+    const snapshot: WorkbenchSnapshot = {
+      ...base,
+      state: {
+        ...base.state,
+        inputMode: {
+          kind: "local-session",
+          sessionId: "session-2",
+          token: "token-2",
+          capabilities: {
+            mode: "local",
+            canReadFiles: false,
+            canWriteFiles: true,
+            canApplyPatch: true,
+          },
+          files: [
+            { fileName: "store/index.ts", language: "ts", roles: ["entry"], hash: "abc" },
+            { fileName: "store/extra.ts", language: "ts", roles: [], hash: "def" },
+          ],
+          entryPath: "store/index.ts",
+        },
+        model: { status: "running", requestId: "model:1:1", diagnostics: [] },
+      },
+    };
+
+    renderShell(snapshot);
+
+    const card = screen.getByTestId(ids.source.localSessionCard);
+    expect(card.getAttribute("data-file-count")).toBe("2");
+    expect(card.textContent).toContain("2 files");
+    expect(card.textContent).toContain("not reported");
+    expect(card.textContent).toContain("read:no · write:yes · patch:yes");
+    expect(card.textContent).toContain("running");
+    expect(card.textContent).not.toContain("tsconfig");
+  });
+
   it("возвращает к paste source режиму через input-mode toggle сохраняя предыдущий source", async () => {
     const services: EffectRunnerServices = {
       compiler: { compile: vi.fn(async (input) => ({ ok: true as const, sourceVersion: input.sourceVersion, document: projectExportDocument.graph as never, diagnostics: [] })) },
@@ -334,6 +428,7 @@ describe("оболочка Shell", () => {
       simulation: createLocalSimulationService(),
       validation: createNoopValidationRegistry(),
       codegen: createNoopCodegenPlanner(),
+      sourceAccess: { fetch: vi.fn() },
     };
     const store = renderShell(createInitialWorkbenchSnapshot(), services);
     const sourceBefore = store.getSnapshot().state.source.source;
@@ -551,7 +646,22 @@ describe("оболочка Shell", () => {
     fireEvent.click(screen.getByTestId(ids.console.channelAll));
     expect(store.getSnapshot().state.console.selectedChannel).toBe("all");
 
-    fireEvent.click(document.querySelector<HTMLElement>('[data-testid="visualizer-console-entry"][data-entry-id="diagnostic-entry"]')!);
+    const diagnosticRow = document.querySelector<HTMLElement>('[data-testid="visualizer-console-entry"][data-entry-id="diagnostic-entry"]')!;
+    fireEvent.keyDown(diagnosticRow.querySelector("strong")!, { key: "Enter" });
+    expect(store.getSnapshot().state.panels.console.selectedEntryId).toBeUndefined();
+
+    fireEvent.keyDown(diagnosticRow, { key: "Escape" });
+    expect(store.getSnapshot().state.panels.console.selectedEntryId).toBeUndefined();
+
+    fireEvent.keyDown(diagnosticRow, { key: "Enter" });
+    expect(store.getSnapshot().state.panels.console.selectedEntryId).toBe("diagnostic-entry");
+
+    act(() => {
+      store.dispatch({ type: "console.entry.selected", entryId: "missing-entry" });
+    });
+    expect(store.getSnapshot().state.panels.console.selectedEntryId).toBe("missing-entry");
+
+    fireEvent.keyDown(diagnosticRow, { key: " " });
     expect(store.getSnapshot().state.panels.console.selectedEntryId).toBe("diagnostic-entry");
   });
 

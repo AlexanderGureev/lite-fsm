@@ -44,6 +44,7 @@ const createServices = (): EffectRunnerServices => ({
   simulation: createLocalSimulationService(),
   validation: createNoopValidationRegistry(),
   codegen: createNoopCodegenPlanner(),
+  sourceAccess: { fetch: vi.fn() },
 });
 
 describe("исполнитель эффектов", () => {
@@ -106,6 +107,55 @@ describe("исполнитель эффектов", () => {
     );
 
     expect(codegen).toMatchObject({ type: "codegen.plan.completed", requestId: "codegen:1:1", sourceVersion: 1 });
+  });
+
+  it("маршрутизирует source-access fetch success и failure", async () => {
+    const services = createServices();
+    services.sourceAccess.fetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        sessionId: "session-1",
+        fileName: "store.ts",
+        hash: "abc",
+        text: "const store = 1;",
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        sessionId: "session-1",
+        fileName: "store.ts",
+        hash: "abc",
+        code: "source-stale",
+        message: "Changed",
+      });
+
+    await expect(runWorkbenchEffect({
+      kind: "source-access.fetch",
+      sessionId: "session-1",
+      token: "token-1",
+      fileName: "store.ts",
+      hash: "abc",
+    }, services)).resolves.toEqual({
+      type: "source-access.fetch.succeeded",
+      sessionId: "session-1",
+      fileName: "store.ts",
+      hash: "abc",
+      text: "const store = 1;",
+    });
+    await expect(runWorkbenchEffect({
+      kind: "source-access.fetch",
+      sessionId: "session-1",
+      token: "token-1",
+      fileName: "store.ts",
+      hash: "abc",
+    }, services)).resolves.toEqual({
+      type: "source-access.fetch.failed",
+      sessionId: "session-1",
+      fileName: "store.ts",
+      hash: "abc",
+      code: "source-stale",
+      message: "Changed",
+    });
   });
 
   it("передает document/model в validation registry", async () => {
@@ -203,6 +253,9 @@ describe("исполнитель эффектов", () => {
     services.codegen.plan = vi.fn(async () => {
       throw new Error("codegen failed");
     });
+    services.sourceAccess.fetch = vi.fn(async () => {
+      throw new Error("source failed");
+    });
     const source = { source: "const a = 1;", language: "ts" as const, version: 1, hash: "lfg1:test" };
 
     await expect(runWorkbenchEffect({ kind: "compile", requestId: "compile:1:1", source }, services)).resolves.toMatchObject({
@@ -237,6 +290,22 @@ describe("исполнитель эффектов", () => {
           primaryTarget: { kind: "console" },
         },
       ],
+    });
+    await expect(
+      runWorkbenchEffect({
+        kind: "source-access.fetch",
+        sessionId: "session-1",
+        token: "token-1",
+        fileName: "store.ts",
+        hash: "abc",
+      }, services),
+    ).resolves.toEqual({
+      type: "source-access.fetch.failed",
+      sessionId: "session-1",
+      fileName: "store.ts",
+      hash: "abc",
+      code: "effect-runner-failed",
+      message: "source failed",
     });
   });
 

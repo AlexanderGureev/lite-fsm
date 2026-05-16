@@ -20,6 +20,13 @@ import { createWorkbenchDiagnostic, normalizeGraphDiagnostics } from "../diagnos
 import { STATIC_HOST_CAPABILITIES } from "../services";
 import { MUSIC_APP_SAMPLE_SOURCE, createSourceSession } from "../source";
 import {
+  createInitialSourceAccessState,
+  resolveSourceAccessFetchRequest,
+  setSourceAccessError,
+  setSourceAccessLoading,
+  setSourceAccessReady,
+} from "../source-access";
+import {
   createIdleAnalysisState,
   createIdleCompileState,
   createIdleModelState,
@@ -69,6 +76,8 @@ const INTERNAL_COMMAND_TYPES = {
   "simulation.snapshot.changed": true,
   "codegen.plan.completed": true,
   "codegen.plan.failed": true,
+  "source-access.fetch.succeeded": true,
+  "source-access.fetch.failed": true,
 } as const satisfies Record<VisualizerInternalCommand["type"], true>;
 
 const isInternalCommand = (
@@ -229,6 +238,7 @@ const resetDerivedForSource = (state: VisualizerWorkbenchState): VisualizerWorkb
   console: createInitialConsoleState(),
   panels: clearPipelinePanelSelection(state.panels),
   canvas: clearCanvasOnPipelineInvalidation(state.canvas),
+  sourceAccess: createInitialSourceAccessState(),
 });
 
 const createNextSourceSession = (
@@ -274,6 +284,7 @@ const sourceChanged = (snapshot: WorkbenchSnapshot, source: string): Reduction =
       "diagnostics",
       "console",
       "panels",
+      "sourceAccess",
       ...canvasRevision(snapshot.state, state),
     ],
     disposeSimulationEffect(snapshot),
@@ -340,6 +351,7 @@ const openVisualizer = (snapshot: WorkbenchSnapshot): Reduction => {
     console,
     panels: clearPipelinePanelSelection(snapshot.state.panels),
     canvas: clearCanvasOnPipelineInvalidation(snapshot.state.canvas),
+    sourceAccess: createInitialSourceAccessState(),
   };
 
   return changed(
@@ -358,6 +370,7 @@ const openVisualizer = (snapshot: WorkbenchSnapshot): Reduction => {
       "diagnostics",
       "console",
       "panels",
+      "sourceAccess",
       ...canvasRevision(snapshot.state, state),
     ],
     [...disposeSimulationEffect(snapshot), { kind: "compile", requestId, source: inputState.source }],
@@ -393,38 +406,41 @@ const startDocumentPipeline = (
   );
 };
 
-const projectExportLoaded = (
+export type LoadGraphDocumentInput = {
+  inputMode: Exclude<VisualizerWorkbenchState["inputMode"], { kind: "pasted-source" }>;
+  document: NonNullable<VisualizerWorkbenchState["compile"]["document"]>;
+  hostCapabilities: VisualizerWorkbenchState["host"]["capabilities"];
+  consoleTitle: string;
+  consoleMessage: string;
+  consoleEntryKey: string;
+  inputVersion?: number;
+  leadingEffects?: readonly WorkbenchEffectDescriptor[];
+};
+
+export const loadGraphDocumentInput = (
   snapshot: WorkbenchSnapshot,
-  command: Extract<VisualizerCommand, { type: "project-export.loaded" }>,
+  input: LoadGraphDocumentInput,
 ): Reduction => {
-  const inputVersion = nextInputVersion(snapshot.state);
+  const inputVersion = input.inputVersion ?? nextInputVersion(snapshot.state);
   const sequence = snapshot.state.compile.sequence + 1;
-  const document = command.exportDocument.graph;
   const compile: CompileState = {
     status: "ready",
     sequence,
-    document,
+    document: input.document,
     diagnostics: [],
   };
   const console = appendConsoleEntries(resetConsoleEntries(snapshot.state.console), [
     createSystemConsoleEntry(
       inputVersion,
-      `project-export:${sequence}`,
-      "Project export pipeline started",
-      `Loaded ${command.fileName} (entry ${command.exportDocument.entry.path}) from CLI JSON export.`,
+      `${input.consoleEntryKey}:${sequence}`,
+      input.consoleTitle,
+      input.consoleMessage,
     ),
   ]);
   const state = {
     ...snapshot.state,
-    host: { capabilities: STATIC_HOST_CAPABILITIES },
-    inputMode: {
-      kind: "project-export" as const,
-      fileName: command.fileName,
-      document,
-      files: command.exportDocument.files,
-      entryPath: command.exportDocument.entry.path,
-      ...(command.exportDocument.sources ? { sources: command.exportDocument.sources } : {}),
-    },
+    host: { capabilities: input.hostCapabilities },
+    inputMode: input.inputMode,
     inputVersion,
     compile,
     analysis: createIdleAnalysisState(),
@@ -438,13 +454,14 @@ const projectExportLoaded = (
     console,
     panels: clearPipelinePanelSelection(snapshot.state.panels),
     canvas: clearCanvasOnPipelineInvalidation(snapshot.state.canvas),
+    sourceAccess: createInitialSourceAccessState(),
   };
 
   return startDocumentPipeline(
     snapshot,
     state,
     inputVersion,
-    document,
+    input.document,
     [
       "input",
       "compile",
@@ -457,10 +474,35 @@ const projectExportLoaded = (
       "diagnostics",
       "console",
       "panels",
+      "sourceAccess",
       ...canvasRevision(snapshot.state, state),
     ],
-    disposeSimulationEffect(snapshot),
+    input.leadingEffects ?? NO_EFFECTS,
   );
+};
+
+const projectExportLoaded = (
+  snapshot: WorkbenchSnapshot,
+  command: Extract<VisualizerCommand, { type: "project-export.loaded" }>,
+): Reduction => {
+  const document = command.exportDocument.graph;
+
+  return loadGraphDocumentInput(snapshot, {
+    inputMode: {
+      kind: "project-export" as const,
+      fileName: command.fileName,
+      document,
+      files: command.exportDocument.files,
+      entryPath: command.exportDocument.entry.path,
+      ...(command.exportDocument.sources ? { sources: command.exportDocument.sources } : {}),
+    },
+    document,
+    hostCapabilities: STATIC_HOST_CAPABILITIES,
+    consoleTitle: "Project export pipeline started",
+    consoleMessage: `Loaded ${command.fileName} (entry ${command.exportDocument.entry.path}) from CLI JSON export.`,
+    consoleEntryKey: "project-export",
+    leadingEffects: disposeSimulationEffect(snapshot),
+  });
 };
 
 const projectExportLoadFailed = (
@@ -474,6 +516,44 @@ const projectExportLoadFailed = (
     code: `project-export-${command.issue.code}`,
     severity: "warning",
     message: `${command.fileName}: ${command.issue.message}`,
+    sourceAnchors: [],
+    primaryTarget: { kind: "console" },
+  });
+  const state = appendDiagnostics(snapshot.state, [diagnostic]);
+
+  return changed(snapshot, state, ["diagnostics", "console"]);
+};
+
+const startupLoaded = (
+  snapshot: WorkbenchSnapshot,
+  command: Extract<VisualizerCommand, { type: "startup.loaded" }>,
+): Reduction => {
+  if (command.result.kind === "source-input") {
+    return sourceChanged(snapshot, command.result.inputMode.source.source);
+  }
+
+  return loadGraphDocumentInput(snapshot, {
+    inputMode: command.result.inputMode,
+    document: command.result.document,
+    hostCapabilities: command.result.hostCapabilities,
+    consoleTitle: command.result.consoleTitle,
+    consoleMessage: command.result.consoleMessage,
+    consoleEntryKey: command.result.inputMode.kind,
+    leadingEffects: disposeSimulationEffect(snapshot),
+  });
+};
+
+const startupLoadFailed = (
+  snapshot: WorkbenchSnapshot,
+  command: Extract<VisualizerCommand, { type: "startup.load.failed" }>,
+): Reduction => {
+  const diagnostic = createWorkbenchDiagnostic({
+    diagnosticId: `startup:${snapshot.state.inputVersion}:${snapshot.state.console.entries.length}:${command.entryKind}:${command.issue.code}`,
+    sourceVersion: snapshot.state.inputVersion,
+    origin: "host",
+    code: `startup-${command.entryKind}-${command.issue.code}`,
+    severity: "warning",
+    message: command.issue.message,
     sourceAnchors: [],
     primaryTarget: { kind: "console" },
   });
@@ -742,6 +822,23 @@ const codegenCompleted = (
   });
 };
 
+const sourceAccessFetchCompleted = (
+  snapshot: WorkbenchSnapshot,
+  command: Extract<VisualizerInternalCommand, { type: "source-access.fetch.succeeded" | "source-access.fetch.failed" }>,
+): Reduction => {
+  if (snapshot.state.inputMode.kind !== "local-session") return unchanged(snapshot);
+  if (snapshot.state.inputMode.sessionId !== command.sessionId) return unchanged(snapshot);
+
+  const sourceAccess =
+    command.type === "source-access.fetch.succeeded"
+      ? setSourceAccessReady(snapshot.state.sourceAccess, command.fileName, command.hash, command.text)
+      : setSourceAccessError(snapshot.state.sourceAccess, command.fileName, command.hash, command.code, command.message);
+
+  if (sourceAccess === snapshot.state.sourceAccess) return unchanged(snapshot);
+
+  return changed(snapshot, { ...snapshot.state, sourceAccess }, ["sourceAccess"]);
+};
+
 const selectTab = (snapshot: WorkbenchSnapshot, tab: VisualizerTab): Reduction => {
   if (tab === snapshot.state.activeTab) return unchanged(snapshot);
 
@@ -940,6 +1037,50 @@ const selectConsoleEntry = (snapshot: WorkbenchSnapshot, entryId: string): Reduc
   return changed(snapshot, { ...snapshot.state, panels: basePanels }, ["panels"]);
 };
 
+const sourceOverlayPanelState = (
+  state: VisualizerWorkbenchState,
+  command: Extract<VisualizerCommand, { type: "source.overlay.opened" }>,
+): VisualizerWorkbenchState["panels"] => ({
+  ...state.panels,
+  sourceOverlay: {
+    title: command.title,
+    anchors: command.anchors,
+    sourceVersion: state.inputVersion,
+  },
+});
+
+const openSourceOverlay = (
+  snapshot: WorkbenchSnapshot,
+  command: Extract<VisualizerCommand, { type: "source.overlay.opened" }>,
+): Reduction => {
+  const panels = sourceOverlayPanelState(snapshot.state, command);
+
+  if (snapshot.state.inputMode.kind !== "local-session") {
+    return changed(snapshot, { ...snapshot.state, panels }, ["panels"]);
+  }
+
+  const request = resolveSourceAccessFetchRequest(
+    {
+      kind: "local-session",
+      sessionId: snapshot.state.inputMode.sessionId,
+      token: snapshot.state.inputMode.token,
+      files: snapshot.state.inputMode.files,
+      sourceAccess: snapshot.state.sourceAccess,
+    },
+    command.anchors,
+  );
+
+  if (!request) return changed(snapshot, { ...snapshot.state, panels }, ["panels"]);
+
+  const sourceAccess = setSourceAccessLoading(snapshot.state.sourceAccess, request.fileName, request.hash);
+  return changed(
+    snapshot,
+    { ...snapshot.state, panels, sourceAccess },
+    ["panels", "sourceAccess"],
+    [{ kind: "source-access.fetch", ...request }],
+  );
+};
+
 const reduceUserCommand = (snapshot: WorkbenchSnapshot, command: VisualizerCommand): Reduction => {
   switch (command.type) {
     case "source.changed":
@@ -954,6 +1095,10 @@ const reduceUserCommand = (snapshot: WorkbenchSnapshot, command: VisualizerComma
       return projectExportLoaded(snapshot, command);
     case "project-export.load.failed":
       return projectExportLoadFailed(snapshot, command);
+    case "startup.loaded":
+      return startupLoaded(snapshot, command);
+    case "startup.load.failed":
+      return startupLoadFailed(snapshot, command);
     case "tab.selected":
       return selectTab(snapshot, command.tab);
     case "l1.machine-query.changed":
@@ -1017,21 +1162,7 @@ const reduceUserCommand = (snapshot: WorkbenchSnapshot, command: VisualizerComma
     case "canvas.machine-board.closed":
       return closeMachineCanvasBoard(snapshot);
     case "source.overlay.opened":
-      return changed(
-        snapshot,
-        {
-          ...snapshot.state,
-          panels: {
-            ...snapshot.state.panels,
-            sourceOverlay: {
-              title: command.title,
-              anchors: command.anchors,
-              sourceVersion: snapshot.state.inputVersion,
-            },
-          },
-        },
-        ["panels"],
-      );
+      return openSourceOverlay(snapshot, command);
     case "source.overlay.closed":
       if (!snapshot.state.panels.sourceOverlay) return unchanged(snapshot);
       return changed(snapshot, { ...snapshot.state, panels: { ...snapshot.state.panels, sourceOverlay: undefined } }, ["panels"]);
@@ -1163,6 +1294,9 @@ const reduceInternalCommand = (snapshot: WorkbenchSnapshot, command: VisualizerI
     case "codegen.plan.completed":
     case "codegen.plan.failed":
       return codegenCompleted(snapshot, command);
+    case "source-access.fetch.succeeded":
+    case "source-access.fetch.failed":
+      return sourceAccessFetchCompleted(snapshot, command);
   }
 };
 

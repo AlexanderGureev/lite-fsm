@@ -1,6 +1,6 @@
 export { readProjectGraphExportFile } from "./file";
 export type { ProjectGraphExportTextFile } from "./file";
-export { parseProjectGraphExportDocumentText } from "./parser";
+export { parseProjectGraphExportDocument, parseProjectGraphExportDocumentText } from "./parser";
 export {
   PROJECT_GRAPH_EXPORT_PACKAGE,
   PROJECT_GRAPH_EXPORT_VERSION,

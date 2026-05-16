@@ -89,6 +89,7 @@ const renderOverlayBody = (view: OpenView, mode: Mode) => {
         className="h-full overflow-auto rounded-md border bg-(--vf-surface-soft) p-3 font-mono text-[11px] text-(--vf-text-muted)"
         data-testid={VISUALIZER_TEST_IDS.source.overlayFallback}
         data-fallback="true"
+        data-source-status={view.sourceStatus}
       >
         {view.fallback}
       </p>
@@ -161,6 +162,7 @@ export const SourceOverlay = ({
                     data-testid={VISUALIZER_TEST_IDS.source.overlayDescription}
                     data-source-version={view.sourceVersion}
                     data-anchor-count={view.anchorCount}
+                    data-source-status={view.sourceStatus}
                     data-location-label={view.locationLabel ?? ""}
                   >
                     source v{view.sourceVersion} · anchors {view.anchorCount}

@@ -1,6 +1,6 @@
 import { WorkbenchProvider } from "./workbench-context";
 import { Shell } from "../features/shell/Shell";
-import { ProjectExportConfigLoader } from "../project-export/config-loader";
+import { StartupLoader } from "../startup";
 import type { EffectRunnerServices } from "../services";
 import { TooltipProvider } from "@/ui/tooltip";
 
@@ -11,7 +11,7 @@ export type AppProps = {
 export const App = ({ services }: AppProps = {}) => (
   <WorkbenchProvider services={services}>
     <TooltipProvider>
-      <ProjectExportConfigLoader />
+      <StartupLoader />
       <Shell />
     </TooltipProvider>
   </WorkbenchProvider>

@@ -11,12 +11,13 @@ import type { WorkbenchDiagnosticRef } from "../diagnostics";
 import type { EffectRunnerServices, GraphSimulationSession } from "./types";
 
 type CodegenPlanEffect = Extract<WorkbenchEffectDescriptor, { kind: "codegen.plan" }>;
+type SourceAccessEffect = Extract<WorkbenchEffectDescriptor, { kind: "source-access.fetch" }>;
 type SimulationEffect = Extract<WorkbenchEffectDescriptor, { kind: `simulation.${string}` | "create-simulation-session" }>;
 
 const simulationSessions = new WeakMap<EffectRunnerServices, GraphSimulationSession>();
 
 const sourceVersionFromEffect = (effect: WorkbenchEffectDescriptor): number =>
-  effect.kind === "compile" ? effect.source.version : effect.sourceVersion;
+  effect.kind === "compile" ? effect.source.version : "sourceVersion" in effect ? effect.sourceVersion : 0;
 
 const simulationSnapshotCommand = (
   sourceVersion: number,
@@ -67,6 +68,31 @@ const missingSimulationSession = (sourceVersion: number): VisualizerInternalComm
   simulationSnapshotCommand(sourceVersion, undefined, "blocked", [
     createControlledDiagnostic(sourceVersion, "simulator", "missing-simulation-session", "Graph simulation session is not active."),
   ]);
+
+const runSourceAccessEffect = async (
+  effect: SourceAccessEffect,
+  services: EffectRunnerServices,
+): Promise<VisualizerInternalCommand> => {
+  const response = await services.sourceAccess.fetch(effect);
+  if (response.ok) {
+    return {
+      type: "source-access.fetch.succeeded",
+      sessionId: response.sessionId,
+      fileName: response.fileName,
+      hash: response.hash,
+      text: response.text,
+    };
+  }
+
+  return {
+    type: "source-access.fetch.failed",
+    sessionId: response.sessionId,
+    fileName: response.fileName,
+    hash: response.hash,
+    code: response.code,
+    message: response.message,
+  };
+};
 
 const runSimulationEffect = (
   effect: SimulationEffect,
@@ -150,6 +176,11 @@ export const runWorkbenchEffect = async (
   services: EffectRunnerServices,
 ): Promise<VisualizerInternalCommand | undefined> => {
   try {
+    if (effect.kind === "source-access.fetch") {
+      const command = await runSourceAccessEffect(effect, services);
+      return command;
+    }
+
     if (effect.kind === "compile") {
       const response = await services.compiler.compile({
         requestId: effect.requestId,
@@ -308,6 +339,17 @@ export const runWorkbenchEffect = async (
         sourceVersion: sourceVersionFromEffect(effect),
         status: "blocked",
         diagnostics: [diagnostic],
+      };
+    }
+
+    if (effect.kind === "source-access.fetch") {
+      return {
+        type: "source-access.fetch.failed",
+        sessionId: effect.sessionId,
+        fileName: effect.fileName,
+        hash: effect.hash,
+        code: "effect-runner-failed",
+        message,
       };
     }
 

@@ -56,7 +56,7 @@ export type {
   SystemPanelView,
   SystemTopicRowView,
 } from "./system-selectors";
-export type { SourceOverlayLineView, SourceOverlaySourceContext, SourceOverlayView } from "./source-overlay";
+export type { SourceOverlayLineView, SourceOverlayView } from "./source-overlay";
 export type {
   AnalysisState,
   CompileState,

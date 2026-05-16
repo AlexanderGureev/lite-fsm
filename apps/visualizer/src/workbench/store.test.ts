@@ -4,6 +4,7 @@ import { openMachineBoard } from "../canvas";
 import type { ConsoleEntry } from "../console";
 import type { WorkbenchDiagnosticRef } from "../diagnostics";
 import { describe, expect, it, vi } from "vitest";
+import { loadGraphDocumentInput } from "./reducer";
 import { createInitialWorkbenchSnapshot } from "./state";
 import { createWorkbenchStore } from "./store";
 import {
@@ -58,6 +59,36 @@ const countedModelFixture = {
   topics: [{ eventType: "PLAY" }, { eventType: "STOP" }, { eventType: "PAUSE" }],
 } as unknown as GraphVisualizerModel;
 const analysisDiagnostics: readonly GraphDiagnostic[] = [{ code: "info", severity: "info", message: "ready" }];
+const consoleEntries: readonly ConsoleEntry[] = [
+  {
+    entryId: "system-entry",
+    sourceVersion: 1,
+    channel: "system",
+    title: "system ready",
+    message: "pipeline opened",
+  },
+  {
+    entryId: "diagnostic-entry",
+    sourceVersion: 1,
+    channel: "diagnostics",
+    title: "compile failed",
+    message: "unsupported source shape",
+    diagnosticId: "diag-player",
+    origin: "compiler",
+    severity: "error",
+    machineId: "player",
+    locationLabel: "line 3, column 7",
+    target: { kind: "none", reason: "no-anchor" },
+  },
+  {
+    entryId: "debug-entry",
+    sourceVersion: 1,
+    channel: "debug",
+    title: "debug trace",
+    message: "request completed",
+    severity: "info",
+  },
+];
 const diagnostic = {
   diagnosticId: "compiler:1:bad",
   sourceVersion: 1,
@@ -559,6 +590,7 @@ describe("хранилище workbench визуализатора", () => {
         inputMode: {
           kind: "local-session",
           sessionId: "session-1",
+          token: "token-1",
           capabilities: {
             mode: "local",
             canReadFiles: true,
@@ -566,6 +598,8 @@ describe("хранилище workbench визуализатора", () => {
             canApplyPatch: false,
             projectRoot: "/project",
           },
+          files: [{ fileName: "store/index.ts", language: "ts", roles: ["entry"], hash: "abc" }],
+          entryPath: "store/index.ts",
         },
         panels: {
           ...base.state.panels,
@@ -590,8 +624,508 @@ describe("хранилище workbench визуализатора", () => {
 
     expect(selectSourceOverlay(store.getSnapshot())).toMatchObject({
       open: true,
-      fallback: "store/index.ts:1:1\nSource text is not available from the current visualizer host.",
+      sourceStatus: "loading",
+      fallback: "store/index.ts:1:1\nLoading source text from local session.",
     });
+  });
+
+  it("загружает local-session через startup и планирует source fetch через overlay command", () => {
+    const store = createWorkbenchStore();
+
+    const startup = store.dispatch({
+      type: "startup.loaded",
+      result: {
+        kind: "graph-document-input",
+        inputMode: {
+          kind: "local-session",
+          sessionId: "session-1",
+          token: "token-1",
+          capabilities: {
+            mode: "local",
+            canReadFiles: true,
+            canWriteFiles: false,
+            canApplyPatch: false,
+            projectRoot: "/project",
+          },
+          files: projectExportDocumentFixture.files,
+          entryPath: "store/index.ts",
+        },
+        document: documentFixture,
+        hostCapabilities: {
+          mode: "local",
+          canReadFiles: true,
+          canWriteFiles: false,
+          canApplyPatch: false,
+          projectRoot: "/project",
+        },
+        consoleTitle: "Local session pipeline started",
+        consoleMessage: "Loaded local session session-1.",
+      },
+    });
+
+    expect(startup.effects).toEqual([
+      {
+        kind: "analyze",
+        requestId: "analyze:2:1",
+        sourceVersion: 2,
+        document: documentFixture,
+      },
+    ]);
+    expect(selectSourceInputMode(store.getSnapshot())).toEqual({
+      kind: "local-session",
+      sessionId: "session-1",
+      entryPath: "store/index.ts",
+      fileCount: 1,
+      projectRoot: "/project",
+      canReadFiles: true,
+      canWriteFiles: false,
+      canApplyPatch: false,
+    });
+
+    const open = store.dispatch({
+      type: "source.overlay.opened",
+      title: "manager",
+      anchors: [
+        {
+          kind: "machine",
+          editable: false,
+          loc: {
+            fileName: "store/index.ts",
+            start: { line: 1, column: 1, offset: 0 },
+            end: { line: 1, column: 7, offset: 6 },
+          },
+        },
+      ],
+    });
+
+    expect(open.effects).toEqual([
+      {
+        kind: "source-access.fetch",
+        sessionId: "session-1",
+        token: "token-1",
+        fileName: "store/index.ts",
+        hash: "abc",
+      },
+    ]);
+    expect(selectSourceOverlay(store.getSnapshot())).toMatchObject({
+      sourceStatus: "loading",
+      fallback: "store/index.ts:1:1\nLoading source text from local session.",
+    });
+
+    expect(store.dispatch({
+      type: "source.overlay.opened",
+      title: "manager",
+      anchors: store.getSnapshot().state.panels.sourceOverlay?.anchors ?? [],
+    }).effects).toEqual([]);
+
+    store.dispatch({
+      type: "source-access.fetch.succeeded",
+      sessionId: "session-1",
+      fileName: "store/index.ts",
+      hash: "abc",
+      text: "export const manager = 1;",
+    });
+
+    expect(selectSourceOverlay(store.getSnapshot())).toMatchObject({
+      sourceStatus: "ready",
+      lines: [{ line: 1, code: "export const manager = 1;", selected: true }],
+    });
+    expect(store.dispatch({
+      type: "source.overlay.opened",
+      title: "manager",
+      anchors: store.getSnapshot().state.panels.sourceOverlay?.anchors ?? [],
+    }).effects).toEqual([]);
+  });
+
+  it("не планирует source fetch для local-session без metadata и показывает unavailable overlay", () => {
+    const base = createInitialWorkbenchSnapshot();
+    const store = createWorkbenchStore({
+      ...base,
+      state: {
+        ...base.state,
+        inputMode: {
+          kind: "local-session",
+          sessionId: "session-1",
+          token: "token-1",
+          capabilities: {
+            mode: "local",
+            canReadFiles: true,
+            canWriteFiles: false,
+            canApplyPatch: false,
+            projectRoot: "/project",
+          },
+          files: projectExportDocumentFixture.files,
+          entryPath: "store/index.ts",
+        },
+      },
+    });
+
+    const output = store.dispatch({
+      type: "source.overlay.opened",
+      title: "missing",
+      anchors: [
+        {
+          kind: "machine",
+          editable: false,
+          loc: {
+            fileName: "missing.ts",
+            start: { line: 1, column: 1, offset: 0 },
+            end: { line: 1, column: 7, offset: 6 },
+          },
+        },
+      ],
+    });
+
+    expect(output.effects).toEqual([]);
+    expect(store.getSnapshot().state.sourceAccess.entries).toEqual({});
+    expect(selectSourceOverlay(store.getSnapshot())).toMatchObject({
+      sourceStatus: "unavailable",
+      fallback: "missing.ts:1:1\nSource file metadata is not available for this local session.",
+    });
+  });
+
+  it("игнорирует stale source-access results и применяет ошибки только для текущей local-session", () => {
+    const base = createInitialWorkbenchSnapshot();
+    const store = createWorkbenchStore({
+      ...base,
+      state: {
+        ...base.state,
+        inputMode: {
+          kind: "local-session",
+          sessionId: "session-1",
+          token: "token-1",
+          capabilities: {
+            mode: "local",
+            canReadFiles: true,
+            canWriteFiles: false,
+            canApplyPatch: false,
+            projectRoot: "/project",
+          },
+          files: projectExportDocumentFixture.files,
+          entryPath: "store/index.ts",
+        },
+      },
+    });
+    const before = store.getSnapshot();
+
+    store.dispatch({
+      type: "source-access.fetch.succeeded",
+      sessionId: "old-session",
+      fileName: "store/index.ts",
+      hash: "abc",
+      text: "old",
+    });
+    expect(store.getSnapshot()).toBe(before);
+
+    store.dispatch({
+      type: "source-access.fetch.failed",
+      sessionId: "session-1",
+      fileName: "store/index.ts",
+      hash: "abc",
+      code: "source-stale",
+      message: "Changed",
+    });
+    expect(store.getSnapshot().state.sourceAccess.entries).toEqual({
+      "[\"store/index.ts\",\"abc\"]": {
+        status: "error",
+        fileName: "store/index.ts",
+        hash: "abc",
+        code: "source-stale",
+        message: "Changed",
+      },
+    });
+
+    store.dispatch({ type: "input-mode.use-pasted-source" });
+    const pasted = store.getSnapshot();
+    store.dispatch({
+      type: "source-access.fetch.failed",
+      sessionId: "session-1",
+      fileName: "store/index.ts",
+      hash: "abc",
+      code: "source-stale",
+      message: "Changed",
+    });
+    expect(store.getSnapshot()).toBe(pasted);
+  });
+
+  it("не меняет snapshot для повторных identical source-access completions", () => {
+    const base = createInitialWorkbenchSnapshot();
+    const store = createWorkbenchStore({
+      ...base,
+      state: {
+        ...base.state,
+        inputMode: {
+          kind: "local-session",
+          sessionId: "session-1",
+          token: "token-1",
+          capabilities: {
+            mode: "local",
+            canReadFiles: true,
+            canWriteFiles: false,
+            canApplyPatch: false,
+            projectRoot: "/project",
+          },
+          files: projectExportDocumentFixture.files,
+          entryPath: "store/index.ts",
+        },
+      },
+    });
+
+    store.dispatch({
+      type: "source-access.fetch.succeeded",
+      sessionId: "session-1",
+      fileName: "store/index.ts",
+      hash: "abc",
+      text: "export const manager = 1;",
+    });
+    const ready = store.getSnapshot();
+
+    const sameReady = store.dispatch({
+      type: "source-access.fetch.succeeded",
+      sessionId: "session-1",
+      fileName: "store/index.ts",
+      hash: "abc",
+      text: "export const manager = 1;",
+    });
+    expect(sameReady.effects).toEqual([]);
+    expect(store.getSnapshot()).toBe(ready);
+
+    store.dispatch({
+      type: "source-access.fetch.failed",
+      sessionId: "session-1",
+      fileName: "store/index.ts",
+      hash: "abc",
+      code: "source-stale",
+      message: "Changed",
+    });
+    const failed = store.getSnapshot();
+
+    const sameFailed = store.dispatch({
+      type: "source-access.fetch.failed",
+      sessionId: "session-1",
+      fileName: "store/index.ts",
+      hash: "abc",
+      code: "source-stale",
+      message: "Changed",
+    });
+    expect(sameFailed.effects).toEqual([]);
+    expect(store.getSnapshot()).toBe(failed);
+  });
+
+  it("startup source-input переиспользует общий sourceChanged path", () => {
+    const store = createWorkbenchStore();
+    const output = store.dispatch({
+      type: "startup.loaded",
+      result: {
+        kind: "source-input",
+        inputMode: {
+          kind: "pasted-source",
+          source: {
+            source: "const custom = 1;",
+            filename: "custom.ts",
+            language: "ts",
+            version: 10,
+            hash: "custom",
+          },
+        },
+      },
+    });
+
+    expect(output.effects).toEqual([]);
+    expect(store.getSnapshot().state.inputMode.kind).toBe("pasted-source");
+    expect(store.getSnapshot().state.source).toMatchObject({
+      source: "const custom = 1;",
+      filename: "sample.ts",
+      version: 2,
+    });
+    expect(store.getSnapshot().state.compile).toEqual({ status: "idle", sequence: 0, diagnostics: [] });
+  });
+
+  it("добавляет startup diagnostic без смены input mode", () => {
+    const store = createWorkbenchStore();
+    const before = store.getSnapshot().state.inputMode;
+
+    store.dispatch({
+      type: "startup.load.failed",
+      entryKind: "local-session",
+      issue: { code: "invalid-session", message: "Bad token" },
+    });
+
+    expect(store.getSnapshot().state.inputMode).toBe(before);
+    expect(store.getSnapshot().state.diagnostics[0]).toMatchObject({
+      origin: "host",
+      diagnostic: {
+        code: "startup-local-session-invalid-session",
+        message: "Bad token",
+      },
+    });
+  });
+
+  it("console commands возвращают no-op для повторных значений и очищают активные scope/filters", () => {
+    const base = createInitialWorkbenchSnapshot();
+    const store = createWorkbenchStore({
+      ...base,
+      state: {
+        ...base.state,
+        console: {
+          ...base.state.console,
+          selectedChannel: "diagnostics",
+          filters: {
+            query: "bad",
+            severity: "warning",
+            origin: "compiler",
+            machineId: "player",
+            code: "warn",
+          },
+          scope: {
+            kind: "diagnostics",
+            owner: { kind: "machine", id: "player", label: "player" },
+            diagnosticIds: ["diag-player"],
+          },
+          entries: consoleEntries,
+        },
+      },
+    });
+
+    expect(store.dispatch({ type: "console.query.changed", query: "bad" }).effects).toEqual([]);
+    expect(store.dispatch({ type: "console.filter.changed", filter: "origin", value: "compiler" }).effects).toEqual([]);
+
+    const clearScope = store.dispatch({ type: "console.scope.cleared" });
+    expect(clearScope.effects).toEqual([]);
+    expect(store.getSnapshot().state.console.scope).toBeUndefined();
+
+    const afterScope = store.getSnapshot();
+    expect(store.dispatch({ type: "console.scope.cleared" }).effects).toEqual([]);
+    expect(store.getSnapshot()).toBe(afterScope);
+
+    const reset = store.dispatch({ type: "console.filters.reset" });
+    expect(reset.effects).toEqual([]);
+    expect(store.getSnapshot().state.console.filters).toEqual({
+      query: "",
+      severity: "all",
+      origin: "all",
+      machineId: "all",
+      code: "all",
+    });
+
+    const afterReset = store.getSnapshot();
+    expect(store.dispatch({ type: "console.filters.reset" }).effects).toEqual([]);
+    expect(store.getSnapshot()).toBe(afterReset);
+  });
+
+  it("selector console покрывает filtered empty, severity active count и hotspot sorting", () => {
+    const base = createInitialWorkbenchSnapshot();
+    const store = createWorkbenchStore({
+      ...base,
+      state: {
+        ...base.state,
+        console: {
+          ...base.state.console,
+          entries: [
+            ...consoleEntries,
+            {
+              entryId: "diagnostic-entry-2",
+              sourceVersion: 1,
+              channel: "diagnostics",
+              title: "compile failed",
+              message: "same code second time",
+              diagnosticId: "diag-player-2",
+              origin: "compiler",
+              severity: "warning",
+              machineId: "player",
+            },
+          ],
+          filters: {
+            query: "does-not-exist",
+            severity: "warning",
+            origin: "compiler",
+            machineId: "player",
+            code: "compile failed",
+          },
+        },
+      },
+    });
+
+    const panel = selectConsolePanel(store.getSnapshot());
+    expect(panel.entries).toEqual([]);
+    expect(panel.emptyReason).toBe("filtered");
+    expect(panel.activeFilterCount).toBe(5);
+    expect(panel.hotspots.map((hotspot) => [hotspot.filter, hotspot.value, hotspot.count])).toEqual([
+      ["code", "compile failed", 2],
+      ["machineId", "player", 2],
+      ["origin", "compiler", 2],
+    ]);
+
+    const machineMismatch = selectConsolePanel({
+      ...store.getSnapshot(),
+      state: {
+        ...store.getSnapshot().state,
+        console: {
+          ...store.getSnapshot().state.console,
+          filters: {
+            query: "",
+            severity: "all",
+            origin: "all",
+            machineId: "worker",
+            code: "all",
+          },
+        },
+      },
+    });
+    expect(machineMismatch.entries).toEqual([]);
+    expect(machineMismatch.emptyReason).toBe("filtered");
+  });
+
+  it("selector console оставляет entries без изменений для неизвестного scope kind", () => {
+    const base = createInitialWorkbenchSnapshot();
+    const snapshot: WorkbenchSnapshot = {
+      ...base,
+      state: {
+        ...base.state,
+        console: {
+          ...base.state.console,
+          entries: consoleEntries,
+          scope: { kind: "custom" } as unknown as WorkbenchSnapshot["state"]["console"]["scope"],
+        },
+      },
+    };
+
+    const panel = selectConsolePanel(snapshot);
+
+    expect(panel.entries.map((entry) => entry.entryId)).toEqual(["system-entry", "diagnostic-entry", "debug-entry"]);
+    expect(panel.totalEntries).toBe(3);
+  });
+
+  it("loadGraphDocumentInput использует empty leading effects по умолчанию", () => {
+    const snapshot = createInitialWorkbenchSnapshot();
+    const output = loadGraphDocumentInput(snapshot, {
+      inputMode: {
+        kind: "project-export",
+        fileName: "graph.json",
+        document: documentFixture,
+        files: projectExportDocumentFixture.files,
+        entryPath: "store/index.ts",
+      },
+      document: documentFixture,
+      hostCapabilities: {
+        mode: "static",
+        canReadFiles: false,
+        canWriteFiles: false,
+        canApplyPatch: false,
+      },
+      consoleTitle: "Project export pipeline started",
+      consoleMessage: "Loaded graph.json.",
+      consoleEntryKey: "project-export",
+    });
+
+    expect(output.effects).toEqual([
+      {
+        kind: "analyze",
+        requestId: "analyze:2:1",
+        sourceVersion: 2,
+        document: documentFixture,
+      },
+    ]);
   });
 
   it("сбрасывает derived UI и dispose-ит активную simulation при загрузке project export", () => {

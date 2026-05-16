@@ -25,6 +25,7 @@ import type {
 } from "@lite-fsm/graph/view-model";
 import type { CodegenPlanner, SourcePatchPlan } from "../codegen";
 import type { SourceSession } from "../source";
+import type { SourceAccessClient } from "../source-access";
 import type { DiagnosticProviderRegistry } from "../validation";
 import type { WorkbenchDiagnosticRef } from "../diagnostics";
 
@@ -175,4 +176,5 @@ export type EffectRunnerServices = {
   simulation: GraphSimulationService;
   validation: DiagnosticProviderRegistry;
   codegen: CodegenPlanner;
+  sourceAccess: SourceAccessClient;
 };

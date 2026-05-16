@@ -56,6 +56,7 @@ const createServices = (): EffectRunnerServices => ({
   simulation: createLocalSimulationService(),
   validation: createNoopValidationRegistry(),
   codegen: createNoopCodegenPlanner(),
+  sourceAccess: { fetch: vi.fn() },
 });
 
 const PipelineButton = () => {

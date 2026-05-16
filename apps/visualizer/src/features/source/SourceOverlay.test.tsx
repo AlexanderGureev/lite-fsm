@@ -30,6 +30,7 @@ describe("компонент SourceOverlay", () => {
           title: "missing source",
           sourceVersion: 3,
           anchorCount: 2,
+          sourceStatus: "unavailable",
           lines: [],
           fallback: "Source range is not available for this graph item.",
         }}
@@ -59,6 +60,7 @@ describe("компонент SourceOverlay", () => {
           title: "flowMachine",
           sourceVersion: 4,
           anchorCount: 1,
+          sourceStatus: "ready",
           locationLabel: "line 10, column 1",
           lines: [
             { line: 10, code: "const flowMachine = createMachine({", selected: true },
@@ -91,6 +93,7 @@ describe("компонент SourceOverlay", () => {
           title: "flow",
           sourceVersion: 7,
           anchorCount: 1,
+          sourceStatus: "ready",
           locationLabel: "line 3, column 1",
           lines: [
             { line: 2, code: "two", selected: false },
@@ -124,5 +127,32 @@ describe("компонент SourceOverlay", () => {
     expect(snippetButton.getAttribute("data-state")).toBe("on");
     snippet = screen.getByTestId(ids.source.snippet);
     expect(snippet.getAttribute("data-first-line-number")).toBe("2");
+  });
+
+  it("сбрасывает desired full mode при закрытии overlay", () => {
+    const fullSource = ["one", "two", "three"].join("\n");
+    const view = {
+      open: true as const,
+      title: "flow",
+      sourceVersion: 8,
+      anchorCount: 1,
+      sourceStatus: "ready" as const,
+      lines: [
+        { line: 2, code: "two", selected: true },
+      ],
+      fullSource,
+    };
+    const onClose = vi.fn();
+    const { rerender } = render(<SourceOverlay view={view} onClose={onClose} />);
+
+    fireEvent.click(screen.getByTestId(ids.source.overlayModeFull));
+    expect(screen.getByTestId(ids.source.snippet).getAttribute("data-first-line-number")).toBe("1");
+
+    fireEvent.click(screen.getByTestId(ids.source.overlayClose));
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    rerender(<SourceOverlay view={{ ...view, sourceVersion: 9 }} onClose={onClose} />);
+    expect(screen.getByTestId(ids.source.overlayModeSnippet).getAttribute("data-state")).toBe("on");
+    expect(screen.getByTestId(ids.source.snippet).getAttribute("data-first-line-number")).toBe("2");
   });
 });

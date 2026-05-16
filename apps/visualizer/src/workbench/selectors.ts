@@ -14,7 +14,8 @@ import {
 } from "../console";
 import type { WorkbenchDiagnosticRef } from "../diagnostics";
 import { buildSourceOverlayView, type SourceOverlayView } from "./source-overlay";
-import type { VisualizerTab, WorkbenchSelector } from "./types";
+import { firstLocatedSourceAnchor, resolveSourceText, type SourceTextResolution } from "../source-access";
+import type { VisualizerInputMode, VisualizerTab, VisualizerWorkbenchState, WorkbenchSelector } from "./types";
 
 export type TabItemView = {
   tab: VisualizerTab;
@@ -57,6 +58,17 @@ export type SourceInputModeView =
       fileCount: number;
       hasSources: boolean;
       sourceFileCount: number;
+    }
+  | {
+      kind: "local-session";
+      sessionId: string;
+      entryPath: string;
+      tsconfigPath?: string;
+      fileCount: number;
+      projectRoot?: string;
+      canReadFiles: boolean;
+      canWriteFiles: boolean;
+      canApplyPatch: boolean;
     };
 
 export const shallowEqualObject = <Input>(left: Input, right: Input): boolean => {
@@ -478,7 +490,20 @@ export const selectSourcePanel = createSelector(
 export const selectSourceInputMode = createSelector(
   (snapshot) => ({ inputMode: snapshot.state.inputMode }),
   ({ inputMode }): SourceInputModeView => {
-    if (inputMode.kind !== "project-export") return { kind: "pasted-source" };
+    if (inputMode.kind === "pasted-source") return { kind: "pasted-source" };
+    if (inputMode.kind === "local-session") {
+      return {
+        kind: "local-session",
+        sessionId: inputMode.sessionId,
+        entryPath: inputMode.entryPath,
+        ...(inputMode.tsconfigPath ? { tsconfigPath: inputMode.tsconfigPath } : {}),
+        fileCount: inputMode.files.length,
+        projectRoot: inputMode.capabilities.projectRoot,
+        canReadFiles: inputMode.capabilities.canReadFiles,
+        canWriteFiles: inputMode.capabilities.canWriteFiles,
+        canApplyPatch: inputMode.capabilities.canApplyPatch,
+      };
+    }
 
     return {
       kind: "project-export",
@@ -491,21 +516,50 @@ export const selectSourceInputMode = createSelector(
   },
 );
 
+const resolveOverlaySourceText = ({
+  source,
+  inputMode,
+  sourceAccess,
+  overlay,
+}: {
+  source: VisualizerWorkbenchState["source"];
+  inputMode: VisualizerInputMode;
+  sourceAccess: VisualizerWorkbenchState["sourceAccess"];
+  overlay: VisualizerWorkbenchState["panels"]["sourceOverlay"];
+}): SourceTextResolution => {
+  const anchor = overlay ? firstLocatedSourceAnchor(overlay.anchors) : undefined;
+  if (!anchor) return { status: "unavailable", message: "Source range is not available for this graph item." };
+
+  if (inputMode.kind === "pasted-source") {
+    return resolveSourceText({ kind: "pasted-source", source: source.source, filename: source.filename }, anchor);
+  }
+
+  if (inputMode.kind === "project-export") {
+    return resolveSourceText({ kind: "project-export", sources: inputMode.sources }, anchor);
+  }
+
+  return resolveSourceText(
+    {
+      kind: "local-session",
+      sessionId: inputMode.sessionId,
+      token: inputMode.token,
+      files: inputMode.files,
+      sourceAccess,
+    },
+    anchor,
+  );
+};
+
 export const selectSourceOverlay = createSelector(
   (snapshot) => ({
     source: snapshot.state.source,
     inputMode: snapshot.state.inputMode,
+    sourceAccess: snapshot.state.sourceAccess,
     overlay: snapshot.state.panels.sourceOverlay,
   }),
-  ({ source, inputMode, overlay }): SourceOverlayView =>
-    buildSourceOverlayView(
-      inputMode.kind === "pasted-source"
-        ? { kind: "pasted-source", source: source.source, filename: source.filename }
-        : inputMode.kind === "project-export"
-          ? { kind: "project-export", sources: inputMode.sources }
-          : { kind: inputMode.kind },
-      overlay,
-    ),
+  ({ source, inputMode, sourceAccess, overlay }): SourceOverlayView => {
+    return buildSourceOverlayView(resolveOverlaySourceText({ source, inputMode, sourceAccess, overlay }), overlay);
+  },
 );
 
 export const selectCurrentEmptyPanel = createSelector(

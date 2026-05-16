@@ -1,4 +1,5 @@
 import { createNoopCodegenPlanner } from "../codegen";
+import { createLocalSessionSourceClient } from "../source-access";
 import { createNoopValidationRegistry } from "../validation";
 import {
   createLocalAnalyzerClient,
@@ -15,4 +16,5 @@ export const createDefaultEffectRunnerServices = (): EffectRunnerServices => ({
   simulation: createLocalSimulationService(),
   validation: createNoopValidationRegistry(),
   codegen: createNoopCodegenPlanner(),
+  sourceAccess: createLocalSessionSourceClient(),
 });

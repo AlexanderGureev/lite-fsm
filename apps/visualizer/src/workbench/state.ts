@@ -2,6 +2,7 @@ import { createInitialCanvasState } from "../canvas";
 import { createInitialConsoleState } from "../console";
 import { createStaticHostAdapter } from "../services";
 import { MUSIC_APP_SAMPLE_SOURCE, createSourceSession } from "../source";
+import { createInitialSourceAccessState } from "../source-access";
 import type {
   AnalysisState,
   CodegenState,
@@ -37,6 +38,7 @@ export const createInitialRevisions = (): WorkbenchRevisionIndex => ({
   panels: 0,
   codegen: 0,
   canvas: 0,
+  sourceAccess: 0,
 });
 
 export const createIdleCompileState = (): CompileState => ({
@@ -114,6 +116,7 @@ export const createInitialWorkbenchState = (): VisualizerWorkbenchState => {
     console: createInitialConsoleState(),
     codegen: createIdleCodegenState(),
     canvas: createInitialCanvasState(),
+    sourceAccess: createInitialSourceAccessState(),
   };
 };
 

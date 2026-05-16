@@ -1,6 +1,6 @@
 import type { GraphSourceAnchor } from "@lite-fsm/graph/view-model";
-import { formatSourceLocationLabel, matchesSourceFile } from "../lib/source-location";
-import type { LiteFsmProjectGraphSourceBundle } from "../project-export";
+import { formatSourceLocationLabel } from "../lib/source-location";
+import type { SourceTextResolution } from "../source-access";
 import type { SourceOverlayState } from "./types";
 
 const SOURCE_CONTEXT_LINES = 2;
@@ -27,16 +27,12 @@ export type SourceOverlayView =
       title: string;
       sourceVersion: number;
       anchorCount: number;
+      sourceStatus: SourceTextResolution["status"] | "no-range";
       locationLabel?: string;
       lines: readonly SourceOverlayLineView[];
       fullSource?: string;
       fallback?: string;
     };
-
-export type SourceOverlaySourceContext =
-  | { kind: "pasted-source"; source: string; filename?: string }
-  | { kind: "project-export"; sources?: LiteFsmProjectGraphSourceBundle }
-  | { kind: "local-session" };
 
 type LocatedGraphSourceAnchor = GraphSourceAnchor & { loc: NonNullable<GraphSourceAnchor["loc"]> };
 
@@ -53,26 +49,6 @@ export const prioritizeMachineSourceAnchors = (
 ): readonly GraphSourceAnchor[] => [...anchors].sort((left, right) => priorityOf(left) - priorityOf(right));
 
 const sourceLines = (source: string): readonly string[] => source.split(/\r?\n/);
-
-const sourceUnavailableFallback = (
-  context: Exclude<SourceOverlaySourceContext, { kind: "pasted-source" }>,
-  label: string,
-): string => {
-  if (context.kind === "project-export") {
-    return `${label}\nSource text is not included in the JSON export.`;
-  }
-
-  return `${label}\nSource text is not available from the current visualizer host.`;
-};
-
-const sourceByFileName = (
-  sources: LiteFsmProjectGraphSourceBundle | undefined,
-  fileName: string | undefined,
-): string | undefined => {
-  if (!sources || !fileName) return undefined;
-
-  return sources.files.find((source) => source.fileName === fileName)?.text;
-};
 
 const buildSnippetView = (
   source: string,
@@ -102,6 +78,7 @@ const buildSnippetView = (
     title: overlay.title,
     sourceVersion: overlay.sourceVersion,
     anchorCount: overlay.anchors.length,
+    sourceStatus: "ready",
     locationLabel,
     lines: viewLines,
     fullSource: source,
@@ -109,7 +86,7 @@ const buildSnippetView = (
 };
 
 export const buildSourceOverlayView = (
-  sourceContext: SourceOverlaySourceContext,
+  sourceResolution: SourceTextResolution,
   overlay: SourceOverlayState | undefined,
 ): SourceOverlayView => {
   if (!overlay) return { open: false };
@@ -121,6 +98,7 @@ export const buildSourceOverlayView = (
       title: overlay.title,
       sourceVersion: overlay.sourceVersion,
       anchorCount: overlay.anchors.length,
+      sourceStatus: "no-range",
       locationLabel: undefined,
       lines: [],
       fallback: "Source range is not available for this graph item.",
@@ -128,44 +106,21 @@ export const buildSourceOverlayView = (
   }
 
   const locationLabel = formatSourceLocationLabel(anchor.loc);
-  if (sourceContext.kind === "project-export") {
-    const source = sourceByFileName(sourceContext.sources, anchor.loc.fileName);
-    if (source !== undefined) return buildSnippetView(source, overlay, anchor, locationLabel);
-
+  if (sourceResolution.status !== "ready") {
     return {
       open: true,
       title: overlay.title,
       sourceVersion: overlay.sourceVersion,
       anchorCount: overlay.anchors.length,
+      sourceStatus: sourceResolution.status,
       locationLabel,
       lines: [],
-      fallback: sourceUnavailableFallback(sourceContext, locationLabel),
+      fallback:
+        sourceResolution.status === "loading"
+          ? `${locationLabel}\nLoading source text from local session.`
+          : `${locationLabel}\n${sourceResolution.message}`,
     };
   }
 
-  if (sourceContext.kind !== "pasted-source") {
-    return {
-      open: true,
-      title: overlay.title,
-      sourceVersion: overlay.sourceVersion,
-      anchorCount: overlay.anchors.length,
-      locationLabel,
-      lines: [],
-      fallback: sourceUnavailableFallback(sourceContext, locationLabel),
-    };
-  }
-
-  if (!matchesSourceFile(anchor.loc, sourceContext.filename)) {
-    return {
-      open: true,
-      title: overlay.title,
-      sourceVersion: overlay.sourceVersion,
-      anchorCount: overlay.anchors.length,
-      locationLabel,
-      lines: [],
-      fallback: `${locationLabel}\nSource text for this file is not available in the current pasted source.`,
-    };
-  }
-
-  return buildSnippetView(sourceContext.source, overlay, anchor, locationLabel);
+  return buildSnippetView(sourceResolution.text, overlay, anchor, locationLabel);
 };

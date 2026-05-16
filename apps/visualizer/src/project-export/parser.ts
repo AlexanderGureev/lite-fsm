@@ -178,7 +178,7 @@ const validateCliDiagnostics = (value: unknown): ProjectGraphExportParseResult |
   return undefined;
 };
 
-const validateProjectGraphExportDocument = (value: unknown): ProjectGraphExportParseResult => {
+export const parseProjectGraphExportDocument = (value: unknown): ProjectGraphExportParseResult => {
   if (!isRecord(value)) return invalidDocument("$", "Project graph export must be a JSON object.");
   if (value.version !== PROJECT_GRAPH_EXPORT_VERSION) {
     return {
@@ -205,7 +205,7 @@ const validateProjectGraphExportDocument = (value: unknown): ProjectGraphExportP
 
 export const parseProjectGraphExportDocumentText = (text: string): ProjectGraphExportParseResult => {
   try {
-    return validateProjectGraphExportDocument(JSON.parse(text) as unknown);
+    return parseProjectGraphExportDocument(JSON.parse(text) as unknown);
   } catch {
     return {
       ok: false,

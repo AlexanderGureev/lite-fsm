@@ -9,6 +9,7 @@ export type { LocalGraphClientDependencies } from "./local-graph-clients";
 export { createLocalSimulationService } from "./local-simulation-service";
 export type { LocalSimulationServiceDependencies } from "./local-simulation-service";
 export { createStaticHostAdapter, STATIC_HOST_CAPABILITIES } from "./static-host";
+export { createLocalSessionSourceClient } from "../source-access";
 export {
   createUnimplementedAnalyzerClient,
   createUnimplementedCompilerClient,

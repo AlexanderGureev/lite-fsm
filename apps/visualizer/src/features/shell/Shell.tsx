@@ -1,4 +1,4 @@
-import { useRef, type ChangeEvent, type KeyboardEvent, type MouseEvent } from "react";
+import { useRef, type ChangeEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import {
   AlertCircle,
   ArrowRight,
@@ -362,6 +362,124 @@ const InputModeToggle = ({ mode, onUseSource, onUseJson }: InputModeToggleProps)
       <Braces aria-hidden="true" className="size-3.5" />
       Import JSON
     </button>
+    {mode === "local-session" ? (
+      <button
+        type="button"
+        role="tab"
+        aria-selected
+        data-testid={VISUALIZER_TEST_IDS.source.inputModeUseLocal}
+        className="inline-flex h-[26px] items-center gap-1.5 rounded-[5px] bg-(--vf-surface-raised) px-2.5 font-mono text-[11px] font-semibold text-(--vf-accent) shadow-[0_1px_2px_oklch(0_0_0/0.35)] transition-colors duration-(--vf-duration-fast)"
+      >
+        <Terminal aria-hidden="true" className="size-3.5" />
+        Local
+      </button>
+    ) : null}
+  </div>
+);
+
+const sourceFileCountLabel = (count: number): string => `${count} ${count === 1 ? "file" : "files"}`;
+
+const sourceModelSummary = (sourcePanel: SourcePanelView): string =>
+  sourcePanel.modelStatus === "ready"
+    ? `${sourcePanel.machineCount} machines · ${sourcePanel.topicCount} topics`
+    : sourcePanel.modelStatus;
+
+const SourceMetadataGrid = ({
+  className,
+  children,
+}: {
+  className?: string;
+  children: ReactNode;
+}) => (
+  <dl className={cn("grid grid-cols-1 gap-2 rounded-md border border-(--vf-border-soft) p-3 font-mono text-[11px] sm:grid-cols-2", className)}>
+    {children}
+  </dl>
+);
+
+const SourceMetadataItem = ({
+  label,
+  title,
+  wide,
+  children,
+}: {
+  label: string;
+  title?: string;
+  wide?: boolean;
+  children: ReactNode;
+}) => (
+  <div className={cn("flex min-w-0 flex-col gap-0.5", wide && "sm:col-span-2")}>
+    <dt className="text-[10px] uppercase tracking-[0.06em] text-(--vf-text-quiet)">{label}</dt>
+    <dd className="min-w-0 truncate text-foreground" title={title}>
+      {children}
+    </dd>
+  </div>
+);
+
+const LoadedInputHeader = ({
+  icon,
+  iconClassName,
+  kicker,
+  title,
+  titleClassName,
+  description,
+}: {
+  icon: ReactNode;
+  iconClassName: string;
+  kicker: string;
+  title: string;
+  titleClassName?: string;
+  description: ReactNode;
+}) => (
+  <div className="flex items-start gap-3">
+    <div className={cn("grid size-10 shrink-0 place-items-center rounded-md border border-(--vf-accent-border) text-(--vf-accent)", iconClassName)}>
+      {icon}
+    </div>
+    <div className="min-w-0 flex-1">
+      <PanelKicker>{kicker}</PanelKicker>
+      <h3 className={cn("mt-0.5 min-w-0 truncate text-[15px] font-semibold text-foreground", titleClassName)}>
+        {title}
+      </h3>
+      {description}
+    </div>
+  </div>
+);
+
+const LoadedInputActions = ({
+  importLabel,
+  onChangeFile,
+  onSwitchToSource,
+  onExploreSystem,
+}: {
+  importLabel: string;
+  onChangeFile: () => void;
+  onSwitchToSource: () => void;
+  onExploreSystem: () => void;
+}) => (
+  <div className="flex flex-wrap items-center gap-2">
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      className="h-8 gap-1.5 border-(--vf-border) bg-(--vf-surface) text-foreground hover:bg-(--vf-surface-raised)"
+      onClick={onChangeFile}
+    >
+      <Upload aria-hidden="true" className="size-3.5" />
+      {importLabel}
+    </Button>
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      className="h-8 gap-1.5 text-(--vf-text-muted) hover:text-foreground"
+      onClick={onSwitchToSource}
+    >
+      <FileCode aria-hidden="true" className="size-3.5" />
+      Switch to paste source
+    </Button>
+    <PrimaryActionButton type="button" className="ml-auto" onClick={onExploreSystem}>
+      Explore system
+      <ArrowRight data-icon="inline-end" aria-hidden="true" />
+    </PrimaryActionButton>
   </div>
 );
 
@@ -383,83 +501,104 @@ const JsonLoadedCard = ({
     data-testid={VISUALIZER_TEST_IDS.source.jsonLoadedCard}
     data-file-name={inputMode.jsonFileName}
   >
-    <div className="flex items-start gap-3">
-      <div className="grid size-10 shrink-0 place-items-center rounded-md border border-(--vf-accent-border) bg-(--vf-surface) text-(--vf-accent)">
-        <FileJson aria-hidden="true" className="size-5" />
-      </div>
-      <div className="min-w-0 flex-1">
-        <PanelKicker>JSON export · loaded</PanelKicker>
-        <h3 className="mt-0.5 min-w-0 truncate text-[15px] font-semibold text-foreground">
-          {inputMode.jsonFileName}
-        </h3>
+    <LoadedInputHeader
+      icon={<FileJson aria-hidden="true" className="size-5" />}
+      iconClassName="bg-(--vf-surface)"
+      kicker="JSON export · loaded"
+      title={inputMode.jsonFileName}
+      description={
         <p className="mt-1 text-[12px] text-(--vf-text-muted)">
           The visualizer compiled this CLI graph export automatically. Use the tabs above to inspect{" "}
           <span className="font-mono text-foreground">System</span>,{" "}
           <span className="font-mono text-foreground">Events</span>, and{" "}
           <span className="font-mono text-foreground">Machines</span>.
         </p>
-      </div>
-    </div>
+      }
+    />
 
-    <dl className="grid grid-cols-1 gap-2 rounded-md border border-(--vf-border-soft) bg-card/80 p-3 font-mono text-[11px] sm:grid-cols-2">
-      <div className="flex min-w-0 flex-col gap-0.5">
-        <dt className="text-[10px] uppercase tracking-[0.06em] text-(--vf-text-quiet)">entry</dt>
-        <dd className="min-w-0 truncate text-foreground" title={inputMode.entryPath}>
-          {inputMode.entryPath}
-        </dd>
-      </div>
-      <div className="flex min-w-0 flex-col gap-0.5">
-        <dt className="text-[10px] uppercase tracking-[0.06em] text-(--vf-text-quiet)">files</dt>
-        <dd className="text-foreground tabular-nums">
-          {inputMode.fileCount} {inputMode.fileCount === 1 ? "file" : "files"}
-        </dd>
-      </div>
-      <div className="flex min-w-0 flex-col gap-0.5">
-        <dt className="text-[10px] uppercase tracking-[0.06em] text-(--vf-text-quiet)">source bundle</dt>
-        <dd className="text-foreground">
-          {inputMode.hasSources ? `embedded · ${inputMode.sourceFileCount}` : "not included"}
-        </dd>
-      </div>
-      <div className="flex min-w-0 flex-col gap-0.5">
-        <dt className="text-[10px] uppercase tracking-[0.06em] text-(--vf-text-quiet)">model</dt>
-        <dd className="text-foreground">
-          {sourcePanel.modelStatus === "ready"
-            ? `${sourcePanel.machineCount} machines · ${sourcePanel.topicCount} topics`
-            : sourcePanel.modelStatus}
-        </dd>
-      </div>
-    </dl>
+    <SourceMetadataGrid className="bg-card/80">
+      <SourceMetadataItem label="entry" title={inputMode.entryPath}>
+        {inputMode.entryPath}
+      </SourceMetadataItem>
+      <SourceMetadataItem label="files">
+        <span className="tabular-nums">{sourceFileCountLabel(inputMode.fileCount)}</span>
+      </SourceMetadataItem>
+      <SourceMetadataItem label="source bundle">
+        {inputMode.hasSources ? `embedded · ${inputMode.sourceFileCount}` : "not included"}
+      </SourceMetadataItem>
+      <SourceMetadataItem label="model">{sourceModelSummary(sourcePanel)}</SourceMetadataItem>
+    </SourceMetadataGrid>
 
-    <div className="flex flex-wrap items-center gap-2">
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        className="h-8 gap-1.5 border-(--vf-border) bg-(--vf-surface) text-foreground hover:bg-(--vf-surface-raised)"
-        onClick={onChangeFile}
-      >
-        <Upload aria-hidden="true" className="size-3.5" />
-        Change file
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className="h-8 gap-1.5 text-(--vf-text-muted) hover:text-foreground"
-        onClick={onSwitchToSource}
-      >
-        <FileCode aria-hidden="true" className="size-3.5" />
-        Switch to paste source
-      </Button>
-      <PrimaryActionButton
-        type="button"
-        className="ml-auto"
-        onClick={() => dispatch({ type: "tab.selected", tab: "system" })}
-      >
-        Explore system
-        <ArrowRight data-icon="inline-end" aria-hidden="true" />
-      </PrimaryActionButton>
-    </div>
+    <LoadedInputActions
+      importLabel="Change file"
+      onChangeFile={onChangeFile}
+      onSwitchToSource={onSwitchToSource}
+      onExploreSystem={() => dispatch({ type: "tab.selected", tab: "system" })}
+    />
+  </div>
+);
+
+const LocalSessionLoadedCard = ({
+  inputMode,
+  sourcePanel,
+  onChangeFile,
+  onSwitchToSource,
+  dispatch,
+}: {
+  inputMode: Extract<SourceInputModeView, { kind: "local-session" }>;
+  sourcePanel: SourcePanelView;
+  onChangeFile: () => void;
+  onSwitchToSource: () => void;
+  dispatch: (command: VisualizerCommand) => void;
+}) => (
+  <div
+    className="flex min-h-[420px] min-w-0 flex-1 flex-col gap-4 rounded-(--vf-radius-lg) border border-(--vf-accent-border) bg-card p-5 shadow-[inset_3px_0_0_var(--vf-accent)] lg:min-h-0"
+    data-testid={VISUALIZER_TEST_IDS.source.localSessionCard}
+    data-session-id={inputMode.sessionId}
+    data-entry-path={inputMode.entryPath}
+    data-file-count={inputMode.fileCount}
+  >
+    <LoadedInputHeader
+      icon={<Terminal aria-hidden="true" className="size-5" />}
+      iconClassName="bg-(--vf-accent-soft)"
+      kicker="Local session · loaded"
+      title={inputMode.entryPath}
+      titleClassName="font-mono"
+      description={
+        <p className="mt-1 font-mono text-[11px] text-(--vf-text-muted)">
+          session {inputMode.sessionId}
+        </p>
+      }
+    />
+
+    <SourceMetadataGrid className="bg-(--vf-surface-soft)">
+      <SourceMetadataItem label="entry" title={inputMode.entryPath}>
+        {inputMode.entryPath}
+      </SourceMetadataItem>
+      <SourceMetadataItem label="files">
+        <span className="tabular-nums">{sourceFileCountLabel(inputMode.fileCount)}</span>
+      </SourceMetadataItem>
+      <SourceMetadataItem label="project root" title={inputMode.projectRoot ?? "not reported"}>
+        {inputMode.projectRoot ?? "not reported"}
+      </SourceMetadataItem>
+      <SourceMetadataItem label="host">
+        read:{inputMode.canReadFiles ? "yes" : "no"} · write:{inputMode.canWriteFiles ? "yes" : "no"} · patch:
+        {inputMode.canApplyPatch ? "yes" : "no"}
+      </SourceMetadataItem>
+      {inputMode.tsconfigPath ? (
+        <SourceMetadataItem label="tsconfig" title={inputMode.tsconfigPath} wide>
+          {inputMode.tsconfigPath}
+        </SourceMetadataItem>
+      ) : null}
+      <SourceMetadataItem label="model" wide>{sourceModelSummary(sourcePanel)}</SourceMetadataItem>
+    </SourceMetadataGrid>
+
+    <LoadedInputActions
+      importLabel="Import JSON"
+      onChangeFile={onChangeFile}
+      onSwitchToSource={onSwitchToSource}
+      onExploreSystem={() => dispatch({ type: "tab.selected", tab: "system" })}
+    />
   </div>
 );
 
@@ -591,8 +730,9 @@ const SourceWorkspace = ({
   const pickFile = () => fileInputRef.current?.click();
   const switchToPasteSource = () => dispatch({ type: "input-mode.use-pasted-source" });
   const isJsonMode = sourceInputMode.kind === "project-export";
-  const eyebrow = isJsonMode ? "Source · JSON export" : "Source · paste TypeScript";
-  const title = isJsonMode ? sourceInputMode.jsonFileName : sourcePanel.filename;
+  const isLocalMode = sourceInputMode.kind === "local-session";
+  const eyebrow = isLocalMode ? "Source · local session" : isJsonMode ? "Source · JSON export" : "Source · paste TypeScript";
+  const title = isLocalMode ? sourceInputMode.entryPath : isJsonMode ? sourceInputMode.jsonFileName : sourcePanel.filename;
 
   return (
     <section
@@ -613,11 +753,11 @@ const SourceWorkspace = ({
       <WorkspaceHeader eyebrow={eyebrow} title={title} titleId="source-pipeline-title">
         <InputModeToggle
           mode={sourceInputMode.kind}
-          onUseSource={isJsonMode ? switchToPasteSource : () => undefined}
+          onUseSource={isJsonMode || isLocalMode ? switchToPasteSource : () => undefined}
           onUseJson={pickFile}
         />
         <div className="flex w-full items-center gap-2 sm:ml-auto sm:w-auto">
-          {isJsonMode ? null : (
+          {isJsonMode || isLocalMode ? null : (
             <>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -649,6 +789,14 @@ const SourceWorkspace = ({
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-auto lg:grid-cols-[minmax(0,1fr)_minmax(220px,260px)] lg:overflow-hidden">
         {isJsonMode ? (
           <JsonLoadedCard
+            inputMode={sourceInputMode}
+            sourcePanel={sourcePanel}
+            onChangeFile={pickFile}
+            onSwitchToSource={switchToPasteSource}
+            dispatch={dispatch}
+          />
+        ) : isLocalMode ? (
+          <LocalSessionLoadedCard
             inputMode={sourceInputMode}
             sourcePanel={sourcePanel}
             onChangeFile={pickFile}
@@ -970,8 +1118,9 @@ export const Shell = () => {
   const compileLabel = compileStatusLabel(sourcePanel.compileStatus);
   const compileTone = statusTone(sourcePanel.compileStatus);
   const isJsonMode = sourceInputMode.kind === "project-export";
-  const inputLabel = isJsonMode ? sourceInputMode.jsonFileName : sourcePanel.filename;
-  const inputKindLabel = isJsonMode ? "JSON" : "TS";
+  const isLocalMode = sourceInputMode.kind === "local-session";
+  const inputLabel = isLocalMode ? sourceInputMode.entryPath : isJsonMode ? sourceInputMode.jsonFileName : sourcePanel.filename;
+  const inputKindLabel = isLocalMode ? "LOCAL" : isJsonMode ? "JSON" : "TS";
   const tabsScrollRef = useRef<HTMLDivElement | null>(null);
   useOverflowFade(tabsScrollRef);
 
@@ -1069,14 +1218,16 @@ export const Shell = () => {
               aria-label={`Go to Source · ${inputKindLabel} input · ${inputLabel}`}
               className={cn(
                 "hidden h-8 shrink-0 items-center gap-1.5 rounded-md border px-2 font-mono text-[11px] transition-colors duration-(--vf-duration-fast) sm:inline-flex",
-                isJsonMode
+                isJsonMode || isLocalMode
                   ? "border-(--vf-accent-border) bg-(--vf-accent-soft) text-(--vf-accent) hover:bg-(--vf-accent-soft)/80"
                   : "border-(--vf-border) bg-(--vf-surface-soft) text-(--vf-text-muted) hover:bg-(--vf-surface-raised) hover:text-foreground",
               )}
               title={`Input: ${inputKindLabel.toLowerCase()} · ${inputLabel}`}
               onClick={() => dispatch({ type: "tab.selected", tab: "source" })}
             >
-              {isJsonMode ? (
+              {isLocalMode ? (
+                <Terminal aria-hidden="true" className="size-3.5 shrink-0" />
+              ) : isJsonMode ? (
                 <Braces aria-hidden="true" className="size-3.5 shrink-0" />
               ) : (
                 <FileCode aria-hidden="true" className="size-3.5 shrink-0 text-(--vf-text-quiet)" />

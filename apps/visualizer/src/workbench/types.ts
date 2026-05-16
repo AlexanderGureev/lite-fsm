@@ -13,8 +13,10 @@ import type { CodegenPlanResult, CodegenState, SourceEditIntent } from "../codeg
 import type { ConsoleChannelFilter, ConsoleFilterKey, ConsoleScope, ConsoleState } from "../console";
 import type { WorkbenchDiagnosticRef } from "../diagnostics";
 import type { SourceSession } from "../source";
+import type { SourceAccessState } from "../source-access";
 import type { VisualizerHostCapabilities, VisualizerHostState, VisualizerWorkbenchRowCommandTarget } from "../services";
 import type { LiteFsmProjectGraphExportDocument, LiteFsmProjectGraphSourceBundle, ProjectGraphExportParseIssue } from "../project-export";
+import type { StartupEntryKind, StartupLoadIssue, StartupLoadResult } from "../startup/types";
 import type { ValidationState } from "../validation";
 
 type VisualizerTransitionRowCommandTarget = Extract<VisualizerWorkbenchRowCommandTarget, { kind: "transition" }>;
@@ -35,7 +37,11 @@ export type VisualizerInputMode =
   | {
       kind: "local-session";
       sessionId: string;
+      token: string;
       capabilities: VisualizerHostCapabilities;
+      files: readonly LiteFsmGraphProjectFile[];
+      entryPath: string;
+      tsconfigPath?: string;
     };
 
 export type CompileState = {
@@ -125,6 +131,7 @@ export type VisualizerWorkbenchState = {
   console: ConsoleState;
   codegen: CodegenState;
   canvas: CanvasState;
+  sourceAccess: SourceAccessState;
 };
 
 export type WorkbenchRevisionIndex = {
@@ -144,6 +151,7 @@ export type WorkbenchRevisionIndex = {
   panels: number;
   codegen: number;
   canvas: number;
+  sourceAccess: number;
 };
 
 export type WorkbenchSnapshot = {
@@ -158,6 +166,8 @@ export type VisualizerCommand =
   | { type: "project-export.loaded"; fileName: string; exportDocument: LiteFsmProjectGraphExportDocument }
   | { type: "input-mode.use-pasted-source" }
   | { type: "project-export.load.failed"; fileName: string; issue: ProjectGraphExportParseIssue }
+  | { type: "startup.loaded"; result: StartupLoadResult }
+  | { type: "startup.load.failed"; entryKind: StartupEntryKind; issue: StartupLoadIssue }
   | { type: "tab.selected"; tab: VisualizerTab }
   | { type: "l1.machine-query.changed"; query: string }
   | { type: "l1.topic-query.changed"; query: string }
@@ -221,7 +231,9 @@ export type VisualizerInternalCommand =
       diagnostics?: readonly WorkbenchDiagnosticRef[];
     }
   | { type: "codegen.plan.completed"; requestId: string; sourceVersion: number; result: CodegenPlanResult }
-  | { type: "codegen.plan.failed"; requestId: string; sourceVersion: number; diagnostics: readonly WorkbenchDiagnosticRef[] };
+  | { type: "codegen.plan.failed"; requestId: string; sourceVersion: number; diagnostics: readonly WorkbenchDiagnosticRef[] }
+  | { type: "source-access.fetch.succeeded"; sessionId: string; fileName: string; hash: string; text: string }
+  | { type: "source-access.fetch.failed"; sessionId: string; fileName: string; hash: string; code: string; message: string };
 
 export type WorkbenchEffectDescriptor =
   | { kind: "compile"; requestId: string; source: SourceSession }
@@ -260,7 +272,8 @@ export type WorkbenchEffectDescriptor =
       initialStateOverrides?: readonly GraphInitialStateOverride[];
       initialContextOverrides?: readonly GraphInitialContextOverride[];
     }
-  | { kind: "codegen.plan"; requestId: string; sourceVersion: number; sourceHash: string; intent: SourceEditIntent };
+  | { kind: "codegen.plan"; requestId: string; sourceVersion: number; sourceHash: string; intent: SourceEditIntent }
+  | { kind: "source-access.fetch"; sessionId: string; token: string; fileName: string; hash: string };
 
 export type VisualizerCommandResult =
   | { ok: true }
