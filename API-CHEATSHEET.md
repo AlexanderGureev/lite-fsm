@@ -61,12 +61,17 @@ lite-fsm export-graph --entry store/index.ts --out lite-fsm.graph.json --tsconfi
 lite-fsm export-graph --entry store/index.ts --out lite-fsm.graph.json --include-source
 lite-fsm visualize --entry store/index.ts --tsconfig tsconfig.json
 lite-fsm visualize --entry store/index.ts --port 3030 --no-open
+lite-fsm create my-app --template vite
+lite-fsm add-machine user-session
 ```
 
 | Command                  | Назначение                                                                                                      |
 | ------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| `lite-fsm create`        | создает Next/Vite starter с generated `src/store`, `app.Events` aggregator и React wiring                       |
+| `lite-fsm add-machine`   | добавляет domain machine в generated `src/store`, регистрирует key и подключает machine-local `Events`          |
 | `lite-fsm export-graph`  | строит project graph через public `compileLiteFsmGraphProject` и пишет JSON export document для visualizer-а   |
 | `lite-fsm visualize`     | строит project graph, запускает local host `127.0.0.1:<port>` и отдает visualizer static + session/source API  |
+| `<name>`                 | `add-machine` only: `kebab-case`, `snake_case` или `camelCase`, например `user-session` → `userSession`         |
 | `--entry <path>`         | обязательный TypeScript entrypoint с выбранным top-level `MachineManager(...)`                                  |
 | `--out <path>`           | обязательный output file; stdout JSON (`--out -`) не поддерживается                                             |
 | `--tsconfig <path>`      | optional explicit tsconfig; без него CLI ищет ближайший `tsconfig.json`, затем fallback к default TS resolution |

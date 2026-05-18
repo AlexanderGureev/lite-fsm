@@ -3,6 +3,7 @@ import type { CliContext } from "./context.js";
 import { cliDiagnostic } from "./diagnostics.js";
 import type { CommandResult } from "./result.js";
 import { createCommandResult } from "./result.js";
+import { registerAddMachineCommand } from "../add-machine/command.js";
 import { registerCreateProjectCommand } from "../create-project/command.js";
 import type { RunCreateProjectDependencies } from "../create-project/run-create-project.js";
 import { registerExportGraphCommand } from "../export-graph/command.js";
@@ -53,6 +54,9 @@ export const createProgram = (context: CliContext, dependencies: CliProgramDepen
   registerCreateProjectCommand(program, context, (result) => {
     commandResult = result;
   }, dependencies.createProject);
+  registerAddMachineCommand(program, context, (result) => {
+    commandResult = result;
+  });
   registerVisualizeCommand(program, context, (result) => {
     commandResult = result;
   });
