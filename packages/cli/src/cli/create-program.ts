@@ -3,12 +3,18 @@ import type { CliContext } from "./context.js";
 import { cliDiagnostic } from "./diagnostics.js";
 import type { CommandResult } from "./result.js";
 import { createCommandResult } from "./result.js";
+import { registerCreateProjectCommand } from "../create-project/command.js";
+import type { RunCreateProjectDependencies } from "../create-project/run-create-project.js";
 import { registerExportGraphCommand } from "../export-graph/command.js";
 import { formatDiagnostics } from "../output/format-diagnostics.js";
 import { registerVisualizeCommand } from "../visualize/command.js";
 
 export type CliProgram = {
   parse(argv: readonly string[]): Promise<CommandResult>;
+};
+
+export type CliProgramDependencies = {
+  createProject?: RunCreateProjectDependencies;
 };
 
 const invalidOptionsResult = (context: CliContext, message: string): CommandResult => {
@@ -26,7 +32,7 @@ const isCommanderError = (error: unknown): error is CommanderError => {
   return error instanceof CommanderError;
 };
 
-export const createProgram = (context: CliContext): CliProgram => {
+export const createProgram = (context: CliContext, dependencies: CliProgramDependencies = {}): CliProgram => {
   let commandResult: CommandResult = { exitCode: 0, diagnostics: [] };
   const program = new Command();
 
@@ -44,6 +50,9 @@ export const createProgram = (context: CliContext): CliProgram => {
   registerExportGraphCommand(program, context, (result) => {
     commandResult = result;
   });
+  registerCreateProjectCommand(program, context, (result) => {
+    commandResult = result;
+  }, dependencies.createProject);
   registerVisualizeCommand(program, context, (result) => {
     commandResult = result;
   });

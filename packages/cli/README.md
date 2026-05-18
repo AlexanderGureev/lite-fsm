@@ -1,6 +1,6 @@
 # @lite-fsm/cli
 
-Alpha command line tools for `lite-fsm`. The `lite-fsm` binary can export a project graph JSON document and run a local Visualizer session for a TypeScript project.
+Alpha command line tools for `lite-fsm`. The `lite-fsm` binary can create starter React projects, export a project graph JSON document, and run a local Visualizer session for a TypeScript project.
 
 The CLI uses `@lite-fsm/graph` for static analysis. It does not run your app, call reducers, execute effects, or evaluate user code.
 
@@ -16,8 +16,31 @@ After installation, the `lite-fsm` command is available.
 
 | Command        | Purpose                                                                |
 | -------------- | ---------------------------------------------------------------------- |
+| `create`       | Create a starter Next.js or Vite React project wired to lite-fsm.      |
 | `export-graph` | Build a project graph and write a JSON export document.                |
 | `visualize`    | Build a project graph and launch the bundled local Visualizer session. |
+
+## Create a Project
+
+Create a Next.js starter:
+
+```bash
+lite-fsm create my-app --template next
+```
+
+Create a Vite starter:
+
+```bash
+lite-fsm create my-app --template vite
+```
+
+Tailwind CSS is enabled by default. To create the same starter without Tailwind:
+
+```bash
+lite-fsm create my-app --template vite --css none
+```
+
+The generated project includes TypeScript, alias `@/*`, `@lite-fsm/core`, `@lite-fsm/react`, and a minimal store under `src/store`.
 
 ## Export a Graph
 
@@ -60,6 +83,14 @@ lite-fsm visualize --entry store/index.ts --tsconfig tsconfig.json --port 3031 -
 ```
 
 ## Options
+
+`create`:
+
+- `<project-name>` - required relative target directory. Nested paths such as `apps/demo` are supported when the parent directory already exists.
+- `--template <next|vite>` - required framework template.
+- `--css <tailwind|none>` - styling preset, defaults to `tailwind`.
+- `--package-manager <pnpm|npm|yarn|bun>` - package manager for scaffold, install, and next steps, defaults to `pnpm`.
+- `--install` / `--no-install` - install dependencies after generation, defaults to `--install`.
 
 `export-graph`:
 
