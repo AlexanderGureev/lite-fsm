@@ -8,6 +8,7 @@ import { createNodeCreateProjectDependencies, type CreateProjectDependencies, ty
 import type { CreateProjectOptions } from "./options.js";
 import { mergePackageJsonPatches, patchPackageJson } from "./package-json.js";
 import { commandLine, createDevCommand, createExternalCommand, createInstallCommand } from "./package-manager.js";
+import { createProjectLiteFsmDependencies } from "./release-dependencies.js";
 import type { CreateProjectStepResult } from "./result.js";
 import { applyLiteFsmStoreOverlay } from "./templates/shared-store.js";
 import { getCreateProjectTemplate } from "./templates/registry.js";
@@ -95,12 +96,7 @@ const packagePatchFor = (css: CreateProjectCss, template: CreateProjectTemplate)
 
   return mergePackageJsonPatches([
     {
-      dependencies: {
-        "@lite-fsm/core": "latest",
-        "@lite-fsm/middleware": "latest",
-        "@lite-fsm/react": "latest",
-        immer: "latest",
-      },
+      dependencies: createProjectLiteFsmDependencies,
     },
     cssAdapter.packageJsonPatch ?? {},
   ]);

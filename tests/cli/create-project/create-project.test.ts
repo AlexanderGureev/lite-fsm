@@ -13,6 +13,7 @@ import {
   createScaffoldCommand,
   type CreateProjectPackageManager,
 } from "../../../packages/cli/src/create-project/package-manager";
+import { createProjectLiteFsmDependencies } from "../../../packages/cli/src/create-project/release-dependencies";
 import { runCreateProjectCommand } from "../../../packages/cli/src/create-project/command";
 import { patchNextLayout } from "../../../packages/cli/src/create-project/templates/next";
 import { getCreateProjectTemplate, listCreateProjectTemplates } from "../../../packages/cli/src/create-project/templates/registry";
@@ -313,10 +314,10 @@ describe("create-project run flow", () => {
     expect(context.fs.getFile("/project/demo/src/app/page.tsx")).toContain('appState === "READY"');
     expect(context.fs.getFile("/project/demo/src/app/page.tsx")).toContain("READY UI is visible.");
     expect(context.fs.getFile("/project/demo/src/app/layout.tsx")).toContain("<Providers>{children}</Providers>");
-    expect(packageJson.dependencies["@lite-fsm/core"]).toBe("latest");
-    expect(packageJson.dependencies["@lite-fsm/middleware"]).toBe("latest");
-    expect(packageJson.dependencies["@lite-fsm/react"]).toBe("latest");
-    expect(packageJson.dependencies.immer).toBe("latest");
+    expect(packageJson.dependencies["@lite-fsm/core"]).toBe(createProjectLiteFsmDependencies["@lite-fsm/core"]);
+    expect(packageJson.dependencies["@lite-fsm/middleware"]).toBe(createProjectLiteFsmDependencies["@lite-fsm/middleware"]);
+    expect(packageJson.dependencies["@lite-fsm/react"]).toBe(createProjectLiteFsmDependencies["@lite-fsm/react"]);
+    expect(packageJson.dependencies.immer).toBe(createProjectLiteFsmDependencies.immer);
     expect(context.fs.getFile("/project/demo/src/store/machines/app.ts")).toContain('initialState: "IDLE"');
     expect(context.fs.getFile("/project/demo/src/store/machines/app.ts")).toContain('IDLE: { DO_INIT: "READY" }');
     expect(context.fs.getFile("/project/demo/src/store/machines/app.ts")).toContain('export type Events = FSMEvent<"DO_INIT">');
@@ -365,9 +366,9 @@ describe("create-project run flow", () => {
     expect(context.fs.getFile("/project/demo/src/index.css")).toBe('@import "tailwindcss";\n');
     expect(tsconfig.compilerOptions.paths["@/*"]).toEqual(["./src/*"]);
     expect(tsconfig.compilerOptions).not.toHaveProperty("baseUrl");
-    expect(packageJson.dependencies["@lite-fsm/core"]).toBe("latest");
-    expect(packageJson.dependencies["@lite-fsm/middleware"]).toBe("latest");
-    expect(packageJson.dependencies.immer).toBe("latest");
+    expect(packageJson.dependencies["@lite-fsm/core"]).toBe(createProjectLiteFsmDependencies["@lite-fsm/core"]);
+    expect(packageJson.dependencies["@lite-fsm/middleware"]).toBe(createProjectLiteFsmDependencies["@lite-fsm/middleware"]);
+    expect(packageJson.dependencies.immer).toBe(createProjectLiteFsmDependencies.immer);
     expect(packageJson.devDependencies["@tailwindcss/vite"]).toBe("latest");
     expect(context.stdout.text()).toContain("npm run dev");
   });

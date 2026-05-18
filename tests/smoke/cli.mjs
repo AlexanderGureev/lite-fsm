@@ -12,6 +12,15 @@ assert.match(result.stdout, /lite-fsm command line tools/);
 assert.match(result.stdout, /export-graph/);
 assert.match(result.stdout, /visualize/);
 
+for (const command of ["create", "export-graph", "visualize"]) {
+  const help = spawnSync("node_modules/.bin/lite-fsm", [command, "--help"], {
+    encoding: "utf8",
+  });
+
+  assert.equal(help.status, 0, help.stderr);
+  assert.match(help.stdout, new RegExp(`lite-fsm ${command}`));
+}
+
 assert.equal(existsSync("packages/cli/dist/visualizer/index.html"), true, "CLI package must include visualizer artifact");
 
 const fixtureRoot = resolve(".tmp/smoke-visualize");
