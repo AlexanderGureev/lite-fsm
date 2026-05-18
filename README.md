@@ -39,13 +39,13 @@ The core runtime stays framework-agnostic and dependency-free. React bindings, m
 ## Install
 
 ```bash
-pnpm add @lite-fsm/core
+npm install @lite-fsm/core
 ```
 
 Add integrations only when you need them:
 
 ```bash
-pnpm add @lite-fsm/react @lite-fsm/middleware @lite-fsm/persist
+npm install @lite-fsm/react @lite-fsm/middleware @lite-fsm/persist
 ```
 
 ## Quickstart
