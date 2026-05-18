@@ -141,6 +141,7 @@ describe("create-project options", () => {
         projectName: "demo",
         targetPath: "/project/demo",
         targetParentPath: "/project",
+        targetMode: "new-directory",
         template: "vite",
         css: "tailwind",
         packageManager: "npm",
@@ -153,9 +154,36 @@ describe("create-project options", () => {
         projectName: "apps/demo",
         targetPath: "/project/apps/demo",
         targetParentPath: "/project/apps",
+        targetMode: "new-directory",
         css: "none",
         packageManager: "npm",
         install: false,
+      }),
+    });
+  });
+
+  it("нормализует текущую директорию как target для project name .", () => {
+    const context = createContext();
+
+    expect(normalizeCreateProjectOptions(context, { projectName: ".", template: "next" })).toEqual({
+      ok: true,
+      options: {
+        projectName: ".",
+        targetPath: "/project",
+        targetParentPath: "/",
+        targetMode: "current-directory",
+        template: "next",
+        css: "tailwind",
+        packageManager: "npm",
+        install: true,
+      },
+    });
+    expect(normalizeCreateProjectOptions(context, { projectName: ".//.", template: "vite" })).toEqual({
+      ok: true,
+      options: expect.objectContaining({
+        projectName: ".",
+        targetPath: "/project",
+        targetMode: "current-directory",
       }),
     });
   });
@@ -183,7 +211,7 @@ describe("create-project options", () => {
 
   it("отклоняет missing template, missing project и небезопасные target paths", () => {
     const context = createContext();
-    const invalidNames = ["", ".", "..", "/tmp/demo", "apps/../demo"];
+    const invalidNames = ["", "..", "/tmp/demo", "apps/../demo"];
 
     expect(normalizeCreateProjectOptions(context, { projectName: "demo" })).toEqual({
       ok: false,
@@ -332,6 +360,31 @@ describe("create-project run flow", () => {
     expect(context.stdout.text()).toContain("Installing dependencies: pnpm install");
     expect(context.stdout.text()).toContain("cd demo");
     expect(context.stdout.text()).toContain("pnpm dev");
+  });
+
+  it("создает Next проект в текущей директории для target .", async () => {
+    const context = createContext();
+    const runCommand = createScaffoldRunCommand(context);
+    const result = await runCreateProjectCommand(context, {
+      projectName: ".",
+      template: "next",
+      packageManager: "pnpm",
+      install: false,
+    }, { runCommand });
+
+    expect(result).toEqual({ exitCode: 0, diagnostics: [] });
+    expect(runCommand).toHaveBeenCalledTimes(1);
+    expect(runCommand.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+      command: "pnpm",
+      cwd: "/project",
+      stage: "scaffold",
+      args: expect.arrayContaining(["."]),
+    }));
+    expect(context.fs.getFile("/project/src/app/providers.tsx")).toContain("makeStore()");
+    expect(context.fs.getFile("/project/src/store/index.ts")).toContain("export const makeStore = () =>");
+    expect(context.stdout.text()).toContain("Next steps:");
+    expect(context.stdout.text()).toContain("pnpm dev");
+    expect(context.stdout.text()).not.toContain("cd .");
   });
 
   it("создает Vite Tailwind проект без install и патчит alias/provider/css", async () => {

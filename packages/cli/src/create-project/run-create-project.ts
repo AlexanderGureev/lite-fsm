@@ -40,6 +40,8 @@ const failTargetExists = (options: CreateProjectOptions): CommandResult => creat
 ]);
 
 const validateTargetDirectory = (context: CliContext, options: CreateProjectOptions): CommandResult | undefined => {
+  if (options.targetMode === "current-directory") return undefined;
+
   if (!context.fs.directoryExists(options.targetParentPath)) return failTargetParentMissing(options);
   if (context.fs.directoryExists(options.targetPath) || context.fs.fileExists(options.targetPath)) return failTargetExists(options);
 
@@ -103,6 +105,11 @@ const packagePatchFor = (css: CreateProjectCss, template: CreateProjectTemplate)
 };
 
 const printNextSteps = (context: CliContext, options: CreateProjectOptions): void => {
+  if (options.targetMode === "current-directory") {
+    context.stdout.write(`\nNext steps:\n  ${createDevCommand(options.packageManager)}\n`);
+    return;
+  }
+
   context.stdout.write(`\nNext steps:\n  cd ${options.projectName}\n  ${createDevCommand(options.packageManager)}\n`);
 };
 

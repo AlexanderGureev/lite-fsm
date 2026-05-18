@@ -11,6 +11,7 @@ export type CreateProjectOptions = {
   projectName: string;
   targetPath: string;
   targetParentPath: string;
+  targetMode: "new-directory" | "current-directory";
   template: CreateProjectTemplate;
   css: CreateProjectCss;
   packageManager: CreateProjectPackageManager;
@@ -49,11 +50,13 @@ const isCreateProjectPackageManager = (value: string): value is CreateProjectPac
 
 const projectNameSegments = (projectName: string): string[] => projectName.split(/[\\/]+/).filter(Boolean);
 
+const isCurrentDirectoryProjectName = (projectName: string): boolean => /^\.(?:[\\/]+\.)*[\\/]*$/.test(projectName);
+
 const normalizeProjectName = (
   context: CliContext,
   value: unknown,
   diagnostics: CliDiagnostic[],
-): Pick<CreateProjectOptions, "projectName" | "targetPath" | "targetParentPath"> | undefined => {
+): Pick<CreateProjectOptions, "projectName" | "targetPath" | "targetParentPath" | "targetMode"> | undefined => {
   const projectName = stringOption(value);
 
   if (!projectName) {
@@ -61,9 +64,19 @@ const normalizeProjectName = (
     return undefined;
   }
 
+  if (isCurrentDirectoryProjectName(projectName)) {
+    const targetPath = normalizeAbsolutePath(context.cwd);
+
+    return {
+      projectName: ".",
+      targetPath,
+      targetParentPath: normalizeAbsolutePath(dirname(targetPath)),
+      targetMode: "current-directory",
+    };
+  }
+
   const segments = projectNameSegments(projectName);
   if (
-    projectName === "." ||
     projectName === ".." ||
     isAbsolute(projectName) ||
     segments.length === 0 ||
@@ -84,6 +97,7 @@ const normalizeProjectName = (
     projectName: normalizedProjectName,
     targetPath,
     targetParentPath: normalizeAbsolutePath(dirname(targetPath)),
+    targetMode: "new-directory",
   };
 };
 

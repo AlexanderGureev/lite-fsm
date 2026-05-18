@@ -50,17 +50,18 @@ lite-fsm create my-app --template vite
 
 ```bash copy
 lite-fsm create my-app --template next
+lite-fsm create . --template next
 lite-fsm create my-app --template vite --css none
 lite-fsm create apps/demo --template vite --package-manager pnpm --no-install
 ```
 
-`<project-name>` должен быть относительным путём внутри текущей директории. Родительская директория должна существовать, а целевая директория — отсутствовать.
+`<project-name>` должен быть относительным путём внутри текущей директории или `.` для генерации в текущую директорию. Для новых директорий родительская директория должна существовать, а целевая директория — отсутствовать.
 
 ## Опции create
 
 | Опция                                      | Обязательна | Назначение                                                                 |
 | ------------------------------------------ | ----------- | -------------------------------------------------------------------------- |
-| `<project-name>`                           | Да          | Относительная директория проекта, например `my-app` или `apps/demo`        |
+| `<project-name>`                           | Да          | Относительная директория проекта, например `my-app`, `apps/demo` или `.`   |
 | `--template <next\|vite>`                  | Да          | Framework starter: Next.js App Router или Vite React                       |
 | `--css <tailwind\|none>`                   | Нет         | CSS preset; по умолчанию `tailwind`                                        |
 | `--package-manager <pnpm\|npm\|yarn\|bun>` | Нет         | Package manager для scaffold, install и next steps; по умолчанию `npm`     |
@@ -348,7 +349,7 @@ type LiteFsmProjectGraphExportDocument = {
 `create` завершается с ошибкой, когда:
 
 - не передан `<project-name>` или `--template`;
-- имя проекта является абсолютным путём, содержит `..` или указывает на уже существующий target;
+- имя проекта является абсолютным путём, содержит `..` или указывает на уже существующий target, кроме `.` для текущей директории;
 - родительская директория target-а не существует;
 - framework scaffold, install, patching или финальная validation завершаются ошибкой.
 

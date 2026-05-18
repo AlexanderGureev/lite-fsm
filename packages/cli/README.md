@@ -35,6 +35,12 @@ Create a Vite starter:
 lite-fsm create my-app --template vite
 ```
 
+Create a starter in the current directory:
+
+```bash
+lite-fsm create . --template next
+```
+
 Tailwind CSS is enabled by default. To create the same starter without Tailwind:
 
 ```bash
@@ -99,7 +105,7 @@ lite-fsm visualize --entry store/index.ts --tsconfig tsconfig.json --port 3031 -
 
 `create`:
 
-- `<project-name>` - required relative target directory. Nested paths such as `apps/demo` are supported when the parent directory already exists.
+- `<project-name>` - required relative target directory, or `.` for the current directory. Nested paths such as `apps/demo` are supported when the parent directory already exists.
 - `--template <next|vite>` - required framework template.
 - `--css <tailwind|none>` - styling preset, defaults to `tailwind`.
 - `--package-manager <pnpm|npm|yarn|bun>` - package manager for scaffold, install, and next steps, defaults to `npm`.
