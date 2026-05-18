@@ -319,13 +319,15 @@ describe("create-project run flow", () => {
     expect(packageJson.dependencies.immer).toBe("latest");
     expect(context.fs.getFile("/project/demo/src/store/machines/app.ts")).toContain('initialState: "IDLE"');
     expect(context.fs.getFile("/project/demo/src/store/machines/app.ts")).toContain('IDLE: { DO_INIT: "READY" }');
+    expect(context.fs.getFile("/project/demo/src/store/machines/app.ts")).toContain('export type Events = FSMEvent<"DO_INIT">');
     expect(context.fs.getFile("/project/demo/src/store/machines/app.ts")).toContain("const root = getState();");
     expect(context.fs.getFile("/project/demo/src/store/index.ts")).toContain("export const makeStore = () =>");
     expect(context.fs.getFile("/project/demo/src/store/index.ts")).toContain('import { immerMiddleware } from "@lite-fsm/middleware/immer";');
     expect(context.fs.getFile("/project/demo/src/store/index.ts")).toContain("middleware: [immerMiddleware]");
     expect(context.fs.getFile("/project/demo/src/store/index.ts")).toContain("getState: manager.getState");
     expect(context.fs.getFile("/project/demo/src/store/deps.ts")).toContain("getState: () => AppState");
-    expect(context.fs.getFile("/project/demo/src/store/types.ts")).toContain('FSMEvent<"DO_INIT">');
+    expect(context.fs.getFile("/project/demo/src/store/types.ts")).toContain('import type * as app from "./machines/app";');
+    expect(context.fs.getFile("/project/demo/src/store/types.ts")).toContain("export type AppEvents = app.Events;");
     expect(context.stdout.text()).toContain("Installing dependencies: pnpm install");
     expect(context.stdout.text()).toContain("cd demo");
     expect(context.stdout.text()).toContain("pnpm dev");

@@ -10,9 +10,9 @@ import type { AppEvents } from "./types";
 
 export const createMachine: TypedCreateMachineFn<AppEvents, AppDeps> = createLiteFsmMachine;
 `,
-  "src/store/types.ts": `import type { FSMEvent } from "@lite-fsm/core";
+  "src/store/types.ts": `import type * as app from "./machines/app";
 
-export type AppEvents = FSMEvent<"DO_INIT">;
+export type AppEvents = app.Events;
 `,
   "src/store/deps.ts": `import type { AppState } from ".";
 
@@ -62,7 +62,10 @@ export * from "./hooks";
 export type { AppDeps } from "./deps";
 export type { AppEvents } from "./types";
 `,
-  "src/store/machines/app.ts": `import { createMachine } from "../create-machine";
+  "src/store/machines/app.ts": `import type { FSMEvent } from "@lite-fsm/core";
+import { createMachine } from "../create-machine";
+
+export type Events = FSMEvent<"DO_INIT">;
 
 export const app = createMachine({
   config: {
