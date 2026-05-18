@@ -1,6 +1,6 @@
 {
   "name": "@lite-fsm/graph",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "Alpha graph compiler for lite-fsm",
   "license": "MIT",
@@ -46,9 +46,15 @@
   },
   "typesVersions": {
     "*": {
-      "*": ["dist/index.d.ts"],
-      "simulator": ["dist/simulator/index.d.ts"],
-      "view-model": ["dist/view-model/index.d.ts"]
+      "*": [
+        "dist/index.d.ts"
+      ],
+      "simulator": [
+        "dist/simulator/index.d.ts"
+      ],
+      "view-model": [
+        "dist/view-model/index.d.ts"
+      ]
     }
   },
   "files": [

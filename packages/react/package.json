@@ -1,6 +1,6 @@
 {
   "name": "@lite-fsm/react",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "type": "module",
   "description": "React bindings for lite-fsm",
   "license": "MIT",
@@ -26,10 +26,14 @@
   },
   "typesVersions": {
     "*": {
-      "*": ["dist/index.d.ts"]
+      "*": [
+        "dist/index.d.ts"
+      ]
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "keywords": [
     "lite-fsm",
     "fsm",

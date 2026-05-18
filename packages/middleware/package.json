@@ -1,6 +1,6 @@
 {
   "name": "@lite-fsm/middleware",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "type": "module",
   "description": "Optional middleware integrations for lite-fsm",
   "license": "MIT",
@@ -46,12 +46,20 @@
   },
   "typesVersions": {
     "*": {
-      "*": ["dist/index.d.ts"],
-      "devTools": ["dist/devTools.d.ts"],
-      "immer": ["dist/immer.d.ts"]
+      "*": [
+        "dist/index.d.ts"
+      ],
+      "devTools": [
+        "dist/devTools.d.ts"
+      ],
+      "immer": [
+        "dist/immer.d.ts"
+      ]
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "keywords": [
     "lite-fsm",
     "fsm",

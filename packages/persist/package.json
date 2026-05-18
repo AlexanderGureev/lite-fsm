@@ -1,6 +1,6 @@
 {
   "name": "@lite-fsm/persist",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "module",
   "description": "Persistence helpers for lite-fsm",
   "license": "MIT",
@@ -36,11 +36,17 @@
   },
   "typesVersions": {
     "*": {
-      "*": ["dist/index.d.ts"],
-      "react": ["dist/react.d.ts"]
+      "*": [
+        "dist/index.d.ts"
+      ],
+      "react": [
+        "dist/react.d.ts"
+      ]
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "keywords": [
     "lite-fsm",
     "fsm",

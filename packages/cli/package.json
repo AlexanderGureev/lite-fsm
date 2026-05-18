@@ -1,6 +1,6 @@
 {
   "name": "@lite-fsm/cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "Alpha CLI for lite-fsm project graph exports",
   "license": "MIT",
@@ -13,7 +13,9 @@
   "exports": {
     "./package.json": "./package.json"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "keywords": [
     "lite-fsm",
     "fsm",
