@@ -3,21 +3,35 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-const result = spawnSync("node_modules/.bin/lite-fsm", ["--help"], {
+const cliBin = resolve("packages/cli/dist/bin/lite-fsm.js");
+const cliArgs = (...args) => [cliBin, ...args];
+const assertCliResult = (result, command) => {
+  assert.equal(
+    result.status,
+    0,
+    `${command} failed with status ${result.status}, signal ${result.signal}${
+      result.error ? `, error: ${result.error.message}` : ""
+    }\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+  );
+};
+
+assert.equal(existsSync(cliBin), true, "CLI smoke requires packages/cli/dist/bin/lite-fsm.js");
+
+const result = spawnSync(process.execPath, cliArgs("--help"), {
   encoding: "utf8",
 });
 
-assert.equal(result.status, 0, result.stderr);
+assertCliResult(result, "lite-fsm --help");
 assert.match(result.stdout, /lite-fsm command line tools/);
 assert.match(result.stdout, /export-graph/);
 assert.match(result.stdout, /visualize/);
 
 for (const command of ["create", "export-graph", "visualize"]) {
-  const help = spawnSync("node_modules/.bin/lite-fsm", [command, "--help"], {
+  const help = spawnSync(process.execPath, cliArgs(command, "--help"), {
     encoding: "utf8",
   });
 
-  assert.equal(help.status, 0, help.stderr);
+  assertCliResult(help, `lite-fsm ${command} --help`);
   assert.match(help.stdout, new RegExp(`lite-fsm ${command}`));
 }
 
@@ -45,8 +59,8 @@ writeFileSync(
 
 const port = 43_030;
 const child = spawn(
-  "node_modules/.bin/lite-fsm",
-  [
+  process.execPath,
+  cliArgs(
     "visualize",
     "--entry",
     ".tmp/smoke-visualize/store.ts",
@@ -55,7 +69,7 @@ const child = spawn(
     "--port",
     String(port),
     "--no-open",
-  ],
+  ),
   { encoding: "utf8" },
 );
 
