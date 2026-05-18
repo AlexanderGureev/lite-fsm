@@ -65,6 +65,7 @@ const validateNextProject = (
   diagnostics: CliDiagnostic[],
 ): void => {
   requireFile(context, targetPath, "src/app/providers.tsx", diagnostics);
+  requireFile(context, targetPath, "src/app/page.tsx", diagnostics);
 
   if (!hasTypeScriptAlias(context, targetPath, ["tsconfig.json"])) {
     diagnostics.push(cliDiagnostic("LFC_CREATE_VALIDATION_FAILED", "error", "Generated Next project is missing @/* TypeScript alias."));
@@ -100,6 +101,7 @@ const validateViteProject = (
   options: CreateProjectOptions,
   diagnostics: CliDiagnostic[],
 ): void => {
+  requireFile(context, options.targetPath, "src/App.tsx", diagnostics);
   requireFile(context, options.targetPath, "src/main.tsx", diagnostics);
 
   const viteConfig = readFile(context, options.targetPath, "vite.config.ts") ?? "";
@@ -127,6 +129,7 @@ export const validateGeneratedProject = (
   const diagnostics: CliDiagnostic[] = [];
 
   requireFile(context, options.targetPath, "package.json", diagnostics);
+  requireFile(context, options.targetPath, "src/store/deps.ts", diagnostics);
   requireFile(context, options.targetPath, "src/store/index.ts", diagnostics);
   requireFile(context, options.targetPath, "src/store/machines/app.ts", diagnostics);
 

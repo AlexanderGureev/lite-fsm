@@ -97,7 +97,9 @@ const packagePatchFor = (css: CreateProjectCss, template: CreateProjectTemplate)
     {
       dependencies: {
         "@lite-fsm/core": "latest",
+        "@lite-fsm/middleware": "latest",
         "@lite-fsm/react": "latest",
+        immer: "latest",
       },
     },
     cssAdapter.packageJsonPatch ?? {},
@@ -106,6 +108,10 @@ const packagePatchFor = (css: CreateProjectCss, template: CreateProjectTemplate)
 
 const printNextSteps = (context: CliContext, options: CreateProjectOptions): void => {
   context.stdout.write(`\nNext steps:\n  cd ${options.projectName}\n  ${createDevCommand(options.packageManager)}\n`);
+};
+
+const printInstallStart = (context: CliContext, installCommand: ExternalCommand): void => {
+  context.stdout.write(`\nInstalling dependencies: ${commandLine(installCommand)}\n`);
 };
 
 export const runCreateProject = async (
@@ -149,6 +155,7 @@ export const runCreateProject = async (
 
   if (options.install) {
     const installCommand = createExternalCommand(createInstallCommand(options.packageManager), options.targetPath, "install");
+    printInstallStart(context, installCommand);
     const installFailure = await runExternalStep(resolvedDependencies, installCommand);
     if (installFailure) return installFailure;
   }

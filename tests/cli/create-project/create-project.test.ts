@@ -142,7 +142,7 @@ describe("create-project options", () => {
         targetParentPath: "/project",
         template: "vite",
         css: "tailwind",
-        packageManager: "pnpm",
+        packageManager: "npm",
         install: true,
       },
     });
@@ -257,6 +257,8 @@ describe("create-project registries and package managers", () => {
 
       expect([next.command, next.args]).toEqual(expected[packageManager].next);
       expect([vite.command, vite.args]).toEqual(expected[packageManager].vite);
+      expect(next.outputFilter).toBeUndefined();
+      expect(vite.outputFilter).toBe("create-vite-next-steps");
       expect([install.command, install.args]).toEqual(expected[packageManager].install);
       expect(createDevCommand(packageManager)).toBe(expected[packageManager].dev);
     }
@@ -305,10 +307,26 @@ describe("create-project run flow", () => {
       args: ["install"],
     }));
     expect(context.fs.getFile("/project/demo/src/app/providers.tsx")?.startsWith('"use client";')).toBe(true);
+    expect(context.fs.getFile("/project/demo/src/app/providers.tsx")).toContain("makeStore()");
+    expect(context.fs.getFile("/project/demo/src/app/providers.tsx")).toContain("useRef<AppStore | null>(null)");
+    expect(context.fs.getFile("/project/demo/src/app/page.tsx")).toContain('transition({ type: "DO_INIT" })');
+    expect(context.fs.getFile("/project/demo/src/app/page.tsx")).toContain('appState === "READY"');
+    expect(context.fs.getFile("/project/demo/src/app/page.tsx")).toContain("READY UI is visible.");
     expect(context.fs.getFile("/project/demo/src/app/layout.tsx")).toContain("<Providers>{children}</Providers>");
     expect(packageJson.dependencies["@lite-fsm/core"]).toBe("latest");
+    expect(packageJson.dependencies["@lite-fsm/middleware"]).toBe("latest");
     expect(packageJson.dependencies["@lite-fsm/react"]).toBe("latest");
-    expect(context.fs.getFile("/project/demo/src/store/machines/app.ts")).toContain('initialState: "idle"');
+    expect(packageJson.dependencies.immer).toBe("latest");
+    expect(context.fs.getFile("/project/demo/src/store/machines/app.ts")).toContain('initialState: "IDLE"');
+    expect(context.fs.getFile("/project/demo/src/store/machines/app.ts")).toContain('IDLE: { DO_INIT: "READY" }');
+    expect(context.fs.getFile("/project/demo/src/store/machines/app.ts")).toContain("const root = getState();");
+    expect(context.fs.getFile("/project/demo/src/store/index.ts")).toContain("export const makeStore = () =>");
+    expect(context.fs.getFile("/project/demo/src/store/index.ts")).toContain('import { immerMiddleware } from "@lite-fsm/middleware/immer";');
+    expect(context.fs.getFile("/project/demo/src/store/index.ts")).toContain("middleware: [immerMiddleware]");
+    expect(context.fs.getFile("/project/demo/src/store/index.ts")).toContain("getState: manager.getState");
+    expect(context.fs.getFile("/project/demo/src/store/deps.ts")).toContain("getState: () => AppState");
+    expect(context.fs.getFile("/project/demo/src/store/types.ts")).toContain('FSMEvent<"DO_INIT">');
+    expect(context.stdout.text()).toContain("Installing dependencies: pnpm install");
     expect(context.stdout.text()).toContain("cd demo");
     expect(context.stdout.text()).toContain("pnpm dev");
   });
@@ -327,19 +345,29 @@ describe("create-project run flow", () => {
     expect(result).toEqual({ exitCode: 0, diagnostics: [] });
     expect(runCommand).toHaveBeenCalledTimes(1);
     expect(runCommand.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+      command: "npm",
       cwd: "/project",
+      outputFilter: "create-vite-next-steps",
       stage: "scaffold",
-      args: ["create", "vite@latest", "demo", "--template", "react-ts"],
+      args: ["create", "vite@latest", "demo", "--", "--template", "react-ts"],
     }));
     expect(context.fs.getFile("/project/demo/vite.config.ts")).toContain("@tailwindcss/vite");
     expect(context.fs.getFile("/project/demo/vite.config.ts")).toContain('"@": fileURLToPath(new URL("./src", import.meta.url))');
+    expect(context.fs.getFile("/project/demo/src/main.tsx")).toContain('import { makeStore } from "@/store";');
+    expect(context.fs.getFile("/project/demo/src/main.tsx")).toContain("const manager = makeStore();");
     expect(context.fs.getFile("/project/demo/src/main.tsx")).toContain("FSMContextProvider");
+    expect(context.fs.getFile("/project/demo/src/App.tsx")).toContain('transition({ type: "DO_INIT" })');
+    expect(context.fs.getFile("/project/demo/src/App.tsx")).toContain('appState === "READY"');
+    expect(context.fs.getFile("/project/demo/src/App.tsx")).toContain("READY UI is visible.");
     expect(context.fs.getFile("/project/demo/src/main.tsx")).toMatch(/import\s+['"]\.\/index\.css['"]/);
     expect(context.fs.getFile("/project/demo/src/index.css")).toBe('@import "tailwindcss";\n');
     expect(tsconfig.compilerOptions.paths["@/*"]).toEqual(["./src/*"]);
+    expect(tsconfig.compilerOptions).not.toHaveProperty("baseUrl");
     expect(packageJson.dependencies["@lite-fsm/core"]).toBe("latest");
+    expect(packageJson.dependencies["@lite-fsm/middleware"]).toBe("latest");
+    expect(packageJson.dependencies.immer).toBe("latest");
     expect(packageJson.devDependencies["@tailwindcss/vite"]).toBe("latest");
-    expect(context.stdout.text()).toContain("pnpm dev");
+    expect(context.stdout.text()).toContain("npm run dev");
   });
 
   it("--css none не добавляет Tailwind dependencies или plugin", async () => {
@@ -405,7 +433,7 @@ describe("create-project run flow", () => {
         writeViteFixture(context, "/project/demo");
         return { exitCode: 0 };
       }
-      throw new Error("pnpm not found");
+      throw new Error("npm not found");
     });
 
     const failedScaffold = await runCreateProjectCommand(context, {
@@ -436,7 +464,7 @@ describe("create-project run flow", () => {
     expect(failedInstall.diagnostics).toEqual([
       expect.objectContaining({
         code: "LFC_CREATE_INSTALL_FAILED",
-        message: expect.stringContaining("stage: install, error: pnpm not found"),
+        message: expect.stringContaining("stage: install, error: npm not found"),
       }),
     ]);
     expect(context.fs.directoryExists("/project/demo")).toBe(true);
@@ -565,8 +593,11 @@ describe("create-project run flow", () => {
   resolve: { alias: { "@": "/src" } },
 })
 `;
-    const main = `import { manager } from "@/store";
+    const main = `import { makeStore } from "@/store";
 import { FSMContextProvider } from "@lite-fsm/react";
+
+const manager = makeStore();
+
 <App />
 `;
 
@@ -581,7 +612,7 @@ import { FSMContextProvider } from "@lite-fsm/react";
     });
     expect(patchViteMainProvider(main)).toEqual({
       ok: true,
-      contents: expect.stringContaining('import { manager } from "@/store";'),
+      contents: expect.stringContaining("const manager = makeStore();"),
     });
     expect(patchViteMainProvider("render(null)")).toEqual({
       ok: false,
@@ -622,19 +653,30 @@ export default defineConfig({
 
   it("покрывает Vite tsconfig fallback и patch failures", async () => {
     const rootTsconfigContext = createContext();
+    const jsoncContext = createContext();
     const missingTsconfigContext = createContext();
     const invalidObjectContext = createContext();
     const invalidJsonContext = createContext();
-    const nonErrorJsonContext = createContext();
     const arrayCompilerOptionsContext = createContext();
     const arrayPathsContext = createContext();
     const objectPathsContext = createContext();
     const missingMainContext = createContext();
     const rootRun = createScaffoldRunCommand(rootTsconfigContext, (ctx, targetPath) => writeViteFixtureWithRootTsconfig(ctx, targetPath));
+    const jsoncRun = createScaffoldRunCommand(jsoncContext, (ctx, targetPath) => {
+      writeViteFixtureWithInvalidTsconfig(ctx, targetPath, `{
+  "compilerOptions": {
+    "jsx": "react-jsx",
+
+    /* Bundler mode */
+    "moduleResolution": "bundler"
+  },
+  "include": ["src"]
+}
+`);
+    });
     const missingRun = createScaffoldRunCommand(missingTsconfigContext, (ctx, targetPath) => writeViteFixtureWithoutTsconfig(ctx, targetPath));
     const invalidObjectRun = createScaffoldRunCommand(invalidObjectContext, (ctx, targetPath) => writeViteFixtureWithInvalidTsconfig(ctx, targetPath, "[]"));
     const invalidJsonRun = createScaffoldRunCommand(invalidJsonContext, (ctx, targetPath) => writeViteFixtureWithInvalidTsconfig(ctx, targetPath, "{"));
-    const nonErrorJsonRun = createScaffoldRunCommand(nonErrorJsonContext, (ctx, targetPath) => writeViteFixtureWithInvalidTsconfig(ctx, targetPath, "{}"));
     const arrayCompilerOptionsRun = createScaffoldRunCommand(arrayCompilerOptionsContext, (ctx, targetPath) => {
       writeViteFixtureWithInvalidTsconfig(ctx, targetPath, JSON.stringify({ compilerOptions: [] }));
     });
@@ -642,7 +684,7 @@ export default defineConfig({
       writeViteFixtureWithInvalidTsconfig(ctx, targetPath, JSON.stringify({ compilerOptions: { paths: [] } }));
     });
     const objectPathsRun = createScaffoldRunCommand(objectPathsContext, (ctx, targetPath) => {
-      writeViteFixtureWithInvalidTsconfig(ctx, targetPath, JSON.stringify({ compilerOptions: { paths: { "~/*": ["./src/*"] } } }));
+      writeViteFixtureWithInvalidTsconfig(ctx, targetPath, JSON.stringify({ compilerOptions: { baseUrl: ".", paths: { "~/*": ["./src/*"] } } }));
     });
     const missingMainRun = createScaffoldRunCommand(missingMainContext, (ctx, targetPath) => writeViteFixtureWithoutMainEntry(ctx, targetPath));
 
@@ -652,6 +694,14 @@ export default defineConfig({
       install: false,
     }, { runCommand: rootRun })).exitCode).toBe(0);
     expect(JSON.parse(rootTsconfigContext.fs.getFile("/project/demo/tsconfig.json") ?? "{}").compilerOptions.paths["@/*"]).toEqual(["./src/*"]);
+    expect(JSON.parse(rootTsconfigContext.fs.getFile("/project/demo/tsconfig.json") ?? "{}").compilerOptions).not.toHaveProperty("baseUrl");
+    expect((await runCreateProjectCommand(jsoncContext, {
+      projectName: "demo",
+      template: "vite",
+      install: false,
+    }, { runCommand: jsoncRun })).exitCode).toBe(0);
+    expect(JSON.parse(jsoncContext.fs.getFile("/project/demo/tsconfig.app.json") ?? "{}").compilerOptions.paths["@/*"]).toEqual(["./src/*"]);
+    expect(JSON.parse(jsoncContext.fs.getFile("/project/demo/tsconfig.app.json") ?? "{}").compilerOptions).not.toHaveProperty("baseUrl");
     await expect(runCreateProjectCommand(missingTsconfigContext, {
       projectName: "demo",
       template: "vite",
@@ -671,7 +721,7 @@ export default defineConfig({
       exitCode: 1,
       diagnostics: [expect.objectContaining({
         code: "LFC_CREATE_PATCH_FAILED",
-        message: "TypeScript config patch failed: expected a JSON object.",
+        message: expect.stringContaining("root value"),
       })],
     });
     await expect(runCreateProjectCommand(invalidJsonContext, {
@@ -685,21 +735,6 @@ export default defineConfig({
         message: expect.stringContaining("TypeScript config patch failed:"),
       })],
     });
-    const parse = vi.spyOn(JSON, "parse").mockImplementationOnce(() => {
-      throw "json boom";
-    });
-    await expect(runCreateProjectCommand(nonErrorJsonContext, {
-      projectName: "demo",
-      template: "vite",
-      install: false,
-    }, { runCommand: nonErrorJsonRun })).resolves.toEqual({
-      exitCode: 1,
-      diagnostics: [expect.objectContaining({
-        code: "LFC_CREATE_PATCH_FAILED",
-        message: "TypeScript config patch failed: json boom",
-      })],
-    });
-    parse.mockRestore();
     expect((await runCreateProjectCommand(arrayCompilerOptionsContext, {
       projectName: "demo",
       template: "vite",
@@ -715,6 +750,12 @@ export default defineConfig({
       template: "vite",
       install: false,
     }, { runCommand: objectPathsRun })).exitCode).toBe(0);
+    expect(JSON.parse(objectPathsContext.fs.getFile("/project/demo/tsconfig.app.json") ?? "{}").compilerOptions).toEqual({
+      paths: {
+        "~/*": ["./src/*"],
+        "@/*": ["./src/*"],
+      },
+    });
     await expect(runCreateProjectCommand(missingMainContext, {
       projectName: "demo",
       template: "vite",
@@ -796,6 +837,7 @@ export default defineConfig({
   it("покрывает early returns css, store и package patch в run pipeline", async () => {
     const cssFailureContext = createContext();
     const storeFailureContext = createContext();
+    const nextPageFailureContext = createContext();
     const packageFailureContext = createContext();
     const cssFailureRun = createScaffoldRunCommand(cssFailureContext, (ctx, targetPath) => {
       writeViteFixture(ctx, targetPath);
@@ -808,6 +850,13 @@ export default defineConfig({
       writeNextFixture(ctx, targetPath);
       storeFailureContext.fs.writeFile = (path, contents) => {
         if (path.endsWith("src/store/create-machine.ts")) throw new Error("store readonly");
+        createContext().fs.writeFile(path, contents);
+      };
+    });
+    const nextPageFailureRun = createScaffoldRunCommand(nextPageFailureContext, (ctx, targetPath) => {
+      writeNextFixture(ctx, targetPath);
+      nextPageFailureContext.fs.writeFile = (path, contents) => {
+        if (path.endsWith("src/app/page.tsx")) throw new Error("page readonly");
         createContext().fs.writeFile(path, contents);
       };
     });
@@ -835,6 +884,17 @@ export default defineConfig({
       diagnostics: [expect.objectContaining({
         code: "LFC_WRITE_FAILED",
         message: expect.stringContaining("store readonly"),
+      })],
+    });
+    await expect(runCreateProjectCommand(nextPageFailureContext, {
+      projectName: "demo",
+      template: "next",
+      install: false,
+    }, { runCommand: nextPageFailureRun })).resolves.toEqual({
+      exitCode: 1,
+      diagnostics: [expect.objectContaining({
+        code: "LFC_WRITE_FAILED",
+        message: expect.stringContaining("page readonly"),
       })],
     });
     await expect(runCreateProjectCommand(packageFailureContext, {

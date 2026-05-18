@@ -33,6 +33,7 @@ export type NormalizeCreateProjectOptionsResult =
 const templates = new Set<CreateProjectTemplate>(["next", "vite"]);
 const cssPresets = new Set<CreateProjectCss>(["tailwind", "none"]);
 const packageManagers = new Set<CreateProjectPackageManager>(["pnpm", "npm", "yarn", "bun"]);
+const DEFAULT_PACKAGE_MANAGER: CreateProjectPackageManager = "npm";
 
 const stringOption = (value: unknown): string | undefined => {
   return typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
@@ -112,10 +113,10 @@ const normalizeCss = (value: unknown, diagnostics: CliDiagnostic[]): CreateProje
 };
 
 const normalizePackageManager = (value: unknown, diagnostics: CliDiagnostic[]): CreateProjectPackageManager => {
-  const packageManager = stringOption(value) ?? "pnpm";
+  const packageManager = stringOption(value) ?? DEFAULT_PACKAGE_MANAGER;
   if (!isCreateProjectPackageManager(packageManager)) {
     diagnostics.push(cliDiagnostic("LFC_INVALID_OPTIONS", "error", `Unknown package manager '${packageManager}'.`));
-    return "pnpm";
+    return DEFAULT_PACKAGE_MANAGER;
   }
 
   return packageManager;

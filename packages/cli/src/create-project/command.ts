@@ -42,7 +42,7 @@ export const registerCreateProjectCommand = (
     .argument("[project-name]", "project directory to create")
     .requiredOption("--template <next|vite>", "framework template")
     .option("--css <tailwind|none>", "styling preset", "tailwind")
-    .option("--package-manager <pnpm|npm|yarn|bun>", "package manager", "pnpm")
+    .option("--package-manager <pnpm|npm|yarn|bun>", "package manager", "npm")
     .option("--install", "install dependencies after generation")
     .option("--no-install", "skip dependency install")
     .action(async (projectName: string | undefined, options: Omit<RawCreateProjectOptions, "projectName">) => {

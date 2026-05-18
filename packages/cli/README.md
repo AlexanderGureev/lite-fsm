@@ -40,7 +40,7 @@ Tailwind CSS is enabled by default. To create the same starter without Tailwind:
 lite-fsm create my-app --template vite --css none
 ```
 
-The generated project includes TypeScript, alias `@/*`, `@lite-fsm/core`, `@lite-fsm/react`, and a minimal store under `src/store`.
+The generated project includes TypeScript, alias `@/*`, `@lite-fsm/core`, `@lite-fsm/react`, `@lite-fsm/middleware`, `immer`, and a minimal store under `src/store`.
 
 ## Export a Graph
 
@@ -89,7 +89,7 @@ lite-fsm visualize --entry store/index.ts --tsconfig tsconfig.json --port 3031 -
 - `<project-name>` - required relative target directory. Nested paths such as `apps/demo` are supported when the parent directory already exists.
 - `--template <next|vite>` - required framework template.
 - `--css <tailwind|none>` - styling preset, defaults to `tailwind`.
-- `--package-manager <pnpm|npm|yarn|bun>` - package manager for scaffold, install, and next steps, defaults to `pnpm`.
+- `--package-manager <pnpm|npm|yarn|bun>` - package manager for scaffold, install, and next steps, defaults to `npm`.
 - `--install` / `--no-install` - install dependencies after generation, defaults to `--install`.
 
 `export-graph`:

@@ -5,23 +5,24 @@ import { writeProjectFiles } from "../write-files.js";
 const storeFiles: Readonly<Record<string, string>> = {
   "src/store/create-machine.ts": `import type { TypedCreateMachineFn } from "@lite-fsm/core";
 import { createMachine as createLiteFsmMachine } from "@lite-fsm/core";
-import type { AppDeps, AppEvents } from "./types";
+import type { AppDeps } from "./deps";
+import type { AppEvents } from "./types";
 
 export const createMachine: TypedCreateMachineFn<AppEvents, AppDeps> = createLiteFsmMachine;
 `,
-  "src/store/types.ts": `export type AppEvents = never;
-export type AppDeps = Record<string, never>;
+  "src/store/types.ts": `import type { FSMEvent } from "@lite-fsm/core";
+
+export type AppEvents = FSMEvent<"DO_INIT">;
 `,
-  "src/store/hooks.ts": `import type { MachinesState } from "@lite-fsm/core";
-import { useManager, useSelector, useTransition } from "@lite-fsm/react";
-import type { app } from "./machines/app";
-import type { AppEvents } from "./types";
+  "src/store/deps.ts": `import type { AppState } from ".";
 
-export type AppMachines = {
-  app: typeof app;
+export type AppDeps = {
+  getState: () => AppState;
 };
-
-export type AppState = MachinesState<AppMachines>;
+`,
+  "src/store/hooks.ts": `import { useManager, useSelector, useTransition } from "@lite-fsm/react";
+import type { AppMachines, AppState } from ".";
+import type { AppEvents } from "./types";
 
 export const useAppManager = () => useManager<AppMachines, AppEvents>();
 
@@ -32,27 +33,50 @@ export const useAppSelector = <R>(
 
 export const useAppTransition = () => useTransition<AppEvents>();
 `,
-  "src/store/index.ts": `import { MachineManager } from "@lite-fsm/core";
+  "src/store/index.ts": `import { MachineManager, type MachinesState } from "@lite-fsm/core";
+import { immerMiddleware } from "@lite-fsm/middleware/immer";
 import { app } from "./machines/app";
+import type { AppEvents } from "./types";
 
 export const machines = {
   app,
 };
 
-export const manager = MachineManager(machines);
+export type AppMachines = typeof machines;
+export type AppState = MachinesState<AppMachines>;
 
-export type AppStore = typeof manager;
+export const makeStore = () => {
+  const manager = MachineManager<AppMachines, AppEvents>(machines, {
+    middleware: [immerMiddleware],
+  });
+
+  manager.setDependencies({
+    getState: manager.getState,
+  });
+
+  return manager;
+};
+
+export type AppStore = ReturnType<typeof makeStore>;
 export * from "./hooks";
-export type { AppDeps, AppEvents } from "./types";
+export type { AppDeps } from "./deps";
+export type { AppEvents } from "./types";
 `,
   "src/store/machines/app.ts": `import { createMachine } from "../create-machine";
 
 export const app = createMachine({
   config: {
-    idle: {},
+    IDLE: { DO_INIT: "READY" },
+    READY: {},
   },
-  initialState: "idle",
+  initialState: "IDLE",
   initialContext: {},
+  effects: {
+    READY: ({ getState }) => {
+      const root = getState();
+      if (root.app.state !== "READY") return;
+    },
+  },
 });
 `,
 };

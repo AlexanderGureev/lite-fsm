@@ -140,6 +140,71 @@ describe("node-зависимости create-project", () => {
     });
   });
 
+  it("скрывает преждевременный блок next steps от create-vite", async () => {
+    const context = createCliTestContext({ "/project/.keep": "" });
+    const child = createFakeChildProcess();
+    const spawn = createSpawnMock(child);
+    captureProcessSignals();
+    const { runExternalCommand } = await importDependenciesWithSpawn(spawn);
+
+    const result = runExternalCommand(context, createCommand({
+      outputFilter: "create-vite-next-steps",
+    }));
+    child.stdout?.emit("data", Buffer.from("│\n◇  Scaffolding project in /project/demo...\n│\n└  Do"));
+    child.stdout?.emit("data", Buffer.from("ne. Now run:\n\n  cd demo\n  npm install\n  npm run dev\n"));
+    child.emit("close", 0);
+
+    await expect(result).resolves.toEqual({
+      exitCode: 0,
+      stdout: "│\n◇  Scaffolding project in /project/demo...\n│\n└  Done. Now run:\n\n  cd demo\n  npm install\n  npm run dev\n",
+      stderr: "",
+    });
+    expect(context.stdout.text()).toBe("│\n◇  Scaffolding project in /project/demo...\n│\n");
+  });
+
+  it("сбрасывает отложенный stdout create-vite фильтра без next steps маркера", async () => {
+    const context = createCliTestContext({ "/project/.keep": "" });
+    const child = createFakeChildProcess();
+    const spawn = createSpawnMock(child);
+    captureProcessSignals();
+    const { runExternalCommand } = await importDependenciesWithSpawn(spawn);
+
+    const result = runExternalCommand(context, createCommand({
+      outputFilter: "create-vite-next-steps",
+    }));
+    child.stdout?.emit("data", Buffer.from("short scaffold output\n"));
+    child.emit("close", 0);
+
+    await expect(result).resolves.toEqual({
+      exitCode: 0,
+      stdout: "short scaffold output\n",
+      stderr: "",
+    });
+    expect(context.stdout.text()).toBe("short scaffold output\n");
+  });
+
+  it("подавляет create-vite next steps, если маркер пришел в начале буфера", async () => {
+    const context = createCliTestContext({ "/project/.keep": "" });
+    const child = createFakeChildProcess();
+    const spawn = createSpawnMock(child);
+    captureProcessSignals();
+    const { runExternalCommand } = await importDependenciesWithSpawn(spawn);
+
+    const result = runExternalCommand(context, createCommand({
+      outputFilter: "create-vite-next-steps",
+    }));
+    child.stdout?.emit("data", Buffer.from("Done. Now run:\n\n  cd demo\n"));
+    child.stdout?.emit("data", Buffer.from("  npm install\n  npm run dev\n"));
+    child.emit("close", 0);
+
+    await expect(result).resolves.toEqual({
+      exitCode: 0,
+      stdout: "Done. Now run:\n\n  cd demo\n  npm install\n  npm run dev\n",
+      stderr: "",
+    });
+    expect(context.stdout.text()).toBe("");
+  });
+
   it("отклоняет promise при spawn error и чистит signal listeners", async () => {
     const context = createCliTestContext({ "/project/.keep": "" });
     const child = createFakeChildProcess();

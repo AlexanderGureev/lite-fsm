@@ -1,5 +1,5 @@
 import type { CreateProjectCss } from "./css/types.js";
-import type { ExternalCommandStage } from "./dependencies.js";
+import type { ExternalCommandOutputFilter, ExternalCommandStage } from "./dependencies.js";
 import type { CreateProjectTemplate } from "./templates/types.js";
 
 export type CreateProjectPackageManager = "pnpm" | "npm" | "yarn" | "bun";
@@ -7,6 +7,7 @@ export type CreateProjectPackageManager = "pnpm" | "npm" | "yarn" | "bun";
 export type PackageManagerCommand = {
   command: string;
   args: readonly string[];
+  outputFilter?: ExternalCommandOutputFilter;
 };
 
 export type ScaffoldCommandInput = {
@@ -46,13 +47,29 @@ const nextScaffoldCommand = ({ css, packageManager, target }: ScaffoldCommandInp
 const viteScaffoldCommand = ({ packageManager, target }: ScaffoldCommandInput): PackageManagerCommand => {
   switch (packageManager) {
     case "pnpm":
-      return { command: "pnpm", args: ["create", "vite@latest", target, "--template", "react-ts"] };
+      return {
+        command: "pnpm",
+        args: ["create", "vite@latest", target, "--template", "react-ts"],
+        outputFilter: "create-vite-next-steps",
+      };
     case "npm":
-      return { command: "npm", args: ["create", "vite@latest", target, "--", "--template", "react-ts"] };
+      return {
+        command: "npm",
+        args: ["create", "vite@latest", target, "--", "--template", "react-ts"],
+        outputFilter: "create-vite-next-steps",
+      };
     case "yarn":
-      return { command: "yarn", args: ["create", "vite", target, "--template", "react-ts"] };
+      return {
+        command: "yarn",
+        args: ["create", "vite", target, "--template", "react-ts"],
+        outputFilter: "create-vite-next-steps",
+      };
     case "bun":
-      return { command: "bun", args: ["create", "vite@latest", target, "--template", "react-ts"] };
+      return {
+        command: "bun",
+        args: ["create", "vite@latest", target, "--template", "react-ts"],
+        outputFilter: "create-vite-next-steps",
+      };
   }
 };
 

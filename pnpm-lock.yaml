@@ -400,6 +400,9 @@ importers:
       '@vitest/coverage-v8':
         specifier: ^4.1.4
         version: 4.1.6(vitest@4.1.6)
+      jiti:
+        specifier: ^2.7.0
+        version: 2.7.0
       tsup:
         specifier: ^8.5.1
         version: 8.5.1(jiti@2.7.0)(postcss@8.5.14)(typescript@6.0.3)(yaml@2.9.0)
