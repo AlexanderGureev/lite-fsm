@@ -1,8 +1,8 @@
 # @lite-fsm/cli
 
-`@lite-fsm/cli` предоставляет команду `lite-fsm` для работы с проектом из терминала. В alpha-версии пакет строит project graph по TypeScript-файлам проекта и может запускать локальный Visualizer с готовой graph-сессией.
+`@lite-fsm/cli` предоставляет команду `lite-fsm` для работы с проектом из терминала. В alpha-версии пакет умеет создавать React starter-проекты, добавлять автоматы в generated store, строить project graph по TypeScript-файлам проекта и запускать локальный Visualizer с готовой graph-сессией.
 
-CLI использует `@lite-fsm/graph`: находит `MachineManager`, определяет машины, переданные в этот менеджер, строит граф состояний, переходов, reducer-веток и событий effects. CLI не запускает приложение и не выполняет пользовательский код.
+Команды `create` и `add-machine` пишут файлы проекта. Команды `export-graph` и `visualize` используют `@lite-fsm/graph`: находят `MachineManager`, определяют автоматы, переданные в этот менеджер, строят граф состояний, переходов, reducer-веток и событий effects. CLI не запускает приложение и не выполняет пользовательский код.
 
 Пакет находится в alpha-версии.
 
@@ -14,12 +14,108 @@ npm install --save-dev @lite-fsm/cli
 
 После установки доступна команда `lite-fsm`.
 
+Для одноразового запуска без установки в проект можно использовать `npx @lite-fsm/cli ...`.
+
 ## Команды
 
 | Команда        | Назначение                                                                           |
 | -------------- | ------------------------------------------------------------------------------------ |
+| `create`       | Создать Next.js или Vite React starter, уже подключенный к lite-fsm                  |
+| `add-machine`  | Добавить доменный автомат в generated `src/store`                                    |
 | `export-graph` | Построить project graph и записать JSON export document                              |
 | `visualize`    | Построить project graph, поднять локальный Visualizer и открыть graph-сессию проекта |
+
+## Быстрый старт с нуля
+
+```bash copy
+npx @lite-fsm/cli create my-app --template vite
+cd my-app
+npx @lite-fsm/cli add-machine user-session
+npm run dev
+```
+
+Этот сценарий создаёт starter с базовым автоматом `app`, затем добавляет отдельный автомат `userSession`. Для Next.js используйте `--template next`.
+
+## Команда create
+
+```bash copy
+lite-fsm create my-app --template vite
+```
+
+`create` создаёт React starter на базе Vite или Next.js и добавляет готовый lite-fsm store под `src/store`. Проект получает `@lite-fsm/core`, `@lite-fsm/react`, `@lite-fsm/middleware`, `immer`, typed helper `createMachine`, React hooks и минимальный автомат `app`.
+
+Команда вызывает framework scaffold (`create-vite` или `create-next-app`), патчит entrypoint приложения, добавляет `FSMContextProvider`, настраивает alias `@/*` и по умолчанию устанавливает зависимости.
+
+Примеры:
+
+```bash copy
+lite-fsm create my-app --template next
+lite-fsm create my-app --template vite --css none
+lite-fsm create apps/demo --template vite --package-manager pnpm --no-install
+```
+
+`<project-name>` должен быть относительным путём внутри текущей директории. Родительская директория должна существовать, а целевая директория — отсутствовать.
+
+## Опции create
+
+| Опция                                      | Обязательна | Назначение                                                                 |
+| ------------------------------------------ | ----------- | -------------------------------------------------------------------------- |
+| `<project-name>`                           | Да          | Относительная директория проекта, например `my-app` или `apps/demo`        |
+| `--template <next\|vite>`                  | Да          | Framework starter: Next.js App Router или Vite React                       |
+| `--css <tailwind\|none>`                   | Нет         | CSS preset; по умолчанию `tailwind`                                        |
+| `--package-manager <pnpm\|npm\|yarn\|bun>` | Нет         | Package manager для scaffold, install и next steps; по умолчанию `npm`     |
+| `--install` / `--no-install`               | Нет         | Установить зависимости после генерации или пропустить install; по умолчанию install включен |
+
+## Generated store
+
+`create` добавляет одинаковую структуру store для Next.js и Vite:
+
+```text copy
+src/store/
+  create-machine.ts
+  deps.ts
+  hooks.ts
+  index.ts
+  types.ts
+  machines/app.ts
+```
+
+`src/store/index.ts` экспортирует `machines`, `makeStore`, `AppState`, `AppStore`, hooks и типы. Автомат `app` принимает событие `DO_INIT` и показывает минимальный паттерн: общий `AppEvents`, typed `createMachine`, `MachineManager` с `immerMiddleware` и dependencies через `manager.setDependencies(...)`.
+
+## Команда add-machine
+
+```bash copy
+lite-fsm add-machine user-session
+```
+
+`add-machine` запускается из корня проекта, созданного через `lite-fsm create`. Команда создаёт файл автомата, регистрирует его в `src/store/index.ts` и добавляет namespace событий в `src/store/types.ts`.
+
+Для `user-session` результат выглядит так:
+
+```text copy
+src/store/machines/user-session.ts
+src/store/index.ts
+src/store/types.ts
+```
+
+Новый автомат экспортируется как `userSession`, а стартовое событие получает имя `DO_USER_SESSION_INIT`.
+
+Команда принимает имена в `kebab-case`, `snake_case` и `camelCase`:
+
+| Ввод           | Файл              | Export        | Событие                    |
+| -------------- | ----------------- | ------------- | -------------------------- |
+| `user-session` | `user-session.ts` | `userSession` | `DO_USER_SESSION_INIT`     |
+| `user_session` | `user-session.ts` | `userSession` | `DO_USER_SESSION_INIT`     |
+| `userSession`  | `user-session.ts` | `userSession` | `DO_USER_SESSION_INIT`     |
+| `checkout`     | `checkout.ts`     | `checkout`    | `DO_CHECKOUT_INIT`         |
+
+`add-machine` рассчитан на generated store shape из `lite-fsm create`: должны существовать `src/store/create-machine.ts`, `src/store/index.ts`, `src/store/types.ts` и `src/store/machines`. Если store был сильно переписан, CLI вернёт diagnostic и попросит обновить регистрацию вручную.
+
+## Опции add-machine
+
+| Опция   | Обязательна | Назначение                                                                           |
+| ------- | ----------- | ------------------------------------------------------------------------------------ |
+| `<name>` | Да          | Имя автомата: ASCII `kebab-case`, `snake_case` или `camelCase`, начинается с буквы   |
 
 ## Команда export-graph
 
@@ -29,7 +125,7 @@ lite-fsm export-graph --entry store/index.ts --out lite-fsm.graph.json --tsconfi
 
 `export-graph` строит проектный граф и записывает JSON-файл. Это основной способ подготовить данные для визуализатора, проверок и собственных инструментов анализа.
 
-Команда принимает входной TypeScript-файл, ищет в нем выбранный `MachineManager(...)`, затем проходит по импортам, которые нужны для машин этого менеджера.
+Команда принимает входной TypeScript-файл, ищет в нем выбранный `MachineManager(...)`, затем проходит по импортам, которые нужны для автоматов этого менеджера.
 
 ## Минимальный пример
 
@@ -83,7 +179,7 @@ export const manager = MachineManager({
 });
 ```
 
-CLI ожидает, что карта машин в `MachineManager` читается статически: через объект, локальную константу, поддерживаемые именованные импорты или повторные экспорты. Если карта строится динамически, команда вернёт диагностику о неполном статическом анализе.
+CLI ожидает, что карта автоматов в `MachineManager` читается статически: через объект, локальную константу, поддерживаемые именованные импорты или повторные экспорты. Если карта строится динамически, команда вернёт диагностику о неполном статическом анализе.
 
 На этом этапе проектный обход рассчитан на `.ts` файлы. Импорты с неподдерживаемым расширением попадают в диагностику.
 
@@ -187,7 +283,7 @@ type LiteFsmProjectGraphExportDocument = {
 - `version` — версия формата экспортируемого документа.
 - `createdBy` — пакет и версия CLI, который создал файл.
 - `entry` — входной файл и использованный `tsconfig`, если он был найден или передан явно.
-- `graph` — граф `@lite-fsm/graph` с машинами, менеджерами, переходами и diagnostics компилятора.
+- `graph` — граф `@lite-fsm/graph` с автоматами, менеджерами, переходами и diagnostics компилятора.
 - `files` — найденные файлы проекта, их роли и хеши.
 - `diagnostics` — сообщения CLI.
 - `sources` — исходный текст файлов, только если передан `--include-source`.
@@ -201,11 +297,11 @@ type LiteFsmProjectGraphExportDocument = {
 | Роль      | Значение                                     |
 | --------- | -------------------------------------------- |
 | `entry`   | входной файл из `--entry`                    |
-| `machine` | файл с найденной машиной                     |
+| `machine` | файл с найденным автоматом                   |
 | `barrel`  | файл с повторными экспортами                 |
 | `helper`  | файл с локальной оберткой над API `lite-fsm` |
 
-Роли помогают визуализатору и собственным инструментам объяснить, откуда взялась каждая машина.
+Роли помогают визуализатору и собственным инструментам объяснить, откуда взялся каждый автомат.
 
 ## Диагностика
 
@@ -216,7 +312,7 @@ type LiteFsmProjectGraphExportDocument = {
 Такое разделение важно:
 
 - `diagnostics` описывает запуск CLI: параметры, `tsconfig`, чтение файлов, запись результата.
-- `graph.diagnostics` описывает сам граф: неподдержанные формы кода, проблемы поиска машин, ошибки компиляции графа.
+- `graph.diagnostics` описывает сам граф: неподдержанные формы кода, проблемы поиска автоматов, ошибки компиляции графа.
 
 Коды CLI:
 
@@ -226,13 +322,22 @@ type LiteFsmProjectGraphExportDocument = {
 | `LFC_TSCONFIG_NOT_FOUND`            | `tsconfig.json` не найден                       |
 | `LFC_TSCONFIG_INVALID`              | `tsconfig.json` не прочитан или содержит ошибку |
 | `LFC_GRAPH_PROJECT_FAILED`          | граф проекта не удалось построить               |
-| `LFC_NO_MACHINES_EXPORTED`          | в графе нет машин, подключенных к менеджеру     |
+| `LFC_NO_MACHINES_EXPORTED`          | в графе нет автоматов, подключенных к менеджеру |
 | `LFC_SOURCE_BUNDLE_FILE_UNREADABLE` | файл нельзя встроить через `--include-source`   |
 | `LFC_VISUALIZER_STATIC_MISSING`     | static artifact Visualizer-а не найден          |
 | `LFC_VISUALIZER_PORT_UNAVAILABLE`   | порт локального Visualizer-а занят              |
 | `LFC_VISUALIZER_SERVER_FAILED`      | локальный server Visualizer-а не стартовал      |
 | `LFC_VISUALIZER_OPEN_FAILED`        | браузер не удалось открыть автоматически        |
-| `LFC_WRITE_FAILED`                  | итоговый JSON нельзя записать                   |
+| `LFC_CREATE_TARGET_EXISTS`          | целевой путь для `create` уже существует        |
+| `LFC_CREATE_TARGET_PARENT_MISSING`  | родительская директория для `create` не найдена |
+| `LFC_CREATE_SCAFFOLD_FAILED`        | framework scaffold завершился ошибкой           |
+| `LFC_CREATE_INSTALL_FAILED`         | install dependencies завершился ошибкой         |
+| `LFC_CREATE_PATCH_FAILED`           | generated project не удалось пропатчить         |
+| `LFC_CREATE_VALIDATION_FAILED`      | generated project не прошёл финальную проверку  |
+| `LFC_ADD_MACHINE_STORE_NOT_FOUND`   | generated `src/store` не найден или не прочитан |
+| `LFC_ADD_MACHINE_CONFLICT`          | добавляемый автомат конфликтует с текущим store |
+| `LFC_ADD_MACHINE_PATCH_FAILED`      | `index.ts` или `types.ts` не удалось обновить   |
+| `LFC_WRITE_FAILED`                  | файл проекта или итоговый JSON нельзя записать  |
 
 ## Поведение при ошибках
 
@@ -240,13 +345,27 @@ type LiteFsmProjectGraphExportDocument = {
 
 Команды возвращают код выхода `1`, если есть хотя бы одна blocking CLI error.
 
+`create` завершается с ошибкой, когда:
+
+- не передан `<project-name>` или `--template`;
+- имя проекта является абсолютным путём, содержит `..` или указывает на уже существующий target;
+- родительская директория target-а не существует;
+- framework scaffold, install, patching или финальная validation завершаются ошибкой.
+
+`add-machine` завершается с ошибкой, когда:
+
+- не передан `<name>` или имя нельзя преобразовать в безопасный JS identifier;
+- команда запущена не из generated проекта с `src/store`;
+- файл автомата, import, key в `machines` или member в `AppEvents` уже существуют;
+- `src/store/index.ts` или `src/store/types.ts` не соответствуют ожидаемому generated shape.
+
 `export-graph` не пишет частичный JSON, когда:
 
 - не передан `--entry` или `--out`;
 - `--out` равен `-`;
 - явный `--tsconfig` не найден или некорректен;
 - компилятор графа вернул блокирующие diagnostics;
-- в найденном менеджере нет машин;
+- в найденном менеджере нет автоматов;
 - не удалось прочитать файл для `--include-source`;
 - не удалось записать итоговый файл.
 

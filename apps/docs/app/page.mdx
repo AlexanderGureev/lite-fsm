@@ -64,7 +64,7 @@
 ## Ключевые возможности
 
 - **Компактный API**: описание `config`, `reducer`, `effects` и запуск через `MachineManager`
-- **Композиция автоматов**: разделение доменной логики на несколько независимых машин
+- **Композиция автоматов**: разделение доменной логики на несколько независимых автоматов
 - **Интеграция с React**: хуки, provider и hydration boundary для React-приложений
 - **Расширяемость через middleware**: подключение Immer, Redux DevTools и собственных обработчиков
 - **Типизация TypeScript**: вывод состояний, событий, контекста и зависимостей effects
@@ -81,6 +81,21 @@ Runtime-пакеты доступны через npm.
 ```bash copy
 npm install @lite-fsm/core @lite-fsm/middleware immer
 ```
+
+### Старт проекта с CLI
+
+Если нужен React-проект с готовым `MachineManager`, начните через CLI и добавляйте автоматы по мере роста доменной логики:
+
+```bash copy
+npx @lite-fsm/cli create my-app --template vite
+cd my-app
+npx @lite-fsm/cli add-machine user-session
+npm run dev
+```
+
+`create` собирает Next.js или Vite starter с `src/store`, React provider-ом и базовым автоматом `app`. `add-machine` создаёт `src/store/machines/user-session.ts`, регистрирует `userSession` в store и подключает его события к общему `AppEvents`.
+
+Подробности, шаблоны, опции package manager-а и ограничения generated store описаны в разделе [@lite-fsm/cli](/packages/cli).
 
 ### Пример использования
 
@@ -134,7 +149,7 @@ const { state, context } = manager.getState().lamp;
 
 > **TypeScript**: Если вы используете TypeScript, посмотрите раздел [TypeScript](/usage/typescript): там показаны типизированные фабрики, события и React-хуки.
 
-> **Playground**: Примеры с исходниками — sync-машины, async-эффекты, actor templates и SSR-streaming — доступны в [playground](/playground/).
+> **Playground**: Примеры с исходниками — sync-автоматы, async-эффекты, actor templates и SSR-streaming — доступны в [playground](/playground/).
 
 ## Куда дальше?
 
@@ -151,7 +166,7 @@ const { state, context } = manager.getState().lamp;
 - [API](/api): Полная документация по всем функциям и параметрам
 - [@lite-fsm/middleware](/packages/middleware): Расширение функциональности с помощью промежуточных обработчиков
 - [@lite-fsm/persist](/packages/persist): Долговременное хранение состояния `MachineManager` и синхронизация между вкладками
-- [Инструменты](/tools): visualizer, CLI export и `@lite-fsm/graph`
+- [Инструменты](/tools): visualizer, CLI create/add-machine/export и `@lite-fsm/graph`
 - [Сравнение](/comparison): Сравнение lite-fsm с другими решениями для управления состоянием
 - [Примеры](/examples): Готовые решения типовых задач и паттерны использования
 - [Playground](/playground/): Демо-площадка на Next.js с подсветкой переходов FSM

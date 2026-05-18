@@ -4,10 +4,40 @@
 
 ## Команды
 
-| Команда        | Назначение                                      |
-| -------------- | ----------------------------------------------- |
-| `export-graph` | Записать project graph в JSON export document   |
-| `visualize`    | Запустить локальный Visualizer для project graph |
+| Команда        | Назначение                                           |
+| -------------- | ---------------------------------------------------- |
+| `create`       | Создать Next.js или Vite starter с lite-fsm store    |
+| `add-machine`  | Добавить доменный автомат в generated `src/store`    |
+| `export-graph` | Записать project graph в JSON export document        |
+| `visualize`    | Запустить локальный Visualizer для project graph     |
+
+## `lite-fsm create`
+
+```bash copy
+lite-fsm create my-app --template vite
+```
+
+Команда создаёт React starter, добавляет `@lite-fsm/core`, `@lite-fsm/react`, `@lite-fsm/middleware`, `immer`, generated `src/store`, React provider wiring и базовый автомат `app`.
+
+| Опция                                      | Обязательна | Назначение                                                             |
+| ------------------------------------------ | ----------- | ---------------------------------------------------------------------- |
+| `<project-name>`                           | Да          | Относительный target, например `my-app` или `apps/demo`                |
+| `--template <next\|vite>`                  | Да          | Framework starter                                                      |
+| `--css <tailwind\|none>`                   | Нет         | CSS preset, по умолчанию `tailwind`                                    |
+| `--package-manager <pnpm\|npm\|yarn\|bun>` | Нет         | Package manager для scaffold/install/next steps, по умолчанию `npm`    |
+| `--install` / `--no-install`               | Нет         | Установить зависимости после генерации или пропустить install          |
+
+## `lite-fsm add-machine`
+
+```bash copy
+lite-fsm add-machine user-session
+```
+
+Команда запускается из корня проекта, созданного через `lite-fsm create`. Она создаёт `src/store/machines/user-session.ts`, регистрирует `userSession` в `src/store/index.ts` и добавляет `userSession.Events` в `AppEvents`.
+
+| Опция   | Обязательна | Назначение                                                                       |
+| ------- | ----------- | -------------------------------------------------------------------------------- |
+| `<name>` | Да          | Имя в `kebab-case`, `snake_case` или `camelCase`, например `user-session`        |
 
 ## `lite-fsm export-graph`
 

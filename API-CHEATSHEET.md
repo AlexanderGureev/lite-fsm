@@ -54,7 +54,7 @@ Reducer branches в graph IR символические: compiler сохраня
 
 ## Alpha CLI
 
-`@lite-fsm/cli` предоставляет binary `lite-fsm` для tooling-сценариев. Публичная поверхность CLI — команды graph export/local visualize и JSON/HTTP contracts, а не runtime import.
+`@lite-fsm/cli` предоставляет binary `lite-fsm` для создания starter-проектов и tooling-сценариев. Публичная поверхность CLI — команды create/add-machine/graph export/local visualize и JSON/HTTP contracts, а не runtime import.
 
 ```bash
 lite-fsm export-graph --entry store/index.ts --out lite-fsm.graph.json --tsconfig tsconfig.json
@@ -68,10 +68,15 @@ lite-fsm add-machine user-session
 | Command                  | Назначение                                                                                                      |
 | ------------------------ | --------------------------------------------------------------------------------------------------------------- |
 | `lite-fsm create`        | создает Next/Vite starter с generated `src/store`, `app.Events` aggregator и React wiring                       |
-| `lite-fsm add-machine`   | добавляет domain machine в generated `src/store`, регистрирует key и подключает machine-local `Events`          |
+| `lite-fsm add-machine`   | добавляет доменный автомат в generated `src/store`, регистрирует key и подключает локальные `Events` автомата   |
 | `lite-fsm export-graph`  | строит project graph через public `compileLiteFsmGraphProject` и пишет JSON export document для visualizer-а   |
 | `lite-fsm visualize`     | строит project graph, запускает local host `127.0.0.1:<port>` и отдает visualizer static + session/source API  |
+| `<project-name>`          | `create` only: relative target path внутри cwd; parent должен существовать, target не должен существовать       |
 | `<name>`                 | `add-machine` only: `kebab-case`, `snake_case` или `camelCase`, например `user-session` → `userSession`         |
+| `--template <next\|vite>` | `create` only: required framework starter                                                                      |
+| `--css <tailwind\|none>` | `create` only: styling preset, default `tailwind`                                                              |
+| `--package-manager <...>` | `create` only: `pnpm`, `npm`, `yarn` или `bun`, default `npm`                                                   |
+| `--install`/`--no-install` | `create` only: dependency install после генерации, default install                                             |
 | `--entry <path>`         | обязательный TypeScript entrypoint с выбранным top-level `MachineManager(...)`                                  |
 | `--out <path>`           | обязательный output file; stdout JSON (`--out -`) не поддерживается                                             |
 | `--tsconfig <path>`      | optional explicit tsconfig; без него CLI ищет ближайший `tsconfig.json`, затем fallback к default TS resolution |
@@ -366,7 +371,7 @@ manager.transition({ type: "INC" });
 | `hydrate(snapshot, opts?)`          | применяет snapshot без middleware/effects                      |
 | `getHydratedState(snapshot, opts?)` | preview `hydrate` без мутации manager-а                        |
 
-Action идёт во все domain machines; машина без подходящего transition остаётся без изменений (селекторы не дёргаются). Префикс `@@lite-fsm/*` зарезервирован — отправлять через `transition` нельзя.
+Action идёт во все доменные автоматы; автомат без подходящего transition остаётся без изменений (селекторы не дёргаются). Префикс `@@lite-fsm/*` зарезервирован — отправлять через `transition` нельзя.
 
 ## Hydration
 
@@ -392,7 +397,7 @@ const preview = manager.getHydratedState(snapshot, {
 | Strategy    | Поведение                                                                                                                |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------ |
 | `"merge"`   | применяет только keys из snapshot                                                                                        |
-| `"replace"` | для actor templates сбрасывает actors, отсутствующих в snapshot; для domain machines форму replace решает `hydrate` hook |
+| `"replace"` | для actor templates сбрасывает actors, отсутствующих в snapshot; для доменных автоматов форму replace решает `hydrate` hook |
 
 Domain hooks:
 
@@ -486,7 +491,7 @@ const request = createMachine({
 | spawn            | action должен match-ить `__INIT` transition               |
 | public record    | `state.requests[actorId] = { state, context, meta }`      |
 | terminal targets | `__RESOLVED` · `__REJECTED` · `__CANCELLED` удаляют actor |
-| domain machines  | получают action независимо от actor routing               |
+| доменные автоматы | получают action независимо от actor routing               |
 | standalone       | actor templates работают только в `MachineManager`        |
 
 ### Routing

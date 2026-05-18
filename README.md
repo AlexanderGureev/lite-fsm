@@ -8,7 +8,7 @@
 
 `lite-fsm` is a lightweight, strongly typed TypeScript toolkit for finite state machines.
 
-The core runtime stays framework-agnostic and dependency-free. React bindings, middleware, persistence, graph analysis, CLI exports, and visual tooling are shipped as opt-in packages.
+The core runtime stays framework-agnostic and dependency-free. React bindings, middleware, persistence, graph analysis, CLI project scaffolding, exports, and visual tooling are shipped as opt-in packages.
 
 ## Links
 
@@ -25,7 +25,7 @@ The core runtime stays framework-agnostic and dependency-free. React bindings, m
 | `@lite-fsm/middleware` | Optional middleware integrations, including Immer and Redux DevTools.                                          |
 | `@lite-fsm/persist`    | Persistence helpers, storage adapters, restore status, and React status hooks.                                 |
 | `@lite-fsm/graph`      | Alpha graph compiler, analyzer, simulator, and view-model helpers.                                             |
-| `@lite-fsm/cli`        | Alpha CLI for exporting project graphs and running the local visualizer.                                       |
+| `@lite-fsm/cli`        | Alpha CLI for creating starter projects, adding machines, exporting graphs, and running the local visualizer.  |
 
 ## Features
 
