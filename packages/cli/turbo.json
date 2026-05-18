@@ -1,0 +1,20 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "../../apps/visualizer/components.json",
+        "../../apps/visualizer/index.html",
+        "../../apps/visualizer/package.json",
+        "../../apps/visualizer/postcss.config.mjs",
+        "../../apps/visualizer/src/**",
+        "../../apps/visualizer/tsconfig.json",
+        "../../apps/visualizer/vite.config.ts"
+      ],
+      "outputs": ["dist/**"]
+    }
+  }
+}
