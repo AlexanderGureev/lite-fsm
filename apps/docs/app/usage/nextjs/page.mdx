@@ -112,6 +112,56 @@ export default function StoreProvider({ children }: { children: ReactNode }) {
 }
 ```
 
+## Persist в App Router
+
+Persist можно создавать вместе с manager без ручного `typeof window`: `createJsonStorage` принимает lazy factory и не вызывает её во время создания adapter-а или server prerender. `FSMContextProvider` запускает persist lifecycle только после mount.
+
+```ts showLineNumbers copy
+// src/store/persist.ts
+import { createJsonStorage, persistManager } from "@lite-fsm/persist";
+import { makeStore, type FSMConfigType } from ".";
+
+export const makePersistentStore = () => {
+  const manager = makeStore();
+  const persist = persistManager(manager, {
+    storage: createJsonStorage<FSMConfigType>({
+      key: "app:state:v1",
+      storage: () => window.localStorage,
+    }),
+    machines: ["profile"],
+    throttleMs: 300,
+  });
+
+  return { manager, persist };
+};
+
+export type PersistentStore = ReturnType<typeof makePersistentStore>;
+```
+
+```tsx showLineNumbers copy
+// app/StoreProvider.tsx
+"use client";
+import { useRef, type ReactNode } from "react";
+import { FSMContextProvider } from "@lite-fsm/react";
+import { makePersistentStore, type PersistentStore } from "../src/store/persist";
+
+export default function StoreProvider({ children }: { children: ReactNode }) {
+  const storeRef = useRef<PersistentStore | null>(null);
+
+  if (!storeRef.current) {
+    storeRef.current = makePersistentStore();
+  }
+
+  return (
+    <FSMContextProvider machineManager={storeRef.current.manager} persist={storeRef.current.persist}>
+      {children}
+    </FSMContextProvider>
+  );
+}
+```
+
+`useIsPersistRestoring()` проверяет только фазу `"restoring"`. Если экран должен скрывать данные до завершения первого restore, используйте `status.phase === "idle" || status.phase === "restoring"`.
+
 ## Использование хуков
 
 Создайте типизированные версии хуков:

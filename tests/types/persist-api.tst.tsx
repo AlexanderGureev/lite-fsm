@@ -89,6 +89,17 @@ describe("lite-fsm/persist public API", () => {
     type _StorageGet = Assert<
       Equal<Awaited<ReturnType<PersistStorage<Store>["get"]>>, PersistedRecord<Store> | undefined>
     >;
+    type _StorageContract = Assert<
+      Equal<
+        PersistStorage<Store>,
+        {
+          get(): MaybePromise<PersistedRecord<Store> | undefined>;
+          set(record: PersistedRecord<Store>): MaybePromise<void>;
+          remove(): MaybePromise<void>;
+          subscribe?(cb: () => void): () => void;
+        }
+      >
+    >;
     type _Status = Assert<
       Equal<
         PersistStatus,
@@ -100,6 +111,20 @@ describe("lite-fsm/persist public API", () => {
     >;
     type _RestoreSettled = Assert<
       Equal<PersistRestoreSettledResult, { phase: "ready"; restored: boolean } | { phase: "error"; error: unknown }>
+    >;
+    type _ControllerContract = Assert<
+      Equal<
+        PersistController,
+        {
+          start(): () => void;
+          restore(): Promise<PersistStatus>;
+          save(): Promise<void>;
+          flush(): Promise<void>;
+          clear(): Promise<void>;
+          getStatus(): PersistStatus;
+          subscribeStatus(cb: () => void): () => void;
+        }
+      >
     >;
   });
 
@@ -141,16 +166,23 @@ describe("lite-fsm/persist public API", () => {
   });
 
   test("createJsonStorage создаёт typed PersistStorage<S>", () => {
+    const jsonBackend = {
+      getItem: () => null,
+      setItem: (_key: string, _value: string) => {},
+      removeItem: (_key: string) => {},
+    };
     const jsonStorage = createJsonStorage<Store>({
       key: "state",
-      storage: {
-        getItem: () => null,
-        setItem: (_key, _value) => {},
-        removeItem: (_key) => {},
-      },
+      storage: () => jsonBackend,
     });
 
     expect(jsonStorage).type.toBe<PersistStorage<Store>>();
+
+    createJsonStorage<Store>({
+      key: "state",
+      // @ts-expect-error!
+      storage: jsonBackend,
+    });
   });
 });
 

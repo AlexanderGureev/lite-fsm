@@ -95,6 +95,46 @@ const createStorage = (initial?: unknown) => {
   };
 };
 
+const createJsonBackend = (backend = new Map<string, string>()) => ({
+  backend,
+  storage: {
+    getItem: vi.fn((key: string) => backend.get(key) ?? null),
+    setItem: vi.fn((key: string, value: string) => {
+      backend.set(key, value);
+    }),
+    removeItem: vi.fn((key: string) => {
+      backend.delete(key);
+    }),
+  },
+});
+
+const createThrowingJsonStorage = (error: unknown) =>
+  createJsonStorage<Store>({
+    key: "fsm",
+    storage: () => {
+      throw error;
+    },
+  });
+
+const createFailableJsonStorage = (error: unknown) => {
+  let shouldThrow = false;
+  const backend = createJsonBackend();
+  const storage = createJsonStorage<Store>({
+    key: "fsm",
+    storage: () => {
+      if (shouldThrow) throw error;
+      return backend.storage;
+    },
+  });
+
+  return {
+    storage,
+    failFactory: () => {
+      shouldThrow = true;
+    },
+  };
+};
+
 const deferred = <T>() => {
   let resolve!: (value: T) => void;
   let reject!: (reason?: unknown) => void;
@@ -1116,6 +1156,97 @@ describe("persistManager", () => {
     stop();
   });
 
+  it("ошибка lazy storage factory обрабатывается как restore error", async () => {
+    const factoryError = new Error("storage unavailable");
+    const storage = createThrowingJsonStorage(factoryError);
+
+    const directManager = createManager();
+    const directOnError = vi.fn();
+    const directController = persistManager(directManager, { storage, onError: directOnError });
+
+    await expect(directController.restore()).rejects.toBe(factoryError);
+    expect(directOnError).toHaveBeenCalledWith(factoryError, "restore");
+    expect(directController.getStatus()).toEqual({ phase: "error", error: factoryError });
+
+    const backgroundManager = createManager();
+    const backgroundOnError = vi.fn();
+    const backgroundController = persistManager(backgroundManager, { storage, onError: backgroundOnError });
+    const stop = backgroundController.start();
+
+    await vi.waitFor(() => {
+      expect(backgroundController.getStatus()).toEqual({ phase: "error", error: factoryError });
+    });
+    expect(backgroundOnError).toHaveBeenCalledWith(factoryError, "restore");
+    stop();
+  });
+
+  it("ошибка lazy storage factory обрабатывается как save error", async () => {
+    const factoryError = new Error("storage unavailable");
+    const storage = createThrowingJsonStorage(factoryError);
+
+    const directManager = createManager();
+    const directOnError = vi.fn();
+    const directController = persistManager(directManager, { storage, onError: directOnError });
+
+    await expect(directController.save()).rejects.toBe(factoryError);
+    expect(directOnError).toHaveBeenCalledWith(factoryError, "save");
+    expect(directController.getStatus()).toEqual({ phase: "error", error: factoryError });
+
+    const backgroundManager = createManager();
+    const backgroundOnError = vi.fn();
+    const backgroundStorage = createFailableJsonStorage(factoryError);
+    const backgroundController = persistManager(backgroundManager, {
+      storage: backgroundStorage.storage,
+      onError: backgroundOnError,
+    });
+    const stop = backgroundController.start();
+    await vi.waitFor(() => {
+      expect(backgroundController.getStatus()).toEqual({ phase: "ready", restored: false });
+    });
+
+    backgroundStorage.failFactory();
+    backgroundManager.transition({ type: "INC" });
+
+    await vi.waitFor(() => {
+      expect(backgroundController.getStatus()).toEqual({ phase: "error", error: factoryError });
+    });
+    expect(backgroundOnError).toHaveBeenCalledWith(factoryError, "save");
+    stop();
+  });
+
+  it("ошибка lazy storage factory из flush() обрабатывается как save error", async () => {
+    const factoryError = new Error("storage unavailable");
+    const storage = createFailableJsonStorage(factoryError);
+    const manager = createManager();
+    const onError = vi.fn();
+    const controller = persistManager(manager, { storage: storage.storage, throttleMs: 100, onError });
+    const stop = controller.start();
+    await vi.waitFor(() => {
+      expect(controller.getStatus()).toEqual({ phase: "ready", restored: false });
+    });
+
+    storage.failFactory();
+    manager.transition({ type: "INC" });
+
+    await expect(controller.flush()).rejects.toBe(factoryError);
+    expect(onError).toHaveBeenCalledWith(factoryError, "save");
+    expect(controller.getStatus()).toEqual({ phase: "error", error: factoryError });
+    stop();
+  });
+
+  it("ошибка lazy storage factory обрабатывается как clear error", async () => {
+    const factoryError = new Error("storage unavailable");
+    const storage = createThrowingJsonStorage(factoryError);
+    const manager = createManager();
+    const onError = vi.fn();
+    const controller = persistManager(manager, { storage, onError });
+
+    await expect(controller.clear()).rejects.toBe(factoryError);
+
+    expect(onError).toHaveBeenCalledWith(factoryError, "clear");
+    expect(controller.getStatus()).toEqual({ phase: "error", error: factoryError });
+  });
+
   it("remove error во время invalid restore пробрасывается после initial shape error", async () => {
     const manager = createManager();
     const removeError = new Error("remove failed");
@@ -1419,59 +1550,228 @@ describe("persistManager", () => {
 });
 
 describe("createJsonStorage", () => {
-  it("читает undefined для отсутствующего ключа, пишет JSON и удаляет запись", () => {
-    const backend = new Map<string, string>();
+  it("не вызывает factory при создании adapter-а", () => {
+    const source = vi.fn(() => createJsonBackend().storage);
+
     const storage = createJsonStorage<Store>({
       key: "fsm",
-      storage: {
-        getItem: (key) => backend.get(key) ?? null,
-        setItem: (key, value) => {
-          backend.set(key, value);
-        },
-        removeItem: (key) => {
-          backend.delete(key);
-        },
-      },
+      storage: source,
+    });
+
+    expect(source).not.toHaveBeenCalled();
+    expect("subscribe" in storage).toBe(false);
+  });
+
+  it("вызывает factory один раз на каждый get(), set(record) и remove()", () => {
+    const backend = new Map<string, string>();
+    const source = vi.fn(() => createJsonBackend(backend).storage);
+    const storage = createJsonStorage<Store>({
+      key: "fsm",
+      storage: source,
     });
     const record = createRecord(5, { storageVersion: 1 });
 
     expect(storage.get()).toBeUndefined();
+    expect(source).toHaveBeenCalledTimes(1);
     storage.set(record);
+    expect(source).toHaveBeenCalledTimes(2);
     expect(backend.get("fsm")).toBe(JSON.stringify(record));
     expect(storage.get()).toEqual(record);
+    expect(source).toHaveBeenCalledTimes(3);
     storage.remove();
+    expect(source).toHaveBeenCalledTimes(4);
     expect(storage.get()).toBeUndefined();
+    expect(source).toHaveBeenCalledTimes(5);
   });
 
-  it("пробрасывает JSON.parse ошибки из get()", () => {
+  it("не кеширует результат factory между операциями", () => {
+    const first = createJsonBackend();
+    const second = createJsonBackend();
+    const firstRecord = createRecord(1, { timestamp: 101 });
+    const secondRecord = createRecord(2, { timestamp: 202 });
+    first.backend.set("fsm", JSON.stringify(firstRecord));
+    second.backend.set("fsm", JSON.stringify(secondRecord));
+    const source = vi.fn().mockReturnValueOnce(first.storage).mockReturnValueOnce(second.storage);
     const storage = createJsonStorage<Store>({
       key: "fsm",
-      storage: {
-        getItem: () => "{bad json",
-        setItem: () => {},
-        removeItem: () => {},
-      },
+      storage: source,
     });
 
-    expect(() => storage.get()).toThrow(SyntaxError);
+    expect(storage.get()).toEqual(firstRecord);
+    expect(storage.get()).toEqual(secondRecord);
+    expect(first.storage.getItem).toHaveBeenCalledOnce();
+    expect(second.storage.getItem).toHaveBeenCalledOnce();
   });
 
-  it("remove() не падает на отсутствующем ключе", () => {
-    const backend = new Map<string, string>();
+  it("get() возвращает parsed record для валидного JSON", () => {
+    const record = createRecord(7, { timestamp: 123 });
+    const { backend, storage: backendStorage } = createJsonBackend();
+    backend.set("fsm", JSON.stringify(record));
     const storage = createJsonStorage<Store>({
       key: "fsm",
-      storage: {
-        getItem: (key) => backend.get(key) ?? null,
-        setItem: (key, value) => {
-          backend.set(key, value);
+      storage: () => backendStorage,
+    });
+
+    expect(storage.get()).toEqual(record);
+  });
+
+  it("get(), set(record) и remove() используют только настроенный key", () => {
+    const { backend, storage: backendStorage } = createJsonBackend();
+    const storage = createJsonStorage<Store>({
+      key: "fsm",
+      storage: () => backendStorage,
+    });
+    backend.set("other", JSON.stringify(createRecord(9, { timestamp: 909 })));
+    const record = createRecord(4, { timestamp: 404 });
+
+    expect(storage.get()).toBeUndefined();
+    storage.set(record);
+    storage.remove();
+
+    expect(backendStorage.getItem).toHaveBeenCalledWith("fsm");
+    expect(backendStorage.setItem).toHaveBeenCalledWith("fsm", JSON.stringify(record));
+    expect(backendStorage.removeItem).toHaveBeenCalledWith("fsm");
+    expect(backend.get("other")).toBe(JSON.stringify(createRecord(9, { timestamp: 909 })));
+  });
+
+  it("get() не валидирует envelope и возвращает результат JSON.parse как есть", () => {
+    const parsed = { arbitrary: true };
+    const storage = createJsonStorage<Store>({
+      key: "fsm",
+      storage: () => ({
+        getItem: () => JSON.stringify(parsed),
+        setItem: () => {},
+        removeItem: () => {},
+      }),
+    });
+
+    expect(storage.get()).toEqual(parsed);
+  });
+
+  it("get() пробрасывает ошибки factory, getItem и JSON.parse", () => {
+    const factoryError = new Error("factory failed");
+    const getItemError = new Error("getItem failed");
+
+    expect(() =>
+      createJsonStorage<Store>({
+        key: "fsm",
+        storage: () => {
+          throw factoryError;
         },
-        removeItem: (key) => {
-          backend.delete(key);
+      }).get(),
+    ).toThrow(factoryError);
+
+    expect(() =>
+      createJsonStorage<Store>({
+        key: "fsm",
+        storage: () => ({
+          getItem: () => {
+            throw getItemError;
+          },
+          setItem: () => {},
+          removeItem: () => {},
+        }),
+      }).get(),
+    ).toThrow(getItemError);
+
+    expect(() =>
+      createJsonStorage<Store>({
+        key: "fsm",
+        storage: () => ({
+          getItem: () => "{bad json",
+          setItem: () => {},
+          removeItem: () => {},
+        }),
+      }).get(),
+    ).toThrow(SyntaxError);
+  });
+
+  it("set(record) пишет JSON.stringify(record) по ключу", () => {
+    const { backend, storage: backendStorage } = createJsonBackend();
+    const storage = createJsonStorage<Store>({
+      key: "fsm",
+      storage: () => backendStorage,
+    });
+    const record = createRecord(5, { storageVersion: 1 });
+
+    storage.set(record);
+
+    expect(backend.get("fsm")).toBe(JSON.stringify(record));
+    expect(backendStorage.setItem).toHaveBeenCalledWith("fsm", JSON.stringify(record));
+  });
+
+  it("set(record) пробрасывает ошибки factory, JSON.stringify и setItem", () => {
+    const factoryError = new Error("factory failed");
+    const setItemError = new Error("setItem failed");
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+
+    expect(() =>
+      createJsonStorage<Store>({
+        key: "fsm",
+        storage: () => {
+          throw factoryError;
         },
-      },
+      }).set(createRecord(1)),
+    ).toThrow(factoryError);
+
+    expect(() =>
+      createJsonStorage<Store>({
+        key: "fsm",
+        storage: () => createJsonBackend().storage,
+      }).set(circular as PersistedRecord<Store>),
+    ).toThrow(TypeError);
+
+    expect(() =>
+      createJsonStorage<Store>({
+        key: "fsm",
+        storage: () => ({
+          getItem: () => null,
+          setItem: () => {
+            throw setItemError;
+          },
+          removeItem: () => {},
+        }),
+      }).set(createRecord(1)),
+    ).toThrow(setItemError);
+  });
+
+  it("remove() вызывает removeItem и не падает на отсутствующем ключе", () => {
+    const { storage: backendStorage } = createJsonBackend();
+    const storage = createJsonStorage<Store>({
+      key: "fsm",
+      storage: () => backendStorage,
     });
 
     expect(() => storage.remove()).not.toThrow();
+    expect(backendStorage.removeItem).toHaveBeenCalledWith("fsm");
     expect(storage.get()).toBeUndefined();
+  });
+
+  it("remove() пробрасывает ошибки factory и removeItem", () => {
+    const factoryError = new Error("factory failed");
+    const removeItemError = new Error("removeItem failed");
+
+    expect(() =>
+      createJsonStorage<Store>({
+        key: "fsm",
+        storage: () => {
+          throw factoryError;
+        },
+      }).remove(),
+    ).toThrow(factoryError);
+
+    expect(() =>
+      createJsonStorage<Store>({
+        key: "fsm",
+        storage: () => ({
+          getItem: () => null,
+          setItem: () => {},
+          removeItem: () => {
+            throw removeItemError;
+          },
+        }),
+      }).remove(),
+    ).toThrow(removeItemError);
   });
 });

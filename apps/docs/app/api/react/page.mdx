@@ -27,11 +27,13 @@ import {
 </FSMContextProvider>
 ```
 
-| Prop             | Назначение                                      |
-| ---------------- | ----------------------------------------------- |
-| `machineManager` | Экземпляр `MachineManager`                      |
-| `persist?`       | Один `PersistController` или массив controllers |
-| `children`       | React-поддерево                                 |
+| Prop             | Назначение                                                                                       |
+| ---------------- | ------------------------------------------------------------------------------------------------ |
+| `machineManager` | Экземпляр `MachineManager`                                                                       |
+| `persist?`       | Один `FSMPersistLifecycle` или массив lifecycle-объектов; провайдер запускает их после mount    |
+| `children`       | React-поддерево                                                                                  |
+
+`persist` — структурный контракт `{ start(): () => void }`, поэтому `@lite-fsm/react` не зависит от `@lite-fsm/persist`. Если передан ровно один объект с `getStatus()` и `subscribeStatus()`, хуки `@lite-fsm/persist/react` могут читать статус из provider context без явного controller-а. На сервере провайдер без `persist` отдаёт этим хукам idle fallback; на клиенте без persist с источником статуса они продолжают бросать provider error.
 
 ### `FSMHydrationBoundary`
 

@@ -459,6 +459,36 @@ describe("@lite-fsm/persist/react", () => {
     expectRenderToThrowPersistProviderError(<Readout />);
   });
 
+  it("usePersistStatus внутри client provider без persist бросает понятную ошибку", () => {
+    const manager = createManager();
+
+    const Readout = () => {
+      const status = usePersistStatus();
+      return <span>{status.phase}</span>;
+    };
+
+    expectRenderToThrowPersistProviderError(
+      <FSMContextProvider machineManager={manager}>
+        <Readout />
+      </FSMContextProvider>,
+    );
+  });
+
+  it("useIsPersistRestoring внутри client provider без persist бросает понятную ошибку", () => {
+    const manager = createManager();
+
+    const Readout = () => {
+      const restoring = useIsPersistRestoring();
+      return <span>{restoring ? "yes" : "no"}</span>;
+    };
+
+    expectRenderToThrowPersistProviderError(
+      <FSMContextProvider machineManager={manager}>
+        <Readout />
+      </FSMContextProvider>,
+    );
+  });
+
   it("plain lifecycle persist не создаёт status context", () => {
     const manager = createManager();
     const lifecycle = { start: vi.fn(() => () => {}) };

@@ -424,7 +424,7 @@ Unknown machine keys пропускаются: в DEV — warning + `onUnknownMa
 ```ts
 const storage = createJsonStorage<AppStore>({
   key: "app:fsm",
-  storage: window.localStorage,
+  storage: () => window.localStorage,
 });
 
 const persist = persistManager(manager, {
@@ -447,7 +447,7 @@ stop();
 | API                                   | Что делает                                                                   |
 | ------------------------------------- | ---------------------------------------------------------------------------- |
 | `persistManager(manager, opts)`       | создаёт controller для restore/save/clear и подписки на manager/storage      |
-| `createJsonStorage({ key, storage })` | адаптер для `localStorage` / `sessionStorage`-совместимых JSON-хранилищ      |
+| `createJsonStorage({ key, storage })` | адаптер для `localStorage` / `sessionStorage`-совместимых JSON-хранилищ; `storage` — lazy factory |
 | `controller.start()`                  | ref-counted start; запускает background restore и подписки                   |
 | `controller.restore()`                | читает запись, валидирует envelope persist-слоя и вызывает `manager.hydrate` |
 | `controller.save()`                   | сразу пишет `manager.dehydrate({ machines })`                                |
@@ -455,6 +455,8 @@ stop();
 | `controller.clear()`                  | отменяет pending save, удаляет storage record и сбрасывает status            |
 | `controller.getStatus()`              | текущий `{ phase }` snapshot                                                 |
 | `controller.subscribeStatus(cb)`      | подписка на смену status                                                     |
+
+`createJsonStorage` принимает только `storage: () => { getItem; setItem; removeItem }`. Factory не вызывается при создании adapter-а, вызывается заново на каждом `get`, `set`, `remove` и не кешируется; `subscribe` добавляйте вручную через `PersistStorage`. `persistManager` не проверяет browser/server environment.
 
 `start()` не блокирует SSR/hydration. Пока restore в процессе, user transitions не пишутся сразу; если live state изменился во время restore, controller после restore сохраняет финальное состояние. `@@lite-fsm/HYDRATE` сам по себе save не планирует, а restore из `storage.subscribe()` не делает echo-save без live изменений.
 
@@ -655,7 +657,7 @@ function PersistBadge() {
 }
 ```
 
-Явный `usePersistStatus(controller)` и `useIsPersistRestoring(controller)` остаются доступны для компонентов вне provider-а или для нескольких persist controllers.
+`useIsPersistRestoring()` — строго `usePersistStatus().phase === "restoring"`. Для UI, который должен скрывать данные до завершения первого restore, проверяйте `status.phase === "idle" || status.phase === "restoring"`. Явный `usePersistStatus(controller)` и `useIsPersistRestoring(controller)` остаются доступны для компонентов вне provider-а или для нескольких persist controllers.
 
 Внутри `FSMHydrationBoundary` selector читает render overlay; для SSR/hydration ближайший boundary server snapshot имеет приоритет над Provider snapshot. `useManager().getState()` в render всегда читает live manager и не участвует в SSR-safe overlay contract.
 

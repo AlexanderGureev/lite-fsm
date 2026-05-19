@@ -243,6 +243,11 @@ type Store = typeof machines;
 type Record = PersistedRecord<Store>;
 type Storage = PersistStorage<Store>;
 
+const storage = createJsonStorage<Store>({
+  key: "app:state:v1",
+  storage: () => window.localStorage,
+});
+
 const persist = persistManager(manager, {
   storage,
   machines: ["profile"],
@@ -252,6 +257,8 @@ const persist = persistManager(manager, {
   },
 });
 ```
+
+`createJsonStorage` принимает только lazy factory `() => { getItem; setItem; removeItem }`; plain storage object типами отклоняется. Контракт `PersistStorage<S>` остаётся `{ get, set, remove, subscribe? }`, поэтому `subscribe` добавляется вручную через расширение adapter-а.
 
 `PersistManagerOptions<S>["machines"]` использует `DehydrateOptions<S>["machines"]`: runtime actor templates без `persistence: "snapshot"` на уровне типов не принимаются. `migrate(record)` возвращает `MachineManagerSnapshot<S> | undefined`, поэтому старый transport record можно конвертировать без расширения core snapshot API.
 

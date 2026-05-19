@@ -56,7 +56,7 @@ const manager = MachineManager<typeof machines>(machines, { schemaVersion: 1 });
 const persist = persistManager(manager, {
   storage: createJsonStorage<typeof machines>({
     key: "app:state:v1",
-    storage: window.localStorage,
+    storage: () => window.localStorage,
   }),
   storageVersion: 1,
   machines: ["counter"],
@@ -71,6 +71,8 @@ await persist.flush();
 
 stop();
 ```
+
+`createJsonStorage` expects a lazy `storage` factory. The factory is not called when the adapter is created; it is called again for every `get`, `set`, and `remove`. `persistManager` does not check whether it runs in a browser or on a server, so Next.js stores can reference `window.localStorage` inside the factory without a manual `typeof window` guard. Add `subscribe` manually by extending the returned `PersistStorage` when you need tab or external storage notifications.
 
 ## React Integration
 
@@ -101,6 +103,9 @@ function PersistStatusView() {
 
 You can still pass a controller explicitly when the component is outside
 `FSMContextProvider` or when several persist controllers are active.
+`useIsPersistRestoring()` is exactly `usePersistStatus().phase === "restoring"`;
+blocking UI until the first restore settles should also treat the `"idle"`
+phase as loading.
 
 ## Documentation
 

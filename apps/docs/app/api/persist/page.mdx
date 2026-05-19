@@ -23,7 +23,7 @@ import { useIsPersistRestoring, usePersistStatus } from "@lite-fsm/persist/react
 const persist = persistManager(manager, {
   storage: createJsonStorage({
     key: "app:state:v1",
-    storage: window.localStorage,
+    storage: () => window.localStorage,
   }),
   storageVersion: 1,
   machines: ["counter"],
@@ -69,7 +69,7 @@ type PersistStorage<S> = {
 };
 ```
 
-`createJsonStorage` подходит для синхронных storage API с `getItem`, `setItem`, `removeItem`.
+`createJsonStorage` подходит для синхронных storage API с `getItem`, `setItem`, `removeItem`. `storage` принимает только функцию: она не вызывается при создании adapter-а, вызывается заново на каждом `get`, `set`, `remove` и не кешируется. `subscribe` добавляйте вручную через расширение `PersistStorage`.
 
 ## React-хуки
 
@@ -77,5 +77,9 @@ type PersistStorage<S> = {
 const status = usePersistStatus(persist);
 const restoring = useIsPersistRestoring(persist);
 ```
+
+Аргумент можно опустить, если ближайший `FSMContextProvider` получил ровно один `PersistController` с источником статуса через `persist`. Серверный render провайдера без `persist` отдаёт hook-ам `{ phase: "idle" }`; клиентский render без persist с источником статуса продолжает бросать provider error.
+
+`useIsPersistRestoring` — это строго `status.phase === "restoring"`; для blocking UI до первого restore проверяйте также `"idle"`.
 
 Подробное руководство: [@lite-fsm/persist](/packages/persist).

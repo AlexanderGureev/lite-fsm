@@ -26,7 +26,7 @@ const createId = () => {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 };
 
-const createPeer = (): ChatPeer => {
+export const createPeer = (): ChatPeer => {
   const id = createId();
   const index = Math.floor(Math.random() * peerNames.length);
   const name = peerNames[index];
@@ -39,17 +39,17 @@ const createPeer = (): ChatPeer => {
   };
 };
 
-const createLocalStorageAdapter = (storage: Storage): PersistStorage<FSMConfigType> => {
+const createLocalStorageAdapter = (): PersistStorage<FSMConfigType> => {
   const jsonStorage = createJsonStorage<FSMConfigType>({
     key: PERSIST_STORAGE_KEY,
-    storage,
+    storage: () => window.localStorage,
   });
 
   return {
     ...jsonStorage,
     subscribe: (cb) => {
       const handleStorage = (event: StorageEvent) => {
-        if (event.storageArea !== storage) return;
+        if (event.storageArea !== window.localStorage) return;
         if (event.key !== PERSIST_STORAGE_KEY && event.key !== null) return;
         cb();
       };
@@ -72,23 +72,13 @@ export type AppStore = ReturnType<typeof makeStore>;
 export type PersistChatRuntime = {
   manager: AppStore;
   persist: PersistController;
-  peer: ChatPeer;
 };
 
-export const makePersistChatRuntime = (storage: Storage): PersistChatRuntime => {
+export const makePersistChatRuntime = (): PersistChatRuntime => {
   const manager = makeStore();
-  const peer = createPeer();
-
-  manager.transition({
-    type: "SESSION_STARTED",
-    payload: {
-      peer,
-      openedAt: Date.now(),
-    },
-  });
 
   const persist = persistManager(manager, {
-    storage: createLocalStorageAdapter(storage),
+    storage: createLocalStorageAdapter(),
     storageVersion: PERSIST_STORAGE_VERSION,
     machines: ["chatThread"],
     throttleMs: PERSIST_THROTTLE_MS,
@@ -99,7 +89,6 @@ export const makePersistChatRuntime = (storage: Storage): PersistChatRuntime => 
   return {
     manager,
     persist,
-    peer,
   };
 };
 

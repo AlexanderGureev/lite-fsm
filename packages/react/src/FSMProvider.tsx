@@ -29,10 +29,13 @@ export const FSMContextProvider = <S extends MachineStore, P extends AnyEvent = 
     }),
     [getServerSnapshot, initialSnapshot],
   );
-  const persistStatusSource = React.useMemo(() => resolvePersistStatusSource(persist), [persist]);
+  const persistStatusSource = React.useMemo(
+    () => resolvePersistStatusSource(persist, { serverFallback: typeof window === "undefined" }),
+    [persist],
+  );
 
   React.useEffect(() => {
-    if (!persist) return;
+    if (persist === undefined) return;
     const persistItems = Array.isArray(persist) ? persist : [persist];
     const stops = persistItems.map((item) => item.start());
     return () => {

@@ -20,6 +20,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 import {
+  createPeer,
   makePersistChatRuntime,
   PERSIST_STORAGE_KEY,
   PERSIST_STORAGE_VERSION,
@@ -27,7 +28,7 @@ import {
   type PersistChatRuntime,
 } from "../store";
 import { useSelector, useTransition } from "../store/hooks";
-import type { ChatMessage } from "../store/types";
+import type { ChatMessage, ChatPeer } from "../store/types";
 
 const timeFormatter = new Intl.DateTimeFormat("ru-RU", {
   hour: "2-digit",
@@ -63,17 +64,6 @@ const groupMessages = (messages: ChatMessage[]): MessageGroup[] => {
   }
   return groups;
 };
-
-function RuntimeSkeleton() {
-  return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col items-center justify-center gap-3 py-24 text-center">
-      <span className="grid size-11 place-items-center rounded-[10px] bg-accent-persist-soft text-accent-persist">
-        <HardDrive className="size-5" strokeWidth={1.8} />
-      </span>
-      <p className="text-caption-strong text-ink">Подключаем browser storage…</p>
-    </div>
-  );
-}
 
 function SyncIndicator({
   phase,
@@ -121,7 +111,7 @@ function PeerChip({ name, color, prefix }: { name: string; color: string; prefix
   );
 }
 
-function HeroSection({ peer }: { peer: PersistChatRuntime["peer"] }) {
+function HeroSection({ peer }: { peer: ChatPeer }) {
   const openClone = () => {
     if (typeof window === "undefined") return;
     window.open(window.location.href, "_blank", "noopener,noreferrer");
@@ -562,9 +552,30 @@ function TechRail({ onFlushPersist }: { onFlushPersist: () => void }) {
   );
 }
 
-function ChatApp({ onFlushPersist, peer }: { onFlushPersist: () => void; peer: PersistChatRuntime["peer"] }) {
+function SessionBootstrap() {
+  const transition = useTransition();
+  const sessionState = useSelector((state) => state.chatSession.state);
+
+  useEffect(() => {
+    if (sessionState !== "BOOTING") return;
+    transition({
+      type: "SESSION_STARTED",
+      payload: {
+        peer: createPeer(),
+        openedAt: Date.now(),
+      },
+    });
+  }, [sessionState, transition]);
+
+  return null;
+}
+
+function ChatApp({ onFlushPersist }: { onFlushPersist: () => void }) {
+  const peer = useSelector((state) => state.chatSession.context.peer);
+
   return (
     <section className="flex flex-col gap-8">
+      <SessionBootstrap />
       <HeroSection peer={peer} />
 
       <div className="mx-auto w-full max-w-2xl">
@@ -582,23 +593,16 @@ function ChatApp({ onFlushPersist, peer }: { onFlushPersist: () => void; peer: P
 
 function PersistRuntime() {
   const runtimeRef = useRef<PersistChatRuntime | null>(null);
-  if (!runtimeRef.current) runtimeRef.current = makePersistChatRuntime(window.localStorage);
+  if (!runtimeRef.current) runtimeRef.current = makePersistChatRuntime();
   const runtime = runtimeRef.current;
 
   return (
     <FSMContextProvider machineManager={runtime.manager} persist={runtime.persist}>
-      <ChatApp onFlushPersist={() => void runtime.persist.flush()} peer={runtime.peer} />
+      <ChatApp onFlushPersist={() => void runtime.persist.flush()} />
     </FSMContextProvider>
   );
 }
 
 export function Demo() {
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  if (!mounted) return <RuntimeSkeleton />;
   return <PersistRuntime />;
 }

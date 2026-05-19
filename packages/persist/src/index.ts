@@ -81,6 +81,8 @@ type JsonStorageLike = {
   removeItem(key: string): void;
 };
 
+type JsonStorageSource = () => JsonStorageLike;
+
 const IDLE_STATUS: PersistStatus = { phase: "idle" };
 const RESTORING_STATUS: PersistStatus = { phase: "restoring" };
 
@@ -406,19 +408,19 @@ export const persistManager = <S extends MachineStore>(
 
 export const createJsonStorage = <S extends MachineStore>({
   key,
-  storage,
+  storage: storageSource,
 }: {
   key: string;
-  storage: JsonStorageLike;
+  storage: JsonStorageSource;
 }): PersistStorage<S> => ({
   get: () => {
-    const raw = storage.getItem(key);
+    const raw = storageSource().getItem(key);
     return raw == null ? undefined : (JSON.parse(raw) as PersistedRecord<S>);
   },
   set: (record) => {
-    storage.setItem(key, JSON.stringify(record));
+    storageSource().setItem(key, JSON.stringify(record));
   },
   remove: () => {
-    storage.removeItem(key);
+    storageSource().removeItem(key);
   },
 });
