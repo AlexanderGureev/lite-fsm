@@ -25,7 +25,15 @@ type UnionToIntersection<U> = (U extends unknown ? (value: U) => void : never) e
   ? I
   : never;
 
-type ConfigDependencies<E> = E extends MachineConfig<object, AnyRecord, AnyEvent, infer D> ? D : never;
+type ConfigDependencies<E> =
+  E extends MachineConfig<infer C, infer T, infer P, infer D, infer Snapshot>
+    ? [C, T, P, D, Snapshot] extends [object, AnyRecord, AnyEvent, AnyRecord, unknown]
+      ? D
+      : never
+    : never;
+
+type EffectFunctionDependencies<F> =
+  NonNullable<F> extends (deps: infer D) => unknown ? Omit<D, keyof DefaultDeps | "self"> : {};
 
 type EffectDependencies<E> = "effects" extends keyof E
   ? keyof NonNullable<E["effects"]> extends never
@@ -33,9 +41,7 @@ type EffectDependencies<E> = "effects" extends keyof E
     : [ConfigDependencies<E>] extends [never]
       ? UnionToIntersection<
           {
-            [key in keyof NonNullable<E["effects"]>]: NonNullable<E["effects"]>[key] extends (deps: infer D) => unknown
-              ? Omit<D, keyof DefaultDeps | "self">
-              : {};
+            [key in keyof NonNullable<E["effects"]>]: EffectFunctionDependencies<NonNullable<E["effects"]>[key]>;
           }[keyof NonNullable<E["effects"]>]
         >
       : ConfigDependencies<E>

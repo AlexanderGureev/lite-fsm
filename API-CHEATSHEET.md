@@ -210,6 +210,8 @@ const counter = createMachine({
 | `groupTag?`                       | actor template only — tag группы                                          |
 | `persistence?`                    | actor template only — `"runtime"` (default) или `"snapshot"`              |
 
+Для domain-машины custom `dehydrate` / `hydrate` задают transport shape этой машины; `MachineManager.dehydrate()`, `hydrate()` и `getHydratedState()` используют именно эту форму, а не дефолтный `{ state, context }`.
+
 ### Targets
 
 | Target                                            | Поведение                                                             |
@@ -370,6 +372,8 @@ manager.transition({ type: "INC" });
 | `dehydrate(opts?)`                  | snapshot с `dehydrate` hooks                                   |
 | `hydrate(snapshot, opts?)`          | применяет snapshot без middleware/effects                      |
 | `getHydratedState(snapshot, opts?)` | preview `hydrate` без мутации manager-а                        |
+
+Тип `deps` для `setDependencies` выводится из `MachineConfig` / `TypedCreateMachineFn<P, D>` и из signatures `effects`; runtime deps (`action`, `transition`, `condition`, `self`) в user deps не входят.
 
 Action идёт во все доменные автоматы; автомат без подходящего transition остаётся без изменений (селекторы не дёргаются). Префикс `@@lite-fsm/*` зарезервирован — отправлять через `transition` нельзя.
 

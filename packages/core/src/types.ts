@@ -349,7 +349,9 @@ type SnapshotFromDomainHydrate<M> = M extends { hydrate: (prev: any, snapshot: i
 
 type DomainSnapshotForMachine<M> = M extends { dehydrate: (...args: any[]) => unknown }
   ? SnapshotFromDehydrate<M>
-  : SnapshotFromDomainHydrate<M>;
+  : M extends MachineConfig<infer _C, infer _T, infer _P, infer _D, infer Snapshot>
+    ? Snapshot
+    : SnapshotFromDomainHydrate<M>;
 
 export type SnapshotForMachine<M> =
   IsActorTemplate<M> extends true ? ActorSnapshotForMachine<M> : DomainSnapshotForMachine<M>;

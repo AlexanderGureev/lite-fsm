@@ -103,6 +103,7 @@ const config = {
 | `persistence?`            | actor template only: `"runtime"` (default) \| `"snapshot"`  |
 
 Default `Snapshot`: domain → `StateType<C, T>`, actor hook payload → `DefaultActorSnapshot<C, T>`.
+Custom domain hooks переопределяют `Snapshot`: `SnapshotForMachine<M>`, `MachineManagerSnapshot<S>`, `dehydrate()` и `hydrate()` используют transport payload из `dehydrate` / `hydrate`, включая машины, созданные через `TypedCreateMachineFn<P, D>`.
 
 ## `MachineReducer<C, P, T>`
 
@@ -289,7 +290,7 @@ const persist = persistManager(manager, {
 | `dehydrate`        | `MachineManagerDehydrateFn<S>`                                    |
 | `onTransition`     | `(cb: TransitionSubscriber<S, P>) => () => void`                  |
 | `replaceReducer`   | `(enhancer: (reducer) => reducer) => void`                        |
-| `setDependencies`  | `(deps \| updater) => void`                                       |
+| `setDependencies`  | `(deps: MachineDependencies<S> \| updater) => void`               |
 
 ### Manager options и subscribers
 
@@ -302,6 +303,8 @@ const persist = persistManager(manager, {
 | `TransitionSubscriber<S, P>`  | `(prev: MachinesState<S>, current: MachinesState<S>, action: ManagerCommitAction<S, ManagerAction<P>>) => void`                                       |
 
 `originId?: string` (без `#`) и кастомные `generateActorId` / `generateGroupId` обеспечивают изоляцию id между менеджерами в P2P / multi-tab / шарды-сценариях. Подробнее — в гайде [Распределенный спавн](/guide/actors#распределенный-спавн).
+
+`MachineDependencies<S>` берёт user deps из `MachineConfig` / `TypedCreateMachineFn<P, D>` и signatures `effects`, исключая runtime deps manager-а и actor-а.
 
 ## Typed factory aliases
 

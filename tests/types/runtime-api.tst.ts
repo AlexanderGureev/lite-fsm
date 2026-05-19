@@ -1,5 +1,6 @@
 import { describe, expect, test } from "tstyche";
 import {
+  createMachine,
   defineMachine,
   type AnyEvent,
   type FSMEvent,
@@ -18,9 +19,11 @@ import {
   type MachineStore,
   type ManagerAction,
   type ManagerCommitAction,
+  type SnapshotForMachine,
   type StateType,
   type Subscriber,
   type MachinesState,
+  type TypedCreateMachineFn,
 } from "@lite-fsm/core";
 
 import type { Assert, Equal } from "./_helpers";
@@ -240,6 +243,55 @@ describe("MachineManager(machines, opts?)", () => {
     >();
   });
 
+  test("snapshot-методы сохраняют custom domain snapshot из TypedCreateMachineFn", () => {
+    type StrokeEvt = FSMEvent<"STROKE_APPEND">;
+    type StrokeSnapshot = { test: number };
+
+    const createStrokeMachine: TypedCreateMachineFn<StrokeEvt> = createMachine;
+    const p1 = createStrokeMachine({
+      config: {
+        IDLE: {
+          STROKE_APPEND: "READY",
+        },
+        READY: {},
+      },
+      initialState: "IDLE",
+      initialContext: {
+        test: -1,
+      },
+      dehydrate: () => ({ test: 1 }),
+      hydrate: (prev, snapshot) => {
+        expect(snapshot).type.toBe<StrokeSnapshot>();
+        return {
+          state: prev.state,
+          context: snapshot,
+        };
+      },
+    });
+    const strokeMachines = { p1 };
+    const manager = MachineManager(strokeMachines);
+
+    expect<SnapshotForMachine<typeof p1>>().type.toBe<StrokeSnapshot>();
+    expect<MachineManagerSnapshot<typeof strokeMachines>["machines"]>().type.toBe<Partial<{ p1: StrokeSnapshot }>>();
+    expect(manager.dehydrate({ machines: ["p1"] }).machines.p1).type.toBe<StrokeSnapshot>();
+    manager.hydrate({
+      machines: {
+        p1: { test: 2 },
+      },
+    });
+    manager.getHydratedState({
+      machines: {
+        p1: { test: 2 },
+      },
+    });
+    manager.hydrate({
+      machines: {
+        // @ts-expect-error!
+        p1: { context: { test: 2 }, state: "IDLE" },
+      },
+    });
+  });
+
   test("пустая machines map по умолчанию даёт IMachineManager с never events", () => {
     const empty = MachineManager({});
     expect(empty).type.toBe<IMachineManager<{}, never>>();
@@ -278,6 +330,42 @@ describe("MachineManager(machines, opts?)", () => {
     >();
     manager.setDependencies({ clock: () => 0 });
     manager.setDependencies((deps: CounterDeps) => ({ ...deps, clock: () => deps.clock() + 1 }));
+  });
+
+  test("setDependencies сохраняет deps из TypedCreateMachineFn с getState self-reference", () => {
+    type CircularEvt = FSMEvent<"PING">;
+    type CircularDeps = {
+      getState: () => CircularState;
+      random: () => number;
+    };
+
+    const createCircularMachine: TypedCreateMachineFn<CircularEvt, CircularDeps> = createMachine;
+    const circularMachine = createCircularMachine({
+      config: { idle: { PING: null } },
+      initialState: "idle",
+      initialContext: {},
+      effects: {
+        idle: ({ getState, random }) => {
+          expect(getState()).type.toBe<CircularState>();
+          expect(random()).type.toBe<number>();
+        },
+      },
+    });
+    const circularMachines = { circular: circularMachine };
+    type CircularMachines = typeof circularMachines;
+    type CircularState = MachinesState<CircularMachines>;
+
+    const manager = MachineManager<CircularMachines, CircularEvt>(circularMachines);
+    expect<MachineDependencies<CircularMachines>>().type.toBe<CircularDeps>();
+    expect(manager.setDependencies).type.toBe<
+      (d: CircularDeps | ((deps: CircularDeps) => CircularDeps)) => void
+    >();
+    manager.setDependencies({ getState: manager.getState, random: () => 0 });
+    manager.setDependencies({
+      getState: manager.getState,
+      // @ts-expect-error!
+      random: "wrong",
+    });
   });
 
   test("transition отклоняет events, которых нет в P", () => {
