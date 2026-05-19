@@ -19,6 +19,9 @@ type FlagContext = { enabled: boolean };
 type FlagSnapshot = { enabled: boolean };
 type ListsConfig = { READY: {} };
 type ListsContext = { lists: Record<string, string> };
+type LikesConfig = { IDLE: { LIKE: null } };
+type LikesContext = { data: Record<string, boolean> };
+type LikesAction = { type: "LIKE"; payload: Record<string, boolean> };
 
 const counter = {
   config: { IDLE: {} },
@@ -66,6 +69,22 @@ const listsMachine = {
 } satisfies MachineConfig<ListsConfig, ListsContext, Action>;
 const listsStore = { lists: listsMachine };
 type ListsStore = typeof listsStore;
+
+const nonIdempotentLikesMachine = {
+  config: { IDLE: { LIKE: null } },
+  initialState: "IDLE",
+  initialContext: { data: {} },
+  hydrate: (prev, snapshot) => ({
+    state: snapshot.state,
+    context: { data: { ...snapshot.context.data, ...prev.context.data } },
+  }),
+  reducer: (state, action, { nextState }) => ({
+    state: nextState,
+    context: { data: { ...state.context.data, ...action.payload } },
+  }),
+} satisfies MachineConfig<LikesConfig, LikesContext, LikesAction>;
+const nonIdempotentLikesStore = { likes: nonIdempotentLikesMachine };
+type NonIdempotentLikesStore = typeof nonIdempotentLikesStore;
 
 type Subscription = { id: string };
 type ProfileConfig = { IDLE: {}; READY: {} };
@@ -186,6 +205,20 @@ const createListsSnapshot = (id: string, title: string): MachineManagerSnapshot<
       context: {
         lists: {
           [id]: title,
+        },
+      },
+    },
+  },
+});
+
+const createLikesSnapshot = (): MachineManagerSnapshot<NonIdempotentLikesStore> => ({
+  machines: {
+    likes: {
+      state: "IDLE",
+      context: {
+        data: {
+          "1": true,
+          "2": false,
         },
       },
     },
@@ -629,6 +662,70 @@ describe("FSMHydrationBoundary", () => {
       "Fresh arrivals,Slow streaming widget",
     ]);
     expect(Object.keys(manager.getState().lists.context.lists).sort()).toEqual(["fresh", "slow"]);
+  });
+
+  it("не повторяет commit для state, который boundary уже получил своим hydrate", () => {
+    const manager = MachineManager<NonIdempotentLikesStore, LikesAction>(nonIdempotentLikesStore);
+    manager.transition({ type: "LIKE", payload: { "3": true } });
+    const hydrate = vi.spyOn(manager, "hydrate");
+    const renders: string[] = [];
+
+    const LikesReadout = () => {
+      const label = useSelector<NonIdempotentLikesStore, string>((state) =>
+        Object.entries(state.likes.context.data)
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(([id, value]) => `${id}:${value}`)
+          .join(","),
+      );
+      renders.push(label);
+      return <span data-testid="likes">{label}</span>;
+    };
+
+    const { getByTestId } = render(
+      <FSMContextProvider machineManager={manager}>
+        <FSMHydrationBoundary snapshot={createLikesSnapshot()}>
+          <LikesReadout />
+        </FSMHydrationBoundary>
+      </FSMContextProvider>,
+    );
+
+    expect(getByTestId("likes").textContent).toBe("1:true,2:false,3:true");
+    expect(hydrate).toHaveBeenCalledOnce();
+    expect(renders.length).toBeLessThan(10);
+  });
+
+  it("не повторяет commit после transitionAfterHydrate с неидемпотентным hydrate", () => {
+    const manager = MachineManager<NonIdempotentLikesStore, LikesAction>(nonIdempotentLikesStore);
+    manager.transition({ type: "LIKE", payload: { "3": true } });
+    const hydrate = vi.spyOn(manager, "hydrate");
+    const transition = vi.spyOn(manager, "transition");
+    const action: LikesAction = { type: "LIKE", payload: { "4": false } };
+    const renders: string[] = [];
+
+    const LikesReadout = () => {
+      const label = useSelector<NonIdempotentLikesStore, string>((state) =>
+        Object.entries(state.likes.context.data)
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(([id, value]) => `${id}:${value}`)
+          .join(","),
+      );
+      renders.push(label);
+      return <span data-testid="likes">{label}</span>;
+    };
+
+    const { getByTestId } = render(
+      <FSMContextProvider machineManager={manager}>
+        <FSMHydrationBoundary snapshot={createLikesSnapshot()} transitionAfterHydrate={action}>
+          <LikesReadout />
+        </FSMHydrationBoundary>
+      </FSMContextProvider>,
+    );
+
+    expect(getByTestId("likes").textContent).toBe("1:true,2:false,3:true,4:false");
+    expect(hydrate).toHaveBeenCalledOnce();
+    expect(transition).toHaveBeenCalledOnce();
+    expect(transition).toHaveBeenLastCalledWith(action);
+    expect(renders.length).toBeLessThan(10);
   });
 
   it("useHydrateSnapshot commit-ит в layout effect без render overlay", () => {

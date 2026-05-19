@@ -29,6 +29,13 @@ type CompletedDispatch<P extends AnyEvent> = {
   actions: ReadonlyArray<ManagerAction<P>>;
 };
 
+type CommittedHydration<S extends MachineStore> = {
+  baseState: MachinesState<S>;
+  committedState: MachinesState<S>;
+  snapshot: MachineManagerSnapshot<S>;
+  strategy: HydrateStrategy;
+};
+
 const matchesCompletedDispatch = <P extends AnyEvent>(
   completed: CompletedDispatch<P> | null,
   snapshot: unknown,
@@ -60,16 +67,12 @@ export const FSMHydrationBoundary = <S extends MachineStore, P extends AnyEvent 
   const parentOverlay = useHydrationOverlay<S>();
   const parentServerSnapshot = useServerSnapshot<S>();
   const hydrateStrategy = strategy ?? "merge";
-  const committedRef = React.useRef<{
-    baseState: MachinesState<S>;
-    snapshot: MachineManagerSnapshot<S>;
-    strategy: HydrateStrategy;
-  } | null>(null);
+  const committedRef = React.useRef<CommittedHydration<S> | null>(null);
 
-  // State убирает render overlay после post-hydration dispatch; ref гасит StrictMode replay до commit state.
+  // State управляет render overlay; refs гасят StrictMode replay до commit state.
+  const [committedHydration, setCommittedHydration] = React.useState<CommittedHydration<S> | null>(null);
   const completedDispatchRef = React.useRef<CompletedDispatch<P> | null>(null);
   const [completedDispatch, setCompletedDispatch] = React.useState<CompletedDispatch<P> | null>(null);
-  const [, forceRender] = React.useReducer((version: number) => version + 1, 0);
 
   const transitionActions = React.useMemo<ReadonlyArray<ManagerAction<P>> | null>(() => {
     if (!transitionAfterHydrate) return null;
@@ -84,7 +87,12 @@ export const FSMHydrationBoundary = <S extends MachineStore, P extends AnyEvent 
   );
 
   const dispatchCompleted = matchesCompletedDispatch(completedDispatch, snapshot, hydrateStrategy, transitionActions);
-  const hasOverlay = previewState !== baseState && !dispatchCompleted;
+  const hydrationCommitted =
+    committedHydration !== null &&
+    committedHydration.committedState === baseState &&
+    committedHydration.snapshot === snapshot &&
+    committedHydration.strategy === hydrateStrategy;
+  const hasOverlay = previewState !== baseState && !dispatchCompleted && !hydrationCommitted;
 
   const serverBaseState = parentServerSnapshot?.getState() ?? baseState;
   const serverPreviewState = React.useMemo(
@@ -105,15 +113,20 @@ export const FSMHydrationBoundary = <S extends MachineStore, P extends AnyEvent 
     if (!shouldHydrate && !shouldDispatch) return;
 
     const committed = committedRef.current;
-    let didHydrate = false;
     /* v8 ignore next 3 -- защита от StrictMode replay с тем же render snapshot. */
     if (
       shouldHydrate &&
       !(committed?.baseState === baseState && committed.snapshot === snapshot && committed.strategy === hydrateStrategy)
     ) {
       manager.hydrate(snapshot, { strategy: hydrateStrategy });
-      committedRef.current = { baseState, snapshot, strategy: hydrateStrategy };
-      didHydrate = true;
+      const nextCommitted: CommittedHydration<S> = {
+        baseState,
+        committedState: manager.getState(),
+        snapshot,
+        strategy: hydrateStrategy,
+      };
+      committedRef.current = nextCommitted;
+      setCommittedHydration(nextCommitted);
     }
 
     if (shouldDispatch && transitionActions !== null) {
@@ -122,8 +135,6 @@ export const FSMHydrationBoundary = <S extends MachineStore, P extends AnyEvent 
       completedDispatchRef.current = completed;
       setCompletedDispatch(completed);
     }
-
-    if (didHydrate && !shouldDispatch) forceRender();
   }, [baseState, hasOverlay, hydrateStrategy, manager, snapshot, transitionActions]);
 
   const overlay = React.useMemo(() => ({ getState: () => previewState }), [previewState]);
