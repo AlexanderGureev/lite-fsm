@@ -363,15 +363,15 @@ manager.transition({ type: "INC" });
 
 | Метод                               | Назначение                                                     |
 | ----------------------------------- | -------------------------------------------------------------- |
-| `getState()`                        | текущий manager state                                          |
+| `getState()`                        | текущее состояние менеджера                                    |
 | `transition(action)`                | dispatch user action; возвращает фактически применённый action |
 | `onTransition(cb)`                  | `(prev, current, action) => void`                              |
 | `setDependencies(deps \| updater)`  | задаёт user deps для effects                                   |
 | `replaceReducer(enhancer)`          | подменяет root reducer (вызывается из middleware)              |
 | `getSnapshot()`                     | runtime snapshot `{ schemaVersion, machines }` без hooks       |
 | `dehydrate(opts?)`                  | snapshot с `dehydrate` hooks                                   |
-| `hydrate(snapshot, opts?)`          | применяет snapshot без middleware/effects                      |
-| `getHydratedState(snapshot, opts?)` | preview `hydrate` без мутации manager-а                        |
+| `hydrate(snapshot, opts?)`          | применяет снимок без middleware/effects                        |
+| `getHydratedState(snapshot, opts?)` | предварительный результат `hydrate` без изменения менеджера    |
 
 Тип `deps` для `setDependencies` выводится из `MachineConfig` / `TypedCreateMachineFn<P, D>` и из signatures `effects`; runtime deps (`action`, `transition`, `condition`, `self`) в user deps не входят.
 
@@ -389,7 +389,7 @@ const preview = manager.getHydratedState(snapshot, {
 });
 ```
 
-`dehydrate()` типизирует все snapshot-eligible machines как обязательные. `dehydrate({ machines: ["counter"] })` делает обязательными только выбранные literal keys; dynamic array остаётся partial envelope для безопасности.
+`dehydrate()` типизирует все машины, которые участвуют в снимке, как обязательные. `dehydrate({ machines: ["counter"] })` делает обязательными только выбранные literal keys; dynamic array остаётся partial envelope для безопасности.
 
 | API                  | Hooks       | Mutates | Subscribers          | Effects |
 | -------------------- | ----------- | ------- | -------------------- | ------- |
@@ -398,10 +398,12 @@ const preview = manager.getHydratedState(snapshot, {
 | `getHydratedState()` | `hydrate`   | —       | —                    | —       |
 | `hydrate()`          | `hydrate`   | да      | `@@lite-fsm/HYDRATE` | —       |
 
-| Strategy    | Поведение                                                                                                                |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `"merge"`   | применяет только keys из snapshot                                                                                        |
-| `"replace"` | для actor templates сбрасывает actors, отсутствующих в snapshot; для доменных автоматов форму replace решает `hydrate` hook |
+`strategy` не выполняет глубокое объединение поля `context` и не заменяет всё состояние менеджера. В обоих режимах `hydrate()` рассматривает только ключи из `snapshot.machines`; отсутствующие доменные машины остаются как есть.
+
+| Strategy    | Поведение                                                                                                                                                 |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `"merge"`   | частичное наложение: ключи доменных машин из снимка применяются; акторы, сохраняемые в снимок, вне входящего набора записей остаются                        |
+| `"replace"` | полный набор записей акторов: ключи доменных машин из снимка применяются; акторы, сохраняемые в снимок, но отсутствующие во входящем наборе записей, удаляются; для доменных машин семантику замены задаёт обработчик `hydrate` |
 
 Domain hooks:
 
@@ -464,7 +466,7 @@ stop();
 | ------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | `storage`           | `{ get, set, remove, subscribe? }`                                                                                         |
 | `machines?`         | те же snapshot-eligible keys, что в `dehydrate({ machines })`                                                              |
-| `strategy?`         | strategy для `hydrate`, default `"merge"`                                                                                  |
+| `strategy?`         | стратегия для `hydrate`, по умолчанию `"merge"`; не глубокое объединение `context` и не замена всего состояния менеджера   |
 | `storageVersion?`   | версия persist record; mismatch без `migrate` удаляет record. `undefined` vs определённое значение тоже считается mismatch |
 | `maxAge?`           | TTL в миллисекундах; expired record удаляется                                                                              |
 | `throttleMs?`       | coalescing для saves; default `0`, для browser storage обычно `300-1000`                                                   |
@@ -563,7 +565,7 @@ const request = createMachine({
 });
 ```
 
-Без hooks snapshot actor использует дефолтный payload `{ state, context }`. Кастомные actor snapshot hooks видят пользовательский data-slice `{ state, context }`, payload snapshot и hydrate meta `{ strategy }`. `actorId`, `groupId` и `groupTag` сохраняет и восстанавливает `MachineManager` рядом с actor snapshot entry.
+Без hooks актор, сохраняемый в снимок, использует дефолтный payload `{ state, context }`. Кастомные actor snapshot hooks видят пользовательский фрагмент данных `{ state, context }`, payload snapshot и meta `hydrate` со стратегией. `actorId`, `groupId` и `groupTag` сохраняет и восстанавливает `MachineManager` рядом с записью актора в снимке.
 
 ## Middleware
 
@@ -643,7 +645,7 @@ function Counter() {
 | `useHydrateSnapshot(snapshot, opts?)`      | apply snapshot в layout effect, без preview                                                   |
 | `defineMachine`                            | standalone machine как hook                                                                   |
 
-`FSMContextProvider` принимает `getServerSnapshot?: () => MachinesState<S>` и `persist?: { start(): () => void } | readonly { start(): () => void }[]`. Без `getServerSnapshot` он кеширует `machineManager.getState()` для текущего manager-а на первом render-е. Это root state для React `useSyncExternalStore`, не `MachineManagerSnapshot` envelope.
+`FSMContextProvider` принимает `getServerSnapshot?: () => MachinesState<S>` и `persist?: { start(): () => void } | readonly { start(): () => void }[]`. Без `getServerSnapshot` он кеширует `machineManager.getState()` для текущего менеджера при первой отрисовке. Это состояние корня для React `useSyncExternalStore`, а не envelope `MachineManagerSnapshot`.
 
 `persist` — structural lifecycle prop: provider вызывает `start()` в `useEffect`, а cleanup вызывает возвращённые stop-функции. Если передан ровно один controller с `getStatus()`/`subscribeStatus()`, provider также кладёт его в persist-status context для `@lite-fsm/persist/react`. `@lite-fsm/react` не зависит от `@lite-fsm/persist`, поэтому туда можно передать любой совместимый controller.
 

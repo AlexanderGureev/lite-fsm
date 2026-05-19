@@ -124,9 +124,13 @@ manager.transition({ type: "INC" });
 | `onTransition(cb)`                  | Подписаться на успешные transitions                              |
 | `setDependencies(depsOrUpdater)`    | Задать effect dependencies                                       |
 | `replaceReducer(enhancer)`          | Обернуть root reducer                                            |
-| `dehydrate(opts?)`                  | Собрать snapshot для передачи или сохранения                     |
-| `hydrate(snapshot, opts?)`          | Применить snapshot                                               |
-| `getHydratedState(snapshot, opts?)` | Рассчитать состояние после hydrate без изменения manager         |
+| `dehydrate(opts?)`                  | Собрать снимок для передачи или сохранения                       |
+| `hydrate(snapshot, opts?)`          | Применить снимок                                                 |
+| `getHydratedState(snapshot, opts?)` | Рассчитать состояние после `hydrate` без изменения менеджера     |
+
+### Стратегия восстановления
+
+`hydrate(snapshot, { strategy })` не выполняет глубокое объединение поля `context` и не заменяет всё состояние менеджера. В обоих режимах применяются только ключи из `snapshot.machines`. Для доменных машин `strategy` передаётся в обработчик `hydrate` как `meta.strategy`; для акторов, сохраняемых в снимок, `merge` сохраняет акторов вне входящего набора записей, а `replace` удаляет отсутствующих.
 
 ## Actors
 

@@ -26,7 +26,7 @@
 | `P`        | union events, совместимый с `AnyEvent`     |
 | `D`        | custom effect dependencies                 |
 | `N`        | state name или `"*"` для effect/deps       |
-| `S`        | `MachineStore`, карта машин manager-а      |
+| `S`        | `MachineStore`, карта машин менеджера      |
 | `R`        | selector result                            |
 | `Snapshot` | transport shape для hydrate/dehydrate      |
 
@@ -190,8 +190,8 @@ type AppDeps = MachineDependencies<Store>;
 | Тип                      | Что выводит                                    |
 | ------------------------ | ---------------------------------------------- |
 | `MachineStore`           | `Record<string, AnyMachineConfig>`             |
-| `MachineSliceState<M>`   | domain slice или actor record для одной машины |
-| `MachinesState<S>`       | manager state по карте машин                   |
+| `MachineSliceState<M>`   | фрагмент состояния доменной машины или набор записей акторов |
+| `MachinesState<S>`       | состояние менеджера по карте машин                         |
 | `MachineEvents<S>`       | union событий всех машин                       |
 | `MachineDependencies<S>` | intersection custom deps всех effects          |
 
@@ -204,25 +204,27 @@ type AppDeps = MachineDependencies<Store>;
 | `MachineRuntimeSnapshot<C, T>`                 | runtime domain slice (= `StateType<C, T>`)                                                        |
 | `MachineRuntimeSnapshotForMachine<M>`          | runtime snapshot одного machine config                                                            |
 | `SnapshotForMachine<M>` · `MachineSnapshot<M>` | transport snapshot одной machine                                                                  |
-| `MachineManagerRuntimeSnapshot<S>`             | envelope из `getSnapshot()`; включает live actor records                                          |
-| `MachineManagerSnapshot<S>`                    | partial envelope для `hydrate()`; domain + snapshot actors                                        |
+| `MachineManagerRuntimeSnapshot<S>`             | envelope из `getSnapshot()`; включает активные записи акторов                                     |
+| `MachineManagerSnapshot<S>`                    | partial envelope для `hydrate()`; доменные машины + акторы, сохраняемые в снимок                  |
 | `MachineManagerDehydratedSnapshot<S, K>`       | точный envelope из `dehydrate()`; ключи `K` обязательны                                           |
 | `MachineManagerDehydrateResult<S, Keys>`       | результат `dehydrate({ machines: Keys })`: tuple keys обязательны, dynamic array остаётся partial |
 | `MachineManagerDehydrateFn<S>`                 | overloads для `dehydrate`: без opts все snapshot keys, с literal `machines` выбранные keys        |
 | `SnapshotActorTemplateKey<S>`                  | ключи actor templates с `persistence: "snapshot"`                                                 |
-| `SnapshotMachineKey<S>`                        | domain keys + snapshot-actor keys                                                                 |
+| `SnapshotMachineKey<S>`                        | ключи доменных машин + ключи акторов, сохраняемых в снимок                                        |
 | `DehydrateOptions<S>`                          | `{ machines?: ReadonlyArray<SnapshotMachineKey<S>> }`                                             |
 
 ### Hydration
 
 | Тип                        | Форма                                                             |
 | -------------------------- | ----------------------------------------------------------------- |
-| `HydrateStrategy`          | `"replace" \| "merge"`                                            |
+| `HydrateStrategy`          | `"replace" \| "merge"`; режим применения снимка, не глубокое объединение |
 | `HydrateOptions`           | `{ strategy?: HydrateStrategy }`                                  |
 | `HydratePreviewOptions<S>` | `HydrateOptions & { baseState?: MachinesState<S> }`               |
 | `HydrateMeta`              | `{ strategy: HydrateStrategy }`                                   |
 | `HydrateAction<S>`         | `{ type: "@@lite-fsm/HYDRATE"; payload: { strategy; snapshot } }` |
 | `UnknownMachineKeyContext` | `"hydrate" \| "opts.snapshot"`                                    |
+
+`HydrateStrategy` различает частичное наложение и полный набор записей акторов. В обоих режимах `hydrate()` применяет только ключи из `snapshot.machines`; отсутствующие доменные машины не сбрасываются. Для обработчиков доменных машин значение приходит как `HydrateMeta["strategy"]`.
 
 ## Persist
 
@@ -273,7 +275,7 @@ const persist = persistManager(manager, {
 | `ActorHydrateHook<C, T, Snapshot>`   | `(prev, snapshot, meta: HydrateMeta) => ActorDataSlice<C, T>`    |
 | `ActorDehydrateHook<C, T, Snapshot>` | `(slice) => Snapshot`                                            |
 
-В `MachineManagerSnapshot` для snapshot actor хранится per-actor entry `{ snapshot, meta }`. Пользовательские hooks получают только `snapshot`, data-slice и hydrate meta `{ strategy }`; `actorId`, `groupId` и `groupTag` остаются под управлением manager-а.
+В `MachineManagerSnapshot` для актора, сохраняемого в снимок, хранится запись `{ snapshot, meta }` на каждого актора. Пользовательские обработчики получают только `snapshot`, фрагмент данных и meta `hydrate` со стратегией; `actorId`, `groupId` и `groupTag` остаются под управлением менеджера.
 
 ## Runtime интерфейсы
 
@@ -311,7 +313,7 @@ const persist = persistManager(manager, {
 
 `originId?: string` (без `#`) и кастомные `generateActorId` / `generateGroupId` обеспечивают изоляцию id между менеджерами в P2P / multi-tab / шарды-сценариях. Подробнее — в гайде [Распределенный спавн](/guide/actors#распределенный-спавн).
 
-`MachineDependencies<S>` берёт user deps из `MachineConfig` / `TypedCreateMachineFn<P, D>` и signatures `effects`, исключая runtime deps manager-а и actor-а.
+`MachineDependencies<S>` берёт пользовательские зависимости из `MachineConfig` / `TypedCreateMachineFn<P, D>` и signatures `effects`, исключая runtime deps менеджера и актора.
 
 ## Typed factory aliases
 
@@ -597,7 +599,7 @@ export type AppManager = IMachineManager<Store, AppEvent>;
 | `FSMEvent<"X", undefined>` | payload обязателен: `{ type: "X", payload: undefined }`               |
 | wildcard target            | `"*"` — только source key, не target и не `initialState`              |
 | actor `__INIT`             | system state, не public state и не effect key                         |
-| runtime actors в snapshot  | `DehydrateOptions` принимает только domain keys и snapshot-actor keys |
+| runtime actors в snapshot  | `DehydrateOptions` принимает только ключи доменных машин и ключи акторов, сохраняемых в снимок |
 | `MachineManager({})`       | events → `never`, deps → `{}`, state → `{}`                           |
 | тип action в middleware    | используйте `ManagerAction<P>`, если нужен routing `meta`             |
 | `TypedUseSelectorHook`     | generic `S` — store config, не computed state                         |

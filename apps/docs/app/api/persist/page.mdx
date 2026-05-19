@@ -1,6 +1,6 @@
 # Persist API
 
-`@lite-fsm/persist` сохраняет snapshot `MachineManager` в произвольное хранилище и восстанавливает его.
+`@lite-fsm/persist` сохраняет снимок `MachineManager` в произвольное хранилище и восстанавливает его.
 
 ## Импорт
 
@@ -35,9 +35,9 @@ const persist = persistManager(manager, {
 
 | Опция               | Назначение                                 |
 | ------------------- | ------------------------------------------ |
-| `storage`           | Adapter `{ get, set, remove, subscribe? }` |
-| `machines?`         | Какие machines попадают в snapshot         |
-| `strategy?`         | `"merge"` или `"replace"` для hydrate      |
+| `storage`           | Адаптер `{ get, set, remove, subscribe? }` |
+| `machines?`         | Какие машины попадают в снимок             |
+| `strategy?`         | Режим `hydrate`; по умолчанию `"merge"`    |
 | `storageVersion?`   | Версия записи                              |
 | `maxAge?`           | TTL записи в миллисекундах                 |
 | `throttleMs?`       | Минимальный интервал между сохранениями    |
@@ -46,13 +46,15 @@ const persist = persistManager(manager, {
 | `onRestoreSettled?` | Колбэк результата restore                  |
 | `onError?`          | Колбэк ошибок restore/save/clear           |
 
+`strategy` не объединяет поля `context` автоматически и не заменяет всё состояние менеджера. Она передаётся в `manager.hydrate()`; для акторов, сохраняемых в снимок, `"merge"` сохраняет акторов вне входящего набора записей, а `"replace"` удаляет отсутствующих.
+
 ### Контроллер
 
 | Метод                 | Назначение                                           |
 | --------------------- | ---------------------------------------------------- |
 | `start()`             | Подписаться на manager/storage и восстановить запись |
-| `restore()`           | Прочитать storage и применить snapshot               |
-| `save()`              | Сразу записать текущий snapshot                      |
+| `restore()`           | Прочитать storage и применить снимок                 |
+| `save()`              | Сразу записать текущий снимок                        |
 | `flush()`             | Дописать отложенное сохранение                       |
 | `clear()`             | Удалить запись и сбросить статус                     |
 | `getStatus()`         | Вернуть текущий `PersistStatus`                      |
@@ -78,7 +80,7 @@ const status = usePersistStatus(persist);
 const restoring = useIsPersistRestoring(persist);
 ```
 
-Аргумент можно опустить, если ближайший `FSMContextProvider` получил ровно один `PersistController` с источником статуса через `persist`. Серверный render провайдера без `persist` отдаёт hook-ам `{ phase: "idle" }`; клиентский render без persist с источником статуса продолжает бросать provider error.
+Аргумент можно опустить, если ближайший `FSMContextProvider` получил ровно один `PersistController` с источником статуса через `persist`. Серверный render провайдера без `persist` отдаёт hook-ам `{ phase: "idle" }`; клиентский render без persist с источником статуса продолжает бросать ошибку провайдера.
 
 `useIsPersistRestoring` — это строго `status.phase === "restoring"`; для blocking UI до первого restore проверяйте также `"idle"`.
 

@@ -95,7 +95,7 @@ export const streams = createMachine({
   },
 });
 
-// Событие распространяется во все автоматы, зарегистрированные в manager
+// Событие распространяется во все автоматы, зарегистрированные в менеджере
 manager.transition({ type: "CHANGE_TRACK", payload: { trackId: "123" } });
 ```
 
