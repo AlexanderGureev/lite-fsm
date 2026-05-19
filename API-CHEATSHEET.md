@@ -263,7 +263,7 @@ State effect приоритетнее `"*"`. Wildcard срабатывает и 
 
 ## Factories
 
-Все фабрики — typed identity helpers. Runtime ничего не создают, только сужают типы.
+`createMachine`, `createConfig`, `createReducer` и `createActorMeta` — typed helpers: runtime-поведение не меняют, только фиксируют и сужают типы. `createEffect` — runtime wrapper: он оборачивает effect guard-ом для политики запуска.
 
 | Factory                                      | Назначение                                                     |
 | -------------------------------------------- | -------------------------------------------------------------- |
@@ -271,7 +271,7 @@ State effect приоритетнее `"*"`. Wildcard срабатывает и 
 | `createConfig(cfg)`                          | только граф переходов                                          |
 | `createReducer(fn)`                          | reducer с фиксированным action union                           |
 | `createActorMeta(meta)`                      | frozen `Readonly<ActorMeta>` для replacement/time-travel input |
-| `createEffect({ effect, type?, cancelFn? })` | оборачивает effect политикой запуска                           |
+| `createEffect({ effect, type?, cancelFn? })` | возвращает effect с guard-ом для политики запуска              |
 
 ### `createEffect`
 
@@ -288,11 +288,11 @@ const load = createEffect({
 
 | Опция                     | Поведение                                                                            |
 | ------------------------- | ------------------------------------------------------------------------------------ |
-| `type: "every"` (default) | каждый запуск может dispatch-ить                                                     |
-| `type: "latest"`          | старый запуск продолжает работать, его `transition` подавляется после нового запуска |
-| `cancelFn(deps)`          | возвращает `cancel(): boolean` — `true` подавляет любой `transition`                 |
+| `type: "every"` (default) | каждый запуск получает рабочий `transition`                                          |
+| `type: "latest"`          | новый запуск делает предыдущие запуски stale; их `transition` возвращает action без dispatch |
+| `cancelFn(deps)`          | возвращает `cancel(): boolean`; `true` подавляет `transition`, но не отменяет async-работу effect-а |
 
-В actor effect guard покрывает и `transition.unscoped/actor/group/tag`.
+`createEffect` не отменяет promise, request или timer внутри effect-а. Он контролирует только возможность отправить новое событие через `transition`. В actor effect guard покрывает и callable `transition`, и `transition.unscoped/actor/group/tag`.
 
 ## `Machine(cfg)` — pure machine
 
