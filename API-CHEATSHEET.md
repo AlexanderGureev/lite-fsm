@@ -643,18 +643,19 @@ function Counter() {
 
 `FSMContextProvider` принимает `getServerSnapshot?: () => MachinesState<S>` и `persist?: { start(): () => void } | readonly { start(): () => void }[]`. Без `getServerSnapshot` он кеширует `machineManager.getState()` для текущего manager-а на первом render-е. Это root state для React `useSyncExternalStore`, не `MachineManagerSnapshot` envelope.
 
-`persist` — structural lifecycle prop: provider вызывает `start()` в `useEffect`, а cleanup вызывает возвращённые stop-функции. `@lite-fsm/react` не зависит от `@lite-fsm/persist`, поэтому туда можно передать любой совместимый controller.
+`persist` — structural lifecycle prop: provider вызывает `start()` в `useEffect`, а cleanup вызывает возвращённые stop-функции. Если передан ровно один controller с `getStatus()`/`subscribeStatus()`, provider также кладёт его в persist-status context для `@lite-fsm/persist/react`. `@lite-fsm/react` не зависит от `@lite-fsm/persist`, поэтому туда можно передать любой совместимый controller.
 
 ```tsx
-import type { PersistController } from "@lite-fsm/persist";
 import { useIsPersistRestoring, usePersistStatus } from "@lite-fsm/persist/react";
 
-function PersistBadge({ persist }: { persist: PersistController }) {
-  const status = usePersistStatus(persist);
-  const restoring = useIsPersistRestoring(persist);
+function PersistBadge() {
+  const status = usePersistStatus();
+  const restoring = useIsPersistRestoring();
   return <span>{restoring ? "restoring" : status.phase}</span>;
 }
 ```
+
+Явный `usePersistStatus(controller)` и `useIsPersistRestoring(controller)` остаются доступны для компонентов вне provider-а или для нескольких persist controllers.
 
 Внутри `FSMHydrationBoundary` selector читает render overlay; для SSR/hydration ближайший boundary server snapshot имеет приоритет над Provider snapshot. `useManager().getState()` в render всегда читает live manager и не участвует в SSR-safe overlay contract.
 

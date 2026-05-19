@@ -37,8 +37,11 @@ type Store = typeof machines;
 
 const createManager = () => MachineManager<Store, Action>(machines);
 
-const createStatusController = () => {
-  let status: PersistStatus = { phase: "idle" };
+const PERSIST_PROVIDER_ERROR =
+  "Hooks from @lite-fsm/persist/react require a PersistController argument or FSMContextProvider persist context.";
+
+const createStatusController = (initialStatus: PersistStatus = { phase: "idle" }) => {
+  let status: PersistStatus = initialStatus;
   const listeners = new Set<() => void>();
   const controller: PersistController & { setStatus(next: PersistStatus): void } = {
     start: () => () => {},
@@ -57,6 +60,16 @@ const createStatusController = () => {
     },
   };
   return controller;
+};
+
+const expectRenderToThrowPersistProviderError = (element: React.ReactElement) => {
+  const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+  try {
+    expect(() => render(element)).toThrow(PERSIST_PROVIDER_ERROR);
+  } finally {
+    consoleError.mockRestore();
+  }
 };
 
 describe("FSMContextProvider persist", () => {
@@ -271,6 +284,29 @@ describe("FSMContextProvider persist", () => {
 });
 
 describe("@lite-fsm/persist/react", () => {
+  it("создаёт shared context при импорте persist/react раньше react provider", async () => {
+    const persistContextKey = Symbol.for("@lite-fsm/react.persistContext");
+    const contextStore = globalThis as typeof globalThis & { [key: symbol]: unknown };
+    const previousContext = contextStore[persistContextKey];
+    const specifier = "../../packages/persist/src/react.ts?persist-first";
+
+    delete contextStore[persistContextKey];
+
+    try {
+      const imported = (await import(specifier)) as typeof import("../../packages/persist/src/react");
+
+      expect(imported.usePersistStatus).toBeTypeOf("function");
+      expect(imported.useIsPersistRestoring).toBeTypeOf("function");
+      expect(contextStore[persistContextKey]).toBeDefined();
+    } finally {
+      if (previousContext === undefined) {
+        delete contextStore[persistContextKey];
+      } else {
+        contextStore[persistContextKey] = previousContext;
+      }
+    }
+  });
+
   it("usePersistStatus возвращает stable snapshot и обновляется по подписке", () => {
     const controller = createStatusController();
     const seen: PersistStatus[] = [];
@@ -294,6 +330,188 @@ describe("@lite-fsm/persist/react", () => {
       controller.setStatus(controller.getStatus());
     });
     expect(seen).toHaveLength(renders);
+  });
+
+  it("usePersistStatus читает controller из FSMContextProvider persist", () => {
+    const manager = createManager();
+    const controller = createStatusController();
+
+    const Readout = () => {
+      const status = usePersistStatus();
+      return <span data-testid="status">{status.phase}</span>;
+    };
+
+    const view = render(
+      <FSMContextProvider machineManager={manager} persist={controller}>
+        <Readout />
+      </FSMContextProvider>,
+    );
+
+    expect(view.getByTestId("status").textContent).toBe("idle");
+    act(() => {
+      controller.setStatus({ phase: "restoring" });
+    });
+    expect(view.getByTestId("status").textContent).toBe("restoring");
+  });
+
+  it("usePersistStatus читает единственный status controller из persist array", async () => {
+    const manager = createManager();
+    const controller = createStatusController();
+    const stop = vi.fn();
+    const lifecycle = { start: vi.fn(() => stop) };
+
+    const Readout = () => {
+      const status = usePersistStatus();
+      return <span data-testid="status">{status.phase}</span>;
+    };
+
+    const view = render(
+      <FSMContextProvider machineManager={manager} persist={[lifecycle, controller]}>
+        <Readout />
+      </FSMContextProvider>,
+    );
+
+    expect(view.getByTestId("status").textContent).toBe("idle");
+    act(() => {
+      controller.setStatus({ phase: "restoring" });
+    });
+    expect(view.getByTestId("status").textContent).toBe("restoring");
+
+    await waitFor(() => {
+      expect(lifecycle.start).toHaveBeenCalledOnce();
+    });
+    view.unmount();
+    expect(stop).toHaveBeenCalledOnce();
+  });
+
+  it("usePersistStatus переподписывается при смене status controller в provider", () => {
+    const manager = createManager();
+    const first = createStatusController();
+    const second = createStatusController({ phase: "ready", restored: false });
+
+    const Readout = () => {
+      const status = usePersistStatus();
+      return <span data-testid="status">{status.phase}</span>;
+    };
+
+    const view = render(
+      <FSMContextProvider machineManager={manager} persist={first}>
+        <Readout />
+      </FSMContextProvider>,
+    );
+
+    expect(view.getByTestId("status").textContent).toBe("idle");
+
+    view.rerender(
+      <FSMContextProvider machineManager={manager} persist={second}>
+        <Readout />
+      </FSMContextProvider>,
+    );
+
+    expect(view.getByTestId("status").textContent).toBe("ready");
+
+    act(() => {
+      first.setStatus({ phase: "restoring" });
+    });
+    expect(view.getByTestId("status").textContent).toBe("ready");
+
+    act(() => {
+      second.setStatus({ phase: "error", error: new Error("restore failed") });
+    });
+    expect(view.getByTestId("status").textContent).toBe("error");
+  });
+
+  it("явный controller имеет приоритет над provider context", () => {
+    const manager = createManager();
+    const contextController = createStatusController({ phase: "restoring" });
+    const explicitController = createStatusController({ phase: "ready", restored: true });
+
+    const Readout = () => {
+      const status = usePersistStatus(explicitController);
+      return <span data-testid="status">{status.phase}</span>;
+    };
+
+    const view = render(
+      <FSMContextProvider machineManager={manager} persist={contextController}>
+        <Readout />
+      </FSMContextProvider>,
+    );
+
+    expect(view.getByTestId("status").textContent).toBe("ready");
+
+    act(() => {
+      contextController.setStatus({ phase: "error", error: new Error("context failed") });
+    });
+    expect(view.getByTestId("status").textContent).toBe("ready");
+
+    act(() => {
+      explicitController.setStatus({ phase: "restoring" });
+    });
+    expect(view.getByTestId("status").textContent).toBe("restoring");
+  });
+
+  it("usePersistStatus без controller и provider бросает понятную ошибку", () => {
+    const Readout = () => {
+      const status = usePersistStatus();
+      return <span>{status.phase}</span>;
+    };
+
+    expectRenderToThrowPersistProviderError(<Readout />);
+  });
+
+  it("plain lifecycle persist не создаёт status context", () => {
+    const manager = createManager();
+    const lifecycle = { start: vi.fn(() => () => {}) };
+
+    const Readout = () => {
+      const status = usePersistStatus();
+      return <span>{status.phase}</span>;
+    };
+
+    expectRenderToThrowPersistProviderError(
+      <FSMContextProvider machineManager={manager} persist={lifecycle}>
+        <Readout />
+      </FSMContextProvider>,
+    );
+  });
+
+  it("несколько status controllers в persist array не выбираются неявно", () => {
+    const manager = createManager();
+    const first = createStatusController();
+    const second = createStatusController();
+
+    const Readout = () => {
+      const restoring = useIsPersistRestoring();
+      return <span>{restoring ? "yes" : "no"}</span>;
+    };
+
+    expectRenderToThrowPersistProviderError(
+      <FSMContextProvider machineManager={manager} persist={[first, second]}>
+        <Readout />
+      </FSMContextProvider>,
+    );
+  });
+
+  it("useIsPersistRestoring читает controller из FSMContextProvider persist", () => {
+    const manager = createManager();
+    const controller = createStatusController();
+
+    const Readout = () => {
+      const restoring = useIsPersistRestoring();
+      return <span data-testid="restoring">{restoring ? "yes" : "no"}</span>;
+    };
+
+    const view = render(
+      <FSMContextProvider machineManager={manager} persist={controller}>
+        <Readout />
+      </FSMContextProvider>,
+    );
+
+    expect(view.getByTestId("restoring").textContent).toBe("no");
+    act(() => {
+      controller.setStatus({ phase: "restoring" });
+    });
+    expect(view.getByTestId("restoring").textContent).toBe("yes");
   });
 
   it("useIsPersistRestoring отражает phase restoring", () => {

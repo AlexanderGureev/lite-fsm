@@ -337,6 +337,7 @@ Key constants:
 
 - Only allowed usage: `lite-fsm` in homepage h1.
 - Outer element: `relative inline-block align-baseline`.
+- Backdrop: hidden below the `md` viewport breakpoint to match the mobile `HeroBackdrop` layout.
 - Inner text: `lite-fsm-gradient-text relative inline-block font-display font-bold`.
 - Gradient: 100deg through `lite-fsm-1..5`, `background-size: 240% 240%`.
 - Animation: `lite-fsm-shift 16s ease-in-out infinite`.
@@ -601,4 +602,3 @@ All interactive targets should remain at least visually comfortable on touch. Pr
 - Не использовать nested cards.
 - Не добавлять декоративные blur/glass surfaces вне `frosted-parchment`, `GradientText` backdrop и `HeroBackdrop`.
 - Не использовать gradients для произвольных headings. `GradientText` является единственным text-gradient исключением.
-

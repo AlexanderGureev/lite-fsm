@@ -26,7 +26,7 @@ function GradientText<E extends React.ElementType = "span">({
       {backdrop ? (
         <span
           aria-hidden
-          className="pointer-events-none absolute"
+          className="lite-fsm-gradient-backdrop pointer-events-none absolute"
           style={{
             inset: "-0.3em 0",
             backdropFilter: "saturate(135%) blur(18px)",

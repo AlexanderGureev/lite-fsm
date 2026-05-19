@@ -185,4 +185,9 @@ describe("React persist API", () => {
     expect(usePersistStatus(controller)).type.toBe<PersistStatus>();
     expect(useIsPersistRestoring(controller)).type.toBe<boolean>();
   });
+
+  test("persist/react hooks могут читать PersistController из provider context", () => {
+    expect(usePersistStatus()).type.toBe<PersistStatus>();
+    expect(useIsPersistRestoring()).type.toBe<boolean>();
+  });
 });

@@ -4,10 +4,10 @@ import type { AnyEvent, IMachineManager, MachinesState, MachineStore } from "@li
 
 import { FSMContext } from "./FSMContext";
 import { FSMServerSnapshotProvider } from "./hydrationOverlay";
+import { FSMPersistContext, resolvePersistStatusSource } from "./persistContext";
+import type { FSMPersistLifecycle } from "./persistContext";
 
-export type FSMPersistLifecycle = {
-  start(): () => void;
-};
+export type { FSMPersistLifecycle } from "./persistContext";
 
 export type FSMContextProviderProps<S extends MachineStore, P extends AnyEvent = AnyEvent> = React.PropsWithChildren<{
   machineManager: IMachineManager<S, P>;
@@ -29,6 +29,7 @@ export const FSMContextProvider = <S extends MachineStore, P extends AnyEvent = 
     }),
     [getServerSnapshot, initialSnapshot],
   );
+  const persistStatusSource = React.useMemo(() => resolvePersistStatusSource(persist), [persist]);
 
   React.useEffect(() => {
     if (!persist) return;
@@ -41,7 +42,9 @@ export const FSMContextProvider = <S extends MachineStore, P extends AnyEvent = 
 
   return (
     <FSMContext.Provider value={value}>
-      <FSMServerSnapshotProvider value={serverSnapshot}>{children}</FSMServerSnapshotProvider>
+      <FSMPersistContext.Provider value={persistStatusSource}>
+        <FSMServerSnapshotProvider value={serverSnapshot}>{children}</FSMServerSnapshotProvider>
+      </FSMPersistContext.Provider>
     </FSMContext.Provider>
   );
 };

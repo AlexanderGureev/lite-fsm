@@ -384,6 +384,12 @@
   }
 }
 
+@media (max-width: 767px) {
+  .lite-fsm-gradient-backdrop {
+    display: none;
+  }
+}
+
 @layer base {
   * {
     border-color: var(--hairline);

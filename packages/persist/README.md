@@ -92,13 +92,15 @@ Read restore status from React with `@lite-fsm/persist/react`:
 
 ```tsx
 import { usePersistStatus } from "@lite-fsm/persist/react";
-import type { PersistController } from "@lite-fsm/persist";
 
-function PersistStatusView({ controller }: { controller: PersistController }) {
-  const status = usePersistStatus(controller);
+function PersistStatusView() {
+  const status = usePersistStatus();
   return <span>{status.phase}</span>;
 }
 ```
+
+You can still pass a controller explicitly when the component is outside
+`FSMContextProvider` or when several persist controllers are active.
 
 ## Documentation
 

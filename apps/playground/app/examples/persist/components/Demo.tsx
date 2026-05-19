@@ -121,7 +121,7 @@ function PeerChip({ name, color, prefix }: { name: string; color: string; prefix
   );
 }
 
-function HeroSection({ runtime }: { runtime: PersistChatRuntime }) {
+function HeroSection({ peer }: { peer: PersistChatRuntime["peer"] }) {
   const openClone = () => {
     if (typeof window === "undefined") return;
     window.open(window.location.href, "_blank", "noopener,noreferrer");
@@ -157,7 +157,7 @@ function HeroSection({ runtime }: { runtime: PersistChatRuntime }) {
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <PeerChip name={runtime.peer.name} color={runtime.peer.color} prefix="ты" />
+          <PeerChip name={peer.name} color={peer.color} prefix="ты" />
           <Button
             type="button"
             onClick={openClone}
@@ -172,7 +172,9 @@ function HeroSection({ runtime }: { runtime: PersistChatRuntime }) {
   );
 }
 
-function EmptyTranscript({ runtime }: { runtime: PersistChatRuntime }) {
+function EmptyTranscript() {
+  const peer = useSelector((state) => state.chatSession.context.peer);
+
   return (
     <div className="grid h-full place-items-center">
       <div className="flex max-w-sm flex-col items-center gap-4 text-center">
@@ -182,9 +184,8 @@ function EmptyTranscript({ runtime }: { runtime: PersistChatRuntime }) {
         <div className="flex flex-col gap-1.5">
           <p className="text-caption-strong text-ink">Здесь пока пусто</p>
           <p className="text-caption text-ink-muted-48">
-            Отправь первое сообщение от{" "}
-            <span className="font-medium text-ink-muted-80">{runtime.peer.name}</span> — оно появится во всех вкладках,
-            где открыт этот демо.
+            Отправь первое сообщение от <span className="font-medium text-ink-muted-80">{peer.name}</span> — оно появится
+            во всех вкладках, где открыт этот демо.
           </p>
         </div>
       </div>
@@ -268,8 +269,9 @@ function MessageGroupRow({
   );
 }
 
-function Transcript({ runtime }: { runtime: PersistChatRuntime }) {
+function Transcript() {
   const messages = useSelector((state) => state.chatThread.context.messages);
+  const peerId = useSelector((state) => state.chatSession.context.peer.id);
   const groups = useMemo(() => groupMessages(messages), [messages]);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
 
@@ -287,11 +289,11 @@ function Transcript({ runtime }: { runtime: PersistChatRuntime }) {
       {groups.length ? (
         <div className="mt-auto flex flex-col gap-4">
           {groups.map((group, index) => (
-            <MessageGroupRow key={`${group.peerId}-${index}`} group={group} ownPeerId={runtime.peer.id} />
+            <MessageGroupRow key={`${group.peerId}-${index}`} group={group} ownPeerId={peerId} />
           ))}
         </div>
       ) : (
-        <EmptyTranscript runtime={runtime} />
+        <EmptyTranscript />
       )}
     </div>
   );
@@ -373,8 +375,8 @@ function Composer() {
   );
 }
 
-function ChatPanel({ runtime }: { runtime: PersistChatRuntime }) {
-  const status = usePersistStatus(runtime.persist);
+function ChatPanel() {
+  const status = usePersistStatus();
   const peer = useSelector((state) => state.chatSession.context.peer);
   const messageCount = useSelector((state) => state.chatThread.context.messages.length);
   const updatedAt = useSelector((state) => state.chatThread.context.updatedAt);
@@ -397,7 +399,7 @@ function ChatPanel({ runtime }: { runtime: PersistChatRuntime }) {
       </header>
 
       <CardContent className="p-0">
-        <Transcript runtime={runtime} />
+        <Transcript />
       </CardContent>
 
       <Composer />
@@ -452,7 +454,7 @@ function TechFact({ icon, label, value }: TechFactProps) {
   );
 }
 
-function SnapshotPanel({ runtime, expanded }: { runtime: PersistChatRuntime; expanded: boolean }) {
+function SnapshotPanel({ expanded }: { expanded: boolean }) {
   const thread = useSelector((state) => state.chatThread);
 
   const snapshotText = useMemo(
@@ -504,8 +506,8 @@ function SnapshotPanel({ runtime, expanded }: { runtime: PersistChatRuntime; exp
   );
 }
 
-function TechRail({ runtime }: { runtime: PersistChatRuntime }) {
-  const restoring = useIsPersistRestoring(runtime.persist);
+function TechRail({ onFlushPersist }: { onFlushPersist: () => void }) {
+  const restoring = useIsPersistRestoring();
   const [expanded, setExpanded] = useState(false);
 
   return (
@@ -533,7 +535,7 @@ function TechRail({ runtime }: { runtime: PersistChatRuntime }) {
             type="button"
             variant="ghost"
             size="sm"
-            onClick={() => void runtime.persist.flush()}
+            onClick={onFlushPersist}
             className="h-8 gap-1.5 rounded-sm border border-hairline px-3 text-caption text-ink-muted-80 hover:border-accent-persist/40 hover:text-accent-persist"
           >
             <RefreshCcw className="size-3.5" strokeWidth={1.9} />
@@ -555,25 +557,25 @@ function TechRail({ runtime }: { runtime: PersistChatRuntime }) {
           </Button>
         </div>
       </div>
-      <SnapshotPanel runtime={runtime} expanded={expanded} />
+      <SnapshotPanel expanded={expanded} />
     </Card>
   );
 }
 
-function ChatApp({ runtime }: { runtime: PersistChatRuntime }) {
+function ChatApp({ onFlushPersist, peer }: { onFlushPersist: () => void; peer: PersistChatRuntime["peer"] }) {
   return (
     <section className="flex flex-col gap-8">
-      <HeroSection runtime={runtime} />
+      <HeroSection peer={peer} />
 
       <div className="mx-auto w-full max-w-2xl">
-        <ChatPanel runtime={runtime} />
+        <ChatPanel />
       </div>
 
       <div className="mx-auto w-full max-w-3xl">
         <DataFlowHint />
       </div>
 
-      <TechRail runtime={runtime} />
+      <TechRail onFlushPersist={onFlushPersist} />
     </section>
   );
 }
@@ -585,7 +587,7 @@ function PersistRuntime() {
 
   return (
     <FSMContextProvider machineManager={runtime.manager} persist={runtime.persist}>
-      <ChatApp runtime={runtime} />
+      <ChatApp onFlushPersist={() => void runtime.persist.flush()} peer={runtime.peer} />
     </FSMContextProvider>
   );
 }
