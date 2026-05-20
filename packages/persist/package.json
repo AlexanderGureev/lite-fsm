@@ -1,6 +1,6 @@
 {
   "name": "@lite-fsm/persist",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "type": "module",
   "description": "Persistence helpers for lite-fsm",
   "license": "MIT",

@@ -22,7 +22,7 @@ npm install @lite-fsm/react @lite-fsm/persist
 import { createJsonStorage, persistManager } from "@lite-fsm/persist";
 import type { PersistController, PersistStorage, PersistStatus } from "@lite-fsm/persist";
 
-import { useIsPersistRestoring, usePersistStatus } from "@lite-fsm/persist/react";
+import { useIsPersistRestoring, usePersistStatuses } from "@lite-fsm/persist/react";
 ```
 
 ## Quick Example
@@ -83,7 +83,7 @@ import { FSMContextProvider } from "@lite-fsm/react";
 
 export function App() {
   return (
-    <FSMContextProvider machineManager={manager} persist={persist}>
+    <FSMContextProvider machineManager={manager} persist={[persist]}>
       <Page />
     </FSMContextProvider>
   );
@@ -93,19 +93,19 @@ export function App() {
 Read restore status from React with `@lite-fsm/persist/react`:
 
 ```tsx
-import { usePersistStatus } from "@lite-fsm/persist/react";
+import { usePersistStatuses } from "@lite-fsm/persist/react";
 
 function PersistStatusView() {
-  const status = usePersistStatus();
-  return <span>{status.phase}</span>;
+  const [status] = usePersistStatuses();
+  return <span>{status?.phase ?? "none"}</span>;
 }
 ```
 
-You can still pass a controller explicitly when the component is outside
-`FSMContextProvider` or when several persist controllers are active.
-`useIsPersistRestoring()` is exactly `usePersistStatus().phase === "restoring"`;
-blocking UI until the first restore settles should also treat the `"idle"`
-phase as loading.
+`usePersistStatuses()` returns an array with the same length and order as the
+provider `persist` array. Entries without `getStatus()` and `subscribeStatus()`
+are returned as `null`. `useIsPersistRestoring()` returns `true` when any
+non-null status has `phase === "restoring"`; blocking UI until the first restore
+settles should also treat the `"idle"` phase as loading.
 
 ## Documentation
 

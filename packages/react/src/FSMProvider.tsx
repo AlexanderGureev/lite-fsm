@@ -4,7 +4,12 @@ import type { AnyEvent, IMachineManager, MachinesState, MachineStore } from "@li
 
 import { FSMContext } from "./FSMContext";
 import { FSMServerSnapshotProvider } from "./hydrationOverlay";
-import { FSMPersistContext, resolvePersistStatusSource } from "./persistContext";
+import {
+  arePersistLifecycleSequencesEqual,
+  EMPTY_PERSIST_ENTRIES,
+  FSMPersistStatusesContext,
+  resolvePersistStatusSources,
+} from "./persistContext";
 import type { FSMPersistLifecycle } from "./persistContext";
 
 export type { FSMPersistLifecycle } from "./persistContext";
@@ -12,8 +17,35 @@ export type { FSMPersistLifecycle } from "./persistContext";
 export type FSMContextProviderProps<S extends MachineStore, P extends AnyEvent = AnyEvent> = React.PropsWithChildren<{
   machineManager: IMachineManager<S, P>;
   getServerSnapshot?: () => MachinesState<S>;
-  persist?: FSMPersistLifecycle | ReadonlyArray<FSMPersistLifecycle>;
+  persist?: readonly FSMPersistLifecycle[];
 }>;
+
+type PersistEntriesCache = {
+  snapshot: readonly FSMPersistLifecycle[];
+};
+
+const createPersistEntriesCache = (): PersistEntriesCache => ({
+  snapshot: EMPTY_PERSIST_ENTRIES,
+});
+
+const normalizePersistEntries = (persist: readonly FSMPersistLifecycle[] | undefined) =>
+  persist === undefined || persist.length === 0 ? EMPTY_PERSIST_ENTRIES : persist;
+
+const readStablePersistEntries = (
+  cache: PersistEntriesCache,
+  persist: readonly FSMPersistLifecycle[] | undefined,
+) => {
+  const nextEntries = normalizePersistEntries(persist);
+  if (arePersistLifecycleSequencesEqual(cache.snapshot, nextEntries)) return cache.snapshot;
+
+  cache.snapshot = nextEntries.length === 0 ? EMPTY_PERSIST_ENTRIES : [...nextEntries];
+  return cache.snapshot;
+};
+
+const usePersistEntries = (persist: readonly FSMPersistLifecycle[] | undefined) => {
+  const cache = React.useMemo(() => createPersistEntriesCache(), []);
+  return readStablePersistEntries(cache, persist);
+};
 
 export const FSMContextProvider = <S extends MachineStore, P extends AnyEvent = AnyEvent>({
   children,
@@ -29,25 +61,22 @@ export const FSMContextProvider = <S extends MachineStore, P extends AnyEvent = 
     }),
     [getServerSnapshot, initialSnapshot],
   );
-  const persistStatusSource = React.useMemo(
-    () => resolvePersistStatusSource(persist, { serverFallback: typeof window === "undefined" }),
-    [persist],
-  );
+  const persistEntries = usePersistEntries(persist);
+  const persistStatusSources = React.useMemo(() => resolvePersistStatusSources(persistEntries), [persistEntries]);
 
   React.useEffect(() => {
-    if (persist === undefined) return;
-    const persistItems = Array.isArray(persist) ? persist : [persist];
-    const stops = persistItems.map((item) => item.start());
+    if (persistEntries.length === 0) return;
+    const stops = persistEntries.map((item) => item.start());
     return () => {
       for (const stop of stops) stop();
     };
-  }, [persist]);
+  }, [persistEntries]);
 
   return (
     <FSMContext.Provider value={value}>
-      <FSMPersistContext.Provider value={persistStatusSource}>
+      <FSMPersistStatusesContext.Provider value={persistStatusSources}>
         <FSMServerSnapshotProvider value={serverSnapshot}>{children}</FSMServerSnapshotProvider>
-      </FSMPersistContext.Provider>
+      </FSMPersistStatusesContext.Provider>
     </FSMContext.Provider>
   );
 };

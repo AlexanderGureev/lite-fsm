@@ -44,7 +44,7 @@ import { devToolsMiddleware } from "@lite-fsm/middleware/devTools";
 import { immerMiddleware } from "@lite-fsm/middleware/immer";
 import { createJsonStorage, persistManager } from "@lite-fsm/persist";
 import type { PersistController, PersistStorage } from "@lite-fsm/persist";
-import { useIsPersistRestoring, usePersistStatus } from "@lite-fsm/persist/react";
+import { useIsPersistRestoring, usePersistStatuses } from "@lite-fsm/persist/react";
 
 type SmokeEvent = FSMEvent<"START">;
 type SmokeConfig = MachineConfig<any, any, SmokeEvent, {}>;
@@ -85,7 +85,7 @@ void immerMiddleware;
 void createJsonStorage;
 void persistManager;
 void useIsPersistRestoring;
-void usePersistStatus;
+void usePersistStatuses;
 
 export type SmokeHydrationBoundaryProps = FSMHydrationBoundaryProps<Record<string, SmokeConfig>>;
 export type SmokePersistStorage = PersistStorage<Record<string, SmokeConfig>>;

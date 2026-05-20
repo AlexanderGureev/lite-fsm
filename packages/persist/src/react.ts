@@ -3,42 +3,95 @@
 import React from "react";
 import { useSyncExternalStore } from "use-sync-external-store/shim";
 
-import type { PersistController, PersistStatus } from "./index";
+import type { PersistStatus } from "./index";
 
 type PersistStatusSource = {
   getStatus(): PersistStatus;
   subscribeStatus(listener: () => void): () => void;
 };
 
-const PERSIST_CONTEXT_KEY = Symbol.for("@lite-fsm/react.persistContext");
-const PERSIST_PROVIDER_ERROR =
-  "Hooks from @lite-fsm/persist/react require a PersistController argument or FSMContextProvider persist context.";
+type PersistStatusEntry = PersistStatusSource | null;
+type PersistStatusesSnapshot = readonly (PersistStatus | null)[];
+
+const PERSIST_STATUSES_CONTEXT_KEY = Symbol.for("@lite-fsm/react.persistStatusesContext");
+const PERSIST_PROVIDER_ERROR = "Hooks from @lite-fsm/persist/react require FSMContextProvider from @lite-fsm/react.";
+const EMPTY_PERSIST_STATUSES: PersistStatusesSnapshot = [];
 
 const persistContextStore = globalThis as typeof globalThis & {
-  [key: symbol]: React.Context<PersistStatusSource | null> | undefined;
+  [key: symbol]: React.Context<readonly PersistStatusEntry[] | null> | undefined;
 };
 
 // Reads the same context object that @lite-fsm/react writes, without forcing
 // @lite-fsm/persist to depend on @lite-fsm/react for non-React usage.
-const PersistContext =
-  persistContextStore[PERSIST_CONTEXT_KEY] ??
-  (persistContextStore[PERSIST_CONTEXT_KEY] = React.createContext<PersistStatusSource | null>(null));
+const PersistStatusesContext =
+  persistContextStore[PERSIST_STATUSES_CONTEXT_KEY] ??
+  (persistContextStore[PERSIST_STATUSES_CONTEXT_KEY] =
+    React.createContext<readonly PersistStatusEntry[] | null>(null));
 
-const usePersistStatusSource = (controller?: PersistController): PersistStatusSource => {
-  const contextController = React.useContext(PersistContext);
-  const source = controller ?? contextController;
+const readPersistStatuses = (entries: readonly PersistStatusEntry[]): PersistStatusesSnapshot => {
+  if (entries.length === 0) return EMPTY_PERSIST_STATUSES;
 
-  if (!source) {
+  const statuses: Array<PersistStatus | null> = [];
+  for (const entry of entries) {
+    statuses.push(entry === null ? null : entry.getStatus());
+  }
+  return statuses;
+};
+
+const arePersistStatusesEqual = (prev: PersistStatusesSnapshot, next: PersistStatusesSnapshot): boolean => {
+  if (prev.length !== next.length) return false;
+
+  for (let index = 0; index < prev.length; index += 1) {
+    if (!Object.is(prev[index], next[index])) return false;
+  }
+
+  return true;
+};
+
+const createPersistStatusesStore = (entries: readonly PersistStatusEntry[]) => {
+  let snapshot = readPersistStatuses(entries);
+
+  const refreshSnapshot = () => {
+    const nextSnapshot = readPersistStatuses(entries);
+    if (arePersistStatusesEqual(snapshot, nextSnapshot)) return false;
+    snapshot = nextSnapshot;
+    return true;
+  };
+
+  return {
+    getSnapshot: () => snapshot,
+    getServerSnapshot: () => snapshot,
+    subscribe: (listener: () => void) => {
+      const stops: Array<() => void> = [];
+
+      for (const entry of entries) {
+        if (entry === null) continue;
+        stops.push(
+          entry.subscribeStatus(() => {
+            if (refreshSnapshot()) listener();
+          }),
+        );
+      }
+
+      return () => {
+        for (const stop of stops) stop();
+      };
+    },
+  };
+};
+
+export const usePersistStatuses = (): PersistStatusesSnapshot => {
+  const entries = React.useContext(PersistStatusesContext);
+
+  if (entries === null) {
     throw new Error(PERSIST_PROVIDER_ERROR);
   }
 
-  return source;
+  const store = React.useMemo(() => createPersistStatusesStore(entries), [entries]);
+  return useSyncExternalStore(store.subscribe, store.getSnapshot, store.getServerSnapshot);
 };
 
-export const usePersistStatus = (controller?: PersistController): PersistStatus => {
-  const source = usePersistStatusSource(controller);
-  return useSyncExternalStore(source.subscribeStatus, source.getStatus, source.getStatus);
+export const useIsPersistRestoring = (): boolean => {
+  const statuses = usePersistStatuses();
+  return statuses.some((status) => status?.phase === "restoring");
 };
-
-export const useIsPersistRestoring = (controller?: PersistController): boolean =>
-  usePersistStatus(controller).phase === "restoring";

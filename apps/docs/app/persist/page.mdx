@@ -24,12 +24,12 @@ export const playgroundExamplePath = (id) => `${playgroundBasePath}/examples/${i
 import { persistManager, createJsonStorage } from "@lite-fsm/persist";
 import type { PersistController, PersistStorage, PersistStatus } from "@lite-fsm/persist";
 
-import { usePersistStatus, useIsPersistRestoring } from "@lite-fsm/persist/react";
+import { usePersistStatuses, useIsPersistRestoring } from "@lite-fsm/persist/react";
 ```
 
 ## Базовый пример
 
-Минимальная схема подключения: создать менеджер, передать его в `persistManager`, а полученный контроллер передать в `FSMContextProvider`. Провайдер запустит контроллер при монтировании компонента и остановит его при размонтировании.
+Минимальная схема подключения: создать менеджер, передать его в `persistManager`, а полученный контроллер передать массивом в свойство `persist` у `FSMContextProvider`. Провайдер запустит контроллер при монтировании компонента и остановит его при размонтировании.
 
 ```tsx showLineNumbers copy
 import { MachineManager } from "@lite-fsm/core";
@@ -60,7 +60,7 @@ const persist = persistManager(manager, {
 
 export function App() {
   return (
-    <FSMContextProvider machineManager={manager} persist={persist}>
+    <FSMContextProvider machineManager={manager} persist={[persist]}>
       <Counter />
     </FSMContextProvider>
   );
@@ -191,7 +191,7 @@ const storage = createJsonStorage<Store>({
 });
 ```
 
-`storage` передаётся как функция. `createJsonStorage` не вызывает её при создании адаптера: функция вызывается заново на каждом `get`, `set` и `remove`. Результат не кэшируется, среда выполнения не проверяется. За доступность `window` при серверном рендеринге отвечает вызывающий код; `persistManager` также не обращается к `window`.
+`storage` передаётся как функция. `createJsonStorage` не вызывает её при создании адаптера: функция вызывается заново на каждом `get`, `set` и `remove`. Результат не кэшируется, среда выполнения не проверяется. Поэтому `storage: () => window.localStorage` можно объявлять в коде, который участвует в серверном рендеринге: во время рендеринга функция не вызывается. Если явно вызвать `get`, `set` или `remove` там, где `window` недоступен, ошибка функции хранилища попадёт в обычный путь ошибок хранилища.
 
 `createJsonStorage` не реализует `subscribe` — у `localStorage` нет собственной подписки. Если нужно реагировать на изменения из других вкладок, дополните адаптер вручную (см. ниже).
 
@@ -256,17 +256,17 @@ const memoryAdapter = (): PersistStorage<Store> => {
 
 ### Свойство `persist` у `FSMContextProvider`
 
-`FSMContextProvider` принимает свойство `persist`, которое управляет жизненным циклом контроллера: при монтировании провайдер вызывает `start()`, при размонтировании — возвращённую функцию остановки. Серверный рендеринг и гидратация React при этом не блокируются: первое восстановление выполняется в фоне после монтирования.
+`FSMContextProvider` принимает свойство `persist`, которое управляет массивом элементов жизненного цикла: при монтировании провайдер вызывает `start()` у каждого элемента, при размонтировании — возвращённые функции остановки. Серверный рендеринг и гидратация React при этом не блокируются: первое восстановление выполняется в фоне после монтирования.
 
 ```tsx showLineNumbers copy
 import { FSMContextProvider } from "@lite-fsm/react";
 
-<FSMContextProvider machineManager={manager} persist={persist}>
+<FSMContextProvider machineManager={manager} persist={[persist]}>
   <App />
 </FSMContextProvider>;
 ```
 
-`persist` принимает один объект жизненного цикла или массив таких объектов. Минимальный контракт для провайдера — `{ start(): () => void }`; `PersistController` уже реализует этот контракт. Массив полезен, когда нужно подключить несколько хранилищ, например `localStorage` и серверное хранилище:
+`persist` принимает только массив объектов жизненного цикла. Минимальный контракт для провайдера — `{ start(): () => void }`; `PersistController` уже реализует этот контракт. Массив полезен, когда нужно подключить несколько хранилищ, например `localStorage` и серверное хранилище:
 
 ```tsx showLineNumbers copy
 <FSMContextProvider machineManager={manager} persist={[localPersist, remotePersist]}>
@@ -274,44 +274,43 @@ import { FSMContextProvider } from "@lite-fsm/react";
 </FSMContextProvider>
 ```
 
-Провайдер не запускает `persist` во время серверного рендеринга: `start()` вызывается только после монтирования. Если `persist` не передан на сервере, `usePersistStatus()` без явного контроллера возвращает резервный статус `{ phase: "idle" }`, поэтому предварительный рендеринг не падает. На клиенте хуки по-прежнему требуют провайдера или явно переданного контроллера со статусом.
+Провайдер не запускает `persist` во время серверного рендеринга: `start()` вызывается только после монтирования. Если `persist` не передан или равен `[]`, `usePersistStatuses()` возвращает пустой массив и на сервере, и на клиенте.
 
-Контекст статуса создаётся только тогда, когда среди элементов `persist` есть ровно один объект с `getStatus()` и `subscribeStatus()`. Обычный объект жизненного цикла без этих методов контекст статуса не создаёт. Если источников статуса несколько, передавайте нужный контроллер явно: `usePersistStatus(controller)`.
+Контекст статуса повторяет порядок массива `persist`. Элемент с `getStatus()` и `subscribeStatus()` возвращает текущий `PersistStatus`; обычный объект жизненного цикла без этих методов возвращается в массиве как `null`.
 
-### `usePersistStatus`, `useIsPersistRestoring`
+### `usePersistStatuses`, `useIsPersistRestoring`
 
-Эти хуки подписываются на изменение статуса контроллера и возвращают актуальное значение. Используйте их для индикатора синхронизации, ошибки или скрытия интерфейса на время восстановления.
+Эти хуки подписываются на изменение статусов контроллеров из ближайшего `FSMContextProvider`. Вне провайдера они бросают ошибку провайдера. Используйте их для индикатора синхронизации, ошибки или скрытия интерфейса на время восстановления.
 
 ```tsx showLineNumbers copy
-import { useIsPersistRestoring, usePersistStatus } from "@lite-fsm/persist/react";
-import type { PersistController } from "@lite-fsm/persist";
+import { useIsPersistRestoring, usePersistStatuses } from "@lite-fsm/persist/react";
 
-function PersistBadge({ persist }: { persist: PersistController }) {
-  const status = usePersistStatus(persist);
-  const restoring = useIsPersistRestoring(persist);
+function PersistBadge() {
+  const [status] = usePersistStatuses();
+  const restoring = useIsPersistRestoring();
 
   if (restoring) return <span>Загружаем сохранённые данные…</span>;
-  if (status.phase === "error") return <span>Не удалось прочитать запись</span>;
-  if (status.phase === "ready" && status.restored) return <span>Синхронизировано</span>;
+  if (status?.phase === "error") return <span>Не удалось прочитать запись</span>;
+  if (status?.phase === "ready" && status.restored) return <span>Синхронизировано</span>;
 
   return <span>Готово</span>;
 }
 ```
 
-Если `FSMContextProvider` получил ровно один `PersistController`, контроллер можно не передавать:
+`usePersistStatuses()` всегда возвращает массив той же длины и в том же порядке, что `persist` у ближайшего провайдера:
 
 ```tsx showLineNumbers copy
 function PersistBadge() {
-  const status = usePersistStatus();
-  return <span>{status.phase}</span>;
+  const [localStatus, remoteStatus] = usePersistStatuses();
+  return <span>{localStatus?.phase ?? remoteStatus?.phase ?? "none"}</span>;
 }
 ```
 
-`useIsPersistRestoring` — точное сокращение для `usePersistStatus(p).phase === "restoring"`. Если интерфейс должен скрывать данные до завершения первого восстановления, считайте загрузкой обе фазы:
+`useIsPersistRestoring` возвращает `true`, если хотя бы один статус, отличный от `null`, имеет `phase === "restoring"`. Если интерфейс должен скрывать данные до завершения первого восстановления, считайте загрузкой обе фазы:
 
 ```tsx showLineNumbers copy
-const status = usePersistStatus(persist);
-const loading = status.phase === "idle" || status.phase === "restoring";
+const [status] = usePersistStatuses();
+const loading = status?.phase === "idle" || status?.phase === "restoring";
 ```
 
 ## Версии и миграции
@@ -391,26 +390,26 @@ const persist = persistManager(manager, {
 
 ```tsx showLineNumbers copy
 import { FSMContextProvider } from "@lite-fsm/react";
-import { useIsPersistRestoring, usePersistStatus } from "@lite-fsm/persist/react";
+import { useIsPersistRestoring, usePersistStatuses } from "@lite-fsm/persist/react";
 
-function ChatApp({ persist }: { persist: PersistController }) {
-  const status = usePersistStatus(persist);
-  const restoring = useIsPersistRestoring(persist);
+function ChatApp() {
+  const [status] = usePersistStatuses();
+  const restoring = useIsPersistRestoring();
 
   return (
     <section>
       {restoring && <p>Подключаем хранилище…</p>}
       <ChatPanel />
       <ChatComposer />
-      {status.phase === "error" && <p>Ошибка хранилища</p>}
+      {status?.phase === "error" && <p>Ошибка хранилища</p>}
     </section>
   );
 }
 
 export function App() {
   return (
-    <FSMContextProvider machineManager={manager} persist={persist}>
-      <ChatApp persist={persist} />
+    <FSMContextProvider machineManager={manager} persist={[persist]}>
+      <ChatApp />
     </FSMContextProvider>
   );
 }

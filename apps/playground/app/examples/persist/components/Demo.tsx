@@ -13,7 +13,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { FSMContextProvider } from "@lite-fsm/react";
-import { useIsPersistRestoring, usePersistStatus } from "@lite-fsm/persist/react";
+import { useIsPersistRestoring, usePersistStatuses } from "@lite-fsm/persist/react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -366,7 +366,8 @@ function Composer() {
 }
 
 function ChatPanel() {
-  const status = usePersistStatus();
+  const [status] = usePersistStatuses();
+  const persistPhase = status?.phase ?? "idle";
   const peer = useSelector((state) => state.chatSession.context.peer);
   const messageCount = useSelector((state) => state.chatThread.context.messages.length);
   const updatedAt = useSelector((state) => state.chatThread.context.updatedAt);
@@ -385,7 +386,7 @@ function ChatPanel() {
             </p>
           </div>
         </div>
-        <SyncIndicator phase={status.phase} restored={status.phase === "ready" ? status.restored : undefined} />
+        <SyncIndicator phase={persistPhase} restored={status?.phase === "ready" ? status.restored : undefined} />
       </header>
 
       <CardContent className="p-0">
@@ -597,7 +598,7 @@ function PersistRuntime() {
   const runtime = runtimeRef.current;
 
   return (
-    <FSMContextProvider machineManager={runtime.manager} persist={runtime.persist}>
+    <FSMContextProvider machineManager={runtime.manager} persist={[runtime.persist]}>
       <ChatApp onFlushPersist={() => void runtime.persist.flush()} />
     </FSMContextProvider>
   );

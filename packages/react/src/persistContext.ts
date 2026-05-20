@@ -9,22 +9,22 @@ export type FSMPersistLifecycle = {
   start(): () => void;
 };
 
-const PERSIST_CONTEXT_KEY = Symbol.for("@lite-fsm/react.persistContext");
-const IDLE_PERSIST_STATUS = { phase: "idle" } as const;
-const SERVER_IDLE_STATUS_SOURCE: FSMPersistStatusSource = {
-  getStatus: () => IDLE_PERSIST_STATUS,
-  subscribeStatus: () => () => {},
-};
+export type FSMPersistStatusEntry = FSMPersistStatusSource | null;
 
 const persistContextStore = globalThis as typeof globalThis & {
-  [key: symbol]: React.Context<FSMPersistStatusSource | null> | undefined;
+  [key: symbol]: React.Context<readonly FSMPersistStatusEntry[] | null> | undefined;
 };
+
+const PERSIST_STATUSES_CONTEXT_KEY = Symbol.for("@lite-fsm/react.persistStatusesContext");
+export const EMPTY_PERSIST_ENTRIES: readonly FSMPersistLifecycle[] = [];
+const EMPTY_PERSIST_STATUS_ENTRIES: readonly FSMPersistStatusEntry[] = [];
 
 // Shared through a global symbol so @lite-fsm/persist/react can consume the
 // provider context without making @lite-fsm/react import @lite-fsm/persist.
-export const FSMPersistContext =
-  persistContextStore[PERSIST_CONTEXT_KEY] ??
-  (persistContextStore[PERSIST_CONTEXT_KEY] = React.createContext<FSMPersistStatusSource | null>(null));
+export const FSMPersistStatusesContext =
+  persistContextStore[PERSIST_STATUSES_CONTEXT_KEY] ??
+  (persistContextStore[PERSIST_STATUSES_CONTEXT_KEY] =
+    React.createContext<readonly FSMPersistStatusEntry[] | null>(null));
 
 const isPersistStatusSource = (value: FSMPersistLifecycle): value is FSMPersistLifecycle & FSMPersistStatusSource => {
   const candidate = value as Partial<FSMPersistStatusSource>;
@@ -36,20 +36,22 @@ const isPersistStatusSource = (value: FSMPersistLifecycle): value is FSMPersistL
   );
 };
 
-export const resolvePersistStatusSource = (
-  persist: FSMPersistLifecycle | ReadonlyArray<FSMPersistLifecycle> | undefined,
-  options?: { serverFallback?: boolean },
-) => {
-  if (persist === undefined) return options?.serverFallback === true ? SERVER_IDLE_STATUS_SOURCE : null;
+export const arePersistLifecycleSequencesEqual = (
+  prev: readonly FSMPersistLifecycle[],
+  next: readonly FSMPersistLifecycle[],
+): boolean => {
+  if (prev.length !== next.length) return false;
 
-  const persistItems = Array.isArray(persist) ? persist : [persist];
-  let statusSource: FSMPersistStatusSource | null = null;
-
-  for (const item of persistItems) {
-    if (!isPersistStatusSource(item)) continue;
-    if (statusSource) return null;
-    statusSource = item;
+  for (let index = 0; index < prev.length; index += 1) {
+    if (prev[index] !== next[index]) return false;
   }
 
-  return statusSource;
+  return true;
+};
+
+export const resolvePersistStatusSources = (
+  persist: readonly FSMPersistLifecycle[] | undefined,
+): readonly FSMPersistStatusEntry[] => {
+  if (persist === undefined || persist.length === 0) return EMPTY_PERSIST_STATUS_ENTRIES;
+  return persist.map((item) => (isPersistStatusSource(item) ? item : null));
 };

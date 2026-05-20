@@ -14,7 +14,7 @@ import type {
   PersistedRecord,
 } from "@lite-fsm/persist";
 
-import { useIsPersistRestoring, usePersistStatus } from "@lite-fsm/persist/react";
+import { useIsPersistRestoring, usePersistStatuses } from "@lite-fsm/persist/react";
 ```
 
 ## `persistManager(manager, options)`
@@ -43,8 +43,8 @@ const persist = persistManager(manager, {
 | `throttleMs?`       | Минимальный интервал между сохранениями    |
 | `shouldSave?`       | Фильтр transitions перед сохранением       |
 | `migrate?`          | Миграция старой записи                     |
-| `onRestoreSettled?` | Колбэк результата restore                  |
-| `onError?`          | Колбэк ошибок restore/save/clear           |
+| `onRestoreSettled?` | Колбэк результата восстановления           |
+| `onError?`          | Колбэк ошибок `restore`, `save`, `clear`   |
 
 `strategy` не объединяет поля `context` автоматически и не заменяет всё состояние менеджера. Она передаётся в `manager.hydrate()`; для акторов, сохраняемых в снимок, `"merge"` сохраняет акторов вне входящего набора записей, а `"replace"` удаляет отсутствующих.
 
@@ -53,7 +53,7 @@ const persist = persistManager(manager, {
 | Метод                 | Назначение                                           |
 | --------------------- | ---------------------------------------------------- |
 | `start()`             | Подписаться на manager/storage и восстановить запись |
-| `restore()`           | Прочитать storage и применить снимок                 |
+| `restore()`           | Прочитать хранилище и применить снимок               |
 | `save()`              | Сразу записать текущий снимок                        |
 | `flush()`             | Дописать отложенное сохранение                       |
 | `clear()`             | Удалить запись и сбросить статус                     |
@@ -71,17 +71,17 @@ type PersistStorage<S> = {
 };
 ```
 
-`createJsonStorage` подходит для синхронных storage API с `getItem`, `setItem`, `removeItem`. `storage` принимает только функцию: она не вызывается при создании adapter-а, вызывается заново на каждом `get`, `set`, `remove` и не кешируется. `subscribe` добавляйте вручную через расширение `PersistStorage`.
+`createJsonStorage` подходит для синхронных storage API с `getItem`, `setItem`, `removeItem`. `storage` принимает только функцию: она не вызывается при создании адаптера, вызывается заново на каждом `get`, `set`, `remove` и не кешируется. `subscribe` добавляйте вручную через расширение `PersistStorage`.
 
 ## React-хуки
 
 ```tsx copy
-const status = usePersistStatus(persist);
-const restoring = useIsPersistRestoring(persist);
+const [status] = usePersistStatuses();
+const restoring = useIsPersistRestoring();
 ```
 
-Аргумент можно опустить, если ближайший `FSMContextProvider` получил ровно один `PersistController` с источником статуса через `persist`. Серверный render провайдера без `persist` отдаёт hook-ам `{ phase: "idle" }`; клиентский render без persist с источником статуса продолжает бросать ошибку провайдера.
+Хуки работают через ближайший `FSMContextProvider` и вне него бросают ошибку провайдера. `usePersistStatuses()` возвращает массив той же длины и в том же порядке, что `persist`; элемент без `getStatus()` и `subscribeStatus()` возвращается как `null`. Если `persist` не передан или равен `[]`, возвращается `[]`.
 
-`useIsPersistRestoring` — это строго `status.phase === "restoring"`; для blocking UI до первого restore проверяйте также `"idle"`.
+`useIsPersistRestoring` возвращает `true`, если хотя бы один статус, отличный от `null`, имеет `phase === "restoring"`; для блокировки интерфейса до первого восстановления проверяйте также `"idle"` у нужного статуса.
 
 Подробное руководство: [@lite-fsm/persist](/packages/persist).

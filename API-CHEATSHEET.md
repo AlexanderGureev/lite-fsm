@@ -8,7 +8,7 @@
 | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `@lite-fsm/core`                                               | `createMachine`, `createConfig`, `createReducer`, `createEffect`, `createActorMeta`, `Machine`, `defineMachine`, `MachineManager`, `LiteFsmError` |
 | `@lite-fsm/persist`                                            | `persistManager`, `createJsonStorage`                                                                                                             |
-| `@lite-fsm/persist/react`                                      | `usePersistStatus`, `useIsPersistRestoring`                                                                                                       |
+| `@lite-fsm/persist/react`                                      | `usePersistStatuses`, `useIsPersistRestoring`                                                                                                     |
 | `@lite-fsm/middleware`                                         | `immerMiddleware`, `devToolsMiddleware`                                                                                                           |
 | `@lite-fsm/middleware/immer` · `@lite-fsm/middleware/devTools` | per-feature entry points                                                                                                                          |
 | `@lite-fsm/react`                                              | `FSMContext`, `FSMContextProvider`, `FSMHydrationBoundary`, `useHydrateSnapshot`, `useManager`, `useSelector`, `useTransition`, `defineMachine`   |
@@ -645,21 +645,21 @@ function Counter() {
 | `useHydrateSnapshot(snapshot, opts?)`      | apply snapshot в layout effect, без preview                                                   |
 | `defineMachine`                            | standalone machine как hook                                                                   |
 
-`FSMContextProvider` принимает `getServerSnapshot?: () => MachinesState<S>` и `persist?: { start(): () => void } | readonly { start(): () => void }[]`. Без `getServerSnapshot` он кеширует `machineManager.getState()` для текущего менеджера при первой отрисовке. Это состояние корня для React `useSyncExternalStore`, а не envelope `MachineManagerSnapshot`.
+`FSMContextProvider` принимает `getServerSnapshot?: () => MachinesState<S>` и `persist?: readonly { start(): () => void }[]`. Без `getServerSnapshot` он кеширует `machineManager.getState()` для текущего менеджера при первой отрисовке. Это состояние корня для React `useSyncExternalStore`, а не envelope `MachineManagerSnapshot`.
 
-`persist` — structural lifecycle prop: provider вызывает `start()` в `useEffect`, а cleanup вызывает возвращённые stop-функции. Если передан ровно один controller с `getStatus()`/`subscribeStatus()`, provider также кладёт его в persist-status context для `@lite-fsm/persist/react`. `@lite-fsm/react` не зависит от `@lite-fsm/persist`, поэтому туда можно передать любой совместимый controller.
+`persist` — массив structural lifecycle entries: provider вызывает `start()` для каждого entry в `useEffect`, а cleanup вызывает возвращённые stop-функции. Entry с `getStatus()` и `subscribeStatus()` попадает в массив статусов для `@lite-fsm/persist/react`; lifecycle-only entry представлен как `null`. `@lite-fsm/react` не зависит от `@lite-fsm/persist`, поэтому туда можно передать любой совместимый controller.
 
 ```tsx
-import { useIsPersistRestoring, usePersistStatus } from "@lite-fsm/persist/react";
+import { useIsPersistRestoring, usePersistStatuses } from "@lite-fsm/persist/react";
 
 function PersistBadge() {
-  const status = usePersistStatus();
+  const [status] = usePersistStatuses();
   const restoring = useIsPersistRestoring();
-  return <span>{restoring ? "restoring" : status.phase}</span>;
+  return <span>{restoring ? "restoring" : (status?.phase ?? "none")}</span>;
 }
 ```
 
-`useIsPersistRestoring()` — строго `usePersistStatus().phase === "restoring"`. Для UI, который должен скрывать данные до завершения первого restore, проверяйте `status.phase === "idle" || status.phase === "restoring"`. Явный `usePersistStatus(controller)` и `useIsPersistRestoring(controller)` остаются доступны для компонентов вне provider-а или для нескольких persist controllers.
+`usePersistStatuses()` возвращает массив той же длины и в том же порядке, что `FSMContextProvider.persist`. Если provider есть, но `persist` не передан или равен `[]`, возвращается `[]`. `useIsPersistRestoring()` возвращает `true`, когда хотя бы один non-null status имеет `phase === "restoring"`. Для UI, который должен скрывать данные до завершения первого restore, проверяйте `status?.phase === "idle" || status?.phase === "restoring"`.
 
 Внутри `FSMHydrationBoundary` selector читает render overlay; для SSR/hydration ближайший boundary server snapshot имеет приоритет над Provider snapshot. `useManager().getState()` в render всегда читает live manager и не участвует в SSR-safe overlay contract.
 

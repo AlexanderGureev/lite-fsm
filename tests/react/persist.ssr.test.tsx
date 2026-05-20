@@ -6,8 +6,12 @@ import { MachineManager } from "@lite-fsm/core";
 import type { MachineConfig } from "@lite-fsm/core";
 import { FSMContextProvider } from "@lite-fsm/react";
 import { createJsonStorage, persistManager, type PersistController, type PersistStatus } from "@lite-fsm/persist";
-import { useIsPersistRestoring, usePersistStatus } from "@lite-fsm/persist/react";
-import { resolvePersistStatusSource, type FSMPersistLifecycle } from "../../packages/react/src/persistContext";
+import { useIsPersistRestoring, usePersistStatuses } from "@lite-fsm/persist/react";
+import {
+  arePersistLifecycleSequencesEqual,
+  resolvePersistStatusSources,
+  type FSMPersistLifecycle,
+} from "../../packages/react/src/persistContext";
 
 type Config = { IDLE: { INC: null } };
 type Action = { type: "INC" };
@@ -24,9 +28,6 @@ type Store = typeof machines;
 
 const createManager = () => MachineManager<Store, Action>(machines);
 
-const PERSIST_PROVIDER_ERROR =
-  "Hooks from @lite-fsm/persist/react require a PersistController argument or FSMContextProvider persist context.";
-
 const createStatusController = (initialStatus: PersistStatus = { phase: "idle" }): PersistController => ({
   start: () => () => {},
   restore: async () => initialStatus,
@@ -37,55 +38,40 @@ const createStatusController = (initialStatus: PersistStatus = { phase: "idle" }
   subscribeStatus: () => () => {},
 });
 
-describe("SSR persist в FSMContextProvider", () => {
-  it("серверный запасной источник статуса отдаёт idle snapshot и no-op unsubscribe", () => {
-    const source = resolvePersistStatusSource(undefined, { serverFallback: true });
-    const unsubscribe = source?.subscribeStatus(() => {});
+const formatStatuses = (statuses: readonly (PersistStatus | null)[]) =>
+  statuses.map((status) => status?.phase ?? "none").join("|");
 
-    expect(source?.getStatus()).toEqual({ phase: "idle" });
-    expect(unsubscribe).toBeTypeOf("function");
-    expect(() => unsubscribe?.()).not.toThrow();
+describe("SSR persist statuses в FSMContextProvider", () => {
+  it("сравнивает последовательности persist entries по длине, порядку и identity", () => {
+    const first = { start: () => () => {} };
+    const second = { start: () => () => {} };
+    const replacement = { start: () => () => {} };
+
+    expect(arePersistLifecycleSequencesEqual([], [])).toBe(true);
+    expect(arePersistLifecycleSequencesEqual([first, second], [first, second])).toBe(true);
+    expect(arePersistLifecycleSequencesEqual([first], [first, second])).toBe(false);
+    expect(arePersistLifecycleSequencesEqual([first, second], [second, first])).toBe(false);
+    expect(arePersistLifecycleSequencesEqual([first], [replacement])).toBe(false);
   });
 
-  it("resolvePersistStatusSource не включает запасной источник без serverFallback=true", () => {
-    expect(resolvePersistStatusSource(undefined)).toBeNull();
-    expect(resolvePersistStatusSource(undefined, { serverFallback: false })).toBeNull();
+  it("resolvePersistStatusSources строит entries для всех вариантов массива", () => {
+    const lifecycle: FSMPersistLifecycle = { start: () => () => {} };
+    const first = createStatusController({ phase: "ready", restored: false });
+    const second = createStatusController({ phase: "restoring" });
+
+    expect(resolvePersistStatusSources(undefined)).toEqual([]);
+    expect(resolvePersistStatusSources([])).toEqual([]);
+    expect(resolvePersistStatusSources([lifecycle])).toEqual([null]);
+    expect(resolvePersistStatusSources([first])).toEqual([first]);
+    expect(resolvePersistStatusSources([lifecycle, first, second])).toEqual([null, first, second]);
   });
 
-  it("resolvePersistStatusSource не считает null отсутствующим persist prop", () => {
-    const invalidPersist = null as unknown as FSMPersistLifecycle;
-
-    expect(resolvePersistStatusSource(invalidPersist, { serverFallback: true })).toBeNull();
-  });
-
-  it("resolvePersistStatusSource возвращает null для обычного lifecycle даже с серверным fallback", () => {
-    const lifecycle = { start: () => () => {} };
-
-    expect(resolvePersistStatusSource(lifecycle, { serverFallback: true })).toBeNull();
-    expect(resolvePersistStatusSource([lifecycle], { serverFallback: true })).toBeNull();
-  });
-
-  it("resolvePersistStatusSource выбирает единственный источник статуса", () => {
-    const lifecycle = { start: () => () => {} };
-    const controller = createStatusController({ phase: "ready", restored: false });
-
-    expect(resolvePersistStatusSource(controller)).toBe(controller);
-    expect(resolvePersistStatusSource([lifecycle, controller])).toBe(controller);
-  });
-
-  it("resolvePersistStatusSource возвращает null для нескольких источников статуса", () => {
-    const first = createStatusController();
-    const second = createStatusController();
-
-    expect(resolvePersistStatusSource([first, second])).toBeNull();
-  });
-
-  it("без свойства persist даёт usePersistStatus() прочитать idle", () => {
+  it("provider без persist на server render отдаёт пустой массив статусов", () => {
     const manager = createManager();
 
     const Readout = () => {
-      const status = usePersistStatus();
-      return <span>{status.phase}</span>;
+      const statuses = usePersistStatuses();
+      return <span>{statuses.length}</span>;
     };
 
     const html = renderToString(
@@ -94,10 +80,83 @@ describe("SSR persist в FSMContextProvider", () => {
       </FSMContextProvider>,
     );
 
-    expect(html).toContain(">idle<");
+    expect(html).toContain(">0<");
   });
 
-  it("без свойства persist даёт useIsPersistRestoring() прочитать false", () => {
+  it("persist=[] на server render отдаёт пустой массив статусов", () => {
+    const manager = createManager();
+
+    const Readout = () => {
+      const statuses = usePersistStatuses();
+      return <span>{statuses.length}</span>;
+    };
+
+    const html = renderToString(
+      <FSMContextProvider machineManager={manager} persist={[]}>
+        <Readout />
+      </FSMContextProvider>,
+    );
+
+    expect(html).toContain(">0<");
+  });
+
+  it("один controller в persist array отдаёт массив из одного статуса", () => {
+    const manager = createManager();
+    const controller = createStatusController({ phase: "ready", restored: true });
+
+    const Readout = () => {
+      const statuses = usePersistStatuses();
+      return <span>{formatStatuses(statuses)}</span>;
+    };
+
+    const html = renderToString(
+      <FSMContextProvider machineManager={manager} persist={[controller]}>
+        <Readout />
+      </FSMContextProvider>,
+    );
+
+    expect(html).toContain(">ready<");
+  });
+
+  it("несколько controllers на server render сохраняют порядок persist", () => {
+    const manager = createManager();
+    const first = createStatusController({ phase: "restoring" });
+    const second = createStatusController({ phase: "ready", restored: false });
+
+    const Readout = () => {
+      const statuses = usePersistStatuses();
+      return <span>{formatStatuses(statuses)}</span>;
+    };
+
+    const html = renderToString(
+      <FSMContextProvider machineManager={manager} persist={[first, second]}>
+        <Readout />
+      </FSMContextProvider>,
+    );
+
+    expect(html).toContain(">restoring|ready<");
+  });
+
+  it("lifecycle-only entry на server render отдаёт null на своей позиции", () => {
+    const manager = createManager();
+    const lifecycle = { start: () => () => {} };
+    const controller = createStatusController({ phase: "ready", restored: true });
+
+    const Readout = () => {
+      const statuses = usePersistStatuses();
+      return <span>{formatStatuses(statuses)}</span>;
+    };
+
+    const html = renderToString(
+      <FSMContextProvider machineManager={manager} persist={[lifecycle, controller]}>
+        <Readout />
+      </FSMContextProvider>,
+    );
+
+    expect(html).toContain(">none|ready<");
+  });
+
+  it("useIsPersistRestoring на server render возвращает false для пустого массива", () => {
     const manager = createManager();
 
     const Readout = () => {
@@ -106,7 +165,7 @@ describe("SSR persist в FSMContextProvider", () => {
     };
 
     const html = renderToString(
-      <FSMContextProvider machineManager={manager}>
+      <FSMContextProvider machineManager={manager} persist={[]}>
         <Readout />
       </FSMContextProvider>,
     );
@@ -114,7 +173,7 @@ describe("SSR persist в FSMContextProvider", () => {
     expect(html).toContain(">no<");
   });
 
-  it("с persistManager и ленивым window storage не вызывает storage factory", () => {
+  it("persistManager с ленивым window storage не вызывает storage factory во время server render", () => {
     const manager = createManager();
     const storageFactory = vi.fn(() => window.localStorage);
     const persist = persistManager(manager, {
@@ -125,97 +184,17 @@ describe("SSR persist в FSMContextProvider", () => {
     });
 
     const Readout = () => {
-      const status = usePersistStatus();
-      return <span>{status.phase}</span>;
+      const statuses = usePersistStatuses();
+      return <span>{formatStatuses(statuses)}</span>;
     };
 
     const html = renderToString(
-      <FSMContextProvider machineManager={manager} persist={persist}>
+      <FSMContextProvider machineManager={manager} persist={[persist]}>
         <Readout />
       </FSMContextProvider>,
     );
 
     expect(html).toContain(">idle<");
     expect(storageFactory).not.toHaveBeenCalled();
-  });
-
-  it("с настоящим PersistController читает неявный idle status", () => {
-    const manager = createManager();
-    const persist = persistManager(manager, {
-      storage: {
-        get: () => undefined,
-        set: () => {},
-        remove: () => {},
-      },
-    });
-
-    const Readout = () => {
-      const status = usePersistStatus();
-      return <span>{status.phase}</span>;
-    };
-
-    const html = renderToString(
-      <FSMContextProvider machineManager={manager} persist={persist}>
-        <Readout />
-      </FSMContextProvider>,
-    );
-
-    expect(html).toContain(">idle<");
-  });
-
-  it("обычный lifecycle persist без источника статуса бросает provider error", () => {
-    const manager = createManager();
-    const lifecycle = { start: () => () => {} };
-
-    const Readout = () => {
-      const status = usePersistStatus();
-      return <span>{status.phase}</span>;
-    };
-
-    expect(() =>
-      renderToString(
-        <FSMContextProvider machineManager={manager} persist={lifecycle}>
-          <Readout />
-        </FSMContextProvider>,
-      ),
-    ).toThrow(PERSIST_PROVIDER_ERROR);
-  });
-
-  it("несколько контроллеров с источником статуса в persist array бросают provider error", () => {
-    const manager = createManager();
-    const first = createStatusController();
-    const second = createStatusController();
-
-    const Readout = () => {
-      const status = usePersistStatus();
-      return <span>{status.phase}</span>;
-    };
-
-    expect(() =>
-      renderToString(
-        <FSMContextProvider machineManager={manager} persist={[first, second]}>
-          <Readout />
-        </FSMContextProvider>,
-      ),
-    ).toThrow(PERSIST_PROVIDER_ERROR);
-  });
-
-  it("один контроллер с источником статуса в persist array работает", () => {
-    const manager = createManager();
-    const lifecycle = { start: () => () => {} };
-    const controller = createStatusController({ phase: "ready", restored: true });
-
-    const Readout = () => {
-      const status = usePersistStatus();
-      return <span>{status.phase}</span>;
-    };
-
-    const html = renderToString(
-      <FSMContextProvider machineManager={manager} persist={[lifecycle, controller]}>
-        <Readout />
-      </FSMContextProvider>,
-    );
-
-    expect(html).toContain(">ready<");
   });
 });

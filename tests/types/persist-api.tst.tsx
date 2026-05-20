@@ -24,7 +24,7 @@ import {
   type PersistedRecord,
 } from "@lite-fsm/persist";
 import * as persistReactEntry from "@lite-fsm/persist/react";
-import { useIsPersistRestoring, usePersistStatus } from "@lite-fsm/persist/react";
+import { useIsPersistRestoring, usePersistStatuses } from "@lite-fsm/persist/react";
 
 import type { Assert, Equal } from "./_helpers";
 
@@ -79,7 +79,7 @@ describe("lite-fsm/persist public API", () => {
   test("entrypoints экспортируют только runtime helpers", () => {
     type _PersistKeys = Assert<Equal<keyof typeof persistEntry, "createJsonStorage" | "persistManager">>;
     type _PersistReactKeys = Assert<
-      Equal<keyof typeof persistReactEntry, "useIsPersistRestoring" | "usePersistStatus">
+      Equal<keyof typeof persistReactEntry, "useIsPersistRestoring" | "usePersistStatuses">
     >;
   });
 
@@ -193,33 +193,38 @@ describe("React persist API", () => {
 
     const props: FSMContextProviderProps<Store, Event> = {
       machineManager: manager,
-      persist: lifecycle,
-    };
-    expect(props.persist).type.toBe<FSMPersistLifecycle | readonly FSMPersistLifecycle[] | undefined>();
-
-    const arrayProps: FSMContextProviderProps<Store, Event> = {
-      machineManager: manager,
       persist: [lifecycle],
     };
-    expect(arrayProps.persist).type.toBe<FSMPersistLifecycle | readonly FSMPersistLifecycle[] | undefined>();
+    expect(props.persist).type.toBe<readonly FSMPersistLifecycle[] | undefined>();
 
     const el = (
-      <FSMContextProvider machineManager={manager} persist={lifecycle}>
+      <FSMContextProvider machineManager={manager} persist={[lifecycle]}>
         <span>child</span>
       </FSMContextProvider>
     );
     expect(el).type.toBeAssignableTo<React.JSX.Element>();
   });
 
-  test("persist/react hooks типизированы через PersistController", () => {
+  test("FSMContextProviderProps.persist принимает controller и пустой массив как lifecycle array", () => {
     const controller = persistManager(manager, { storage });
 
-    expect(usePersistStatus(controller)).type.toBe<PersistStatus>();
-    expect(useIsPersistRestoring(controller)).type.toBe<boolean>();
+    const controllerElement = (
+      <FSMContextProvider machineManager={manager} persist={[controller]}>
+        <span>child</span>
+      </FSMContextProvider>
+    );
+    expect(controllerElement).type.toBeAssignableTo<React.JSX.Element>();
+
+    const emptyElement = (
+      <FSMContextProvider machineManager={manager} persist={[]}>
+        <span>child</span>
+      </FSMContextProvider>
+    );
+    expect(emptyElement).type.toBeAssignableTo<React.JSX.Element>();
   });
 
-  test("persist/react hooks могут читать PersistController из provider context", () => {
-    expect(usePersistStatus()).type.toBe<PersistStatus>();
+  test("persist/react hooks читают statuses из provider context", () => {
+    expect(usePersistStatuses()).type.toBe<readonly (PersistStatus | null)[]>();
     expect(useIsPersistRestoring()).type.toBe<boolean>();
   });
 });

@@ -32,7 +32,7 @@ assert.equal(typeof graphViewModel.buildMachineWorkbenchModel, "function");
 assert.equal(typeof persist.createJsonStorage, "function");
 assert.equal(typeof persist.persistManager, "function");
 assert.equal(typeof persistReact.useIsPersistRestoring, "function");
-assert.equal(typeof persistReact.usePersistStatus, "function");
+assert.equal(typeof persistReact.usePersistStatuses, "function");
 
 assert.equal(typeof react.FSMContext, "object");
 assert.equal(typeof react.FSMContextProvider, "function");
