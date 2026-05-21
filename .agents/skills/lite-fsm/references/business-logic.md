@@ -41,9 +41,10 @@ Coordinator — опциональный тип. Любой effect может ч
 2. `Events`;
 3. `Context` type alias;
 4. `initialContext` с этим типом;
-5. `config = createConfig(...)`, если нужен для `createEffect` или тестов;
-6. локальные `createEffect(...)`;
-7. `createMachine({ config, initialState, initialContext, reducer, effects })`.
+5. локальные чистые helpers, если inline-форма теряет читаемость или helper переиспользуется;
+6. `createMachine({ config: {...}, initialState, initialContext, reducer, effects })`.
+
+По умолчанию держи всю конфигурацию автомата inline внутри `createMachine({ ... })`: `config`, `reducer` и `effects` должны читаться как единый контракт машины. Отдельные `const config = createConfig(...)`, `const reducer = createReducer(...)` и `const effect = createEffect(...)` используй только когда автомат слишком большой для чтения в одном объекте или часть конфигурации нужно переиспользовать между machines, effects или тестами. Если нужен `createEffect` для `latest` или `cancelFn`, оставляй вызов inline в `effects`, пока это читается.
 
 ### Helpers рядом с машиной
 

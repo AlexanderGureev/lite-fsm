@@ -33,25 +33,28 @@ Rules:
 ## `createEffect({ type: "latest" })`
 
 Используй `latest` для запросов, поиска, автосохранения и процессов, где последний запуск должен победить.
+В коде machine по умолчанию размещай `createEffect(...)` inline внутри `effects`; выноси в отдельную константу только при большой длине или переиспользовании.
 
 ```ts
-const loadLatest = createEffect<typeof config, "FETCH_ITEMS_PENDING">({
-  type: "latest",
-  effect: async ({ action, api, transition }) => {
-    try {
-      const page = await api.loadItems(action.payload);
-      transition({ type: "FETCH_ITEMS_RESOLVED", payload: { request: action.payload, page } });
-    } catch (error) {
-      transition({
-        type: "FETCH_ITEMS_REJECTED",
-        payload: {
-          request: action.payload,
-          error: { message: error instanceof Error ? error.message : String(error) },
-        },
-      });
-    }
-  },
-});
+effects: {
+  FETCH_ITEMS_PENDING: createEffect({
+    type: "latest",
+    effect: async ({ action, api, transition }) => {
+      try {
+        const page = await api.loadItems(action.payload);
+        transition({ type: "FETCH_ITEMS_RESOLVED", payload: { request: action.payload, page } });
+      } catch (error) {
+        transition({
+          type: "FETCH_ITEMS_REJECTED",
+          payload: {
+            request: action.payload,
+            error: { message: error instanceof Error ? error.message : String(error) },
+          },
+        });
+      }
+    },
+  }),
+},
 ```
 
 `latest` не отменяет promise/request/timer. Он блокирует поздний `transition`. Для actor effect guard изолирован на actor instance.

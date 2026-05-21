@@ -45,7 +45,7 @@ export const chatThread = createMachine({
 
 ```ts
 import type { FSMEvent } from "@lite-fsm/core";
-import { createConfig, createEffect, createMachine } from "../create-machine";
+import { createEffect, createMachine } from "../create-machine";
 
 type Request = { key: string };
 type Page = { items: string[] };
@@ -59,28 +59,11 @@ const initialContext: { lists: Record<string, { status: "idle" | "loading" | "er
   lists: {},
 };
 
-const config = createConfig({
-  READY: { FETCH_ITEMS: "FETCH_ITEMS_PENDING" },
-  FETCH_ITEMS_PENDING: { FETCH_ITEMS_RESOLVED: "READY", FETCH_ITEMS_REJECTED: "READY" },
-});
-
-const fetchItems = createEffect<typeof config, "FETCH_ITEMS_PENDING">({
-  type: "latest",
-  effect: async ({ action, api, transition }) => {
-    try {
-      const page = await api.loadItems(action.payload);
-      transition({ type: "FETCH_ITEMS_RESOLVED", payload: { request: action.payload, page } });
-    } catch (error) {
-      transition({
-        type: "FETCH_ITEMS_REJECTED",
-        payload: { request: action.payload, error: { message: error instanceof Error ? error.message : String(error) } },
-      });
-    }
-  },
-});
-
 export const itemList = createMachine({
-  config,
+  config: {
+    READY: { FETCH_ITEMS: "FETCH_ITEMS_PENDING" },
+    FETCH_ITEMS_PENDING: { FETCH_ITEMS_RESOLVED: "READY", FETCH_ITEMS_REJECTED: "READY" },
+  },
   initialState: "READY",
   initialContext,
   reducer: (state, action, { nextState }) => {
@@ -105,7 +88,20 @@ export const itemList = createMachine({
     }
   },
   effects: {
-    FETCH_ITEMS_PENDING: fetchItems,
+    FETCH_ITEMS_PENDING: createEffect({
+      type: "latest",
+      effect: async ({ action, api, transition }) => {
+        try {
+          const page = await api.loadItems(action.payload);
+          transition({ type: "FETCH_ITEMS_RESOLVED", payload: { request: action.payload, page } });
+        } catch (error) {
+          transition({
+            type: "FETCH_ITEMS_REJECTED",
+            payload: { request: action.payload, error: { message: error instanceof Error ? error.message : String(error) } },
+          });
+        }
+      },
+    }),
   },
 });
 ```

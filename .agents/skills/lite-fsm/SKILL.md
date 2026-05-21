@@ -47,7 +47,8 @@ description: "Помогает использовать lite-fsm latest в пр�
 - Состояния и события называй в `UPPER_SNAKE_CASE`.
 - Async результат возвращай событием `*_RESOLVED`/`*_REJECTED`. Если в проекте уже зафиксирована другая конвенция (например, `*_RESOLVE`/`*_REJECT`), следуй ей.
 - События типизируй union из `FSMEvent<...>`.
-- Для app-level typing используй локальные wrappers `createMachine`, `createConfig`, `createReducer`, `createEffect`.
+- Для app-level typing экспортируй локальные wrappers `createMachine`, `createConfig`, `createReducer`, `createEffect`.
+- По умолчанию инлайнь всю конфигурацию автомата внутри `createMachine({ ... })`: `config`, `reducer` и `effects` должны читаться рядом с машиной. Отдельные `const config = createConfig(...)`, `const reducer = createReducer(...)` и `const effect = createEffect(...)` используй только когда автомат слишком большой для чтения в одном объекте или часть конфигурации нужно переиспользовать.
 - Один machine или actor template — один модуль: `src/store/machines/<kebab-case>.ts` для простого случая или `src/store/machines/<kebab-case>/index.ts` с локальными файлами для сложного.
 - Узкие чтения делай inline через `useAppSelector(s => s.machine.state === "...")`. Выноси именованный selector в `src/store/selectors/` только если projection агрегирует несколько machines, нетривиальна или переиспользуется в трех и более местах.
 - Persistence добавляй только когда состояние должно пережить reload или session break.
