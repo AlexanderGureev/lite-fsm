@@ -201,6 +201,154 @@ describe("EffectsCompiler по fixture", () => {
     ]);
   });
 
+  it("поддерживает try/catch/finally и вложенные ветки управления", () => {
+    const machines = compileSnippetMachines(`
+      import { createMachine } from "@lite-fsm/core";
+
+      export const tryWithEmptyCatch = createMachine({
+        config: { IDLE: {} },
+        initialState: "IDLE",
+        initialContext: {},
+        effects: {
+          IDLE: ({ transition }) => {
+            try {
+              transition({ type: "TRY_ONLY" });
+            } catch {}
+          },
+        },
+      });
+
+      export const tryCatchNoBinding = createMachine({
+        config: { IDLE: {} },
+        initialState: "IDLE",
+        initialContext: {},
+        effects: {
+          IDLE: ({ transition }) => {
+            try {
+              transition({ type: "TRY_BEFORE_CATCH" });
+            } catch {
+              transition({ type: "CATCH_NO_BINDING" });
+            }
+          },
+        },
+      });
+
+      export const tryFinally = createMachine({
+        config: { IDLE: {} },
+        initialState: "IDLE",
+        initialContext: {},
+        effects: {
+          IDLE: ({ transition }) => {
+            try {
+              return transition({ type: "TRY_RETURN" });
+            } finally {
+              const result = transition({ type: "FINALLY_DECLARED" });
+              console.log(result);
+            }
+          },
+        },
+      });
+
+      export const tryCatchFinally = createMachine({
+        config: { IDLE: {} },
+        initialState: "IDLE",
+        initialContext: {},
+        effects: {
+          IDLE: ({ action, transition }) => {
+            try {
+              if (action.type === "A") {
+                transition({ type: "TRY_IF" });
+              } else if (action.type === "B") {
+                transition({ type: "TRY_ELSE_IF" });
+              } else {
+                transition({ type: "TRY_ELSE" });
+              }
+
+              switch (action.type) {
+                case "C":
+                  transition({ type: "TRY_SWITCH" });
+                  break;
+                default:
+                  transition({ type: "TRY_SWITCH_DEFAULT" });
+              }
+
+              {
+                transition({ type: "TRY_BLOCK" });
+              }
+            } catch (err) {
+              transition({ type: "CATCH_BINDING" });
+              if (action.type === "D") {
+                transition({ type: "CATCH_IF" });
+              }
+              console.log(err);
+            } finally {
+              if (action.type === "E") {
+                transition({ type: "FINALLY_IF" });
+              } else {
+                transition({ type: "FINALLY_ELSE" });
+              }
+            }
+          },
+        },
+      });
+
+      export const nestedEscape = createMachine({
+        config: { IDLE: {} },
+        initialState: "IDLE",
+        initialContext: {},
+        effects: {
+          IDLE: ({ transition }) => {
+            try {
+              setTimeout(() => transition({ type: "TIMEOUT" }), 10);
+              const later = () => transition({ type: "NESTED_CONST" });
+              console.log(later);
+            } catch (err) {
+              function nested() {
+                transition({ type: "NESTED_FUNCTION" });
+              }
+              console.log(err, nested);
+            }
+          },
+        },
+      });
+    `);
+    const tryWithEmptyCatch = getMachine(machines, "tryWithEmptyCatch");
+    const tryCatchNoBinding = getMachine(machines, "tryCatchNoBinding");
+    const tryFinally = getMachine(machines, "tryFinally");
+    const tryCatchFinally = getMachine(machines, "tryCatchFinally");
+    const nestedEscape = getMachine(machines, "nestedEscape");
+
+    expect(emissionRows(tryWithEmptyCatch)).toEqual([
+      expect.objectContaining({ event: "TRY_ONLY", guardKind: undefined, confidence: "exact" }),
+    ]);
+    expect(tryCatchNoBinding.emissions.map((emission) => [emission.event.type, emission.guard?.kind, emission.guard?.text])).toEqual([
+      ["TRY_BEFORE_CATCH", undefined, undefined],
+      ["CATCH_NO_BINDING", "unknown", "catch"],
+    ]);
+    expect(emissionRows(tryFinally)).toEqual([
+      expect.objectContaining({ event: "TRY_RETURN", guardKind: undefined, confidence: "exact" }),
+      expect.objectContaining({ event: "FINALLY_DECLARED", guardKind: undefined, confidence: "exact" }),
+    ]);
+    expect(tryCatchFinally.emissions.map((emission) => [emission.event.type, emission.guard?.kind, emission.guard?.text])).toEqual([
+      ["TRY_IF", "if", 'action.type === "A"'],
+      ["TRY_ELSE_IF", "else-if", 'action.type === "B"'],
+      ["TRY_ELSE", "else", "else"],
+      ["TRY_SWITCH", "switch-case", 'case "C"'],
+      ["TRY_SWITCH_DEFAULT", "else", "default"],
+      ["TRY_BLOCK", undefined, undefined],
+      ["CATCH_BINDING", "unknown", "catch (err)"],
+      ["CATCH_IF", "if", 'action.type === "D"'],
+      ["FINALLY_IF", "if", 'action.type === "E"'],
+      ["FINALLY_ELSE", "else", "else"],
+    ]);
+    expect(nestedEscape.emissions).toEqual([]);
+    expect(diagnosticCodes(nestedEscape)).toEqual([
+      "LFG_EFFECT_TRANSITION_ESCAPED",
+      "LFG_EFFECT_TRANSITION_ESCAPED",
+      "LFG_EFFECT_TRANSITION_ESCAPED",
+    ]);
+  });
+
   it("сохраняет wildcard source для plain и computed createEffect entries", () => {
     const document = compileFixture().document;
     const wildcardEffectMachine = getMachine(document.machines, "wildcardEffectMachine");
@@ -277,6 +425,17 @@ describe("EffectsCompiler по fixture", () => {
 });
 
 describe("EffectsCompiler diagnostics и partial routing", () => {
+  it("возвращает пустой effects slice для createMachine без object options", () => {
+    const machine = compileSnippetMachine(`
+      import { createMachine } from "@lite-fsm/core";
+
+      export const machine = createMachine();
+    `);
+
+    expect(machine.emissions).toEqual([]);
+    expect(diagnosticCodes(machine)).toContain("LFG_UNSUPPORTED_MACHINE_OPTIONS");
+  });
+
   it("запрещает actor routing sugar в domain effects", () => {
     const machine = compileSnippetMachine(`
       import { createMachine } from "@lite-fsm/core";

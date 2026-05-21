@@ -1,6 +1,7 @@
 import {
   Node,
   type Block,
+  type CatchClause,
   type CallExpression,
   type Expression,
   type ExpressionStatement,
@@ -8,6 +9,7 @@ import {
   type ReturnStatement,
   type Statement,
   type SwitchStatement,
+  type TryStatement,
   type VariableStatement,
 } from "ts-morph";
 import type { GraphCondition, GraphDiagnostic, GraphTransition } from "../types";
@@ -199,6 +201,39 @@ const compileSwitchStatement = (
   }
 };
 
+const catchGuard = (
+  catchClause: CatchClause,
+  context: CompilerContext,
+): GraphCondition => {
+  const variable = catchClause.getVariableDeclaration();
+  const label = variable ? `catch (${context.source.textOf(variable.getNameNode())})` : "catch";
+  return condition(label, "unknown", context.source.locFromNode(catchClause));
+};
+
+const compileTryStatement = (
+  tryStatement: TryStatement,
+  guard: GraphCondition | undefined,
+  baseConfidence: Confidence,
+  state: EffectBuildState,
+  context: CompilerContext,
+) => {
+  compileStatements(tryStatement.getTryBlock().getStatements(), guard, baseConfidence, state, context);
+
+  const catchClause = tryStatement.getCatchClause();
+  if (catchClause) {
+    compileStatements(
+      catchClause.getBlock().getStatements(),
+      catchGuard(catchClause, context),
+      baseConfidence,
+      state,
+      context,
+    );
+  }
+
+  const finallyBlock = tryStatement.getFinallyBlock();
+  if (finallyBlock) compileStatements(finallyBlock.getStatements(), guard, baseConfidence, state, context);
+};
+
 const EFFECT_STATEMENT_RULES: readonly EffectStatementRule[] = [
   {
     name: "block",
@@ -219,6 +254,13 @@ const EFFECT_STATEMENT_RULES: readonly EffectStatementRule[] = [
     match: Node.isSwitchStatement,
     compile(statement, _guard, baseConfidence, state, context) {
       compileSwitchStatement(statement as SwitchStatement, baseConfidence, state, context);
+    },
+  },
+  {
+    name: "try-statement",
+    match: Node.isTryStatement,
+    compile(statement, guard, baseConfidence, state, context) {
+      compileTryStatement(statement as TryStatement, guard, baseConfidence, state, context);
     },
   },
   {

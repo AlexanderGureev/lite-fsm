@@ -398,6 +398,24 @@ const result = transition({ type: "DECLARED" });
 await transition({ type: "AWAITED" });
 ```
 
+Поддержаны блоки `try`/`catch`/`finally`. Компилятор заходит внутрь блоков и извлекает прямые вызовы `transition(...)`, но не моделирует runtime-исключения и порядок фактического исполнения:
+
+```ts
+effects: {
+  PLAYING: ({ transition }) => {
+    try {
+      transition({ type: "TRACK_LOAD" });
+    } catch (err) {
+      transition({ type: "TRACK_LOAD_FAILED" });
+    } finally {
+      transition({ type: "TRACK_LOAD_AUDIT" });
+    }
+  },
+}
+```
+
+Вложенные `if`/`else if`/`else` и `switch` внутри `try`, `catch` и `finally` обрабатываются так же, как на верхнем уровне effect. Прямой emission из `catch` получает guard label `catch` или `catch (err)`.
+
 Поддержаны `if`/`else if`/`else` и `switch (action.type)` как guard labels. Если `switch` не по `action.type`, emissions сохраняются partial с diagnostic.
 
 Routing через `meta` поддержан и в domain, и в actor template effects:

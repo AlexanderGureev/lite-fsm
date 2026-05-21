@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type {
-  GraphCondition,
-  GraphRouting,
+import {
+  compileLiteFsmGraph,
+  type GraphCondition,
+  type GraphRouting,
 } from "@lite-fsm/graph";
-import { buildMachineFlowModel } from "@lite-fsm/graph/view-model";
+import { buildGraphVisualizerModel, buildMachineFlowModel } from "@lite-fsm/graph/view-model";
 import type {
   GraphConfigRow,
   GraphDiagnosticRow,
@@ -476,6 +477,48 @@ describe("модель Machine Flow из @lite-fsm/graph/view-model", () => {
     expect(result.edgeGroups.find((edge) => edge.label === "LOOP")?.direction).toBe("self");
     expect(result.edgeGroups.find((edge) => edge.label === "DONE")?.rows.map((row) => row.rowKind)).toEqual(["effect", "config"]);
     expect(result.nodes.find((node) => node.label === "loading")?.stats.emissions).toBe(2);
+  });
+
+  it("связывает self emission из try/catch effect с config self-transition", () => {
+    const compiled = compileLiteFsmGraph(
+      `
+        import { createMachine } from "@lite-fsm/core";
+
+        export const player = createMachine({
+          config: {
+            IDLE: { PLAY: "PLAYING" },
+            PLAYING: {
+              TRACK_END: "CHECKING_NEXT",
+              TRACK_LOAD: null,
+            },
+            CHECKING_NEXT: {},
+          },
+          initialState: "IDLE",
+          initialContext: {},
+          effects: {
+            PLAYING: ({ transition }) => {
+              try {
+                transition({ type: "TRACK_LOAD" });
+              } catch (err) {
+                console.log(err);
+              }
+            },
+          },
+        });
+      `,
+      { filename: "try-catch-player.ts" },
+    );
+    const model = buildGraphVisualizerModel(compiled.document);
+    const result = ready(model, "player");
+    const edge = result.edgeGroups.find((candidate) => candidate.label === "TRACK_LOAD");
+
+    expect(edge).toMatchObject({
+      kind: "self-emitted-transition",
+      direction: "self",
+      producerCategory: "self-emitted",
+    });
+    expect(edge?.rows.map((row) => row.rowKind)).toEqual(["config", "effect"]);
+    expect(result.nodes.find((node) => node.label === "PLAYING")?.stats.selfLoops).toBe(1);
   });
 
   it("pair-ит wildcard effect с concrete local consumer того же event", () => {
