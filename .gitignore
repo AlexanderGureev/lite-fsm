@@ -38,6 +38,10 @@ coverage/
 internal
 .cursor
 *.tsbuildinfo
-.agents
+.agents/*
+!.agents/skills/
+.agents/skills/*
+!.agents/skills/lite-fsm/
+!.agents/skills/lite-fsm/**
 .tmp
 .codex*

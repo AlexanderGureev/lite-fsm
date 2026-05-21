@@ -1,0 +1,4 @@
+interface:
+  display_name: "lite-fsm"
+  short_description: "Продуктовая логика на lite-fsm"
+  default_prompt: "Используй $lite-fsm, чтобы спроектировать логику приложения на lite-fsm."
