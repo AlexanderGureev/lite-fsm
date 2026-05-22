@@ -34,6 +34,8 @@
     "test:types:all": "pnpm run test:types && pnpm run build:packages && pnpm run test:types:dist",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "test:gc": "NODE_OPTIONS=--expose-gc vitest run --config vitest.gc.config.ts",
+    "test:stress": "NODE_OPTIONS=--expose-gc vitest run --config vitest.stress.config.ts",
     "visualizer:release": "pnpm --filter @lite-fsm/visualizer build && pnpm --filter @lite-fsm/visualizer test:coverage",
     "publint:release": "pnpm --filter './packages/*' exec publint --strict",
     "smoke:release": "node tests/smoke/esm.mjs && node tests/smoke/cjs.cjs && node tests/smoke/cli.mjs && node tests/smoke/cli-packed.mjs && tsc --noEmit -p tests/smoke/tsconfig.json",

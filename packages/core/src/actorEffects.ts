@@ -125,7 +125,7 @@ export const createActorEffectsRuntime = <P extends AnyEvent>(
 
   const buildActorTransition = (self: Self): ActorTransition<P> => {
     const base = ((action: ManagerAction<P>) => refs.transition(action, { sender: self })) as ActorTransition<P>;
-    base.unscoped = (action) => refs.transition(action as ManagerAction<P>, { sender: self, forceUnscoped: true });
+    base.unscoped = (action) => refs.transition(action as ManagerAction<P>, { sender: self, routingMode: "unscoped" });
     base.actor = (id, action) =>
       refs.transition({ ...action, meta: { actorId: id } } as ManagerAction<P>, { sender: self });
     base.group = (id, action) =>

@@ -36,6 +36,8 @@ export default defineConfig({
     globals: true,
     environment: "node",
     include: ["tests/**/*.test.{ts,tsx}"],
+    // `tests/stress/**` гоняется руками через `pnpm run test:stress` и не входит в общий suite.
+    exclude: ["node_modules/**", "dist/**", "tests/stress/**"],
     setupFiles: ["tests/setup.ts"],
     coverage: {
       provider: "v8",

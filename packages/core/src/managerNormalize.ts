@@ -3,13 +3,16 @@
 
 import { attachMeta, type NormalizeOptions, stripRouting, stripSenderFields } from "./actor";
 import type { DispatchContext } from "./dispatchContext";
-import { LATE_DISPATCH } from "./internal";
 import type { SidecarState } from "./sidecar";
 import type { AnyEvent, ManagerAction, MachineStore } from "./types";
 import { isSystemAction } from "./utils";
 
+// Sentinel: normalize дропает dispatch (sender disposed) — вызывающая сторона делает full no-op.
+// Локализован здесь, чтобы не утекать как coordination symbol через internal.ts.
+export const NORMALIZE_DROP = Symbol.for("lite-fsm.normalize-drop");
+
 export type Normalizer<S extends MachineStore, P extends AnyEvent> = {
-  normalizeAction: (raw: ManagerAction<P>, opts?: NormalizeOptions) => ManagerAction<P> | typeof LATE_DISPATCH;
+  normalizeAction: (raw: ManagerAction<P>, opts?: NormalizeOptions) => ManagerAction<P> | typeof NORMALIZE_DROP;
   applyPostNormalize: (ctx: DispatchContext<S, P>, action: ManagerAction<P>) => void;
 };
 
@@ -27,13 +30,13 @@ export const createNormalizer = <S extends MachineStore, P extends AnyEvent>(dep
 
   const normalizeAction = (
     raw: ManagerAction<P>,
-    { sender, forceUnscoped = false }: NormalizeOptions = {},
-  ): ManagerAction<P> | typeof LATE_DISPATCH => {
+    { sender, routingMode = "default" }: NormalizeOptions = {},
+  ): ManagerAction<P> | typeof NORMALIZE_DROP => {
     // Обычный external action без meta не требует копирования.
-    if (!sender && !forceUnscoped && !("meta" in raw)) return raw;
+    if (!sender && routingMode === "default" && !("meta" in raw)) return raw;
 
     // Sender уже disposed → full no-op.
-    if (sender && !sidecar.actorById.has(sender.actorId)) return LATE_DISPATCH;
+    if (sender && !sidecar.actorById.has(sender.actorId)) return NORMALIZE_DROP;
 
     // Срезаем sender-поля и переписываем настоящими — middleware не подделает sender.
     const meta = stripSenderFields(raw.meta);
@@ -44,7 +47,7 @@ export const createNormalizer = <S extends MachineStore, P extends AnyEvent>(dep
     }
 
     // transition.unscoped() обязан остаться unscoped — рубим routing и пропускаем default routing.
-    if (forceUnscoped) return attachMeta(raw, stripRouting(meta));
+    if (routingMode === "unscoped") return attachMeta(raw, stripRouting(meta));
 
     // Default routing: actor-dispatch без явного routing → в свою группу.
     if (sender && meta.actorId === undefined && meta.groupId === undefined && meta.groupTag === undefined) {
@@ -57,7 +60,7 @@ export const createNormalizer = <S extends MachineStore, P extends AnyEvent>(dep
   // ФАЗА 2: post-normalize после middleware. Пишет clean action в ctx.committed.
   const applyPostNormalize = (ctx: DispatchContext<S, P>, action: ManagerAction<P>): void => {
     const normalized = normalizeAction(action, ctx.normalizeOpts);
-    if (normalized !== LATE_DISPATCH) ctx.committed = normalized;
+    if (normalized !== NORMALIZE_DROP) ctx.committed = normalized;
   };
 
   return { normalizeAction, applyPostNormalize };

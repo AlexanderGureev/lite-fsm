@@ -142,6 +142,31 @@ describe("MachineManager actors — snapshot hydration", () => {
     expect(restored.getState().likeSync["likeSync/0"].context.id).toBe("a");
   });
 
+  it("snapshot roundtrip через JSON.stringify/parse восстанавливает actors с canonical meta", () => {
+    const manager = MachineManager({ counter, likeSync: createSnapshotLikeSync() }, { schemaVersion: 1 });
+    manager.transition({ type: "INC" });
+    manager.transition({ type: "LIKE", payload: { id: "a" } });
+    manager.transition({ type: "LIKE", payload: { id: "b" }, meta: { groupId: "likeSync/0" } });
+
+    const serialized = JSON.stringify(manager.dehydrate());
+    const restored = MachineManager(
+      { counter, likeSync: createSnapshotLikeSync() },
+      { schemaVersion: 1, snapshot: JSON.parse(serialized) },
+    );
+
+    expect(restored.getState().counter.context.count).toBe(1);
+    expect(Object.keys(restored.getState().likeSync).sort()).toEqual(["likeSync/0", "likeSync/1"]);
+    expect(restored.getState().likeSync["likeSync/1"].meta).toEqual({
+      actorId: "likeSync/1",
+      groupId: "likeSync/0",
+      groupTag: "likeSync",
+    });
+
+    restored.transition({ type: "BUMP", meta: { groupId: "likeSync/0" } });
+    expect(restored.getState().likeSync["likeSync/0"].context.count).toBe(2);
+    expect(restored.getState().likeSync["likeSync/1"].context.count).toBe(2);
+  });
+
   it("runtime actor dehydrate() остаётся implicit skip, а explicit key бросает ошибку", () => {
     const runtimeActor = createLikeSync();
     const manager = MachineManager({ counter, likeSync: runtimeActor });

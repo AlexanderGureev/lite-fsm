@@ -28,15 +28,17 @@ describe("регрессионная матрица public entry points", () => 
     type _CoreKeys = Assert<
       Equal<
         keyof typeof core,
+        | "HYDRATE_ACTION_TYPE"
+        | "LiteFsmError"
         | "Machine"
         | "MachineManager"
+        | "VOID_REDUCER_MIDDLEWARE_MARKER"
         | "createActorMeta"
         | "createConfig"
         | "createEffect"
         | "createMachine"
         | "createReducer"
         | "defineMachine"
-        | "LiteFsmError"
       >
     >;
   });
@@ -67,7 +69,7 @@ describe("регрессионная матрица public entry points", () => 
   });
 
   test("internal coordination symbols не доступны из public entry points", () => {
-    type InternalSymbolName = "LATE_DISPATCH" | "DEVTOOLS_API" | "ACTOR_RESTORE" | "REGISTER_BAG_DISPOSE";
+    type InternalSymbolName = "NORMALIZE_DROP" | "DEVTOOLS_API" | "ACTOR_RESTORE" | "REGISTER_BAG_DISPOSE";
     type _NoCoreInternals = Assert<IsNever<Extract<keyof typeof core, InternalSymbolName>>>;
     type _NoMiddlewareInternals = Assert<IsNever<Extract<keyof typeof middleware, InternalSymbolName>>>;
     type _NoDevToolsInternals = Assert<IsNever<Extract<keyof typeof devToolsEntry, InternalSymbolName>>>;

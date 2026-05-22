@@ -44,7 +44,9 @@ Coordinator — опциональный тип. Любой effect может ч
 5. локальные чистые helpers, если inline-форма теряет читаемость или helper переиспользуется;
 6. `createMachine({ config: {...}, initialState, initialContext, reducer, effects })`.
 
-По умолчанию держи всю конфигурацию автомата inline внутри `createMachine({ ... })`: `config`, `reducer` и `effects` должны читаться как единый контракт машины. Отдельные `const config = createConfig(...)`, `const reducer = createReducer(...)` и `const effect = createEffect(...)` используй только когда автомат слишком большой для чтения в одном объекте или часть конфигурации нужно переиспользовать между machines, effects или тестами. Если нужен `createEffect` для `latest` или `cancelFn`, оставляй вызов inline в `effects`, пока это читается.
+По умолчанию держи всю конфигурацию автомата inline внутри `createMachine({ ... })`: `config`, `reducer` и `effects` должны читаться как единый контракт машины. Отдельные `const config = createConfig(...)`, `const reducer = createReducer(...)` и `const effect = createEffect(...)` используй только когда автомат слишком большой для чтения в одном объекте или часть конфигурации нужно переиспользовать между machines, effects или тестами.
+
+Async effect по умолчанию — обычная inline-функция в `effects`. Заводи `createEffect(...)` только для реальной семантики его опций (`latest`, `cancelFn`), а не ради консистентности. Если `config` и UI не позволяют повторно запустить процесс до завершения, `latest` не нужен и только заставляет читать код как потенциально конкурентный.
 
 ### Helpers рядом с машиной
 
@@ -97,7 +99,7 @@ Context хранит модель владельца machine.
 
 ## Effects
 
-Effect выполняет внешнюю работу при входе в state и возвращает результат новым событием. Не меняет state напрямую, читает root через `getState`, ошибки превращает в `*_REJECTED` с сериализованным payload.
+Effect выполняет внешнюю работу при входе в state и возвращает результат новым событием. Не меняет state напрямую, читает root через `getState`, ошибки превращает в `*_REJECTED` с сериализованным payload. Для обычного one-shot process используй inline async effect.
 
 Деталі (`createEffect`, `condition`, middleware, deps grouping) — в `effects.md`.
 

@@ -9,7 +9,7 @@
 - `null` transitions: событие принято, reducer обработал payload без обязательной смены state.
 - Guard-through-reducer: reducer явно выбирает target state по payload/context.
 - Effects lifecycle: `*_PENDING` отправляет `*_RESOLVED`/`*_REJECTED`, а rejected payload содержит сериализованную ошибку для UI/логирования/тестов.
-- Late async: `createEffect({ type: "latest" })` не применяет устаревший result.
+- Late async: если используется `createEffect({ type: "latest" })`, устаревший result не применяется; не добавляй этот тест для one-shot inline effects без повторного trigger.
 - Actors: spawn через `__INIT`, routing, terminal removal.
 - Selectors: projection строится из state и не мутирует model.
 - Persistence/hydration: snapshot shape, restore strategy, custom hooks idempotency.

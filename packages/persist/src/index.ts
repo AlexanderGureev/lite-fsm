@@ -1,15 +1,14 @@
-import type {
-  DehydrateOptions,
-  HydrateStrategy,
-  IMachineManager,
-  MachineManagerSnapshot,
-  MachinesState,
-  MachineStore,
-  ManagerCommitAction,
+import {
+  type DehydrateOptions,
+  HYDRATE_ACTION_TYPE,
+  type HydrateStrategy,
+  type IMachineManager,
+  type MachineManagerSnapshot,
+  type MachinesState,
+  type MachineStore,
+  type ManagerCommitAction,
 } from "@lite-fsm/core";
 import { createTaskScope, isTaskCancelledError, type TaskContext } from "./taskScope";
-
-const HYDRATE_ACTION_TYPE = "@@lite-fsm/HYDRATE";
 
 export type MaybePromise<T> = T | Promise<T>;
 

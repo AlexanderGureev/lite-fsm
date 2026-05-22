@@ -1,6 +1,4 @@
-import type { AnyEvent, GenericMiddleware, MiddlewareApi } from "@lite-fsm/core";
-
-const HYDRATE_ACTION_TYPE = "@@lite-fsm/HYDRATE";
+import { type AnyEvent, type GenericMiddleware, HYDRATE_ACTION_TYPE, type MiddlewareApi } from "@lite-fsm/core";
 
 type DevToolsOptions = {
   blacklistActions?: string[];

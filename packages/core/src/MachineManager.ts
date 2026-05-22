@@ -21,15 +21,9 @@ import {
   reserveActorId,
   type SpawnIdConfig,
 } from "./dispatchContext";
-import {
-  applySnapshot as applySnapshotPure,
-  type ApplySnapshotDeps,
-  type ApplySnapshotResult,
-  buildDehydratedEnvelope,
-} from "./hydration";
-import { LATE_DISPATCH } from "./internal";
+import { applySnapshot as applySnapshotPure, type ApplySnapshotDeps, buildDehydratedEnvelope } from "./hydration";
 import { buildManagerIndexes, type ConfigHelpers, createConfigHelpers } from "./managerIndexes";
-import { assertUserAction, createNormalizer } from "./managerNormalize";
+import { assertUserAction, createNormalizer, NORMALIZE_DROP } from "./managerNormalize";
 import { createRoutingResolver } from "./managerRouting";
 import {
   buildReplacementReconcilePlan,
@@ -110,10 +104,13 @@ export const MachineManager = <S extends MachineStore, P extends AnyEvent = Mach
   };
 
   const machineKeys = Object.keys(config) as Array<MachineKey<S>>;
-  const getActorRecord = (root: RootState, templateKey: string): ActorRecord => root[templateKey] as ActorRecord;
 
-  const actorTemplateKeys = machineKeys.filter((name) => isActorTemplateConfig(config[name]));
-  const domainKeys = machineKeys.filter((name) => !isActorTemplateConfig(config[name]));
+  const actorTemplateKeys: Array<MachineKey<S>> = [];
+  const domainKeys: Array<MachineKey<S>> = [];
+  for (const name of machineKeys) {
+    if (isActorTemplateConfig(config[name])) actorTemplateKeys.push(name);
+    else domainKeys.push(name);
+  }
 
   // Fail-fast config validation before deriving anything from `persistence` and before building indexes.
   for (const key of actorTemplateKeys) validateActorTemplateConfig(key, config[key]);
@@ -126,8 +123,12 @@ export const MachineManager = <S extends MachineStore, P extends AnyEvent = Mach
     }
   }
 
-  const snapshotActorTemplateKeys = actorTemplateKeys.filter((name) => config[name].persistence === "snapshot");
-  const runtimeActorTemplateKeys = actorTemplateKeys.filter((name) => config[name].persistence !== "snapshot");
+  const snapshotActorTemplateKeys: Array<MachineKey<S>> = [];
+  const runtimeActorTemplateKeys: Array<MachineKey<S>> = [];
+  for (const key of actorTemplateKeys) {
+    if (config[key].persistence === "snapshot") snapshotActorTemplateKeys.push(key);
+    else runtimeActorTemplateKeys.push(key);
+  }
   const allowVoidReducer = Boolean(opts?.middleware?.some(supportsVoidReducer));
   const schemaVersion = opts?.schemaVersion;
 
@@ -140,7 +141,7 @@ export const MachineManager = <S extends MachineStore, P extends AnyEvent = Mach
     groupTagForTemplate,
   );
   // Если effects нигде нет, не собираем targets на каждый tick.
-  const hasConfiguredEffects = (name: string) => Boolean((config[name as MachineKey<S>] as RuntimeConfig).effects);
+  const hasConfiguredEffects = (name: MachineKey<S>) => Boolean((config[name] as RuntimeConfig).effects);
   const domainEffectKeys = domainKeys.filter(hasConfiguredEffects);
   const hasActorEffects = actorTemplateKeys.some(hasConfiguredEffects);
   const hasAnyEffects = domainEffectKeys.length > 0 || hasActorEffects;
@@ -259,7 +260,7 @@ export const MachineManager = <S extends MachineStore, P extends AnyEvent = Mach
     identity: ActorIdentity,
     action: Action,
   ): { root: RootState; delivered: boolean } => {
-    const record = getActorRecord(root, identity.templateKey);
+    const record = root[identity.templateKey] as ActorRecord;
     const slice = record?.[identity.meta.actorId];
     if (!slice || !hasActorTransition(identity.templateKey, slice.state, action)) {
       return { root, delivered: false };
@@ -282,7 +283,7 @@ export const MachineManager = <S extends MachineStore, P extends AnyEvent = Mach
       if (seen.has(identity.meta.actorId)) continue;
       seen.add(identity.meta.actorId);
 
-      const record = getActorRecord(next, identity.templateKey);
+      const record = next[identity.templateKey] as ActorRecord;
       const slice = record?.[identity.meta.actorId];
       if (!slice || !isTerminal(slice.state)) continue;
 
@@ -357,16 +358,20 @@ export const MachineManager = <S extends MachineStore, P extends AnyEvent = Mach
       return ctx.touchedActorRecords.get(templateKey) !== nextState[templateKey];
     });
 
+  // Slow-path replacement reconcile: используется и dispatch'ем (externally replaced records),
+  // и hydrate-flow (changed records из snapshot result). Build + commit replacement идут парой.
+  const reconcileReplacedActorRecords = (
+    nextState: RootState,
+    changedTemplateKeys: readonly string[],
+  ): RootState => {
+    if (changedTemplateKeys.length === 0) return nextState;
+    const plan = buildReplacementReconcilePlan(sidecar, sidecarValidationDeps, changedTemplateKeys, nextState);
+    return commitReplacementSidecar(sidecar, plan, nextState);
+  };
+
   const commitReducedState = (ctx: DispatchContext<S, P>, prevState: RootState, nextState: RootState): RootState => {
-    const replacedActorTemplateKeys = detectExternallyReplacedActorRecords(prevState, nextState, ctx);
-    const replacementPlan = replacedActorTemplateKeys.length
-      ? buildReplacementReconcilePlan(sidecar, sidecarValidationDeps, replacedActorTemplateKeys, nextState)
-      : undefined;
-
-    const reconciledState = replacementPlan
-      ? commitReplacementSidecar(sidecar, replacementPlan, nextState)
-      : nextState;
-
+    const replacedKeys = detectExternallyReplacedActorRecords(prevState, nextState, ctx);
+    const reconciledState = reconcileReplacedActorRecords(nextState, replacedKeys);
     // ФАЗА 9: single root commit — state + sidecar.
     return commitDispatchSidecar(sidecar, ctx, reconciledState);
   };
@@ -415,17 +420,6 @@ export const MachineManager = <S extends MachineStore, P extends AnyEvent = Mach
     onUnknownMachineKey: opts?.onUnknownMachineKey,
   };
 
-  const commitHydrationResult = (result: ApplySnapshotResult<S>, nextState: RootState): RootState => {
-    if (result.changedActorTemplateKeys.length === 0) return nextState;
-    const plan = buildReplacementReconcilePlan(
-      sidecar,
-      sidecarValidationDeps,
-      result.changedActorTemplateKeys,
-      nextState,
-    );
-    return commitReplacementSidecar(sidecar, plan, nextState);
-  };
-
   const getHydratedState = (
     snapshot: MachineManagerSnapshot<S>,
     { strategy = "merge", baseState = state }: HydratePreviewOptions<S> = {},
@@ -434,7 +428,7 @@ export const MachineManager = <S extends MachineStore, P extends AnyEvent = Mach
   const initialSnapshot = opts?.snapshot;
   if (initialSnapshot) {
     const result = applySnapshotPure(state, initialSnapshot, "replace", "opts.snapshot", hydrationDeps);
-    state = commitHydrationResult(result, result.nextState);
+    state = reconcileReplacedActorRecords(result.nextState, result.changedActorTemplateKeys);
   }
 
   /* v8 ignore next */
@@ -449,7 +443,7 @@ export const MachineManager = <S extends MachineStore, P extends AnyEvent = Mach
     const nextState = result.nextState;
     if (nextState === prevState) return;
 
-    state = commitHydrationResult(result, nextState);
+    state = reconcileReplacedActorRecords(nextState, result.changedActorTemplateKeys);
     /* v8 ignore next */
     if (IS_DEV) deepFreeze(state);
     invokeSubscribers(prevState, state, { type: HYDRATE_ACTION_TYPE, payload: { strategy, snapshot } });
@@ -522,7 +516,7 @@ export const MachineManager = <S extends MachineStore, P extends AnyEvent = Mach
 
     // ФАЗА 0: pre-normalize (sender, late dispatch, default routing).
     const preNormalized = normalizeAction(action, normalizeOpts);
-    if (preNormalized === LATE_DISPATCH) return action;
+    if (preNormalized === NORMALIZE_DROP) return action;
 
     const parentCtx = currentDispatchContext;
     const ctx = createDispatchContext<S, P>(normalizeOpts, sidecar.counters);

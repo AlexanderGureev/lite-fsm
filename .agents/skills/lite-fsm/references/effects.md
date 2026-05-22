@@ -30,34 +30,71 @@ Rules:
 - Не проверяй `action.type` повторно, если у effect один target state и `config` уже направил event в него.
 - Сервисный слой в deps должен быть тонким adapter layer.
 
-## `createEffect({ type: "latest" })`
+## One-shot inline vs repeatable latest
 
-Используй `latest` для запросов, поиска, автосохранения и процессов, где последний запуск должен победить.
-В коде machine по умолчанию размещай `createEffect(...)` inline внутри `effects`; выноси в отдельную константу только при большой длине или переиспользовании.
+Для one-shot процесса, который нельзя повторно запустить до завершения через `config` и UI, пиши обычную inline async-функцию. Это делает модель честной: читатель не ищет скрытую конкурентность там, где ее нет.
 
 ```ts
 effects: {
-  FETCH_ITEMS_PENDING: createEffect({
-    type: "latest",
-    effect: async ({ action, api, transition }) => {
-      try {
-        const page = await api.loadItems(action.payload);
-        transition({ type: "FETCH_ITEMS_RESOLVED", payload: { request: action.payload, page } });
-      } catch (error) {
-        transition({
-          type: "FETCH_ITEMS_REJECTED",
-          payload: {
-            request: action.payload,
-            error: { message: error instanceof Error ? error.message : String(error) },
-          },
-        });
-      }
-    },
-  }),
+  LOGIN_PENDING: async ({ api, transition }) => {
+    try {
+      const user = await api.login();
+      transition({ type: "LOGIN_RESOLVED", payload: { user } });
+    } catch (error) {
+      transition({
+        type: "LOGIN_REJECTED",
+        payload: { error: error instanceof Error ? error.message : String(error) },
+      });
+    }
+  },
+},
+```
+
+Не оборачивай такой effect в `createEffect` ради перестраховки или единого стиля.
+
+Используй `latest` только когда есть реальная возможность повторного запуска до завершения и последний запуск должен победить: поиск по мере ввода, refresh/refetch поверх текущего запроса, автосохранение, ручной retry без ожидания старого результата.
+
+Перед `latest` проверь, что повторный trigger реально приводит к новому запуску effect. `null` self-transition в том же state не перезапускает state effect. Если процесс строго one-shot до `*_RESOLVED`/`*_REJECTED`, используй inline async effect.
+
+```ts
+const searchItemsEffect = createEffect({
+  type: "latest",
+  effect: async ({ action, api, transition }) => {
+    try {
+      const results = await api.searchItems(action.payload.query);
+      transition({ type: "SEARCH_ITEMS_RESOLVED", payload: { query: action.payload.query, results } });
+    } catch (error) {
+      transition({
+        type: "SEARCH_ITEMS_REJECTED",
+        payload: {
+          query: action.payload.query,
+          error: { message: error instanceof Error ? error.message : String(error) },
+        },
+      });
+    }
+  },
+});
+
+config: {
+  READY: { SEARCH_ITEMS: "SEARCH_PENDING" },
+  SEARCH_PENDING: {
+    SEARCH_ITEMS: "SEARCH_RESTART",
+    SEARCH_ITEMS_RESOLVED: "READY",
+    SEARCH_ITEMS_REJECTED: "READY",
+  },
+  SEARCH_RESTART: { SEARCH_ITEMS: "SEARCH_PENDING" },
+},
+effects: {
+  SEARCH_PENDING: searchItemsEffect,
+  SEARCH_RESTART: ({ action, transition }) => {
+    transition(action);
+  },
 },
 ```
 
 `latest` не отменяет promise/request/timer. Он блокирует поздний `transition`. Для actor effect guard изолирован на actor instance.
+
+Если используешь `createEffect`, держи вызов inline внутри `effects`, пока он читается. Выноси в отдельную константу только при большой длине или переиспользовании.
 
 Если нужна ручная отмена, используй `cancelFn` только когда есть ясный cancel condition; все равно моделируй cancel event в `config`.
 

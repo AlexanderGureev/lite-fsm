@@ -91,4 +91,21 @@ describe("dehydrate у MachineManager", () => {
     expect(restored.getState().counter.context.count).toBe(1);
     expect(source.getState()).toBe(before);
   });
+
+  it("snapshot roundtrip через JSON.stringify/parse сохраняет state и schemaVersion", () => {
+    const source = MachineManager({ counter, plain }, { schemaVersion: 5 });
+    source.transition({ type: "INC" });
+    source.transition({ type: "INC" });
+
+    const serialized = JSON.stringify(source.dehydrate());
+    const restored = MachineManager(
+      { counter, plain },
+      { schemaVersion: 5, snapshot: JSON.parse(serialized) },
+    );
+
+    expect(restored.getState()).toEqual({
+      counter: { state: "IDLE", context: { count: 2, secret: "hidden" } },
+      plain: { state: "READY", context: { label: "ok" } },
+    });
+  });
 });

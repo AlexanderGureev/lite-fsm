@@ -2,21 +2,16 @@ import { describe, expect, it } from "vitest";
 
 import {
   bumpCountersFromId,
+  cloneCounters,
   type Counters,
   isOwnedId,
+  mergeCounters,
   parseSpawnId,
-  SPAWN_ID_SEP,
 } from "@lite-fsm/core/internal/actor";
 
 const makeCounters = (actor = 0, groups: Array<[string, number]> = []): Counters => ({
   actor,
   groupByTag: new Map(groups),
-});
-
-describe("SPAWN_ID_SEP", () => {
-  it("разделитель равен '#'", () => {
-    expect(SPAWN_ID_SEP).toBe("#");
-  });
 });
 
 describe("parseSpawnId", () => {
@@ -135,5 +130,62 @@ describe("bumpCountersFromId", () => {
     bumpCountersFromId(c, "alice#likeSync/5", "bob#likeSync/9", "alice");
     expect(c.actor).toBe(6);
     expect(c.groupByTag.get("likeSync")).toBeUndefined();
+  });
+});
+
+describe("cloneCounters", () => {
+  it("создаёт независимый snapshot: мутация клона не трогает оригинал", () => {
+    const original = makeCounters(3, [["a", 5]]);
+    const clone = cloneCounters(original);
+
+    clone.actor = 100;
+    clone.groupByTag.set("a", 99);
+    clone.groupByTag.set("b", 1);
+
+    expect(original.actor).toBe(3);
+    expect(original.groupByTag.get("a")).toBe(5);
+    expect(original.groupByTag.has("b")).toBe(false);
+  });
+});
+
+describe("mergeCounters", () => {
+  it("max-merge actor counter — берёт большее из live и draft", () => {
+    expect(mergeCounters(makeCounters(5), makeCounters(3)).actor).toBe(5);
+    expect(mergeCounters(makeCounters(2), makeCounters(7)).actor).toBe(7);
+    expect(mergeCounters(makeCounters(4), makeCounters(4)).actor).toBe(4);
+  });
+
+  it("max-merge per-tag counters — берёт максимум по каждому тегу", () => {
+    const live = makeCounters(0, [
+      ["a", 10],
+      ["b", 2],
+    ]);
+    const draft = makeCounters(0, [
+      ["a", 5],
+      ["b", 8],
+      ["c", 1],
+    ]);
+
+    const merged = mergeCounters(live, draft);
+
+    expect(merged.groupByTag.get("a")).toBe(10);
+    expect(merged.groupByTag.get("b")).toBe(8);
+    expect(merged.groupByTag.get("c")).toBe(1);
+  });
+
+  it("не мутирует live: создаёт новый Counters", () => {
+    const live = makeCounters(0, [["a", 1]]);
+    const merged = mergeCounters(live, makeCounters(5, [["b", 9]]));
+
+    expect(merged).not.toBe(live);
+    expect(merged.groupByTag).not.toBe(live.groupByTag);
+    expect(live.actor).toBe(0);
+    expect(live.groupByTag.size).toBe(1);
+  });
+
+  it("draft без тега не удаляет тег из live", () => {
+    const live = makeCounters(0, [["a", 3]]);
+    const merged = mergeCounters(live, makeCounters());
+    expect(merged.groupByTag.get("a")).toBe(3);
   });
 });

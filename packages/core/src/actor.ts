@@ -20,7 +20,7 @@ export type ActorIdentity = { meta: Readonly<ActorMeta>; templateKey: string };
 export type ActorRuntime = ActorIdentity & { bag: ActorBag };
 export type GroupIndex = { groupTag: string; actorIds: Set<string>; actorIdsByTemplate: Map<string, Set<string>> };
 export type Counters = { actor: number; groupByTag: Map<string, number> };
-export type NormalizeOptions = { sender?: Self; forceUnscoped?: boolean };
+export type NormalizeOptions = { sender?: Self; routingMode?: "default" | "unscoped" };
 export type RoutingScope = "actor" | "group" | "tag" | "unscoped";
 
 // === Константы ================================================================
@@ -260,16 +260,15 @@ export const bumpCountersFromId = (
   originId: string | undefined,
 ): void => {
   if (isOwnedId(actorId, originId)) {
-    const actorCounter = parseTrailingCounter(parseSpawnId(actorId).tail);
-    if (actorCounter !== null) counters.actor = Math.max(counters.actor, actorCounter + 1);
+    const counter = parseTrailingCounter(parseSpawnId(actorId).tail);
+    if (counter !== null) counters.actor = Math.max(counters.actor, counter + 1);
   }
 
   if (isOwnedId(groupId, originId)) {
     const tail = parseSpawnId(groupId).tail;
-    const slash = tail.lastIndexOf("/");
-    const groupCounter = parseTrailingCounter(tail);
-    if (groupCounter === null) return;
-    const tag = tail.slice(0, slash);
-    counters.groupByTag.set(tag, Math.max(counters.groupByTag.get(tag) ?? 0, groupCounter + 1));
+    const counter = parseTrailingCounter(tail);
+    if (counter === null) return;
+    const tag = tail.slice(0, tail.lastIndexOf("/"));
+    counters.groupByTag.set(tag, Math.max(counters.groupByTag.get(tag) ?? 0, counter + 1));
   }
 };

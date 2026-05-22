@@ -1,8 +1,12 @@
 import { produce } from "immer";
 
-import type { AnyEvent, ManagerAction, MiddlewareApi, VoidReducerMiddleware } from "@lite-fsm/core";
-
-const VOID_REDUCER_MIDDLEWARE_MARKER = "__liteFsmAllowVoidReducer";
+import {
+  type AnyEvent,
+  type ManagerAction,
+  type MiddlewareApi,
+  VOID_REDUCER_MIDDLEWARE_MARKER,
+  type VoidReducerMiddleware,
+} from "@lite-fsm/core";
 
 const createMiddleware = <S, P extends AnyEvent>(api: MiddlewareApi<S, P>) => {
   api.replaceReducer((reducer) => {

@@ -182,12 +182,15 @@ describe("hydrate у MachineManager", () => {
     );
   });
 
-  it("валидирует envelope, но не custom snapshot каждой машины", () => {
+  it("валидирует envelope shape, но передаёт raw snapshot машины в hydrate hook без проверок", () => {
     const manager = MachineManager({ counter: counterMachine });
 
     expect(() => manager.hydrate(null as never)).toThrow(/snapshot must be an object/);
     expect(() => manager.hydrate({ machines: null } as never)).toThrow(/snapshot\.machines must be an object/);
-    expect(() => manager.hydrate({ machines: { counter: { count: 1, extra: true } as CounterSnapshot } })).not.toThrow();
+
+    manager.hydrate({ machines: { counter: { count: 7, extra: true } as CounterSnapshot } });
+
+    expect(manager.getState().counter.context).toEqual({ count: 7 });
   });
 
   it("пропускает неизвестные машины, вызывает callbacks и применяет известные slices", () => {

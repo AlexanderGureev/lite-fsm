@@ -1,6 +1,6 @@
 ---
 name: lite-fsm
-description: "Помогает использовать lite-fsm latest в продуктовых TypeScript/React apps: проектировать app logic как FSM/state machines, писать typed machines, actors, effects, persistence, SSR/hydration, tests и thin UI поверх @lite-fsm/core/@lite-fsm/react."
+description: "Помогает проектировать и реализовывать бизнес-логику на lite-fsm в TypeScript/React apps: state machines, actors, async effects, persistence, SSR/hydration, tests и thin UI поверх @lite-fsm/core/@lite-fsm/react."
 ---
 
 # lite-fsm
@@ -21,6 +21,7 @@ description: "Помогает использовать lite-fsm latest в пр�
 - domain events, payload и уровень достоверности события;
 - источник истины для каждого поля и derived data для selectors;
 - effects и deps, actor routing, persistence, SSR/hydration — только если они нужны для задачи;
+- для async process проверь, может ли он реально стартовать повторно до terminal event; если нет, не используй `latest`;
 - что остается вне machine: разметка, transient UI state и тонкие external adapters.
 
 ## Workflow
@@ -49,10 +50,18 @@ description: "Помогает использовать lite-fsm latest в пр�
 - События типизируй union из `FSMEvent<...>`.
 - Для app-level typing экспортируй локальные wrappers `createMachine`, `createConfig`, `createReducer`, `createEffect`.
 - По умолчанию инлайнь всю конфигурацию автомата внутри `createMachine({ ... })`: `config`, `reducer` и `effects` должны читаться рядом с машиной. Отдельные `const config = createConfig(...)`, `const reducer = createReducer(...)` и `const effect = createEffect(...)` используй только когда автомат слишком большой для чтения в одном объекте или часть конфигурации нужно переиспользовать.
+- По умолчанию пиши async effects обычной inline-функцией. `createEffect(...)` используй только при реальной необходимости опций (`latest`, `cancelFn`): когда процесс можно повторно запустить до завершения, поздний результат реально опасен или есть явная cancel-семантика. Не используй `createEffect` ради перестраховки или единого стиля.
 - Один machine или actor template — один модуль: `src/store/machines/<kebab-case>.ts` для простого случая или `src/store/machines/<kebab-case>/index.ts` с локальными файлами для сложного.
 - Узкие чтения делай inline через `useAppSelector(s => s.machine.state === "...")`. Выноси именованный selector в `src/store/selectors/` только если projection агрегирует несколько machines, нетривиальна или переиспользуется в трех и более местах.
 - Persistence добавляй только когда состояние должно пережить reload или session break.
 - `@lite-fsm/graph` и `@lite-fsm/cli` используй только по явному запросу на graph export, visualizer, static analysis или scaffold; этот skill не описывает их API.
+
+## Anti-patterns
+
+- `createEffect` ради перестраховки или единого стиля.
+- Storage read/write из UI вместо machine deps или persist.
+- Derived flags в `context`, если selector может вычислить их из source of truth.
+- Wildcard config ради экономии строк вместо явных transitions.
 
 ## Entrypoints
 

@@ -41,11 +41,11 @@ export const chatThread = createMachine({
 });
 ```
 
-## Process machine with `latest` effect
+## Process machine with inline async effect
 
 ```ts
 import type { FSMEvent } from "@lite-fsm/core";
-import { createEffect, createMachine } from "../create-machine";
+import { createMachine } from "../create-machine";
 
 type Request = { key: string };
 type Page = { items: string[] };
@@ -88,23 +88,22 @@ export const itemList = createMachine({
     }
   },
   effects: {
-    FETCH_ITEMS_PENDING: createEffect({
-      type: "latest",
-      effect: async ({ action, api, transition }) => {
-        try {
-          const page = await api.loadItems(action.payload);
-          transition({ type: "FETCH_ITEMS_RESOLVED", payload: { request: action.payload, page } });
-        } catch (error) {
-          transition({
-            type: "FETCH_ITEMS_REJECTED",
-            payload: { request: action.payload, error: { message: error instanceof Error ? error.message : String(error) } },
-          });
-        }
-      },
-    }),
+    FETCH_ITEMS_PENDING: async ({ action, api, transition }) => {
+      try {
+        const page = await api.loadItems(action.payload);
+        transition({ type: "FETCH_ITEMS_RESOLVED", payload: { request: action.payload, page } });
+      } catch (error) {
+        transition({
+          type: "FETCH_ITEMS_REJECTED",
+          payload: { request: action.payload, error: { message: error instanceof Error ? error.message : String(error) } },
+        });
+      }
+    },
   },
 });
 ```
+
+Это default для process-машины, где `FETCH_ITEMS` не принимается в `FETCH_ITEMS_PENDING`. Если pending-state принимает повторный trigger и последний запрос должен победить, смотри `references/effects.md` про `createEffect({ type: "latest" })`.
 
 ## Guard-through-reducer
 

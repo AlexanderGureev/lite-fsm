@@ -19,7 +19,7 @@ export { CreateMachine as Machine, defineMachine } from "./Machine";
 export { MachineManager } from "./MachineManager";
 export * from "./types";
 export { createMachine, type TypedCreateMachineFn } from "./createMachine";
-export { LiteFsmError } from "./utils";
+export { HYDRATE_ACTION_TYPE, LiteFsmError, VOID_REDUCER_MIDDLEWARE_MARKER } from "./utils";
 
 export const createReducer = <C extends object, T extends AnyRecord, P extends AnyEvent = AnyEvent>(
   reducer: MachineReducer<C, P, T>,

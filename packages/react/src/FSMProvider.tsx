@@ -20,31 +20,18 @@ export type FSMContextProviderProps<S extends MachineStore, P extends AnyEvent =
   persist?: readonly FSMPersistLifecycle[];
 }>;
 
-type PersistEntriesCache = {
-  snapshot: readonly FSMPersistLifecycle[];
-};
-
-const createPersistEntriesCache = (): PersistEntriesCache => ({
-  snapshot: EMPTY_PERSIST_ENTRIES,
-});
-
 const normalizePersistEntries = (persist: readonly FSMPersistLifecycle[] | undefined) =>
   persist === undefined || persist.length === 0 ? EMPTY_PERSIST_ENTRIES : persist;
 
-const readStablePersistEntries = (
-  cache: PersistEntriesCache,
-  persist: readonly FSMPersistLifecycle[] | undefined,
-) => {
-  const nextEntries = normalizePersistEntries(persist);
-  if (arePersistLifecycleSequencesEqual(cache.snapshot, nextEntries)) return cache.snapshot;
-
-  cache.snapshot = nextEntries.length === 0 ? EMPTY_PERSIST_ENTRIES : [...nextEntries];
-  return cache.snapshot;
-};
-
+// Стабильная ссылка по contents-equality: тот же sequence — та же ref между рендерами.
+// Derived state pattern: новый sequence триггерит немедленный re-render с обновлённым stable.
 const usePersistEntries = (persist: readonly FSMPersistLifecycle[] | undefined) => {
-  const cache = React.useMemo(() => createPersistEntriesCache(), []);
-  return readStablePersistEntries(cache, persist);
+  const [stable, setStable] = React.useState<readonly FSMPersistLifecycle[]>(EMPTY_PERSIST_ENTRIES);
+  const next = normalizePersistEntries(persist);
+  if (!arePersistLifecycleSequencesEqual(stable, next)) {
+    setStable(next.length === 0 ? EMPTY_PERSIST_ENTRIES : [...next]);
+  }
+  return stable;
 };
 
 export const FSMContextProvider = <S extends MachineStore, P extends AnyEvent = AnyEvent>({
@@ -53,14 +40,11 @@ export const FSMContextProvider = <S extends MachineStore, P extends AnyEvent = 
   machineManager,
   persist,
 }: FSMContextProviderProps<S, P>) => {
-  const value = React.useMemo(() => machineManager, [machineManager]);
-  const initialSnapshot = React.useMemo(() => machineManager.getState(), [machineManager]);
-  const serverSnapshot = React.useMemo(
-    () => ({
-      getState: getServerSnapshot ?? (() => initialSnapshot),
-    }),
-    [getServerSnapshot, initialSnapshot],
-  );
+  const serverSnapshot = React.useMemo(() => {
+    if (getServerSnapshot) return { getState: getServerSnapshot };
+    const snapshot = machineManager.getState();
+    return { getState: () => snapshot };
+  }, [getServerSnapshot, machineManager]);
   const persistEntries = usePersistEntries(persist);
   const persistStatusSources = React.useMemo(() => resolvePersistStatusSources(persistEntries), [persistEntries]);
 
@@ -73,7 +57,7 @@ export const FSMContextProvider = <S extends MachineStore, P extends AnyEvent = 
   }, [persistEntries]);
 
   return (
-    <FSMContext.Provider value={value}>
+    <FSMContext.Provider value={machineManager}>
       <FSMPersistStatusesContext.Provider value={persistStatusSources}>
         <FSMServerSnapshotProvider value={serverSnapshot}>{children}</FSMServerSnapshotProvider>
       </FSMPersistStatusesContext.Provider>

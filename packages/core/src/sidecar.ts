@@ -39,7 +39,7 @@ export type ReplacementReconcilePlan = {
   nextCounters: Counters;
   canonicalActorRecords: Map<string, ActorRecord>;
   actorsToCleanup: ActorRuntime[];
-  touchedTemplateKeys: string[];
+  touchedTemplateKeys: readonly string[];
 };
 
 // Per-manager validation deps для replacement-slice — единственный мост из sidecar в manager.
@@ -205,7 +205,7 @@ const rebuildSidecarIndexes = (actorById: Map<string, ActorRuntime>): IndexBundl
 export const buildReplacementReconcilePlan = (
   sidecar: SidecarState,
   deps: SidecarValidationDeps,
-  changedTemplateKeys: string[],
+  changedTemplateKeys: readonly string[],
   nextRoot: RootStateView,
 ): ReplacementReconcilePlan => {
   const newIds = new Set<string>();

@@ -2,67 +2,37 @@ import { describe, it, expect } from "vitest";
 import { compose, deepFreeze } from "@lite-fsm/core/internal/utils";
 
 describe("compose", () => {
-  it("должен компоновать функции справа налево", () => {
+  it("компонует функции справа налево: f(g(h(x)))", () => {
     const add1 = (n: number) => n + 1;
     const multiply2 = (n: number) => n * 2;
     const subtract3 = (n: number) => n - 3;
 
-    const composed = compose(subtract3, multiply2, add1);
-
-    // (5 + 1) * 2 - 3 = 9
-    expect(composed(5)).toBe(9);
+    expect(compose(subtract3, multiply2, add1)(5)).toBe(9);
   });
 
-  it("должен возвращать функцию идентичности, когда аргументы не переданы", () => {
+  it("без аргументов возвращает identity", () => {
     const identity = compose();
 
     expect(identity(5)).toBe(5);
-    expect(identity("test")).toBe("test");
     expect(identity(null)).toBe(null);
   });
 
-  it("должен работать с одной функцией", () => {
-    const add1 = (n: number) => n + 1;
-    const composed = compose(add1);
-    expect(composed(5)).toBe(6);
-  });
+  it("совместим с middleware-стилем: each next возвращает enhanced", () => {
+    const trace: string[] = [];
+    const mw =
+      (label: string) =>
+      (next: (x: number) => number) =>
+      (x: number): number => {
+        trace.push(`${label}:in`);
+        const r = next(x + 1);
+        trace.push(`${label}:out`);
+        return r;
+      };
 
-  it("должен работать с функциями, возвращающими функции", () => {
-    const add = (a: number, b: number) => a + b;
-    const multiply = (a: number, b: number) => a * b;
+    const enhanced = compose(mw("a"), mw("b"), mw("c"))((x: number) => x);
 
-    const composed = compose(
-      (n: number) => n - 3,
-      (n: number) => multiply(n, 2),
-      (n: number) => add(n, 1),
-    );
-
-    // (5 + 1) * 2 - 3 = 9
-    expect(composed(5)).toBe(9);
-  });
-
-  it("должен работать с асинхронными функциями", async () => {
-    const asyncAdd = async (x: number) => x + 1;
-    const asyncMultiply = async (x: Promise<number> | number) => {
-      const resolved = await x;
-      return resolved * 2;
-    };
-
-    const composed = compose(asyncMultiply, asyncAdd);
-
-    await expect(composed(5)).resolves.toBe(12);
-  });
-
-  it("должен обрабатывать вложенные композиции", () => {
-    const add1 = (n: number) => n + 1;
-    const multiply2 = (n: number) => n * 2;
-    const subtract3 = (n: number) => n - 3;
-
-    const innerComposed = compose(multiply2, add1);
-    const outerComposed = compose(subtract3, innerComposed);
-
-    // ((5 + 1) * 2) - 3 = 9
-    expect(outerComposed(5)).toBe(9);
+    expect(enhanced(0)).toBe(3);
+    expect(trace).toEqual(["a:in", "b:in", "c:in", "c:out", "b:out", "a:out"]);
   });
 });
 

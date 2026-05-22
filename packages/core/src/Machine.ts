@@ -90,14 +90,8 @@ export const CreateMachine = <
     ) => {
       if (!cfg.effects) return;
       const effects = cfg.effects as Partial<Record<StateName<C> | "*", MachineEffect<any, C, P, D>>>;
-
-      if (prevState !== currentState && effects[currentState]) {
-        const effect = effects[currentState] as MachineEffect<StateName<C>, C, P, D> | undefined;
-        await effect?.(deps as Parameters<MachineEffect<StateName<C>, C, P, D>>[0]);
-      } else if (effects[WILDCARD]) {
-        const effect = effects[WILDCARD] as MachineEffect<"*", C, P, D> | undefined;
-        await effect?.(deps as Parameters<MachineEffect<"*", C, P, D>>[0]);
-      }
+      const effect = (prevState !== currentState && effects[currentState]) || effects[WILDCARD];
+      if (effect) await effect(deps as Parameters<typeof effect>[0]);
     },
   };
 };
