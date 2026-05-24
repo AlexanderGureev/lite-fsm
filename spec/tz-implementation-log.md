@@ -59,7 +59,7 @@
 | 2 | Schema descriptors и `EntityMachineExtension` | `not started` | — |
 | 3 | Compile metadata, empty `EntityStore`, `ColumnarActorStore`, public lightweight state и `manager.entities` | `not started` | — |
 | 4 | Entity lifecycle events, `__INIT`, internal `ENTITY_SPAWNED`/`ENTITY_DESPAWNED`, `payloadFor` | `not started` | — |
-| 5 | Spawn config, spawn recipes и public spawn event interceptor | `not started` | — |
+| 5 | Spawn events, entity spawn и public spawn event interceptor | `not started` | — |
 | 6 | Columnar reduce pipeline, numeric event/state codes, buckets, routing и hot path guarantees | `not started` | — |
 
 ### `tz-entities-implementation-part-2.md`
@@ -209,7 +209,7 @@
 
 - Пока нет записей.
 
-### Этап 5 — Spawn config, spawn recipes и public spawn event interceptor
+### Этап 5 — Spawn events, entity spawn и public spawn event interceptor
 
 Статус: `not started`
 

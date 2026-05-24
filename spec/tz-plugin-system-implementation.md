@@ -109,7 +109,7 @@
 - unknown storage kind;
 - default storage kind отсутствует в storage registry после установки preset и пользовательских plugins;
 - duplicate route meta key;
-- unknown registered-shape `action.meta` key без route resolver;
+- plugin-declared `action.meta` key без route resolver;
 - duplicate manager extension key;
 - попытка перезаписать core manager method;
 - duplicate deps/transition extension ownership;
@@ -765,6 +765,8 @@ Plugin capabilities для `actionMeta` типизируются позднее 
 - Core применяет единый routing priority на уровне route constraints.
 - Storage runtimes не пересчитывают priority самостоятельно.
 - Каждый plugin-owned `meta` key должен быть зарегистрирован через `routing.registerMetaKey(...)`.
+- Произвольные неизвестные `action.meta` keys не являются ошибкой runtime: normalization срезает или игнорирует их.
+- Plugin-provided `action.meta` fields являются routing/service keys. Пользовательские данные передаются через `payload` или internal plugin transaction state.
 
 Built-in priority:
 
@@ -774,13 +776,15 @@ Built-in priority:
 4. `groupTag`;
 5. unscoped.
 
+Если action содержит несколько route keys, применяется первый key по priority. Остальные route keys игнорируются как менее приоритетные; intersection/union routing не выполняется.
+
 `groupTag` остается multi-runtime route constraint: каждый storage runtime сам доставляет action своим targets, соответствующим `groupTag`.
 
 ### Диагностика этапа
 
 - Duplicate route meta key вызывает clear error на manager init.
-- Unknown registered-shape `action.meta` key без route resolver вызывает clear error.
 - Invalid route resolver result вызывает clear error, если runtime не может безопасно продолжить.
+- Произвольный unregistered `action.meta` key не бросает ошибку и не влияет на routing.
 
 ### Совместимость этапа
 
@@ -803,10 +807,10 @@ Built-in priority:
 
 - route resolver обрабатывает plugin meta key;
 - duplicate route meta key бросает init error;
-- unknown plugin meta key без resolver бросает clear error;
+- unregistered `action.meta` key срезается или игнорируется без ошибки;
 - `meta.entityId` test key не теряется при middleware rewrite и post-normalization;
 - registered plugin route key имеет priority между `actorId` и `groupId`;
-- несколько registered plugin route keys применяются в порядке регистрации;
+- несколько registered plugin route keys применяются по priority-first в порядке регистрации;
 - `groupTag` остается доступным нескольким storage runtimes;
 - route resolver не мутирует storage runtime state.
 
@@ -839,8 +843,8 @@ type ActionInterceptor = (ctx: ActionInterceptorContext) =>
   | void
   | {
       action?: ManagerAction<AnyEvent>;
-      handled?: boolean;
-      continue?: boolean;
+      skipDelivery?: boolean;
+      stopInterceptors?: boolean;
     };
 
 type DispatchRegistry = {
@@ -869,7 +873,7 @@ function transition(action) {
 
     runHooks(registry.dispatch.beforeReduce, ctx);
 
-    if (!ctx.handled) {
+    if (!ctx.skipDelivery) {
       for (const compiled of templatesAccepting(ctx.action)) {
         compiled.storageRuntime.reduce(ctx.forTemplate(compiled));
       }
@@ -902,14 +906,16 @@ function transition(action) {
 - Interceptor может подготовить runtime transaction.
 - Interceptor может добавить plugin-owned internal operation.
 - Interceptor может заменить committed public action до reduce.
-- Если interceptor возвращает `action`, reducers, subscribers, effects, middleware post-`next` и event log видят замененный committed action.
-- `handled: true` означает пропуск delivery в storage reducers/templates.
-- Если `handled !== true`, action продолжает обычный machine delivery pipeline.
-- `handled: true` не останавливает следующие interceptors.
-- Цепочка interceptors останавливается только через `continue: false`.
-- `continue: false` не отменяет уже staged plugin runtime operations.
-- Handled action сохраняет plugin runtime operations и dispatch hooks, но пропускает delivery в machines.
-- Public event остается в event log, даже если interceptor создал internal runtime operations.
+- Если interceptor возвращает `action`, reducers, subscribers, effects, middleware post-`next` и committed public action stream видят замененный committed action.
+- `skipDelivery: true` означает пропуск delivery в storage reducers/templates.
+- Если `skipDelivery !== true`, action продолжает обычный machine delivery pipeline.
+- `skipDelivery: true` не останавливает следующие interceptors.
+- Цепочка interceptors останавливается только через `stopInterceptors: true`.
+- `stopInterceptors: true` не отменяет уже staged plugin runtime operations.
+- `stopInterceptors: true` сам по себе не пропускает delivery в machines.
+- `skipDelivery` и `stopInterceptors` независимы; interceptor возвращает оба флага, если должен и пропустить delivery, и остановить следующие interceptors.
+- Action с `skipDelivery: true` сохраняет plugin runtime operations и dispatch hooks, но пропускает delivery в machines.
+- Public event остается в committed public action stream, даже если interceptor создал internal runtime operations.
 
 ### Runtime-контракт hooks
 
@@ -953,11 +959,12 @@ function transition(action) {
 - interceptors выполняются в порядке регистрации;
 - hooks выполняются в порядке регистрации;
 - interceptor может заменить committed action;
-- замененный action видят reducers, subscribers, effects и event log;
-- `handled: true` пропускает machine delivery;
-- `handled: true` не останавливает следующие interceptors;
-- `continue: false` останавливает следующие interceptors;
-- `continue: false` не отменяет уже staged operations;
+- замененный action видят reducers, subscribers, effects и committed public action stream;
+- `skipDelivery: true` пропускает machine delivery;
+- `skipDelivery: true` не останавливает следующие interceptors;
+- `stopInterceptors: true` останавливает следующие interceptors;
+- `stopInterceptors: true` не отменяет уже staged operations;
+- `stopInterceptors: true` без `skipDelivery: true` сохраняет machine delivery;
 - middleware без `next(...)` не запускает interceptors/hooks/reducers/effects;
 - effects phase остается после middleware chain;
 - `beforeReduce` hook выполняется до storage runtime reduce;
@@ -1064,11 +1071,12 @@ export const createMachine: TypedCreateMachineFn<
 
 ### Action meta typing contract
 
-- Plugin может добавить typed `action.meta` fields.
+- Plugin может добавить typed `action.meta` fields только для routing/service semantics.
 - Plugin action meta только расширяет core meta через intersection, не заменяет его.
 - Core keys `actorId`, `groupId`, `groupTag` и sender fields остаются доступны всегда.
-- Route resolver должен быть зарегистрирован для каждого runtime-supported plugin meta key.
-- Unknown plugin meta key без route resolver запрещен runtime normalization из этапа 4.
+- Route resolver должен быть зарегистрирован для каждого plugin-declared `action.meta` key.
+- Произвольные неизвестные `action.meta` keys срезаются или игнорируются runtime normalization из этапа 4.
+- Пользовательские данные не хранятся в `action.meta`; для них используется `payload`.
 
 ### Runtime-контракт этапа
 
@@ -1316,6 +1324,18 @@ dehydrate({ storage })
 
 Filter `storage` независим от существующего `dehydrate({ machines })`.
 
+В MVP `MachineManagerSnapshot` получает базовую storage envelope форму:
+
+```ts
+type MachineManagerSnapshot<S extends MachineStore> = {
+  schemaVersion?: number;
+  machines: Partial<{ [key in SnapshotMachineKey<S>]: SnapshotForMachine<S[key]> }>;
+  storage?: Record<string, unknown>;
+};
+```
+
+Plugin-specific snapshot payload типизируется и валидируется package-level API соответствующего plugin.
+
 ### Runtime-контракт этапа
 
 - `StorageSnapshotRuntime.dehydrate(...)` получает доступ к `runtimeState` своего storage kind.
@@ -1323,9 +1343,13 @@ Filter `storage` независим от существующего `dehydrate({
 - `snapshot.dehydrate(...)` вызывается только `dehydrate(...)`.
 - Storage runtime snapshot сериализуется в top-level `snapshot.storage[kind]`.
 - Runtime без `snapshot` capability не пишет `snapshot.storage[kind]`.
+- `dehydrate()` без filters экспортирует все eligible `machines` и все storage runtimes со `snapshot` capability.
+- `dehydrate({ machines })` фильтрует только `machines` и не отключает `storage`.
+- `dehydrate({ storage })` фильтрует только storage и не отключает `machines`.
+- `dehydrate({ storage: [] })` явно отключает export storage runtimes.
 - Если `dehydrate({ storage })` явно запрашивает runtime без `snapshot` capability, manager бросает clear error.
 - Если `hydrate(...)` получает `snapshot.storage[kind]` для известного runtime без `snapshot` capability, manager бросает clear error.
-- Unknown storage snapshot key игнорируется или передается в `onUnknownMachineKey`-совместимый handler по существующей политике.
+- Если `hydrate(...)` или `getHydratedState(...)` получает `snapshot.storage[kind]` для неизвестного storage runtime, manager бросает clear error.
 - `getSnapshot()` не вызывает `StorageSnapshotRuntime.dehydrate(...)`.
 - `getSnapshot()` возвращает только public `machines` read model без `storage`.
 - Time travel, import и durable restore custom storage runtimes должны идти через `dehydrate(...)` / `hydrate(...)` и `snapshot.storage[kind]`.
@@ -1342,6 +1366,7 @@ Filter `storage` независим от существующего `dehydrate({
 
 - Явный `dehydrate({ storage })` для runtime без `snapshot` capability бросает clear error.
 - `hydrate(...)` snapshot данных известного runtime без `snapshot` capability бросает clear error.
+- `hydrate(...)` и `getHydratedState(...)` snapshot данных неизвестного storage runtime бросают clear error.
 - Invalid storage snapshot payload бросает clear error, если runtime не может безопасно продолжить.
 
 ### Не делать в этом этапе
@@ -1358,9 +1383,12 @@ Filter `storage` независим от существующего `dehydrate({
 - текущие dehydrate/hydrate tests проходят;
 - test storage runtime snapshot round-trip проходит через `snapshot.storage[testKind]`;
 - runtime без `snapshot` capability не добавляет `snapshot.storage[kind]`;
+- `dehydrate()` по умолчанию включает snapshot runtimes с `snapshot` capability;
+- `dehydrate({ machines })` не отключает storage snapshot;
+- `dehydrate({ storage: [] })` отключает storage snapshot;
 - явный `dehydrate({ storage: [kind] })` для runtime без capability бросает clear error;
 - `hydrate(...)` данных известного runtime без capability бросает clear error;
-- unknown storage snapshot key следует существующей skip/warn policy;
+- unknown storage snapshot key бросает clear error;
 - `getSnapshot()` не включает `storage`;
 - отсутствие `storage` в legacy snapshot сохраняет поведение hydrate.
 

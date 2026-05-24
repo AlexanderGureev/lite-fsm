@@ -218,8 +218,8 @@ type ActionRegistry = {
 
 type ActionInterceptor = (ctx: ActionInterceptorContext) => void | {
   action?: ManagerAction<AnyEvent>;
-  handled?: boolean;
-  continue?: boolean;
+  skipDelivery?: boolean;
+  stopInterceptors?: boolean;
 };
 
 type StorageRegistry = {
@@ -255,14 +255,16 @@ type DepsExtensionRegistry = {
 - Routing meta registry является частью normalization contract: registered `meta` keys сохраняются и валидируются в phase 0/2 normalization, `stripRouting` и routing resolution.
 - Action interceptors выполняются после user action validation, middleware `next(...)` и post-normalization, но до выбора templates, принимающих event.
 - Action interceptors выполняются в порядке регистрации.
-- Action interceptor может подготовить runtime transaction, добавить plugin-owned internal operation, заменить committed public action до reduce, вернуть `handled: true` или остановить следующие interceptors через `continue: false`.
-- Если interceptor возвращает `action`, reducers, subscribers, effects, middleware post-`next` и event log видят замененный committed action.
-- Если `handled !== true`, action продолжает обычный machine delivery pipeline.
-- `handled: true` означает только пропуск delivery в storage reducers/templates.
-- `handled: true` не останавливает следующие interceptors; цепочка останавливается только через `continue: false`.
-- `continue: false` не отменяет уже staged plugin runtime operations.
-- Handled action сохраняет plugin runtime operations и dispatch hooks, но пропускает delivery в machines.
-- Public event остается в event log, даже если interceptor создал internal runtime operations.
+- Action interceptor может подготовить runtime transaction, добавить plugin-owned internal operation, заменить committed public action до reduce, вернуть `skipDelivery: true` или остановить следующие interceptors через `stopInterceptors: true`.
+- Если interceptor возвращает `action`, reducers, subscribers, effects, middleware post-`next` и committed public action stream видят замененный committed action.
+- Если `skipDelivery !== true`, action продолжает обычный machine delivery pipeline.
+- `skipDelivery: true` означает только пропуск delivery в storage reducers/templates.
+- `skipDelivery: true` не останавливает следующие interceptors; цепочка останавливается только через `stopInterceptors: true`.
+- `stopInterceptors: true` не отменяет уже staged plugin runtime operations.
+- `stopInterceptors: true` сам по себе не пропускает delivery в machines.
+- `skipDelivery` и `stopInterceptors` независимы; interceptor возвращает оба флага, если должен и пропустить delivery, и остановить следующие interceptors.
+- Action с `skipDelivery: true` сохраняет plugin runtime operations и dispatch hooks, но пропускает delivery в machines.
+- Public event остается в committed public action stream, даже если interceptor создал internal runtime operations.
 - `StorageRegistry.register(...)` регистрирует runtime для значения `machine.storage`.
 - Повторная регистрация storage kind вызывает clear error на manager init.
 - Unknown `storage` при compile machines вызывает clear error.
@@ -502,7 +504,7 @@ function transition(action) {
 
     runHooks(registry.dispatch.beforeReduce, ctx);
 
-    if (!ctx.handled) {
+    if (!ctx.skipDelivery) {
       for (const compiled of templatesAccepting(ctx.action)) {
         compiled.storageRuntime.reduce(ctx.forTemplate(compiled));
       }
@@ -782,8 +784,9 @@ type EffectDeps<AppDeps, Plugins> = AppDeps &
 **Критерии приемки.**
 
 - No-op hooks не меняют state.
-- Action interceptor может пометить action как handled или продолжить dispatch.
-- `handled: true` не останавливает следующие interceptors без `continue: false`.
+- Action interceptor может пропустить machine delivery через `skipDelivery: true`.
+- `skipDelivery: true` не останавливает следующие interceptors без `stopInterceptors: true`.
+- `stopInterceptors: true` не пропускает machine delivery без `skipDelivery: true`.
 - Interceptor может заменить committed action.
 - Hooks выполняются в порядке регистрации.
 - Fatal hook error semantics покрыты tests.
@@ -899,7 +902,7 @@ type EffectDeps<AppDeps, Plugins> = AppDeps &
 - Тесты, привязанные к конкретным internal functions, которые удалены или переехали при рефакторинге, обновляются на нового владельца поведения или заменяются тестами публичного контракта.
 - Тесты registry покрывают install order, duplicate plugin names и no-op plugin behavior.
 - Type tests покрывают `PluginTransitionEvents<Plugins>`, `PluginManagerExtensions<S, AppEvents, Plugins>`, `action.meta`, scoped deps/transition и третий generic `TypedCreateMachineFn`.
-- Runtime tests покрывают unknown storage, missing default storage kind, duplicate storage kind, optional capability absence, hook ordering, handled actions, `continue: false`, hook error semantics и `reportError(...)`.
+- Runtime tests покрывают unknown storage, missing default storage kind, duplicate storage kind, optional capability absence, hook ordering, `skipDelivery`, `stopInterceptors`, hook error semantics и `reportError(...)`.
 - Snapshot tests покрывают current instance snapshot, storage runtime snapshot round-trip и runtime без `snapshot` capability.
 - Названия новых `describe`/`it`/`test` в проекте должны быть на русском; API-термины остаются на английском.
 

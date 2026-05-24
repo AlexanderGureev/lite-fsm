@@ -62,7 +62,8 @@
 - Actor template может читать другой actor через `entities.get(...)`/`entities.maybe(...)`, но не должен становиться копией ECS system/component пары без state machine смысла.
 - Actor row — наличие конкретного actor template у конкретной entity.
 - `groupTag` — публичная группа entity instance. Она задается в `EntitySpawnSpec`, является свободной строкой и не выводится из recipe key.
-- `spawnConfig` — источник истины для public spawn event names и payload types.
+- У одной entity ровно один `groupTag`; все actor rows этой entity наследуют `groupTag` из `EntitySpawnSpec`.
+- `spawnEvents` — источник истины для public spawn event names и payload types.
 - Spawn recipe — функция, которая по payload public spawn event возвращает `EntitySpawnSpec` или массив `EntitySpawnSpec[]`.
 - `EntityStore` — manager-owned runtime state всех entity ids, generations, group tags, alive flags и free slots.
 - `ColumnarActorStore` — manager-owned runtime state одного entity actor template, индексированный по global `entityIndex`.
@@ -76,8 +77,8 @@
 - `EntityMachineExtension` для `TypedCreateMachineFn`.
 - `storage: "entity"` runtime поверх internal columnar storage.
 - Schema descriptors `f32`, `i16`, `i32`, `u8`, `string`, `optional`.
-- `defineSpawnConfig`, `spawn<T>()`, `SpawnEventsFrom<TSpawnConfig>`.
-- `defineSpawnRecipes<typeof machines, typeof spawnConfig>()`.
+- `defineSpawnEvents`, `spawnEvent<T>()`, `SpawnEventsFrom<TSpawnEvents>`.
+- `defineEntitySpawn(machines, spawnEvents)`.
 - Public spawn events через `manager.transition(...)`.
 - `manager.entities` и typed `EntityAccess<AppState>`.
 - Scoped `transition.entity(...)`, `transition.tag(...)`, `transition.actor(...)`, `transition.despawn(...)` внутри entity effects.
@@ -124,7 +125,7 @@
 - Тесты поведения являются источником истины для обратной совместимости. Их нельзя переписывать под новую реализацию, если public behavior не меняется.
 - Тесты, привязанные к internal functions, которые удалены или переехали при рефакторинге, обновляются на нового владельца поведения или заменяются тестами публичного контракта.
 - Runtime tests покрывают spawn transaction, duplicate entity ids, empty actors validation, `transition.despawn(...)`, entity routing, `groupTag` routing, `despawnOn`, bucket updates, stale scope validation, read-only effects/reactions и reaction error handling.
-- Type tests покрывают `EntityMachineExtension`, `initialContext` schema inference, `spawnSchema` payload inference, `SpawnEventsFrom`, `defineSpawnRecipes`, `manager.entities`, `EntityAccess<AppState>` и исключение lifecycle events из public `manager.transition`.
+- Type tests покрывают `EntityMachineExtension`, `initialContext` schema inference, `spawnSchema` payload inference, `SpawnEventsFrom`, `defineEntitySpawn`, `manager.entities`, `EntityAccess<AppState>` и исключение lifecycle events из public `manager.transition`.
 - Snapshot tests покрывают JSON round-trip, legacy snapshot без `generation`/`rowVersion`, hydrate replace invalidation, sidecar rebuild и routing after hydrate.
 - React tests покрывают row-level subscription invalidation.
 - Benchmark tests покрывают movement update, projectile lifetime update, `despawnOn` cleanup и sprite sync reaction.
@@ -135,9 +136,9 @@
 - Public API использует термин `entity`, а не `columnar`.
 - `@lite-fsm/core` не импортирует внешние plugin packages.
 - Core manager не знает про entity store, columnar layout, generation, spawn recipes, buckets, lifecycle и reactions.
-- Entity runtime не реализует middleware, subscribers или global event log.
+- Entity runtime не реализует middleware, subscribers или committed public action stream API.
 - Entity lifecycle events остаются внутри entity storage runtime.
-- Entity lifecycle events не проходят через public `transition`, middleware, generic action interceptors, subscribers или event log как отдельные committed actions.
+- Entity lifecycle events не проходят через public `transition`, middleware, generic action interceptors, subscribers или committed public action stream как отдельные committed actions.
 - `storage: "instance"` сохраняет текущую semantics.
 - `storage: "entity"` использует `config-default` transition policy.
 - Entity actor row создается только через spawn recipes, internal spawn transaction или hydrate.
@@ -150,7 +151,7 @@
 - Effects выполняют mutation только через `transition(...)`.
 - Reactions являются sync-only.
 - `ENTITY_DESPAWNED` reactions видят columns до cleanup.
-- `payloadFor(entity)` работает только на `ENTITY_SPAWNED`.
+- `payloadFor(entity)` работает только в reducer на `ENTITY_SPAWNED`; reactions/effects читают инициализированные columns через `self`/`entities`.
 - Hydrate не вызывает spawn recipes.
 - `actorId` routing к entity actor rows не поддерживается.
 - `groupTag` берется из `EntitySpawnSpec`.
@@ -176,7 +177,7 @@
 - `groupTag` на actor template;
 - custom event edge из `__INIT` entity template;
 - public dispatch `ENTITY_SPAWNED` или `ENTITY_DESPAWNED`;
-- lifecycle event names как keys в `spawnConfig` или `spawnRecipes`;
+- lifecycle event names как keys в `spawnEvents` или recipe object, переданном в `defineEntitySpawn(...)`;
 - invalid recipe output;
 - duplicate `EntitySpawnSpec.id` против live entity или внутри одного recipe result;
 - empty `EntitySpawnSpec.actors`;
@@ -204,10 +205,13 @@
 import { entitiesPlugin } from "@lite-fsm/entities";
 
 const manager = MachineManager(machines, {
+  plugins: [entitiesPlugin()],
+});
+
+const managerWithSpawn = MachineManager(machines, {
   plugins: [
     entitiesPlugin({
-      spawnConfig,
-      spawnRecipes,
+      spawn,
     }),
   ],
 });
@@ -216,12 +220,15 @@ const manager = MachineManager(machines, {
 Контракт:
 
 - `entitiesPlugin(...)` является generic factory.
-- Plugin capabilities выводятся из переданного `spawnConfig`.
+- `entitiesPlugin()` разрешен и устанавливает entity storage/runtime без public spawn events.
+- `entitiesPlugin({ spawn })` включает public spawn events.
+- `spawn` должен быть результатом `defineEntitySpawn(machines, spawnEvents)`.
+- Plugin capabilities для spawn transition events выводятся из `spawnEvents`, сохраненного в `spawn`.
 - Plugin регистрирует `storage: "entity"` через `ctx.storage.register(...)`.
 - Registered runtime реализует `StorageRuntimeBase` и capability blocks `effects`, `snapshot`, `identity`, `reactions`.
 - Plugin расширяет returned manager через `manager.entities`.
-- Plugin расширяет `manager.transition(...)` type через `SpawnEventsFrom<typeof spawnConfig>`.
-- Plugin регистрирует action interceptor для public spawn events.
+- Plugin расширяет `manager.transition(...)` type через `SpawnEventsFrom<typeof spawnEvents>`, если entity spawn включен.
+- Plugin регистрирует action interceptor для public spawn events, если entity spawn включен.
 - Plugin регистрирует route resolver для `meta.entityId`.
 - Plugin регистрирует scoped deps и scoped transition extensions для entity effects/reactions.
 
@@ -273,32 +280,31 @@ type EntityMachineExtension<
 - Extension metadata используется `MachinesState<typeof machines>` и `EntityAccess<AppState>`.
 - `storage: "entity"` actor template типизируется только при подключенной extension.
 
-### Spawn config
+### Spawn events
 
 ```ts
-const spawnConfig = defineSpawnConfig({
-  SPAWN_UNIT: spawn<UnitSpawn>(),
-  SPAWN_PROJECTILE: spawn<ProjectileSpawn>(),
+const spawnEvents = defineSpawnEvents({
+  SPAWN_PROJECTILE: spawnEvent<ProjectileSpawn>(),
 });
 
-type SpawnEvents = SpawnEventsFrom<typeof spawnConfig>;
+type SpawnEvents = SpawnEventsFrom<typeof spawnEvents>;
 ```
 
 Контракт:
 
-- `defineSpawnConfig(...)` возвращает typed config value.
-- `spawn<T>()` задает payload type для spawn event.
+- `defineSpawnEvents(...)` возвращает typed config value.
+- `spawnEvent<T>()` задает payload type для spawn event.
 - Ключи config являются event `type`.
-- `SpawnEventsFrom<typeof spawnConfig>` выводит discriminated union.
-- Payload type сохраняется в `manager.transition(...)` и `spawnRecipes`.
+- `SpawnEventsFrom<typeof spawnEvents>` выводит discriminated union.
+- Payload type сохраняется в `manager.transition(...)` и `defineEntitySpawn(...)`.
 - Библиотека не подмешивает `SpawnEvents` в `createMachine<AppEvents>` автоматически.
-- Разработчик не обязан добавлять `SpawnEventsFrom<typeof spawnConfig>` в `AppEvents`, чтобы отправлять spawn events через `manager.transition(...)`.
+- Разработчик не обязан добавлять `SpawnEventsFrom<typeof spawnEvents>` в `AppEvents`, чтобы отправлять spawn events через `manager.transition(...)`.
 - Machines, включая `storage: "entity"` templates, могут обработать public spawn event только если разработчик явно включил `SpawnEvents` в `AppEvents`.
 
-### Spawn recipes
+### Entity spawn
 
 ```ts
-const spawnRecipes = defineSpawnRecipes<typeof machines, typeof spawnConfig>()({
+const spawn = defineEntitySpawn(machines, spawnEvents)({
   SPAWN_PROJECTILE: (payload) => ({
     id: `projectile/${payload.id}`,
     groupTag: "projectile",
@@ -320,11 +326,13 @@ const spawnRecipes = defineSpawnRecipes<typeof machines, typeof spawnConfig>()({
 
 Контракт:
 
-- Recipe keys совпадают с keys `spawnConfig`.
-- Recipe callback payload выводится из `spawnConfig`.
+- Recipe keys совпадают с keys `spawnEvents`.
+- Recipe callback payload выводится из `spawnEvents`.
+- `defineEntitySpawn(...)` возвращает единый spawn descriptor для `entitiesPlugin({ spawn })`.
 - Recipe может вернуть один `EntitySpawnSpec` или массив `EntitySpawnSpec[]`.
 - Пустой массив specs разрешен и означает no-op spawn event.
 - `EntitySpawnSpec.id` обязателен.
+- `EntitySpawnSpec.id` должен быть уникален среди live entities и specs одного recipe result, но может использоваться повторно после despawn.
 - `EntitySpawnSpec.groupTag` обязателен и типизируется как `string`.
 - `EntitySpawnSpec.actors` содержит хотя бы один actor row.
 - `actors` keys являются subset entity actor keys из `machines`.
@@ -350,7 +358,9 @@ manager.setDependencies({
 Контракт:
 
 - `manager.entities` создает runtime-owned accessor к entity actor stores.
+- `manager.entities` является stable live accessor object на весь lifetime manager и переживает hydrate replace.
 - Разработчик не создает `entities` вручную.
+- Разработчик сам передает `manager.entities` в `setDependencies(...)`; plugin не подмешивает `entities` автоматически.
 - `EntityAccess<AppState>` выводит доступные keys из `MachinesState<typeof machines>` и включает только `storage: "entity"` actor templates.
 - Обычные domain/process machines читаются через `getState()`.
 - Для `entities` не требуется ручной `AppActorRegistry` или codegen.
@@ -375,6 +385,8 @@ type EntityAccess<AppState> = {
 
 - `entities.get("actorKey")` является required access.
 - `entities.maybe("actorKey")` является optional access.
+- Store view кешируется per `actorKey`: повторный `entities.get("actorKey")` возвращает тот же live view object.
+- Store view читает current committed columns и переживает hydrate replace.
 - `actorKey` типизируется по entity actor keys из `AppState`.
 - Unknown `actorKey` является TypeScript error.
 - Return type выводится из `initialContext` actor template.
@@ -404,9 +416,8 @@ transition.despawn(self.indices);
 - `transition.entity(...)` доставляет action actor rows указанной entity или entities.
 - `transition.tag(...)` доставляет action entity rows указанной entity `groupTag`.
 - `transition.actor(...)` является escape hatch для существующих `storage: "instance"` actors и не адресует entity actor rows.
-- `transition.despawn(...)` доступен только в entity effects.
+- `transition.despawn(...)` доступен только в entity effects; public `manager.despawn(...)` и non-entity scoped `transition.despawn(...)` не добавляются.
 - В entity effect `transition.despawn(...)` принимает entity ids или entity indices из captured scope.
-- Вне entity scope `transition.despawn(...)` принимает только entity ids; raw `EntityIndex` недоступен или бросает clear error.
 - `transition.entities(...)` не входит в MVP.
 - `transition.unscoped(...)` не требуется, потому что `transition(action)` уже unscoped.
 
@@ -421,7 +432,7 @@ type LiteFsmEntityLifecycleEvents =
 Контракт:
 
 - `ENTITY_SPAWNED` и `ENTITY_DESPAWNED` не входят в пользовательский `AppEvents`.
-- Lifecycle event names не доступны как keys в `spawnConfig` и `spawnRecipes`.
+- Lifecycle event names не доступны как keys в `spawnEvents` и recipe object, переданном в `defineEntitySpawn(...)`.
 - Public `manager.transition({ type: "ENTITY_SPAWNED" })` и `manager.transition({ type: "ENTITY_DESPAWNED" })` запрещены.
 - Если пользователь ошибочно добавил lifecycle event names в `AppEvents`, runtime reject-ит public dispatch.
 - TypeScript best-effort исключает `LiteFsmEntityLifecycleEvents` из public `manager.transition(...)`.
@@ -467,9 +478,9 @@ Package exports:
 Обязательные exports из `"."`:
 
 - `entitiesPlugin`;
-- `defineSpawnConfig`;
-- `defineSpawnRecipes`;
-- `spawn`;
+- `defineSpawnEvents`;
+- `defineEntitySpawn`;
+- `spawnEvent`;
 - `type SpawnEventsFrom`;
 - `f32`;
 - `i16`;
@@ -525,7 +536,7 @@ Owners и module boundaries:
 
 - `plugin.ts` связывает `entitiesPlugin(...)` с core plugin system: `storage.register("entity", ...)`, `routing.registerMetaKey("entityId", ...)`, spawn action interceptor, scoped deps/transition extensions и `manager.entities`.
 - `schema.ts` владеет descriptors и runtime/type-level schema validation.
-- `spawn.ts` владеет `defineSpawnConfig`, `spawn`, `SpawnEventsFrom`, `defineSpawnRecipes` и recipe typing.
+- `spawn.ts` владеет `defineSpawnEvents`, `spawnEvent`, `SpawnEventsFrom`, `defineEntitySpawn` и recipe typing.
 - `machine-extension.ts` владеет `EntityMachineExtension` для `TypedCreateMachineFn`.
 - `runtime/storage.ts` собирает `StorageRuntimeBase` и capability blocks `effects`, `snapshot`, `identity`, `reactions` для `storage: "entity"`.
 - `runtime/compile.ts` валидирует entity templates и компилирует event/state codes, transition tables, buckets metadata, reactions/effects metadata и `despawnOn`.
@@ -581,6 +592,7 @@ Owners и module boundaries:
 Добавить:
 
 - package `packages/entities`;
+- workspace dependency entry `@lite-fsm/entities: workspace:*` в root `package.json` для tests/type tests/smoke imports;
 - export `"."`;
 - export `"./package.json"`;
 - `entitiesPlugin(...)`;
@@ -626,7 +638,7 @@ Export `"./react"` не добавляется до этапа React hooks.
 - Не добавлять `EntityMachineExtension`.
 - Не добавлять schema descriptors.
 - Не добавлять `manager.entities`.
-- Не добавлять `defineSpawnConfig`, `spawn`, `SpawnEventsFrom` или `defineSpawnRecipes`.
+- Не добавлять `defineSpawnEvents`, `spawnEvent`, `SpawnEventsFrom` или `defineEntitySpawn`.
 - Не добавлять lifecycle events.
 - Не добавлять columnar stores.
 - Не добавлять entity routing.
@@ -734,7 +746,7 @@ Type tests:
 - Не разрешать `ENTITY_SPAWNED`/`ENTITY_DESPAWNED` в reducer runtime.
 - Не создавать `EntityStore`.
 - Не добавлять `manager.entities`.
-- Не добавлять spawn config и recipes.
+- Не добавлять public spawn events и entity spawn API.
 - Не добавлять routing, effects, reactions, snapshot или React hooks.
 
 #### Тесты этапа
@@ -813,6 +825,8 @@ type EntityMachineState<Metadata> = {
 - Capacity actor stores растет автоматически.
 - `manager.entities` возвращает runtime-owned root accessor.
 - Root accessor умеет создавать store views для known entity actor keys.
+- Root accessor является stable live object на весь lifetime manager.
+- Store views кешируются per template key и читают current committed runtime state.
 - `entities.get(...)` и `entities.maybe(...)` возвращают read-only typed store views для внешнего чтения.
 - `store.has(entity)` доступен и возвращает `false` для отсутствующих rows.
 - Runtime не использует Proxy-based protection.
@@ -836,8 +850,10 @@ type EntityMachineState<Metadata> = {
 
 - `manager.entities` доступен только если установлен `entitiesPlugin(...)`.
 - Без `entitiesPlugin(...)` returned manager shape не содержит `manager.entities`.
+- `manager.entities` не подмешивается в user deps автоматически; пользователь передает его через `setDependencies(...)`.
 - `storage: "instance"` public state и selectors не меняются.
 - Middleware `replaceReducer` не становится API мутации custom storage runtime.
+- External replacement entity public slice не меняет entity storage; runtime восстанавливает canonical lightweight slice из entity runtime state.
 
 #### Не делать в этом этапе
 
@@ -857,6 +873,7 @@ Runtime tests:
 - `manager.getState()` не содержит columns;
 - `manager.entities.get("actorKey")` возвращает typed store view;
 - `manager.entities.maybe("actorKey")` возвращает optional store view;
+- repeated `manager.entities.get("actorKey")` returns same live view object;
 - `store.has(entity)` возвращает `false` для missing row;
 - returned manager не содержит `entities` без plugin;
 - `storage: "instance"` state shape не меняется.
@@ -879,7 +896,7 @@ Type tests:
 
 #### Цель
 
-Добавить внутренние lifecycle events, scoped internal spawn/despawn primitive, `__INIT` validation и reducer context `payloadFor(entity)` без public spawn config и recipes.
+Добавить внутренние lifecycle events, scoped internal spawn/despawn primitive, `__INIT` validation и reducer context `payloadFor(entity)` без public spawn events и entity spawn API.
 
 #### Зависит от
 
@@ -902,7 +919,7 @@ Type tests:
 - `ENTITY_SPAWNED` и `ENTITY_DESPAWNED` являются internal storage runtime events.
 - Lifecycle events не входят в пользовательский `AppEvents`.
 - Lifecycle events доступны только в `storage: "entity"` config/reducer/reactions.
-- Lifecycle events не проходят через public `transition`, middleware, generic action interceptors, subscribers или event log как отдельные committed actions.
+- Lifecycle events не проходят через public `transition`, middleware, generic action interceptors, subscribers или committed public action stream как отдельные committed actions.
 - Public dispatch `ENTITY_SPAWNED` и `ENTITY_DESPAWNED` запрещен даже если пользователь добавил эти names в `AppEvents`.
 - Entity actor template стартует только через internal `ENTITY_SPAWNED`.
 - `__INIT` в entity template может содержать только `ENTITY_SPAWNED`.
@@ -914,6 +931,7 @@ Type tests:
 - `payloadFor(entity)` всегда присутствует в reducer context.
 - `payloadFor(entity)` возвращает actor-specific spawn payload только во время `ENTITY_SPAWNED`.
 - `payloadFor(entity)` на любом другом event бросает clear error.
+- `payloadFor(entity)` не доступен в reactions/effects и не требует хранения spawn payload после reducer phase.
 - Runtime не заполняет columns автоматически из spawn payload.
 - Internal despawn primitive доставляет scoped `ENTITY_DESPAWNED` attached actor rows.
 - Spawn/despawn primitive атомарен внутри entity transaction.
@@ -929,7 +947,7 @@ Type tests:
 #### Диагностика и ошибки
 
 - Public dispatch lifecycle events бросает clear error.
-- Lifecycle event names в `spawnConfig`/`spawnRecipes` будут запрещены на этапе spawn config; на этом этапе names резервируются.
+- Lifecycle event names в `spawnEvents` и recipe keys будут запрещены на этапе entity spawn; на этом этапе names резервируются.
 - Custom `__INIT` edge entity template бросает clear init error.
 - `payloadFor(entity)` outside `ENTITY_SPAWNED` бросает clear error.
 - `payloadFor(entity)` для entity, не входящей в current spawn scope, бросает clear error.
@@ -943,7 +961,7 @@ Type tests:
 
 #### Не делать в этом этапе
 
-- Не добавлять `defineSpawnConfig`, `spawn`, `SpawnEventsFrom` или `defineSpawnRecipes`.
+- Не добавлять `defineSpawnEvents`, `spawnEvent`, `SpawnEventsFrom` или `defineEntitySpawn`.
 - Не добавлять public spawn events.
 - Не добавлять `despawnOn`.
 - Не добавлять `transition.despawn(...)`.
@@ -955,15 +973,12 @@ Type tests:
 
 Runtime tests:
 
-- internal spawn primitive создает entity и actor rows атомарно;
-- `ENTITY_SPAWNED` переводит row из `__INIT` в active state;
-- reducer получает `payloadFor(entity)` на `ENTITY_SPAWNED`;
-- `payloadFor(entity)` outside `ENTITY_SPAWNED` бросает clear error;
-- runtime не заполняет columns из spawn payload без reducer;
 - public transition `ENTITY_SPAWNED` запрещен;
 - public transition `ENTITY_DESPAWNED` запрещен;
 - custom `__INIT` edge entity template запрещен;
 - `storage: "instance"` custom `__INIT` сохраняется.
+
+Комплексные tests создания rows, `ENTITY_SPAWNED` delivery и `payloadFor(entity)` через real spawn transaction выполняются на этапе 5, где появляется public spawn interceptor. Этап 4 не добавляет test-only public surface для запуска internal spawn primitive.
 
 Type tests:
 
@@ -979,7 +994,7 @@ Type tests:
 - Coverage нового и измененного кода этапа равен 100%.
 - Docs build не запускался.
 
-### Этап 5 — Spawn config, spawn recipes и public spawn event interceptor
+### Этап 5 — Spawn events, entity spawn и public spawn event interceptor
 
 #### Цель
 
@@ -994,20 +1009,24 @@ Type tests:
 
 Добавить:
 
-- `defineSpawnConfig`;
-- `spawn<T>()`;
-- `type SpawnEventsFrom<TSpawnConfig>`;
-- `defineSpawnRecipes<typeof machines, typeof spawnConfig>()`;
-- `entitiesPlugin({ spawnConfig, spawnRecipes })` options;
-- `manager.transition(...)` принимает `SpawnEventsFrom<typeof spawnConfig>` от текущего `entitiesPlugin(...)`.
+- `defineSpawnEvents`;
+- `spawnEvent<T>()`;
+- `type SpawnEventsFrom<TSpawnEvents>`;
+- `defineEntitySpawn(machines, spawnEvents)`;
+- `entitiesPlugin({ spawn })` options;
+- `manager.transition(...)` принимает `SpawnEventsFrom<typeof spawnEvents>` от текущего `entitiesPlugin(...)`.
 
 #### Runtime-контракт этапа
 
-- `spawnConfig` является источником истины для spawn event names, payload types, `manager.transition(...)` typing и spawn recipe keys.
+- `spawnEvents` является источником истины для spawn event names, payload types, `manager.transition(...)` typing и spawn recipe keys.
+- `defineEntitySpawn(machines, spawnEvents)` связывает spawn event contract с exhaustive recipes и возвращает единый `spawn` descriptor.
+- `entitiesPlugin()` без `spawn` остается валидным и не регистрирует public spawn events.
+- `entitiesPlugin({ spawn })` включает public spawn events.
+- `entitiesPlugin(...)` не принимает отдельные `spawnEvents` или recipes; частичная spawn-конфигурация не входит в public API.
 - `entitiesPlugin(...)` регистрирует action interceptor для public spawn events.
 - Spawn event interceptor выполняет spawn transaction до public spawn event delivery.
-- Spawn event interceptor не возвращает `handled: true`, если public spawn event должен быть видим machines из `AppEvents`.
-- Public spawn event остается public event для middleware, subscribers и event log, если такие интеграции включены.
+- Spawn event interceptor не возвращает `skipDelivery: true`, если public spawn event должен быть видим machines из `AppEvents`.
+- Public spawn event остается public event для middleware, subscribers и committed public action stream, если такие интеграции включены.
 - Spawn recipes исполняются только при `manager.transition(spawnEvent)`.
 - Hydrate восстанавливает snapshot и не вызывает spawn recipes.
 - Public spawn event не является способом заполнения columns из spawn payload.
@@ -1020,19 +1039,22 @@ Type tests:
 - `generateActorId` и `generateGroupId` не применяются к `storage: "entity"`.
 - `EntitySpawnSpec.actors` содержит хотя бы один actor row.
 - Duplicate `EntitySpawnSpec.id` против live entity или внутри одного recipe result является ошибкой.
+- `EntitySpawnSpec.id` можно использовать повторно после despawn, если entity с таким id больше не live.
 - Spawn transaction атомарна: если один spec невалиден, state не меняется, subscribers/reactions/effects не запускаются.
+- Invalid recipe/spec прерывает весь dispatch до public spawn event delivery.
 - Public spawn event delivery выполняется после internal `ENTITY_SPAWNED`.
 - Machines, которые явно включили `SpawnEvents` в `AppEvents`, видят уже созданные rows.
 - Только что созданные rows получают public spawn event в том же dispatch, если current state после `ENTITY_SPAWNED` принимает этот event.
 
 #### Типовой контракт этапа
 
-- `defineSpawnConfig(...)` возвращает typed config value.
-- `spawn<T>()` задает payload type.
-- `SpawnEventsFrom<typeof spawnConfig>` выводит discriminated union.
-- Payload type сохраняется в `manager.transition(...)` и `spawnRecipes`.
-- `defineSpawnRecipes<typeof machines, typeof spawnConfig>()` проверяет keys, payloads и required fields.
-- Recipe keys совпадают с keys `spawnConfig`.
+- `defineSpawnEvents(...)` возвращает typed config value.
+- `spawnEvent<T>()` задает payload type.
+- `SpawnEventsFrom<typeof spawnEvents>` выводит discriminated union.
+- Payload type сохраняется в `manager.transition(...)` и `defineEntitySpawn(...)`.
+- `defineEntitySpawn(machines, spawnEvents)` проверяет keys, payloads и required fields.
+- `entitiesPlugin({ spawn })` выводит plugin transition events из `spawnEvents`, связанного с `spawn`.
+- Recipe keys совпадают с keys `spawnEvents`.
 - Actor keys являются subset entity actor keys из `machines`.
 - Actor payload проверяется по actor `spawnSchema`.
 - Unknown recipe key, unknown actor key, лишнее поле в actor payload и отсутствующее required поле actor payload являются TypeScript error.
@@ -1042,9 +1064,10 @@ Type tests:
 
 #### Диагностика и ошибки
 
-- Lifecycle event names запрещены как keys в `spawnConfig` и `spawnRecipes`.
+- Lifecycle event names запрещены как keys в `spawnEvents` и recipe object, переданном в `defineEntitySpawn(...)`.
 - Unknown recipe key бросает clear init error, если TypeScript был обойден.
-- Missing recipe for spawnConfig key бросает clear init error.
+- Missing recipe for spawnEvents key бросает clear init error.
+- Передача в `entitiesPlugin(...)` невалидного `spawn` descriptor бросает clear init error.
 - Unknown actor key в recipe output бросает clear runtime error до mutation.
 - Actor payload shape mismatch бросает clear runtime error до mutation.
 - Empty `actors` бросает clear runtime error.
@@ -1056,7 +1079,7 @@ Type tests:
 
 - Machines видят spawn events только если разработчик явно включил `SpawnEvents` в `AppEvents`.
 - Regular events из `AppEvents` продолжают проверяться по `AppEvents`.
-- `SPAWN_PROJECTILE` payload проверяется по `spawnConfig`; `TICK` проверяется по `AppEvents`.
+- `SPAWN_PROJECTILE` payload проверяется по `spawnEvents`; `TICK` проверяется по `AppEvents`.
 - `storage: "instance"` actor spawning и routing не меняются.
 
 #### Не делать в этом этапе
@@ -1078,19 +1101,22 @@ Runtime tests:
 - newly spawned rows receive public spawn event in same dispatch when config accepts it;
 - empty recipe result is no-op spawn but public event delivery continues;
 - duplicate id против live entity fails atomically;
+- id can be reused after despawn;
 - duplicate ids inside one recipe result fail atomically;
 - invalid actor payload fails atomically;
+- invalid recipe/spec aborts before public spawn event delivery;
 - empty actors fails atomically;
 - subscribers/effects не видят partially spawned entities;
 - hydrate не вызывает spawn recipes.
 
 Type tests:
 
-- `SpawnEventsFrom<typeof spawnConfig>` выводит union;
+- `SpawnEventsFrom<typeof spawnEvents>` выводит union;
 - `manager.transition(...)` принимает spawn event из текущего plugin;
+- `entitiesPlugin({ spawn })` сохраняет transition event typing без отдельной передачи `spawnEvents`;
 - `manager.transition(...)` не принимает lifecycle events;
 - machine `AppEvents` не получает spawn events автоматически;
-- recipe payload выводится из `spawnConfig`;
+- recipe payload выводится из `spawnEvents`;
 - recipe actor payload проверяется по `spawnSchema`;
 - unknown actor key является TypeScript error.
 
@@ -1154,12 +1180,15 @@ Type tests:
 - `stateBuckets[stateCode]` хранит dense list entity indices для rows в конкретном state.
 - `statePosition[entityIndex]` хранит позицию entity внутри текущего bucket.
 - State transition обновляет buckets через swap-remove за `O(1)`.
+- Порядок внутри state buckets и entity lists является runtime-defined; stable sorted ordering не гарантируется.
 - `acceptedScratch` и `enteredScratchByState` переиспользуются между dispatch.
 - Entity-routed event доставляется всем actor rows указанной entity или entities.
+- Entity-routed arrays дедуплицируются с сохранением первого появления; unknown ids являются no-op.
 - `groupTag` route доставляет event всем entity rows, принадлежащим entities с matching `EntitySpawnSpec.groupTag`.
 - `groupTag` сохраняет текущее поведение для `storage: "instance"` actor groups.
 - Routing priority следует plugin system: `actorId > registered plugin route keys > groupId > groupTag > unscoped`.
 - Если `entityId` является единственным registered plugin route key, фактический priority: `actorId > entityId > groupId > groupTag > unscoped`.
+- Если action содержит `meta.entityId` и `meta.groupTag`, применяется `entityId`; route keys работают priority-first, без union/intersection.
 - `actorId` и `groupId` routes адресуют только `storage: "instance"` actor runtime в MVP.
 - Public `actorId` routing к entity actor rows не поддерживается.
 - Unknown `entityId` и unknown `groupTag` не создают actor rows.
@@ -1230,6 +1259,7 @@ Runtime tests:
 - state transition обновляет buckets в `O(1)` behavior test;
 - `rowVersion` bump происходит для accepted rows;
 - `meta.entityId` доставляет action rows указанной entity;
+- `meta.entityId` array dedupe сохраняет первое появление и порядок доставки;
 - `meta.groupTag` доставляет action rows matching entity groups;
 - `actorId` не адресует entity rows;
 - unknown `entityId` no-op;

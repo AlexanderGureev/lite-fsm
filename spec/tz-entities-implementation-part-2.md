@@ -62,7 +62,8 @@
 - Actor template может читать другой actor через `entities.get(...)`/`entities.maybe(...)`, но не должен становиться копией ECS system/component пары без state machine смысла.
 - Actor row — наличие конкретного actor template у конкретной entity.
 - `groupTag` — публичная группа entity instance. Она задается в `EntitySpawnSpec`, является свободной строкой и не выводится из recipe key.
-- `spawnConfig` — источник истины для public spawn event names и payload types.
+- У одной entity ровно один `groupTag`; все actor rows этой entity наследуют `groupTag` из `EntitySpawnSpec`.
+- `spawnEvents` — источник истины для public spawn event names и payload types.
 - Spawn recipe — функция, которая по payload public spawn event возвращает `EntitySpawnSpec` или массив `EntitySpawnSpec[]`.
 - `EntityStore` — manager-owned runtime state всех entity ids, generations, group tags, alive flags и free slots.
 - `ColumnarActorStore` — manager-owned runtime state одного entity actor template, индексированный по global `entityIndex`.
@@ -76,8 +77,8 @@
 - `EntityMachineExtension` для `TypedCreateMachineFn`.
 - `storage: "entity"` runtime поверх internal columnar storage.
 - Schema descriptors `f32`, `i16`, `i32`, `u8`, `string`, `optional`.
-- `defineSpawnConfig`, `spawn<T>()`, `SpawnEventsFrom<TSpawnConfig>`.
-- `defineSpawnRecipes<typeof machines, typeof spawnConfig>()`.
+- `defineSpawnEvents`, `spawnEvent<T>()`, `SpawnEventsFrom<TSpawnEvents>`.
+- `defineEntitySpawn(machines, spawnEvents)`.
 - Public spawn events через `manager.transition(...)`.
 - `manager.entities` и typed `EntityAccess<AppState>`.
 - Scoped `transition.entity(...)`, `transition.tag(...)`, `transition.actor(...)`, `transition.despawn(...)` внутри entity effects.
@@ -124,7 +125,7 @@
 - Тесты поведения являются источником истины для обратной совместимости. Их нельзя переписывать под новую реализацию, если public behavior не меняется.
 - Тесты, привязанные к internal functions, которые удалены или переехали при рефакторинге, обновляются на нового владельца поведения или заменяются тестами публичного контракта.
 - Runtime tests покрывают spawn transaction, duplicate entity ids, empty actors validation, `transition.despawn(...)`, entity routing, `groupTag` routing, `despawnOn`, bucket updates, stale scope validation, read-only effects/reactions и reaction error handling.
-- Type tests покрывают `EntityMachineExtension`, `initialContext` schema inference, `spawnSchema` payload inference, `SpawnEventsFrom`, `defineSpawnRecipes`, `manager.entities`, `EntityAccess<AppState>` и исключение lifecycle events из public `manager.transition`.
+- Type tests покрывают `EntityMachineExtension`, `initialContext` schema inference, `spawnSchema` payload inference, `SpawnEventsFrom`, `defineEntitySpawn`, `manager.entities`, `EntityAccess<AppState>` и исключение lifecycle events из public `manager.transition`.
 - Snapshot tests покрывают JSON round-trip, legacy snapshot без `generation`/`rowVersion`, hydrate replace invalidation, sidecar rebuild и routing after hydrate.
 - React tests покрывают row-level subscription invalidation.
 - Benchmark tests покрывают movement update, projectile lifetime update, `despawnOn` cleanup и sprite sync reaction.
@@ -135,9 +136,9 @@
 - Public API использует термин `entity`, а не `columnar`.
 - `@lite-fsm/core` не импортирует внешние plugin packages.
 - Core manager не знает про entity store, columnar layout, generation, spawn recipes, buckets, lifecycle и reactions.
-- Entity runtime не реализует middleware, subscribers или global event log.
+- Entity runtime не реализует middleware, subscribers или committed public action stream API.
 - Entity lifecycle events остаются внутри entity storage runtime.
-- Entity lifecycle events не проходят через public `transition`, middleware, generic action interceptors, subscribers или event log как отдельные committed actions.
+- Entity lifecycle events не проходят через public `transition`, middleware, generic action interceptors, subscribers или committed public action stream как отдельные committed actions.
 - `storage: "instance"` сохраняет текущую semantics.
 - `storage: "entity"` использует `config-default` transition policy.
 - Entity actor row создается только через spawn recipes, internal spawn transaction или hydrate.
@@ -150,7 +151,7 @@
 - Effects выполняют mutation только через `transition(...)`.
 - Reactions являются sync-only.
 - `ENTITY_DESPAWNED` reactions видят columns до cleanup.
-- `payloadFor(entity)` работает только на `ENTITY_SPAWNED`.
+- `payloadFor(entity)` работает только в reducer на `ENTITY_SPAWNED`; reactions/effects читают инициализированные columns через `self`/`entities`.
 - Hydrate не вызывает spawn recipes.
 - `actorId` routing к entity actor rows не поддерживается.
 - `groupTag` берется из `EntitySpawnSpec`.
@@ -176,7 +177,7 @@
 - `groupTag` на actor template;
 - custom event edge из `__INIT` entity template;
 - public dispatch `ENTITY_SPAWNED` или `ENTITY_DESPAWNED`;
-- lifecycle event names как keys в `spawnConfig` или `spawnRecipes`;
+- lifecycle event names как keys в `spawnEvents` или recipe object, переданном в `defineEntitySpawn(...)`;
 - invalid recipe output;
 - duplicate `EntitySpawnSpec.id` против live entity или внутри одного recipe result;
 - empty `EntitySpawnSpec.actors`;
@@ -204,10 +205,13 @@
 import { entitiesPlugin } from "@lite-fsm/entities";
 
 const manager = MachineManager(machines, {
+  plugins: [entitiesPlugin()],
+});
+
+const managerWithSpawn = MachineManager(machines, {
   plugins: [
     entitiesPlugin({
-      spawnConfig,
-      spawnRecipes,
+      spawn,
     }),
   ],
 });
@@ -216,12 +220,15 @@ const manager = MachineManager(machines, {
 Контракт:
 
 - `entitiesPlugin(...)` является generic factory.
-- Plugin capabilities выводятся из переданного `spawnConfig`.
+- `entitiesPlugin()` разрешен и устанавливает entity storage/runtime без public spawn events.
+- `entitiesPlugin({ spawn })` включает public spawn events.
+- `spawn` должен быть результатом `defineEntitySpawn(machines, spawnEvents)`.
+- Plugin capabilities для spawn transition events выводятся из `spawnEvents`, сохраненного в `spawn`.
 - Plugin регистрирует `storage: "entity"` через `ctx.storage.register(...)`.
 - Registered runtime реализует `StorageRuntimeBase` и capability blocks `effects`, `snapshot`, `identity`, `reactions`.
 - Plugin расширяет returned manager через `manager.entities`.
-- Plugin расширяет `manager.transition(...)` type через `SpawnEventsFrom<typeof spawnConfig>`.
-- Plugin регистрирует action interceptor для public spawn events.
+- Plugin расширяет `manager.transition(...)` type через `SpawnEventsFrom<typeof spawnEvents>`, если entity spawn включен.
+- Plugin регистрирует action interceptor для public spawn events, если entity spawn включен.
 - Plugin регистрирует route resolver для `meta.entityId`.
 - Plugin регистрирует scoped deps и scoped transition extensions для entity effects/reactions.
 
@@ -273,32 +280,31 @@ type EntityMachineExtension<
 - Extension metadata используется `MachinesState<typeof machines>` и `EntityAccess<AppState>`.
 - `storage: "entity"` actor template типизируется только при подключенной extension.
 
-### Spawn config
+### Spawn events
 
 ```ts
-const spawnConfig = defineSpawnConfig({
-  SPAWN_UNIT: spawn<UnitSpawn>(),
-  SPAWN_PROJECTILE: spawn<ProjectileSpawn>(),
+const spawnEvents = defineSpawnEvents({
+  SPAWN_PROJECTILE: spawnEvent<ProjectileSpawn>(),
 });
 
-type SpawnEvents = SpawnEventsFrom<typeof spawnConfig>;
+type SpawnEvents = SpawnEventsFrom<typeof spawnEvents>;
 ```
 
 Контракт:
 
-- `defineSpawnConfig(...)` возвращает typed config value.
-- `spawn<T>()` задает payload type для spawn event.
+- `defineSpawnEvents(...)` возвращает typed config value.
+- `spawnEvent<T>()` задает payload type для spawn event.
 - Ключи config являются event `type`.
-- `SpawnEventsFrom<typeof spawnConfig>` выводит discriminated union.
-- Payload type сохраняется в `manager.transition(...)` и `spawnRecipes`.
+- `SpawnEventsFrom<typeof spawnEvents>` выводит discriminated union.
+- Payload type сохраняется в `manager.transition(...)` и `defineEntitySpawn(...)`.
 - Библиотека не подмешивает `SpawnEvents` в `createMachine<AppEvents>` автоматически.
-- Разработчик не обязан добавлять `SpawnEventsFrom<typeof spawnConfig>` в `AppEvents`, чтобы отправлять spawn events через `manager.transition(...)`.
+- Разработчик не обязан добавлять `SpawnEventsFrom<typeof spawnEvents>` в `AppEvents`, чтобы отправлять spawn events через `manager.transition(...)`.
 - Machines, включая `storage: "entity"` templates, могут обработать public spawn event только если разработчик явно включил `SpawnEvents` в `AppEvents`.
 
-### Spawn recipes
+### Entity spawn
 
 ```ts
-const spawnRecipes = defineSpawnRecipes<typeof machines, typeof spawnConfig>()({
+const spawn = defineEntitySpawn(machines, spawnEvents)({
   SPAWN_PROJECTILE: (payload) => ({
     id: `projectile/${payload.id}`,
     groupTag: "projectile",
@@ -320,11 +326,13 @@ const spawnRecipes = defineSpawnRecipes<typeof machines, typeof spawnConfig>()({
 
 Контракт:
 
-- Recipe keys совпадают с keys `spawnConfig`.
-- Recipe callback payload выводится из `spawnConfig`.
+- Recipe keys совпадают с keys `spawnEvents`.
+- Recipe callback payload выводится из `spawnEvents`.
+- `defineEntitySpawn(...)` возвращает единый spawn descriptor для `entitiesPlugin({ spawn })`.
 - Recipe может вернуть один `EntitySpawnSpec` или массив `EntitySpawnSpec[]`.
 - Пустой массив specs разрешен и означает no-op spawn event.
 - `EntitySpawnSpec.id` обязателен.
+- `EntitySpawnSpec.id` должен быть уникален среди live entities и specs одного recipe result, но может использоваться повторно после despawn.
 - `EntitySpawnSpec.groupTag` обязателен и типизируется как `string`.
 - `EntitySpawnSpec.actors` содержит хотя бы один actor row.
 - `actors` keys являются subset entity actor keys из `machines`.
@@ -350,7 +358,9 @@ manager.setDependencies({
 Контракт:
 
 - `manager.entities` создает runtime-owned accessor к entity actor stores.
+- `manager.entities` является stable live accessor object на весь lifetime manager и переживает hydrate replace.
 - Разработчик не создает `entities` вручную.
+- Разработчик сам передает `manager.entities` в `setDependencies(...)`; plugin не подмешивает `entities` автоматически.
 - `EntityAccess<AppState>` выводит доступные keys из `MachinesState<typeof machines>` и включает только `storage: "entity"` actor templates.
 - Обычные domain/process machines читаются через `getState()`.
 - Для `entities` не требуется ручной `AppActorRegistry` или codegen.
@@ -375,6 +385,8 @@ type EntityAccess<AppState> = {
 
 - `entities.get("actorKey")` является required access.
 - `entities.maybe("actorKey")` является optional access.
+- Store view кешируется per `actorKey`: повторный `entities.get("actorKey")` возвращает тот же live view object.
+- Store view читает current committed columns и переживает hydrate replace.
 - `actorKey` типизируется по entity actor keys из `AppState`.
 - Unknown `actorKey` является TypeScript error.
 - Return type выводится из `initialContext` actor template.
@@ -404,9 +416,8 @@ transition.despawn(self.indices);
 - `transition.entity(...)` доставляет action actor rows указанной entity или entities.
 - `transition.tag(...)` доставляет action entity rows указанной entity `groupTag`.
 - `transition.actor(...)` является escape hatch для существующих `storage: "instance"` actors и не адресует entity actor rows.
-- `transition.despawn(...)` доступен только в entity effects.
+- `transition.despawn(...)` доступен только в entity effects; public `manager.despawn(...)` и non-entity scoped `transition.despawn(...)` не добавляются.
 - В entity effect `transition.despawn(...)` принимает entity ids или entity indices из captured scope.
-- Вне entity scope `transition.despawn(...)` принимает только entity ids; raw `EntityIndex` недоступен или бросает clear error.
 - `transition.entities(...)` не входит в MVP.
 - `transition.unscoped(...)` не требуется, потому что `transition(action)` уже unscoped.
 
@@ -421,7 +432,7 @@ type LiteFsmEntityLifecycleEvents =
 Контракт:
 
 - `ENTITY_SPAWNED` и `ENTITY_DESPAWNED` не входят в пользовательский `AppEvents`.
-- Lifecycle event names не доступны как keys в `spawnConfig` и `spawnRecipes`.
+- Lifecycle event names не доступны как keys в `spawnEvents` и recipe object, переданном в `defineEntitySpawn(...)`.
 - Public `manager.transition({ type: "ENTITY_SPAWNED" })` и `manager.transition({ type: "ENTITY_DESPAWNED" })` запрещены.
 - Если пользователь ошибочно добавил lifecycle event names в `AppEvents`, runtime reject-ит public dispatch.
 - TypeScript best-effort исключает `LiteFsmEntityLifecycleEvents` из public `manager.transition(...)`.
@@ -467,9 +478,9 @@ Package exports:
 Обязательные exports из `"."`:
 
 - `entitiesPlugin`;
-- `defineSpawnConfig`;
-- `defineSpawnRecipes`;
-- `spawn`;
+- `defineSpawnEvents`;
+- `defineEntitySpawn`;
+- `spawnEvent`;
 - `type SpawnEventsFrom`;
 - `f32`;
 - `i16`;
@@ -487,7 +498,12 @@ Package exports:
 
 - `useEntitySnapshot`;
 - `useEntityCount`;
-- `useEntityList`.
+- `useEntityList`;
+- `type EntityRowSnapshot`;
+- `type EntityListOptions`;
+- `type TypedUseEntitySnapshotHook`;
+- `type TypedUseEntityCountHook`;
+- `type TypedUseEntityListHook`.
 
 ## 4. Целевая runtime architecture
 
@@ -525,7 +541,7 @@ Owners и module boundaries:
 
 - `plugin.ts` связывает `entitiesPlugin(...)` с core plugin system: `storage.register("entity", ...)`, `routing.registerMetaKey("entityId", ...)`, spawn action interceptor, scoped deps/transition extensions и `manager.entities`.
 - `schema.ts` владеет descriptors и runtime/type-level schema validation.
-- `spawn.ts` владеет `defineSpawnConfig`, `spawn`, `SpawnEventsFrom`, `defineSpawnRecipes` и recipe typing.
+- `spawn.ts` владеет `defineSpawnEvents`, `spawnEvent`, `SpawnEventsFrom`, `defineEntitySpawn` и recipe typing.
 - `machine-extension.ts` владеет `EntityMachineExtension` для `TypedCreateMachineFn`.
 - `runtime/storage.ts` собирает `StorageRuntimeBase` и capability blocks `effects`, `snapshot`, `identity`, `reactions` для `storage: "entity"`.
 - `runtime/compile.ts` валидирует entity templates и компилирует event/state codes, transition tables, buckets metadata, reactions/effects metadata и `despawnOn`.
@@ -539,7 +555,7 @@ Owners и module boundaries:
 - `runtime/effects.ts` реализует `StorageEffectsRuntime.resolveInvocations(...)` и `StorageEffectsRuntime.invoke(...)` для core-managed effect phase.
 - `runtime/access.ts` создает root и scope-bound `EntityAccess`/store views.
 - `runtime/snapshot.ts` реализует `StorageSnapshotRuntime.dehydrate(...)` и `StorageSnapshotRuntime.hydrate(...)` для `snapshot.storage.entity`.
-- `react/index.ts` реализует React hooks на `useSyncExternalStore` и rowVersion cache.
+- `react/index.ts` реализует React hooks на `useSyncExternalStore`, row/list/count caches и storage preview bridge для SSR/hydration.
 
 Внутренний pipeline entity storage runtime:
 
@@ -578,8 +594,8 @@ Owners и module boundaries:
 - `manager.entities` существует только при установленном `entitiesPlugin(...)` и типизируется как `EntityAccess<AppState>`.
 - Public state slice для entity actor templates является lightweight read model с `storage`, `version`, `count` и `capacity`; columns не попадают в `manager.getState()`.
 - Internal lifecycle events `ENTITY_SPAWNED` и `ENTITY_DESPAWNED` доступны только в entity config/reducer/reactions и запрещены через public `manager.transition(...)`.
-- `payloadFor(entity)` работает только на `ENTITY_SPAWNED` и типизируется по actor `spawnSchema`.
-- `defineSpawnConfig`, `spawn<T>()`, `SpawnEventsFrom<TSpawnConfig>` и `defineSpawnRecipes<typeof machines, typeof spawnConfig>()` реализованы.
+- `payloadFor(entity)` работает только в reducer на `ENTITY_SPAWNED` и типизируется по actor `spawnSchema`.
+- `defineSpawnEvents`, `spawnEvent<T>()`, `SpawnEventsFrom<TSpawnEvents>` и `defineEntitySpawn(machines, spawnEvents)` реализованы.
 - Public spawn event interceptor выполняет atomic spawn transaction до public event delivery и не вызывает spawn recipes при hydrate.
 - Spawn recipes валидируют `id`, `groupTag`, actor keys, actor payload shape, duplicate ids и empty `actors` до mutation.
 - Columnar reduce pipeline использует numeric event/state codes, `config-default` policy, state buckets, `rowVersion`, `version` и reusable buffers.
@@ -624,20 +640,20 @@ Owners и module boundaries:
 - Despawn operation находит все actor rows attached к entity.
 - Runtime доставляет scoped `ENTITY_DESPAWNED` всем attached actor rows.
 - Actor config обрабатывает `ENTITY_DESPAWNED`.
-- Terminal actor rows удаляются после commit.
+- Terminal actor rows удаляются в storage commit до subscribers.
 - Entity удаляется из `EntityStore`, когда у нее не остается actor rows.
 - `alive[entityIndex]`, `indexById`, `ids`, `groupTagByIndex`, `freeList` и `generation` обновляются consistent.
 - `generation[entityIndex]` инкрементируется при повторном использовании slot.
 - Captured effect/reaction scopes сохраняют `entityIndex` и `generation`.
-- For stale async scope `transition.despawn(self.indices)` проверяет captured generation.
+- For stale async scope `transition.despawn(self.indices)` проверяет captured generation: в `IS_DEV` бросает clear error, в production выполняет no-op для stale indices.
 - Reactions будут реализованы на этапе 9; cleanup ordering должен оставить hook point, где `ENTITY_DESPAWNED` reactions видят columns до удаления.
 
 #### Типовой контракт этапа
 
 - `transition.despawn(...)` типизируется только как scoped transition extension entity effects.
 - В entity effect `transition.despawn(...)` принимает entity ids или entity indices из captured scope.
-- Вне entity scope `transition.despawn(...)` принимает только entity ids; raw `EntityIndex` недоступен или является TypeScript error.
-- `Public manager.despawn(...)` не добавляется.
+- Вне entity effect scope `transition.despawn(...)` недоступен.
+- Public `manager.despawn(...)` не добавляется.
 - External despawn выражается обычным event + `meta.entityId`/`meta.groupTag` и actor config/reducer behavior.
 
 #### Диагностика и ошибки
@@ -645,8 +661,8 @@ Owners и module boundaries:
 - Invalid `despawnOn` state бросает clear init error.
 - `despawnOn` на special state бросает clear init error.
 - `despawnOn` на `storage: "instance"` бросает clear init error.
-- Raw `EntityIndex` outside entity scope для `transition.despawn(...)` бросает clear runtime error, если TypeScript был обойден.
-- Stale captured scope despawn бросает clear error или no-op according to captured generation policy; policy фиксируется в tests.
+- Raw `EntityIndex` вне entity effect scope для `transition.despawn(...)` бросает clear runtime error, если TypeScript был обойден.
+- Stale captured scope despawn бросает clear error в `IS_DEV` и является no-op в production.
 - Duplicate scheduled despawn одного `entityIndex` дедуплицируется без ошибки.
 
 #### Совместимость
@@ -673,16 +689,18 @@ Runtime tests:
 - multiple actor rows scheduling same entity are deduped;
 - transition to `__RESOLVED` alone does not despawn entity;
 - despawn sends scoped `ENTITY_DESPAWNED` to all attached actor rows;
-- terminal rows are removed after commit;
+- terminal rows are removed during storage commit before subscribers;
 - entity is removed from `EntityStore` when no actor rows remain;
 - `freeList` and `generation` update on slot reuse;
+- stale captured `transition.despawn(self.indices)` throws in `IS_DEV` and no-ops in production;
 - enter-state effects for `despawnOn` states are not scheduled.
 
 Type tests:
 
 - `despawnOn` accepts state name or readonly array;
 - `transition.despawn(...)` is visible in entity effect scope;
-- raw `EntityIndex` is not accepted outside entity scope;
+- raw `EntityIndex` is not accepted outside entity effect scope;
+- `transition.despawn(...)` is unavailable outside entity effects;
 - `manager.despawn(...)` does not exist.
 
 #### Gate завершения
@@ -855,6 +873,7 @@ Public exports не меняются.
 - Reactions internal `ENTITY_DESPAWNED` выполняются до collapse удаляемых rows.
 - Reactions для `ENTITY_DESPAWNED` видят columns до удаления actor rows.
 - Rows, удаленные через `despawnOn`, не попадают в reactions исходного event.
+- Порядок despawn pipeline фиксирован: reducer/default transition исходного event; `despawnOn` и explicit despawn staging; scoped `ENTITY_DESPAWNED` delivery; `ENTITY_DESPAWNED` reactions; cleanup rows/entity/indexes/generation/freeList/versions; source-event reactions только для live rows; subscribers; effects только для live rows.
 - Runtime ловит ошибку каждой reaction и передает ее через dispatch `reportError(...)`, который вызывает `onError`.
 - Ошибка reaction не откатывает reducer result.
 - Ошибка reaction не отменяет subscribers.
@@ -905,6 +924,8 @@ Runtime tests:
 - reaction can read another actor through `entities.get(...)`;
 - `ENTITY_DESPAWNED` reaction reads columns before cleanup;
 - rows despawned via `despawnOn` do not receive source event reaction;
+- subscribers observe already-cleaned state after despawn;
+- effects are not scheduled for despawned rows;
 - Promise-returning reaction reports contract violation through `onError`;
 - thrown reaction error reports through `onError`;
 - reaction error does not rollback reducer result;
@@ -946,13 +967,13 @@ Type tests:
 type MachineManagerSnapshotWithEntityStorage = {
   schemaVersion?: number;
   machines: Record<string, unknown>;
-  storage?: {
+  storage?: Record<string, unknown> & {
     entity?: EntitySnapshot;
   };
 };
 ```
 
-Public exports не меняются.
+Public exports не меняются. `MachineManagerSnapshot` в core хранит базовую `storage?: Record<string, unknown>` envelope; `@lite-fsm/entities` типизирует и валидирует `storage.entity`.
 
 #### Runtime-контракт этапа
 
@@ -960,7 +981,13 @@ Public exports не меняются.
 - `dehydrate()` включает `storage.entity`, если manager содержит `storage: "entity"` runtime с `snapshot` capability.
 - `dehydrate({ storage: ["entity"] })` вызывает `StorageSnapshotRuntime.dehydrate(...)` и выгружает entity storage атомарно целиком.
 - `dehydrate({ machines })` и `dehydrate({ storage })` являются независимыми filters.
+- `dehydrate()` без filters экспортирует eligible `machines` и `storage.entity`.
+- `dehydrate({ machines })` фильтрует только `machines` и не отключает `storage.entity`.
+- `dehydrate({ storage: ["entity"] })` фильтрует только storage и не отключает `machines`.
+- `dehydrate({ storage: [] })` явно отключает export entity storage.
+- Чтобы экспортировать только entity storage, используется `dehydrate({ machines: [], storage: ["entity"] })`.
 - Partial export/import entity storage не входит в MVP.
+- Durable entity data хранится только в `storage.entity`; `machines[entityActorKey]` не хранит rows или columns и восстанавливается из storage runtime.
 - Snapshot serializes `EntityStore`, `generation`, `freeList`, entity `version`, every entity actor store и `rowVersion`.
 - Typed arrays convert to plain arrays.
 - Hydrate `storage.entity` идет через `StorageSnapshotRuntime.hydrate(...)`.
@@ -973,6 +1000,9 @@ Public exports не меняются.
 - Hydrate `storage.entity` является replace-only в MVP независимо от `strategy`.
 - Если snapshot содержит `storage.entity`, hydrate атомарно заменяет entity runtime state.
 - Если snapshot не содержит `storage.entity`, существующий entity runtime state остается без изменений.
+- Hydrate, который меняет только `storage.entity`, является committed change и уведомляет subscribers через `@@lite-fsm/HYDRATE`.
+- `getHydratedState(...)` валидирует `storage.entity`, preview-ит только lightweight public slices (`version`, `count`, `capacity`) и не мутирует runtime columns.
+- Если `getHydratedState(...)` получает storage runtime snapshot для неизвестного runtime или runtime без preview support, он бросает clear error.
 - Hydrate replace invalidates all restored rows by assigning fresh `rowVersion` values.
 - Hydrate replace bumps template `version` for restored actor stores.
 - Snapshot `rowVersion` can be used as debug/import metadata, but React cache correctness relies on hydrate invalidation policy, not trusting remote `rowVersion`.
@@ -986,12 +1016,14 @@ Public exports не меняются.
 - Snapshot payload is serializable plain data.
 - Entity snapshot shape соответствует schema descriptors текущих actor templates.
 - Public state slice остается lightweight read model; columns не попадают в `manager.getState()`.
+- `getSnapshot()` возвращает runtime public read model с lightweight entity slices, но не durable entity envelope.
 - React row cache policy фиксируется на уровне `rowVersion`, но hooks добавляются на этапе 11.
 
 #### Диагностика и ошибки
 
 - Explicit `dehydrate({ storage: ["entity"] })` без snapshot capability бросает clear error.
 - Hydrate данных known runtime без snapshot capability бросает clear error.
+- Hydrate или preview данных unknown storage runtime бросает clear error.
 - Inconsistent snapshot lengths бросают clear error before applying snapshot.
 - Schema mismatch бросает clear error before applying snapshot.
 - Invalid column payload type бросает clear error before applying snapshot.
@@ -1004,6 +1036,7 @@ Public exports не меняются.
 - Отсутствие `storage` в snapshot сохраняет compatibility with legacy snapshots.
 - `getSnapshot()` не вызывает `StorageSnapshotRuntime.dehydrate(...)` и не включает `storage`.
 - `replaceReducer` не является API мутации entity storage runtime.
+- External replacement entity public slice через `replaceReducer` не меняет entity storage; runtime восстанавливает canonical lightweight slice из entity runtime state.
 
 #### Не делать в этом этапе
 
@@ -1020,6 +1053,8 @@ Snapshot tests:
 - `dehydrate -> JSON.stringify -> JSON.parse -> hydrate` restores entities and actor rows;
 - `dehydrate({ storage: ["entity"] })` exports entity storage;
 - `dehydrate({ machines })` и `dehydrate({ storage })` filters independent;
+- `dehydrate()` default includes `storage.entity`;
+- `dehydrate({ storage: [] })` excludes entity storage;
 - columns restore values;
 - `generation`, `freeList`, entity `version`, actor `version` и `rowVersion` serialize;
 - legacy snapshot missing `generation` hydrates with generation `0` for alive rows and rebuilt `freeList`;
@@ -1030,6 +1065,8 @@ Snapshot tests:
 - routing by `entityId` works after hydrate;
 - routing by `groupTag` works after hydrate;
 - hydrate without `storage.entity` preserves existing entity runtime state;
+- storage-only hydrate notifies subscribers with `@@lite-fsm/HYDRATE`;
+- `getHydratedState(...)` previews lightweight public slices and does not mutate columns;
 - spawn recipes are not called during hydrate;
 - `getSnapshot()` does not include `storage`.
 
@@ -1050,12 +1087,13 @@ Runtime tests:
 
 #### Цель
 
-Добавить granular React read layer для entity rows через `@lite-fsm/entities/react`, `useSyncExternalStore` и rowVersion cache без rerender unrelated consumers.
+Добавить granular React read layer для entity rows через `@lite-fsm/entities/react`, `useSyncExternalStore`, row/list/count caches и корректный SSR/hydration preview без rerender unrelated consumers.
 
 #### Зависит от
 
 - Этапы 1-10.
 - `@lite-fsm/react` остается отдельным package и не импортирует entity hooks.
+- `FSMHydrationBoundary` и React hydration overlay из `@lite-fsm/react` доступны как точка интеграции для preview state.
 
 #### Меняется public API
 
@@ -1065,68 +1103,200 @@ Runtime tests:
 
 Добавить hooks:
 
-- `useEntitySnapshot(templateKey, entityId)`;
-- `useEntityCount(templateKey)`;
-- `useEntityList(templateKey, filter?)`.
+```ts
+useEntitySnapshot(templateKey, entityId);
+useEntityCount(templateKey, options?);
+useEntityList(templateKey, options?);
+```
+
+Целевые сигнатуры:
+
+```ts
+type EntityRowSnapshot<Context, State extends string = string> = {
+  readonly entityId: EntityId;
+  readonly groupTag: string;
+  readonly state: State;
+  readonly context: Context;
+};
+
+type EntityListOptions = {
+  readonly groupTag?: string;
+};
+
+function useEntitySnapshot<K extends EntityActorKey<AppState>>(
+  templateKey: K,
+  entityId: EntityId | null | undefined,
+): EntityRowSnapshot<EntityContextFor<AppState, K>, EntityStateFor<AppState, K>> | undefined;
+
+function useEntityCount<K extends EntityActorKey<AppState>>(
+  templateKey: K,
+  options?: EntityListOptions,
+): number;
+
+function useEntityList<K extends EntityActorKey<AppState>>(
+  templateKey: K,
+  options?: EntityListOptions,
+): readonly EntityId[];
+```
+
+Добавить typed aliases для app-level wrappers:
+
+- `TypedUseEntitySnapshotHook<AppState>`;
+- `TypedUseEntityCountHook<AppState>`;
+- `TypedUseEntityListHook<AppState>`.
+
+Обязательные exports из `"./react"`:
+
+- `useEntitySnapshot`;
+- `useEntityCount`;
+- `useEntityList`;
+- `type EntityRowSnapshot`;
+- `type EntityListOptions`;
+- `type TypedUseEntitySnapshotHook`;
+- `type TypedUseEntityCountHook`;
+- `type TypedUseEntityListHook`.
+
+Для корректного SSR/hydration preview добавить generic storage-preview bridge в `@lite-fsm/react` для plugin packages:
+
+```ts
+type FSMStorageHydrationPreview = {
+  readonly hasPreview: boolean;
+  readonly preview: unknown | undefined;
+  readonly hasServerPreview: boolean;
+  readonly serverPreview: unknown | undefined;
+};
+
+function useStorageHydrationPreview(storageKind: string): FSMStorageHydrationPreview;
+```
+
+Контракт bridge:
+
+- `useStorageHydrationPreview("entity")` возвращает active preview `snapshot.storage.entity`, если текущий `FSMHydrationBoundary` или parent boundary содержит `storage.entity`.
+- `hasPreview` отличает отсутствующий storage preview от присутствующего preview со значением `undefined`, если TypeScript был обойден.
+- `serverPreview` и `hasServerPreview` используются как source для `getServerSnapshot` внутри entity hooks.
+- Bridge является generic API для plugin packages и не импортирует `@lite-fsm/entities` в `@lite-fsm/react`.
+- Bridge не дает API мутации storage и не экспортирует storage runtimes.
 
 #### Runtime-контракт этапа
 
 - Hooks используют `useSyncExternalStore`.
+- `@lite-fsm/entities/react` использует существующий manager context из `@lite-fsm/react`; отдельный provider не добавляется.
+- Main export `@lite-fsm/entities` не импортирует React и не зависит runtime-веткой от `@lite-fsm/react`.
+- `@lite-fsm/entities` объявляет `react` и `@lite-fsm/react` как optional peer dependencies для subpath `"./react"`.
 - `useEntitySnapshot` subscribes to one entity row.
-- `rowVersion` provides stable snapshot caching.
-- Hydrate bumps/invalidates row versions before hooks publish snapshots.
+- `useEntitySnapshot(templateKey, null)` и `useEntitySnapshot(templateKey, undefined)` возвращают `undefined` и не подписываются на конкретный row. Это нужно для selected/hovered entity без условного вызова hooks.
+- `useEntitySnapshot` возвращает serializable row snapshot с `entityId`, `groupTag`, `state` и `context`.
+- `context` внутри row snapshot строится из `initialContext` schema и не раскрывает column arrays.
+- `state` внутри row snapshot выводится из states actor template и отражает current committed или preview row state.
+- `groupTag` внутри row snapshot берется из `EntityStore`, а не из actor template.
+- `rowVersion` provides stable snapshot caching: если row не изменился, `getSnapshot` возвращает ту же ссылку.
+- Missing row cache должен возвращать стабильный `undefined` и инвалидироваться при spawn того же `entityId` для этого `templateKey`.
+- Despawn и повторный spawn того же `entityId` инвалидируют старый row snapshot независимо от reuse internal `entityIndex`.
 - Update одного row не rerender unrelated row consumers.
 - `useEntityCount` subscribes to count changes of one actor template.
-- `useEntityList` subscribes to list/filter changes for one actor template.
-- Row snapshot reads serializable value shape from `initialContext`, not column arrays directly.
+- `useEntityList` subscribes to list changes for one actor template.
+- `useEntityCount(templateKey, { groupTag })` и `useEntityList(templateKey, { groupTag })` фильтруют rows по точному `EntitySpawnSpec.groupTag`.
+- `groupTag` option является exact filter по уже существующему groupTag index. Arbitrary predicate/filter не входит в MVP.
+- Count snapshot кешируется по `countVersion` или эквивалентному version source для пары `templateKey + groupTag`.
+- List snapshot кешируется по `listVersion` или эквивалентному version source для пары `templateKey + groupTag`. Если membership и порядок не изменились, `getSnapshot` возвращает ту же `readonly EntityId[]` ссылку.
+- Порядок ids в `useEntityList` является runtime-defined и может меняться при despawn/state transitions; stable sorted ordering не гарантируется.
 - Hooks read through `manager.entities` and entity runtime subscription/index layer.
 - Regular `@lite-fsm/react` не импортирует entity hooks.
+- `@lite-fsm/entities/react` использует `useStorageHydrationPreview("entity")` для выбора между committed entity runtime и active storage preview.
+
+#### SSR и hydration preview
+
+- Entity hooks должны возвращать одинаковые значения на server render, hydration render и client render для одного и того же active hydration preview.
+- `FSMHydrationBoundary` preview должен быть видим для `@lite-fsm/entities/react` так же, как `useSelector` видит preview через `useHydrationOverlay`.
+- Если active hydration preview содержит `snapshot.storage.entity`, entity hooks читают preview rows/list/count из этого snapshot без мутации committed entity runtime.
+- Если active hydration preview не содержит `snapshot.storage.entity`, entity hooks читают текущий committed entity runtime.
+- Entity storage hydrate является replace-only; preview semantics для entity hooks должны соответствовать этому правилу независимо от `strategy`.
+- Nested `FSMHydrationBoundary` должен наследовать parent entity preview, если child snapshot не содержит `storage.entity`, и заменить entity preview, если содержит.
+- `getServerSnapshot` для entity hooks должен читать server preview entity data, а не committed client entity runtime.
+- Hydrate commit должен инвалидировать row/list/count caches до публикации subscriber notification, чтобы первый post-commit snapshot совпал с hydrated storage.
+- `getHydratedState(...)` остается preview только для lightweight public slices. Для React entity hooks stage добавляет отдельный read-only preview path к entity runtime или storage preview bridge; этот path не записывает columns и не становится public mutation API.
+- Preview validation errors для `snapshot.storage.entity` должны совпадать с ошибками этапа 10 и не оставлять частично примененный preview/cache state.
 
 #### Типовой контракт этапа
 
-- `templateKey` типизируется по entity actor keys when used with typed manager/context, если existing React typing позволяет.
-- `useEntitySnapshot` result shape выводится из `SchemaValue<typeof initialContext>`.
+- `templateKey` типизируется по entity actor keys через typed hook aliases и typed manager/context integration.
+- `useEntitySnapshot` возвращает `EntityRowSnapshot<SchemaValue<typeof initialContext>, StateUnion> | undefined`.
+- `useEntitySnapshot` принимает `EntityId | null | undefined`, но не принимает `EntityIndex`.
 - `useEntityCount` возвращает number.
-- `useEntityList` возвращает stable list of entity ids or row snapshots according to final hook signature; выбранная signature фиксируется в cheatsheets.
+- `useEntityList` возвращает `readonly EntityId[]`.
 - Hook types do not expose `EntityIndex` as public row identifier.
+- `EntityListOptions.groupTag` типизируется как `string`; multi-tag и массив tags не входят в MVP.
 
 #### Диагностика и ошибки
 
 - Unknown `templateKey` бросает clear runtime error, если TypeScript был обойден.
-- Missing `entityId` row returns the documented empty value or `undefined`; policy фиксируется в tests and docs.
+- Missing `entityId` row returns `undefined`.
+- `null` или `undefined` `entityId` не являются ошибкой.
 - Hook usage without manager/provider follows existing `@lite-fsm/react` error policy.
-- Hydrate invalidation bugs должны ловиться tests через stale rowVersion cache.
+- Hook usage with manager that lacks `manager.entities` throws clear runtime error.
+- Hook usage with manager whose entity runtime has no React subscription/preview capability throws clear runtime error.
+- Invalid `groupTag` type at runtime throws clear error, если TypeScript был обойден.
+- Hydrate invalidation bugs должны ловиться tests через stale rowVersion/listVersion/countVersion cache.
 
 #### Совместимость
 
 - `@lite-fsm/react` bundle не импортирует `@lite-fsm/entities/react`.
+- Importing `@lite-fsm/entities/react` without installed `@lite-fsm/react` fails through normal module resolution.
 - Existing React hooks keep behavior.
 - Entity hooks do not require graph/devtools UI.
+- Existing `FSMContextProvider`, `FSMHydrationBoundary`, `useSelector`, `useManager` and `useTransition` behavior remains compatible.
+- `useStorageHydrationPreview(...)` в `@lite-fsm/react` остается generic bridge for plugin packages and does not depend on `@lite-fsm/entities`.
 
 #### Не делать в этом этапе
 
 - Не добавлять editor prefab UI.
 - Не добавлять renderer-specific integrations.
 - Не добавлять mutation APIs from React hooks.
-- Не менять `@lite-fsm/react` public API кроме optional typing integration, если она нужна для hooks.
+- Не добавлять arbitrary predicate/filter для `useEntityList` или `useEntityCount`.
+- Не добавлять sorting option или stable sorted ordering.
+- Не добавлять multi-tag filtering.
+- Не добавлять React hook, который возвращает raw column arrays или `EntityIndex`.
+- Не менять `@lite-fsm/react` public API кроме typed integration и `useStorageHydrationPreview(...)`.
 
 #### Тесты этапа
 
 React tests:
 
-- `useEntitySnapshot` renders one row snapshot;
+- `useEntitySnapshot` renders one row snapshot with `entityId`, `groupTag`, `state` and `context`;
+- `useEntitySnapshot(templateKey, null)` and `useEntitySnapshot(templateKey, undefined)` return `undefined` without conditional hook usage;
 - changing one row rerenders only that row consumer;
 - changing unrelated row does not rerender subscriber;
 - despawned row invalidates snapshot;
-- hydrate invalidates rowVersion cache before publishing snapshots;
+- despawn + respawn same `entityId` invalidates previous row snapshot;
+- hydrate invalidates rowVersion/listVersion/countVersion caches before publishing snapshots;
+- `FSMHydrationBoundary` with `snapshot.storage.entity` makes `useEntitySnapshot` read preview row data before hydrate commit;
+- `FSMHydrationBoundary` with `snapshot.storage.entity` makes `useEntityList` and `useEntityCount` read preview list/count data before hydrate commit;
+- server render and hydration render produce matching entity hook snapshots for the same storage preview;
+- nested `FSMHydrationBoundary` inherits parent entity preview when child snapshot lacks `storage.entity`;
+- nested `FSMHydrationBoundary` replaces parent entity preview when child snapshot contains `storage.entity`;
+- `useStorageHydrationPreview("entity")` reports preview/serverPreview for current and nested boundaries without importing `@lite-fsm/entities`;
 - `useEntityCount` rerenders on count changes;
-- `useEntityList` rerenders according to list/filter changes;
+- `useEntityCount(templateKey, { groupTag })` counts only rows with matching `groupTag`;
+- `useEntityList` returns `readonly EntityId[]` and rerenders according to list changes;
+- `useEntityList(templateKey, { groupTag })` returns only rows with matching `groupTag`;
+- list snapshot keeps reference identity when membership/order did not change;
+- `useEntityList` exposes runtime-defined order without sorted ordering guarantee;
+- missing row returns `undefined` from `useEntitySnapshot`;
+- entity hooks throw clear error when manager has no `manager.entities`;
+- entity hooks throw clear error when manager entity runtime lacks React subscription/preview capability;
 - regular `@lite-fsm/react` does not import entity hooks.
 
 Type tests:
 
-- hook `templateKey` is limited to entity actor keys where typed integration is available;
-- `useEntitySnapshot` returns value shape from `initialContext`;
+- hook `templateKey` is limited to entity actor keys through typed aliases;
+- `useEntitySnapshot` returns `EntityRowSnapshot` with `context` value shape from `initialContext`;
+- `useEntitySnapshot` exposes row `state` as inferred state union;
+- `useEntitySnapshot` may return `undefined`;
+- `useEntitySnapshot` accepts `EntityId | null | undefined`;
+- `useEntityList` returns `readonly EntityId[]`;
+- `useEntityList` and `useEntityCount` accept `{ groupTag?: string }`;
+- typed hook aliases preserve app `AppState`;
+- `useStorageHydrationPreview(...)` exposes unknown storage payload and does not expose entity-specific types;
 - public hook types do not expose raw `EntityIndex` as required input.
 
 #### Gate завершения
@@ -1179,7 +1349,7 @@ Type tests:
 
 - Public API и public types в cheatsheets соответствуют реализованным exports.
 - README показывает typed wrapper с `EntityMachineExtension`.
-- README показывает `defineSpawnConfig`, `spawn`, `SpawnEventsFrom`, `defineSpawnRecipes`, `entitiesPlugin` и `manager.entities`.
+- README показывает `defineSpawnEvents`, `spawnEvent`, `SpawnEventsFrom`, `defineEntitySpawn`, `entitiesPlugin({ spawn })` и `manager.entities`.
 - README показывает `AppDeps` с `entities: EntityAccess<AppState>` и `manager.setDependencies({ entities: manager.entities, ... })`.
 - Examples используют spawn events, а не public `manager.spawn(...)`.
 - Examples используют `groupTag` в `EntitySpawnSpec`.
