@@ -21,12 +21,12 @@
 
 - `MachineManager(..., { plugins })`.
 - Встроенный `coreRuntimePlugin()`, установленный автоматически первым.
-- Registry для plugins, actions, storage runtimes, dispatch hooks, routing meta, manager extensions, deps/transition extensions, snapshot slices и devtools providers.
+- Registry для plugins, actions, storage runtimes, dispatch hooks, routing meta, manager extensions и deps/transition extensions.
 - Storage runtime contract для `storage: "instance"` и будущих custom runtimes.
 - `TypedCreateMachineFn` с третьим generic для plugin-provided machine extensions.
 - Plugin-provided internal machine events без добавления их в пользовательский `AppEvents`.
 - Type-level расширение `manager.transition(...)`, `action.meta`, effect deps, scoped `transition` и returned manager object через plugins.
-- Snapshot/hydrate extension points.
+- Snapshot/hydrate extension points для storage runtimes.
 - Backward compatibility текущего runtime, middleware, reducers, effects, actors, routing и persistence.
 
 ## 5. Вне области работ
@@ -34,9 +34,10 @@
 - Entity runtime.
 - Spawn recipes.
 - `ENTITY_SPAWNED` и `ENTITY_DESPAWNED`.
-- `manager.entities`, `manager.spawn(...)`, `manager.despawn(...)`.
+- `manager.entities` и другие entity-specific manager extensions.
 - React entity hooks.
 - Graph support для entity composition.
+- Devtools provider API.
 - Public low-level `storageHandlers` API в MVP.
 
 ## 6. Публичный API
@@ -71,8 +72,7 @@ type ManagerFromPlugins<
   S extends MachineStore,
   AppEvents extends AnyEvent,
   Plugins extends readonly LiteFsmPlugin[],
-> = IMachineManager<S, AppEvents | PluginTransitionEvents<Plugins>> &
-  PluginManagerExtensions<Plugins>;
+> = IMachineManager<S, AppEvents | PluginTransitionEvents<Plugins>> & PluginManagerExtensions<S, AppEvents, Plugins>;
 ```
 
 Требования:
@@ -83,7 +83,7 @@ type ManagerFromPlugins<
 - `Plugins` инферится из literal tuple `options.plugins`.
 - Если `plugins` передан как широкий `LiteFsmPlugin[]`, plugin-specific manager extensions могут быть недоступны в TypeScript.
 - `PluginTransitionEvents<Plugins>` выводится из `Plugins[number]["__capabilities"]["transitionEvents"]`.
-- `PluginManagerExtensions<Plugins>` выводится из `Plugins[number]["__capabilities"]["manager"]`.
+- `PluginManagerExtensions<S, AppEvents, Plugins>` выводится из `Plugins[number]["__capabilities"]["manager"]`.
 - Duplicate plugin names в `IS_DEV` вызывают clear error.
 - Plugin install выполняется до compile machines.
 - Plugin install не имеет доступа к mutable runtime state конкретного dispatch.
@@ -122,8 +122,12 @@ type LiteFsmPlugin<Capabilities extends PluginCapabilities = {}> = {
   readonly __capabilities?: Capabilities;
 };
 
+type ManagerExtensionCapability = {
+  <S extends MachineStore, AppEvents extends AnyEvent>(): object;
+};
+
 type PluginCapabilities = {
-  manager?: object;
+  manager?: object | ManagerExtensionCapability;
   transitionEvents?: AnyEvent;
   machine?: MachineRuntimeExtension;
   actionMeta?: object;
@@ -151,6 +155,8 @@ const myPlugin = definePlugin<MyPluginCapabilities>({
 - `definePlugin(...)` возвращает `LiteFsmPlugin`.
 - `definePlugin(...)` сохраняет literal `name`.
 - `definePlugin(...)` сохраняет phantom capabilities для manager extensions, transition events, machine extensions, deps и action meta.
+- Plugin factory может возвращать `LiteFsmPlugin<Capabilities>`, где `Capabilities` выводятся из options factory.
+- Manager capability может быть generic от `S extends MachineStore`, чтобы returned manager extensions типизировались через machines текущего `MachineManager(...)`.
 
 ### 6.4. `PluginInstallContext`
 
@@ -162,8 +168,6 @@ type PluginInstallContext = {
   routing: RoutingRegistry;
   manager: ManagerExtensionRegistry;
   deps: DepsExtensionRegistry;
-  snapshot: SnapshotRegistry;
-  devtools: DevtoolsRegistry;
 };
 ```
 
@@ -195,30 +199,16 @@ type DispatchRegistry = {
 };
 
 type RoutingRegistry = {
-  registerMetaKey<Key extends string>(
-    key: Key,
-    resolver: RouteResolver<Key>,
-  ): void;
+  registerMetaKey<Key extends string>(key: Key, resolver: RouteResolver<Key>): void;
 };
 
 type ManagerExtensionRegistry = {
-  extend<Key extends string, Value>(
-    key: Key,
-    factory: (ctx: ManagerRuntimeContext) => Value,
-  ): void;
+  extend<Key extends string, Value>(key: Key, factory: (ctx: ManagerRuntimeContext) => Value): void;
 };
 
 type DepsExtensionRegistry = {
   extendDeps(factory: ScopedDepsFactory): void;
   extendTransition(factory: ScopedTransitionFactory): void;
-};
-
-type SnapshotRegistry = {
-  register(slice: string, handler: SnapshotSliceHandler): void;
-};
-
-type DevtoolsRegistry = {
-  registerProvider(provider: DevtoolsProvider): void;
 };
 ```
 
@@ -257,13 +247,9 @@ type DevtoolsRegistry = {
 - Transition extension добавляет методы к scoped `transition`.
 - Extension object для async effect должен сохранять captured invocation scope после `await`.
 - Reaction deps могут переиспользовать scope-bound objects, если reaction sync-only и это не создает allocations на steady-state hot path.
-- Duplicate snapshot slice в `IS_DEV` вызывает clear error.
-- `dehydrate()` включает registered slices.
-- `hydrate()` передает slice соответствующему handler.
-- Unknown snapshot slice игнорируется или передается в `onUnknownMachineKey`-совместимый handler по существующей политике.
-- Core instance runtime регистрирует текущий snapshot format.
-- Devtools provider может добавлять metadata к event log и graph metadata.
-- Отсутствие devtools providers не влияет на runtime behavior.
+- `action.meta` остается служебным routing/sender contract, а не произвольным metadata bag.
+- Пользовательские данные передаются через `payload`, а не через `meta`.
+- Каждый plugin-owned `meta` key должен быть зарегистрирован через `routing.registerMetaKey(...)`.
 
 ### 6.5. Контракт `StorageRuntime`
 
@@ -279,8 +265,10 @@ type StorageRuntime = {
   acceptsEvent(ctx: AcceptsEventContext): boolean;
   reduce(ctx: StorageReduceContext): void;
   commit(ctx: StorageCommitContext): void;
-  resolveEffectTargets(ctx: ResolveEffectTargetsContext): EffectTarget[];
-  createEffectScope(ctx: CreateEffectScopeContext): EffectInvocationScope;
+  runReactions?(ctx: StorageReactionContext): void;
+
+  resolveEffectInvocations(ctx: ResolveEffectInvocationsContext): StorageEffectInvocation[];
+  invokeEffect(ctx: StorageEffectInvocationContext): void;
 
   snapshot(ctx: StorageSnapshotContext): unknown;
   hydrate(ctx: StorageHydrateContext): void;
@@ -304,13 +292,21 @@ type StorageReduceContext = {
 - Custom runtime может выбирать свою внутреннюю структуру state и не обязан использовать текущий actor object layout.
 - Storage runtime state хранится в manager runtime sidecar и принадлежит storage runtime.
 - Public `MachinesState` остается read model/type surface, а не обязательным mutable storage для custom runtime.
-- `createRuntimeState(...)` вызывается один раз на manager init для каждого registered storage kind или template group.
+- `createRuntimeState(...)` вызывается один раз на manager init для каждого registered storage kind.
+- `createRuntimeState(...)` получает все compiled templates своего `storage kind`.
+- Per-template runtime data хранится внутри общего `StorageRuntimeState` этого `storage kind`.
 - `createPublicInitialState(...)` возвращает публичный slice, нужный для backward compatibility, selectors и `MachinesState`.
 - `reduce(...)` пишет только в `runtimeState` или dispatch transaction своего runtime.
 - `commit(...)` применяет staged runtime operations до subscribers.
-- Storage runtime не вызывает subscribers и не запускает effects напрямую.
-- Effect invocation остается обязанностью core manager; storage runtime только возвращает targets и scope через `resolveEffectTargets(...)` и `createEffectScope(...)`.
+- Storage runtime не вызывает subscribers и не запускает effects во время reduce/commit.
+- Reactions являются частью storage runtime contract, а не generic dispatch hooks.
+- `runReactions(...)` выполняется после commit storage runtimes и до subscribers.
+- Reactions, которым нужны данные до удаления rows, могут выполняться внутри `commit(...)` соответствующего storage runtime до collapse cleanup.
+- Core manager управляет фазой effects, error wiring и deps extension pipeline.
+- Конкретный storage runtime создает effect invocations и вызывает свои storage-specific effect functions через `resolveEffectInvocations(...)` и `invokeEffect(...)`.
 - `snapshot(...)` и `hydrate(...)` получают доступ к `runtimeState` своего storage kind.
+- `snapshot(...)` сериализуется в top-level `snapshot.storage[kind]`.
+- `hydrate(...)` получает `snapshot.storage[kind]`; unknown storage snapshot key игнорируется или передается в `onUnknownMachineKey`-совместимый handler по существующей политике.
 - `MachineManager` обращается к runtime через этот контракт.
 - Runtime compile выполняется один раз на manager init.
 - Hot dispatch path не ищет runtime по строке внутри per-actor/per-row loop.
@@ -372,10 +368,11 @@ function transition(action) {
   commit(ctx);
 
   runHooks(registry.dispatch.beforeSubscribers, ctx);
+  runStorageReactions(ctx);
   notifySubscribers(ctx);
 
   runHooks(registry.dispatch.beforeEffects, ctx);
-  invokeCoreEffects(ctx);
+  invokeStorageEffects(ctx);
   runHooks(registry.dispatch.afterEffects, ctx);
 }
 ```
@@ -387,6 +384,8 @@ function transition(action) {
 - Action interceptors выполняются внутри middleware-wrapped transition до выбора targets.
 - Storage runtime `reduce(...)` вызывается только для templates, принимающих event.
 - Storage runtime `commit(...)` вызывается один раз для touched runtimes до root commit/subscribers.
+- Storage runtime reactions выполняются после commit и до subscribers.
+- Storage runtime effects выполняются после subscribers.
 - Plugin hooks не меняют порядок reducer -> commit -> subscribers -> effects, кроме явно разрешенных hook phases.
 - No-op plugin не должен влиять на behavior.
 
@@ -397,17 +396,10 @@ function transition(action) {
 Plugins не меняют global `createMachine(...)` typing автоматически. Plugin packages экспортируют type-level machine extension, который application wrappers передают в `TypedCreateMachineFn`.
 
 ```ts
-import {
-  createMachine as createLiteFsmMachine,
-  type TypedCreateMachineFn,
-} from "@lite-fsm/core";
+import { createMachine as createLiteFsmMachine, type TypedCreateMachineFn } from "@lite-fsm/core";
 import type { EntityMachineExtension } from "@lite-fsm/entities";
 
-export const createMachine: TypedCreateMachineFn<
-  AppEvents,
-  AppDeps,
-  EntityMachineExtension
-> = createLiteFsmMachine;
+export const createMachine: TypedCreateMachineFn<AppEvents, AppDeps, EntityMachineExtension> = createLiteFsmMachine;
 ```
 
 ```ts
@@ -424,6 +416,8 @@ type TypedCreateMachineFn<
 
 - `TypedCreateMachineFn` принимает третий generic для plugin-provided machine extensions.
 - Extension может добавлять allowed `storage` values.
+- Extension может определять storage-specific `CreateMachineInput` для своего `storage kind`.
+- Storage-specific input может переопределять типы core fields, включая `initialContext`, `reducer` и `effects`.
 - Extension может добавлять config fields для конкретного `storage`.
 - Extension может добавлять internal machine events в `config`/`reducer` без добавления в `AppEvents`.
 - Extension может добавлять effect/reaction config fields.
@@ -439,23 +433,21 @@ type ManagerFromPlugins<
   S extends MachineStore,
   AppEvents extends AnyEvent,
   Plugins extends readonly LiteFsmPlugin[],
-> = IMachineManager<S, AppEvents | PluginTransitionEvents<Plugins>> &
-  PluginManagerExtensions<Plugins>;
+> = IMachineManager<S, AppEvents | PluginTransitionEvents<Plugins>> & PluginManagerExtensions<S, AppEvents, Plugins>;
 
-type ManagerTransitionEvents<AppEvents, Plugins> =
-  | AppEvents
-  | PluginTransitionEvents<Plugins>;
+type ManagerTransitionEvents<AppEvents, Plugins> = AppEvents | PluginTransitionEvents<Plugins>;
 ```
 
 Требования:
 
 - Return type `MachineManager(...)` использует `ManagerFromPlugins<S, AppEvents, Plugins>`.
-- `manager.entities`, `manager.spawn` и другие plugin extensions доступны только если plugin добавил соответствующие capabilities.
+- `manager.entities` и другие plugin extensions доступны только если plugin добавил соответствующие capabilities.
 - Без plugin extension TypeScript не показывает соответствующее поле.
 - Plugin может расширить тип `manager.transition(...)`.
 - Plugin transition events не подмешиваются в `createMachine<AppEvents>`.
 - Machine видит plugin events только если разработчик явно добавил их в `AppEvents`.
 - Plugin transition events выводятся только из plugins, переданных в текущий `MachineManager(...)`.
+- Plugin manager extensions могут зависеть от `S extends MachineStore`; `PluginManagerExtensions<S, AppEvents, Plugins>` вычисляется с доступом к machines текущего manager.
 - Текущее поведение `MachineEvents<S>` сохраняется без plugins.
 
 ### 8.3. Action meta, effect deps и scoped transition
@@ -491,7 +483,8 @@ type EffectDeps<AppDeps, Plugins> = AppDeps &
 - Текущие actor spawning, routing и persistence работают на `instanceStorageRuntime`.
 - No plugin-specific code попадает в обычный app bundle без импорта plugin package.
 - Current snapshot format для `storage: "instance"` сохраняется.
-- Plugin snapshot slices должны round-trip через `dehydrate()`/`hydrate()` без влияния на чужие slices.
+- Storage runtime snapshots должны round-trip через top-level `snapshot.storage[kind]` без влияния на чужие storage runtimes.
+- Отсутствие `storage` в snapshot сохраняет совместимость с текущими snapshots.
 
 ## 10. Этапы реализации
 
@@ -512,7 +505,7 @@ type EffectDeps<AppDeps, Plugins> = AppDeps &
 
 - Storage runtime extraction.
 - Dispatch hooks.
-- Snapshot/devtools extension points.
+- Storage snapshot extension points.
 - Entity-specific API.
 
 **Критерии приемки.**
@@ -529,25 +522,26 @@ type EffectDeps<AppDeps, Plugins> = AppDeps &
 
 **Область работ.**
 
-- Extract current runtime into `instanceStorageRuntime`.
-- Register it through built-in `coreRuntimePlugin`.
-- Route machine compile/reduce/snapshot through storage runtime contract.
-- Add storage-owned runtime state sidecar.
-- Keep effect invocation in core manager and let storage runtime provide effect targets/scope.
+- Выделить текущий runtime в `instanceStorageRuntime`.
+- Зарегистрировать его через встроенный `coreRuntimePlugin`.
+- Провести compile/reduce/snapshot machines через storage runtime contract.
+- Добавить storage-owned runtime state sidecar.
+- Оставить orchestration effect phase в core manager и дать storage runtime создавать invocations и вызывать storage-specific effects.
+- Добавить storage runtime reaction phase.
 
 **Вне области работ.**
 
 - Custom storage runtime implementations.
 - Entity runtime.
-- Changes to public reducer/effect semantics.
+- Изменения public reducer/effect semantics.
 
 **Критерии приемки.**
 
-- Existing tests pass.
-- Machine without `storage` uses `"instance"`.
-- `storage: "instance"` works explicitly.
-- Unknown `storage` fails at manager init.
-- Storage runtime does not call subscribers/effects directly.
+- Existing tests проходят.
+- Machine без `storage` использует `"instance"`.
+- `storage: "instance"` работает явно.
+- Unknown `storage` вызывает ошибку на manager init.
+- Storage runtime не вызывает subscribers/effects напрямую.
 
 ### Этап 3 — Dispatch hooks
 
@@ -555,27 +549,27 @@ type EffectDeps<AppDeps, Plugins> = AppDeps &
 
 **Область работ.**
 
-- Implement action interceptors.
-- Implement dispatch hook registries.
-- Implement `beforeCommit` phase.
-- Add internal `DispatchContext.reportError(...)`.
-- Wire hook phases into transition pipeline.
-- Preserve middleware semantics.
+- Реализовать action interceptors.
+- Реализовать dispatch hook registries.
+- Реализовать фазу `beforeCommit`.
+- Добавить internal `DispatchContext.reportError(...)`.
+- Подключить hook phases к transition pipeline.
+- Сохранить middleware semantics.
 
 **Вне области работ.**
 
 - Routing meta registry.
 - Manager extensions.
-- Snapshot/devtools providers.
-- Plugin-specific side effects outside hook contracts.
+- Storage snapshot integration.
+- Plugin-specific side effects вне hook contracts.
 
 **Критерии приемки.**
 
-- No-op hooks do not change state.
-- Action interceptor can mark action handled or continue dispatch.
-- Hooks execute in registration order.
-- Hook error semantics are covered by tests.
-- Non-fatal plugin side-effect hook can report error without aborting committed cleanup.
+- No-op hooks не меняют state.
+- Action interceptor может пометить action как handled или продолжить dispatch.
+- Hooks выполняются в порядке регистрации.
+- Hook error semantics покрыты tests.
+- Non-fatal plugin side-effect hook может передать error без abort committed cleanup.
 
 ### Этап 4 — Расширения типизации machines и deps
 
@@ -583,24 +577,25 @@ type EffectDeps<AppDeps, Plugins> = AppDeps &
 
 **Область работ.**
 
-- Add third generic to `TypedCreateMachineFn`.
-- Support plugin-provided machine config fields.
-- Support plugin-provided internal machine events.
-- Support plugin-provided scoped deps and transition extensions.
-- Support plugin-provided action meta typing.
+- Добавить третий generic в `TypedCreateMachineFn`.
+- Поддержать plugin-provided storage-specific machine input shapes.
+- Поддержать plugin-provided internal machine events.
+- Поддержать plugin-provided scoped deps и transition extensions.
+- Поддержать plugin-provided action meta typing.
 
 **Вне области работ.**
 
-- Runtime implementation of non-core storage kinds.
+- Runtime implementation non-core storage kinds.
 - Entity lifecycle events.
 - Manager object extensions.
 
 **Критерии приемки.**
 
-- Test plugin can add a `storage` kind and config field through typed wrapper.
-- Test plugin can add internal machine event without adding it to app events.
-- Test plugin can add typed `transition.foo(...)` inside effect.
-- Test plugin can add typed `action.meta.foo`.
+- Test plugin может добавить `storage` kind и config field через typed wrapper.
+- Test plugin может добавить internal machine event без добавления в app events.
+- Test plugin может добавить typed `transition.foo(...)` внутри effect.
+- Test plugin может добавить typed `action.meta.foo`.
+- Test plugin может переопределить core field type для своего storage-specific input shape.
 
 ### Этап 5 — Routing и manager extensions
 
@@ -608,45 +603,46 @@ type EffectDeps<AppDeps, Plugins> = AppDeps &
 
 **Область работ.**
 
-- Implement routing meta registry.
-- Implement `manager.extend(...)`.
-- Merge extensions into returned manager.
-- Type returned manager with plugin extensions.
+- Реализовать routing meta registry.
+- Реализовать `manager.extend(...)`.
+- Слить extensions в returned manager.
+- Типизировать returned manager с plugin extensions.
 
 **Вне области работ.**
 
-- Entity-specific `entityId` route.
+- Entity-specific route `entityId`.
 - React hooks.
-- Snapshot/devtools extension points.
+- Storage snapshot extension points.
 
 **Критерии приемки.**
 
-- Route resolver handles plugin meta key.
-- Plugin can add typed `manager.foo`.
-- Extension cannot overwrite core manager methods.
-- Duplicate extension key fails in `IS_DEV`.
+- Route resolver обрабатывает plugin meta key.
+- Plugin может добавить typed `manager.foo`.
+- Extension не может перезаписать core manager methods.
+- Duplicate extension key вызывает ошибку в `IS_DEV`.
 
-### Этап 6 — Extension points для snapshot/devtools
+### Этап 6 — Storage snapshot extension points
 
-Цель этапа: дать plugins возможность добавлять snapshot slices и devtools metadata без влияния на core runtime.
+Цель этапа: дать storage runtimes возможность сериализовать и восстанавливать runtime state без влияния на `storage: "instance"`.
 
 **Область работ.**
 
-- Implement snapshot slice registry.
-- Implement devtools provider registry.
-- Preserve existing snapshot format for instance runtime.
+- Реализовать top-level `snapshot.storage[kind]`.
+- Подключить `StorageRuntime.snapshot(...)` и `StorageRuntime.hydrate(...)`.
+- Добавить filter `dehydrate({ storage })`, независимый от `dehydrate({ machines })`.
+- Сохранить existing snapshot format для instance runtime.
 
 **Вне области работ.**
 
 - Entity snapshot format.
-- Entity graph/devtools providers.
-- UI for devtools.
+- Devtools provider API.
+- Graph/devtools metadata.
 
 **Критерии приемки.**
 
-- Current dehydrate/hydrate tests pass.
-- Plugin snapshot slice round-trips in test plugin.
-- Absence of devtools providers has zero runtime effect.
+- Current dehydrate/hydrate tests проходят.
+- Test storage runtime snapshot round-trip проходит через `snapshot.storage[testKind]`.
+- Unknown storage snapshot key следует той же skip/warn policy, что unknown machine keys.
 
 ### Этап 7 — Документация и examples
 
@@ -654,32 +650,28 @@ type EffectDeps<AppDeps, Plugins> = AppDeps &
 
 **Область работ.**
 
-- Document plugin lifecycle.
-- Document storage runtime contract.
-- Document typed `createMachine` extension pattern.
-- Add minimal test plugin fixture.
-- Document that `@lite-fsm/entities` depends on this plugin system.
+- Задокументировать plugin lifecycle.
+- Задокументировать storage runtime contract.
+- Задокументировать typed `createMachine` extension pattern.
+- Добавить minimal test plugin fixture.
+- Задокументировать, что `@lite-fsm/entities` зависит от этого plugin system.
 
 **Вне области работ.**
 
-- `@lite-fsm/entities` examples.
+- Examples `@lite-fsm/entities`.
 - Migration guide for APIs outside this ТЗ.
 
 **Критерии приемки.**
 
-- Docs show default runtime is built-in.
-- Docs show plugin-provided manager extension.
-- Docs show plugin-provided storage runtime.
+- Docs показывают, что default runtime является built-in.
+- Docs показывают plugin-provided manager extension.
+- Docs показывают plugin-provided storage runtime.
 
 ## 11. Тестовые ожидания
 
 - Текущие тесты `@lite-fsm/core` проходят без изменения пользовательских сценариев.
 - Тесты registry покрывают install order, duplicate plugin names и no-op plugin behavior.
-- Type tests покрывают `PluginTransitionEvents<Plugins>`, `PluginManagerExtensions<Plugins>`, `action.meta`, scoped deps/transition и третий generic `TypedCreateMachineFn`.
+- Type tests покрывают `PluginTransitionEvents<Plugins>`, `PluginManagerExtensions<S, AppEvents, Plugins>`, `action.meta`, scoped deps/transition и третий generic `TypedCreateMachineFn`.
 - Runtime tests покрывают unknown storage, duplicate storage kind, hook ordering, handled actions, `continue: false`, hook error semantics и `reportError(...)`.
-- Snapshot tests покрывают current instance snapshot и plugin snapshot slice round-trip.
+- Snapshot tests покрывают current instance snapshot и storage runtime snapshot round-trip.
 - Названия новых `describe`/`it`/`test` в проекте должны быть на русском; API-термины остаются на английском.
-
-## 12. Открытые вопросы
-
-Нет.
