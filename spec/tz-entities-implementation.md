@@ -498,7 +498,12 @@ Package exports:
 
 - `useEntitySnapshot`;
 - `useEntityCount`;
-- `useEntityList`.
+- `useEntityList`;
+- `type EntityRowSnapshot`;
+- `type EntityListOptions`;
+- `type TypedUseEntitySnapshotHook`;
+- `type TypedUseEntityCountHook`;
+- `type TypedUseEntityListHook`.
 
 ## 4. Целевая runtime architecture
 
@@ -892,11 +897,11 @@ Type tests:
 - Coverage нового и измененного кода этапа равен 100%.
 - Docs build не запускался.
 
-### Этап 4 — Entity lifecycle events, `__INIT`, internal `ENTITY_SPAWNED`/`ENTITY_DESPAWNED`, `payloadFor`
+### Этап 4 — Entity lifecycle events, `__INIT` и запрет public lifecycle dispatch
 
 #### Цель
 
-Добавить внутренние lifecycle events, scoped internal spawn/despawn primitive, `__INIT` validation и reducer context `payloadFor(entity)` без public spawn events и entity spawn API.
+Добавить внутренние lifecycle event types, `__INIT` validation и запрет public lifecycle dispatch без spawn primitive, `payloadFor(entity)`, public spawn events и entity spawn API.
 
 #### Зависит от
 
@@ -911,36 +916,24 @@ Type tests:
 
 Обновить:
 
-- `EntityMachineExtension` получает `internalEvents: LiteFsmEntityLifecycleEvents`;
-- reducer context entity actor template получает `payloadFor(entity)`.
+- `EntityMachineExtension` получает `internalEvents: LiteFsmEntityLifecycleEvents`.
 
 #### Runtime-контракт этапа
 
 - `ENTITY_SPAWNED` и `ENTITY_DESPAWNED` являются internal storage runtime events.
 - Lifecycle events не входят в пользовательский `AppEvents`.
-- Lifecycle events доступны только в `storage: "entity"` config/reducer/reactions.
+- Lifecycle events доступны только в `storage: "entity"` config/reducer type surface; reactions получают эти events на этапе reactions.
 - Lifecycle events не проходят через public `transition`, middleware, generic action interceptors, subscribers или committed public action stream как отдельные committed actions.
 - Public dispatch `ENTITY_SPAWNED` и `ENTITY_DESPAWNED` запрещен даже если пользователь добавил эти names в `AppEvents`.
-- Entity actor template стартует только через internal `ENTITY_SPAWNED`.
+- Entity actor template будет стартовать только через internal `ENTITY_SPAWNED`; в этом этапе runtime только резервирует lifecycle names и валидирует config.
 - `__INIT` в entity template может содержать только `ENTITY_SPAWNED`.
 - Custom events в `__INIT` entity template запрещены.
-- Internal spawn transaction primitive создает entity slot, actor rows, initial column defaults, state `__INIT` и actor-specific spawn payload.
-- Runtime доставляет scoped internal `ENTITY_SPAWNED` созданным actor rows.
-- Default `__INIT -> target` transition применяется до reducer.
-- Reducer вызывается один раз на actor template batch.
-- `payloadFor(entity)` всегда присутствует в reducer context.
-- `payloadFor(entity)` возвращает actor-specific spawn payload только во время `ENTITY_SPAWNED`.
-- `payloadFor(entity)` на любом другом event бросает clear error.
-- `payloadFor(entity)` не доступен в reactions/effects и не требует хранения spawn payload после reducer phase.
-- Runtime не заполняет columns автоматически из spawn payload.
-- Internal despawn primitive доставляет scoped `ENTITY_DESPAWNED` attached actor rows.
-- Spawn/despawn primitive атомарен внутри entity transaction.
+- Runtime не создает entity slots, actor rows, spawn payload buffers или despawn operations в этом этапе.
 
 #### Типовой контракт этапа
 
 - `LiteFsmEntityLifecycleEvents` не подмешивается в public `manager.transition(...)`.
-- `EntityMachineExtension` добавляет lifecycle events в config/reducer/reactions только для entity actor templates.
-- `payloadFor(entity)` return type выводится из actor `spawnSchema`.
+- `EntityMachineExtension` добавляет lifecycle events в config/reducer type surface только для entity actor templates.
 - Custom `__INIT` edge должен быть TypeScript error, если это возможно без ухудшения inference.
 - `storage: "instance"` сохраняет текущую поддержку custom `__INIT` events.
 
@@ -949,9 +942,6 @@ Type tests:
 - Public dispatch lifecycle events бросает clear error.
 - Lifecycle event names в `spawnEvents` и recipe keys будут запрещены на этапе entity spawn; на этом этапе names резервируются.
 - Custom `__INIT` edge entity template бросает clear init error.
-- `payloadFor(entity)` outside `ENTITY_SPAWNED` бросает clear error.
-- `payloadFor(entity)` для entity, не входящей в current spawn scope, бросает clear error.
-- Invalid actor-specific spawn payload shape бросает clear error до mutation.
 
 #### Совместимость
 
@@ -984,7 +974,6 @@ Type tests:
 
 - lifecycle events доступны в entity config/reducer через `EntityMachineExtension`;
 - lifecycle events не доступны в public `manager.transition(...)`;
-- `payloadFor(entity)` типизируется по actor `spawnSchema`;
 - lifecycle events не добавляются в `AppEvents`.
 
 #### Gate завершения
@@ -1013,6 +1002,7 @@ Type tests:
 - `spawnEvent<T>()`;
 - `type SpawnEventsFrom<TSpawnEvents>`;
 - `defineEntitySpawn(machines, spawnEvents)`;
+- reducer context entity actor template получает `payloadFor(entity)`;
 - `entitiesPlugin({ spawn })` options;
 - `manager.transition(...)` принимает `SpawnEventsFrom<typeof spawnEvents>` от текущего `entitiesPlugin(...)`.
 
@@ -1030,6 +1020,15 @@ Type tests:
 - Spawn recipes исполняются только при `manager.transition(spawnEvent)`.
 - Hydrate восстанавливает snapshot и не вызывает spawn recipes.
 - Public spawn event не является способом заполнения columns из spawn payload.
+- Internal spawn transaction primitive создает entity slot, actor rows, initial column defaults, state `__INIT` и actor-specific spawn payload.
+- Runtime доставляет scoped internal `ENTITY_SPAWNED` созданным actor rows.
+- Default `__INIT -> target` transition применяется до reducer.
+- Reducer вызывается один раз на actor template batch.
+- `payloadFor(entity)` всегда присутствует в reducer context.
+- `payloadFor(entity)` возвращает actor-specific spawn payload только во время `ENTITY_SPAWNED`.
+- `payloadFor(entity)` на любом другом event бросает clear error.
+- `payloadFor(entity)` для entity, не входящей в current spawn scope, бросает clear error.
+- `payloadFor(entity)` не доступен в reactions/effects и не требует хранения spawn payload после reducer phase.
 - Internal `ENTITY_SPAWNED` и actor reducers инициализируют columns.
 - Recipe может вернуть один `EntitySpawnSpec` или массив.
 - Пустой массив specs разрешен и означает no-op spawn event; public spawn event все равно доставляется существующим machines/templates, которые принимают event.
@@ -1070,6 +1069,8 @@ Type tests:
 - Передача в `entitiesPlugin(...)` невалидного `spawn` descriptor бросает clear init error.
 - Unknown actor key в recipe output бросает clear runtime error до mutation.
 - Actor payload shape mismatch бросает clear runtime error до mutation.
+- `payloadFor(entity)` outside `ENTITY_SPAWNED` бросает clear runtime error.
+- `payloadFor(entity)` для entity вне current spawn scope бросает clear runtime error.
 - Empty `actors` бросает clear runtime error.
 - Missing `id` или `groupTag` бросает clear runtime error.
 - Duplicate id бросает clear runtime error и не меняет state.
@@ -1098,6 +1099,9 @@ Runtime tests:
 
 - public spawn event создает entity и actor rows;
 - public spawn event доставляется после internal `ENTITY_SPAWNED`;
+- `payloadFor(entity)` возвращает actor-specific spawn payload во время `ENTITY_SPAWNED`;
+- `payloadFor(entity)` outside `ENTITY_SPAWNED` бросает clear error;
+- `payloadFor(entity)` для entity вне current spawn scope бросает clear error;
 - newly spawned rows receive public spawn event in same dispatch when config accepts it;
 - empty recipe result is no-op spawn but public event delivery continues;
 - duplicate id против live entity fails atomically;
@@ -1117,6 +1121,7 @@ Type tests:
 - `manager.transition(...)` не принимает lifecycle events;
 - machine `AppEvents` не получает spawn events автоматически;
 - recipe payload выводится из `spawnEvents`;
+- `payloadFor(entity)` типизируется по actor `spawnSchema`;
 - recipe actor payload проверяется по `spawnSchema`;
 - unknown actor key является TypeScript error.
 
@@ -1161,10 +1166,9 @@ Type tests:
 - Event `type` переводится в `eventCode` один раз на входе `manager.transition`.
 - State names переводятся в `stateCode` при init manager.
 - Transition lookup в dispatch выполняется по numeric `eventCode/stateCode`.
-- Compiled template metadata содержит `eventAcceptMask`, `transitionTable`, `templatesByEventCode`, `acceptStateBucketsByEventCode`, `reactionsByEventCode`, `effectsByStateCode` и `despawnStateMask`.
+- Compiled template metadata содержит `eventAcceptMask`, `transitionTable`, `templatesByEventCode` и `acceptStateBucketsByEventCode`.
 - `templatesByEventCode[eventCode]` содержит только templates, которые принимают event в `config`.
 - `acceptStateBucketsByEventCode[eventCode]` содержит state buckets, которые принимают event.
-- `despawnOn` компилируется в `despawnStateMask`.
 - Runtime не сравнивает строки внутри per-entity loops.
 - Runtime не сканирует все templates на каждый event.
 - `storage: "entity"` использует `config-default` transition policy.

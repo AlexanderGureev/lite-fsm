@@ -176,6 +176,8 @@ type PluginCapabilities = {
 };
 ```
 
+`MachineRuntimeExtension` минимально описывает type-level extension для storage-specific machine config, internal events, deps, metadata и public state shape. Полный contract фиксируется в этапе 6.
+
 ```ts
 const myPlugin = definePlugin<MyPluginCapabilities>({
   name: "my-plugin",
@@ -645,7 +647,8 @@ type StorageRuntime = StorageRuntimeBase & {
 - Storage runtime не вызывает subscribers и не запускает effects во время reduce/commit.
 - Reactions являются частью storage runtime contract, а не generic dispatch hooks.
 - `reactions.run(...)` выполняется после commit storage runtimes и до subscribers.
-- Reactions, которым нужны данные до удаления rows, могут выполняться внутри `commit(...)` соответствующего storage runtime до collapse cleanup.
+- Reactions, которым нужны данные до удаления rows, являются storage-specific lifecycle reactions и могут выполняться внутри `commit(...)` соответствующего storage runtime до destructive cleanup.
+- Generic `StorageReactionRuntime` не получает отдельный pre-cleanup hook в этом ТЗ.
 - Core manager управляет фазой effects, error wiring и deps extension pipeline.
 - Конкретный storage runtime создает effect invocations и вызывает свои storage-specific effect functions через `effects.resolveInvocations(...)` и `effects.invoke(...)`.
 - `MachineManager` обращается к runtime через этот контракт.
@@ -1004,6 +1007,21 @@ type TypedCreateMachineFn<
 ) => MachineConfigResult<...>;
 ```
 
+Зафиксировать минимальный contract для `MachineRuntimeExtension`:
+
+```ts
+type MachineRuntimeExtension = {
+  readonly storage: string;
+  readonly input?: object;
+  readonly internalEvents?: AnyEvent;
+  readonly reducerContext?: object;
+  readonly effectDeps?: object;
+  readonly reactionDeps?: object;
+  readonly resultMetadata?: object;
+  readonly publicState?: unknown;
+};
+```
+
 Добавить manager transition event inference:
 
 ```ts
@@ -1038,8 +1056,12 @@ Manager object extensions не добавляются в этом этапе. О
 - Storage-specific input может переопределять типы core fields, включая `initialContext`, `reducer` и `effects`.
 - Extension может добавлять config fields для конкретного `storage`.
 - Extension может добавлять internal machine events в `config`/`reducer` без добавления в `AppEvents`.
+- Extension может добавлять storage-specific reducer context для matching `storage`.
+- Extension может добавлять storage-specific effect/reaction deps для matching `storage`.
 - Extension может добавлять effect/reaction config fields.
 - Extension может добавлять phantom metadata к `MachineConfigResult` для downstream types.
+- Extension может переопределять public state slice type через `publicState`; если `publicState` не задан, используется текущий core shape.
+- `resultMetadata` и `publicState` должны быть доступны downstream utility types, включая `MachinesState<S>` и plugin package helpers.
 - Extension typing применяется только в wrappers, где разработчик явно передал extension type.
 - Core `createMachine` без typed wrapper сохраняет текущее поведение.
 - `storage: "instance"` типизируется как явный storage kind из default runtime extension.
@@ -1100,6 +1122,9 @@ export const createMachine: TypedCreateMachineFn<
 - test plugin добавляет required config field для своего `storage kind`;
 - test plugin переопределяет core field type для storage-specific input;
 - test plugin добавляет internal machine event без добавления в app events;
+- test plugin добавляет storage-specific reducer context;
+- test plugin добавляет phantom `resultMetadata` для downstream utility type;
+- test plugin переопределяет `MachinesState` slice через `publicState`;
 - core `createMachine` без wrapper не принимает plugin-specific fields;
 - `storage: "instance"` типизируется как явный storage kind;
 - `manager.transition(...)` принимает plugin transition events только от plugins текущего manager;

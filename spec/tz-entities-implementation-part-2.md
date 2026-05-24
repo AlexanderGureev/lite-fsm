@@ -605,23 +605,21 @@ Owners и module boundaries:
 
 
 
-### Этап 7 — Despawn, `despawnOn`, `transition.despawn(...)` и lifecycle cleanup
+### Этап 7 — Despawn, `despawnOn` и lifecycle cleanup
 
 #### Цель
 
-Добавить entity despawn semantics: `despawnOn`, explicit despawn scheduling, scoped `ENTITY_DESPAWNED`, terminal row cleanup, free slot reuse и transition extension `transition.despawn(...)`.
+Добавить entity despawn semantics: `despawnOn`, scoped `ENTITY_DESPAWNED`, terminal row cleanup, free slot reuse и подготовить lifecycle hook point для будущего `transition.despawn(...)` и reactions.
 
 #### Зависит от
 
 - Этапы 1-6.
-- Plugin system scoped transition extensions реализованы.
 
 #### Меняется public API
 
 Добавить:
 
-- `despawnOn?: string | readonly string[]` в `EntityMachineExtension` input;
-- `transition.despawn(...)` в entity scoped transition extension.
+- `despawnOn?: string | readonly string[]` в `EntityMachineExtension` input.
 
 #### Runtime-контракт этапа
 
@@ -633,10 +631,9 @@ Owners и module boundaries:
 - Owner actor row в state из `despawnOn` не обязан иметь `ENTITY_DESPAWNED` edge в этом state.
 - Owner actor row удаляется вместе с entity despawn.
 - Если несколько actor rows одной entity одновременно попали в `despawnOn`, runtime дедуплицирует entity.
-- Enter-state effects для states из `despawnOn` не запускаются.
 - `despawnOn` processing выполняется синхронно в том же dispatch.
 - Переход одного actor row в `__RESOLVED` не вызывает entity despawn автоматически.
-- Entity despawn вызывается через `despawnOn`, `transition.despawn(...)` или hydrate/reconcile.
+- Entity despawn в этом этапе вызывается через `despawnOn`; explicit scoped despawn через `transition.despawn(...)` добавляется на этапе 8, а hydrate/reconcile path использует тот же cleanup contract после появления snapshot/hydrate.
 - Despawn operation находит все actor rows attached к entity.
 - Runtime доставляет scoped `ENTITY_DESPAWNED` всем attached actor rows.
 - Actor config обрабатывает `ENTITY_DESPAWNED`.
@@ -644,15 +641,12 @@ Owners и module boundaries:
 - Entity удаляется из `EntityStore`, когда у нее не остается actor rows.
 - `alive[entityIndex]`, `indexById`, `ids`, `groupTagByIndex`, `freeList` и `generation` обновляются consistent.
 - `generation[entityIndex]` инкрементируется при повторном использовании slot.
-- Captured effect/reaction scopes сохраняют `entityIndex` и `generation`.
-- For stale async scope `transition.despawn(self.indices)` проверяет captured generation: в `IS_DEV` бросает clear error, в production выполняет no-op для stale indices.
+- `generation` подготавливает stale-scope validation для effects/reactions следующих этапов.
+- `despawnOn` компилируется в internal `despawnStateMask`.
 - Reactions будут реализованы на этапе 9; cleanup ordering должен оставить hook point, где `ENTITY_DESPAWNED` reactions видят columns до удаления.
 
 #### Типовой контракт этапа
 
-- `transition.despawn(...)` типизируется только как scoped transition extension entity effects.
-- В entity effect `transition.despawn(...)` принимает entity ids или entity indices из captured scope.
-- Вне entity effect scope `transition.despawn(...)` недоступен.
 - Public `manager.despawn(...)` не добавляется.
 - External despawn выражается обычным event + `meta.entityId`/`meta.groupTag` и actor config/reducer behavior.
 
@@ -661,8 +655,6 @@ Owners и module boundaries:
 - Invalid `despawnOn` state бросает clear init error.
 - `despawnOn` на special state бросает clear init error.
 - `despawnOn` на `storage: "instance"` бросает clear init error.
-- Raw `EntityIndex` вне entity effect scope для `transition.despawn(...)` бросает clear runtime error, если TypeScript был обойден.
-- Stale captured scope despawn бросает clear error в `IS_DEV` и является no-op в production.
 - Duplicate scheduled despawn одного `entityIndex` дедуплицируется без ошибки.
 
 #### Совместимость
@@ -674,7 +666,8 @@ Owners и module boundaries:
 
 #### Не делать в этом этапе
 
-- Не добавлять entity enter-state effects, кроме minimal scoped transition type wiring.
+- Не добавлять `transition.despawn(...)`.
+- Не добавлять entity enter-state effects.
 - Не добавлять reactions.
 - Не добавлять snapshot/hydrate.
 - Не добавлять React hooks.
@@ -691,22 +684,17 @@ Runtime tests:
 - despawn sends scoped `ENTITY_DESPAWNED` to all attached actor rows;
 - terminal rows are removed during storage commit before subscribers;
 - entity is removed from `EntityStore` when no actor rows remain;
-- `freeList` and `generation` update on slot reuse;
-- stale captured `transition.despawn(self.indices)` throws in `IS_DEV` and no-ops in production;
-- enter-state effects for `despawnOn` states are not scheduled.
+- `freeList` and `generation` update on slot reuse.
 
 Type tests:
 
 - `despawnOn` accepts state name or readonly array;
-- `transition.despawn(...)` is visible in entity effect scope;
-- raw `EntityIndex` is not accepted outside entity effect scope;
-- `transition.despawn(...)` is unavailable outside entity effects;
 - `manager.despawn(...)` does not exist.
 
 #### Gate завершения
 
 - Runtime и type tests этапа проходят.
-- Cheatsheets и package docs отражают `despawnOn` и `transition.despawn(...)`.
+- Cheatsheets и package docs отражают `despawnOn`.
 - Coverage нового и измененного кода этапа равен 100%.
 - Docs build не запускался.
 
@@ -743,6 +731,7 @@ Public exports не меняются.
 - Effects запускаются по финальному state после reducer.
 - Effects не запускаются для rows, удаленных через `despawnOn` до effect phase.
 - Entity enter-state effects выполняются через `StorageEffectsRuntime.resolveInvocations(...)` и `StorageEffectsRuntime.invoke(...)` в core-managed effect phase.
+- Entity runtime компилирует `effectsByStateCode` при init manager.
 - Effect phase выполняется после subscribers и middleware post-`next`.
 - `self` и `entities` read-only в effect.
 - `self` и `entities` в async effect являются live views, bound к captured invocation scope.
@@ -762,6 +751,10 @@ Public exports не меняются.
 - `transition.tag(groupTag | readonly groupTag[], action)` доставляет action entity rows указанной entity groupTag.
 - `transition.actor(actorId | readonly actorId[], action)` адресует только `storage: "instance"` actors.
 - `transition.despawn(...)` использует despawn semantics этапа 7.
+- `transition.despawn(entityId | readonly entityId[])` schedules despawn для указанных live entities.
+- `transition.despawn(self.indices)` принимает только entity indices из captured effect scope.
+- Raw `EntityIndex` вне captured entity effect scope для `transition.despawn(...)` бросает clear runtime error, если TypeScript был обойден.
+- For stale async scope `transition.despawn(self.indices)` проверяет captured generation: в `IS_DEV` бросает clear error, в production выполняет no-op для stale indices.
 - `transition.entities(...)` не входит в MVP.
 - Wildcard `*` effects, `condition()`, per-row `bag` и `createEffect("latest")` в entity MVP не поддерживаются.
 
@@ -780,6 +773,8 @@ Public exports не меняются.
 - Required access `entities.get(...)` в diagnostics проверяет каждую entity из current scope.
 - Validation error содержит source actor, event type, requested actor key и entity id.
 - Stale scope после `await` бросает clear dev error для required access.
+- Stale captured scope despawn бросает clear error в `IS_DEV` и является no-op в production.
+- Raw `EntityIndex` вне entity effect scope для `transition.despawn(...)` бросает clear runtime error, если TypeScript был обойден.
 - Production build не обязан выполнять full required-access validation для `entities.get(...)`.
 - Попытка использовать unsupported entity effect feature (`*`, `condition`, `latest`, `bag`) бросает clear init error.
 
@@ -815,6 +810,7 @@ Runtime tests:
 - `transition.tag(...)` routes by entity groupTag;
 - `transition.actor(...)` routes only instance actors;
 - `transition.despawn(...)` despawns captured rows with generation check;
+- stale captured `transition.despawn(self.indices)` throws in `IS_DEV` and no-ops in production;
 - wrong user deps `entities` throws clear error.
 
 Type tests:
@@ -822,6 +818,9 @@ Type tests:
 - entity effect deps expose typed `self` columns;
 - entity effect deps expose scoped `entities`;
 - scoped transition methods are typed in entity effects;
+- raw `EntityIndex` is not accepted outside entity effect scope;
+- `transition.despawn(...)` is unavailable outside entity effects;
+- `manager.despawn(...)` does not exist;
 - scoped transition methods are unavailable without plugin capability;
 - unsupported effect features are rejected.
 
@@ -860,6 +859,7 @@ Public exports не меняются.
 - Reaction привязан к accepted event, а не к enter-state.
 - Reaction вызывается один раз на actor template per accepted event.
 - Reaction получает `self.indices` rows, которые приняли event по `config` и routing.
+- Entity runtime компилирует `reactionsByEventCode` при init manager.
 - Reaction выполняется синхронно.
 - Promise return передается через dispatch `reportError(...)` в `onError` как contract violation, если runtime может надежно определить Promise return, и не await-ится.
 - `self` и `entities` read-only в reaction.
@@ -870,7 +870,8 @@ Public exports не меняются.
 - Reaction может читать user deps и вызывать sync methods внешних deps.
 - Reducers выполняются раньше reactions.
 - `despawnOn` lifecycle processing выполняется раньше reactions исходного event.
-- Reactions internal `ENTITY_DESPAWNED` выполняются до collapse удаляемых rows.
+- Reactions internal `ENTITY_DESPAWNED` являются storage-specific lifecycle reactions entity runtime и выполняются внутри entity commit/lifecycle cleanup до collapse удаляемых rows.
+- Generic `StorageReactionRuntime.run(...)` покрывает обычные source-event reactions после cleanup.
 - Reactions для `ENTITY_DESPAWNED` видят columns до удаления actor rows.
 - Rows, удаленные через `despawnOn`, не попадают в reactions исходного event.
 - Порядок despawn pipeline фиксирован: reducer/default transition исходного event; `despawnOn` и explicit despawn staging; scoped `ENTITY_DESPAWNED` delivery; `ENTITY_DESPAWNED` reactions; cleanup rows/entity/indexes/generation/freeList/versions; source-event reactions только для live rows; subscribers; effects только для live rows.
