@@ -18,6 +18,8 @@
 - Для нового и измененного чистого кода требуется 100% coverage по statements/branches/functions/lines.
 - 100% coverage не считается достаточным без сценарных тестов: happy path, негативные type-level контракты, runtime validation, composition errors, взаимодействие нескольких plugins, порядок выполнения и регрессия без plugins.
 - Агент не запускает docs build и команды, которые транзитивно запускают docs build.
+- Полная документация сайта в `apps/docs` выполняется отдельной задачей; это ТЗ закрывает только cheatsheets, documentation fixture и отсутствие legacy examples.
+- Builder plugin values не подключаются к `MachineManager` до этапа 3; этапы 1-2 закрывают builder/local validation и type-level extraction.
 
 ## Статусы
 
@@ -29,19 +31,24 @@
 ## Текущий указатель
 
 - Активное ТЗ: `tz-plugin-system-public-api-finalization.md`
-- Активный этап: 1 — `definePlugin<PluginEvents, HostEvents>().create(...)` и inferred capabilities
+- Активный этап: 1 — Builder API, opaque plugin value и local validation
 - Статус: `not started`
-- Следующее действие: начать этап 1 с type tests для builder-style API, conditional `HostEvents` default и удаления старого public authoring surface.
+- Следующее действие: начать этап 1 с type/runtime tests для builder-style API, opaque plugin marker, conditional `HostEvents` default, local validation и удаления старого public authoring surface; не добавлять runtime tests с `MachineManager(..., { plugins })` до этапа 3.
 
 ## Сводка по этапам
 
 | Этап | Название | Статус | Последнее обновление |
 | --- | --- | --- | --- |
-| 1 | `definePlugin<PluginEvents, HostEvents>().create(...)` и inferred capabilities | `not started` | — |
-| 2 | Declarative runtime registration для `routeMeta`, `manager`, `intercept` и `hooks` | `not started` | — |
-| 3 | `scopedDeps` и `scopedTransition` без `keys` и casts | `not started` | — |
-| 4 | `defineStorageRuntime`, machine extensions и normalized helper types | `not started` | — |
-| 5 | Документация, examples и final verification | `not started` | — |
+| 1 | Builder API, opaque plugin value и local validation | `not started` | — |
+| 2 | Type-level capabilities и helper types | `not started` | — |
+| 3 | Normalized registry и встроенный `instance` storage | `not started` | — |
+| 4 | `routeMeta` и `manager` | `not started` | — |
+| 5 | `intercept` и `hooks` | `not started` | — |
+| 6 | `scopedDeps` и `scopedTransition` | `not started` | — |
+| 7 | `defineStorageRuntime` и helper types | `not started` | — |
+| 8 | Runtime storage section | `not started` | — |
+| 9 | Рефакторинг, чистка и полировка | `not started` | — |
+| 10 | Документация и финальная проверка | `not started` | — |
 
 ## Шаблон записи
 
@@ -64,31 +71,61 @@
 
 ## Ход реализации
 
-### Этап 1 — `definePlugin<PluginEvents, HostEvents>().create(...)` и inferred capabilities
+### Этап 1 — Builder API, opaque plugin value и local validation
 
 Статус: `not started`
 
 Записи:
 
-### Этап 2 — Declarative runtime registration для `routeMeta`, `manager`, `intercept` и `hooks`
+### Этап 2 — Type-level capabilities и helper types
 
 Статус: `not started`
 
 Записи:
 
-### Этап 3 — `scopedDeps` и `scopedTransition` без `keys` и casts
+### Этап 3 — Normalized registry и встроенный `instance` storage
 
 Статус: `not started`
 
 Записи:
 
-### Этап 4 — `defineStorageRuntime`, machine extensions и normalized helper types
+### Этап 4 — `routeMeta` и `manager`
 
 Статус: `not started`
 
 Записи:
 
-### Этап 5 — Документация, examples и final verification
+### Этап 5 — `intercept` и `hooks`
+
+Статус: `not started`
+
+Записи:
+
+### Этап 6 — `scopedDeps` и `scopedTransition`
+
+Статус: `not started`
+
+Записи:
+
+### Этап 7 — `defineStorageRuntime` и helper types
+
+Статус: `not started`
+
+Записи:
+
+### Этап 8 — Runtime storage section
+
+Статус: `not started`
+
+Записи:
+
+### Этап 9 — Рефакторинг, чистка и полировка
+
+Статус: `not started`
+
+Записи:
+
+### Этап 10 — Документация и финальная проверка
 
 Статус: `not started`
 

@@ -259,13 +259,13 @@ Effect получает один объект:
 | `condition(predicate)` | promise, резолвится на ближайший matching action                        |
 | `self`                 | (actor only) `{ actorId, groupId, groupTag }`                           |
 | user deps              | из `defineMachine({ dependencies })` или `manager.setDependencies(...)` |
-| plugin scoped deps     | добавляются через `ctx.deps.extendDeps(...)` только на время invocation |
+| plugin scoped deps     | public API находится на финализации; документация будет создана после стабилизации DSL |
 
 State effect приоритетнее `"*"`. Wildcard срабатывает и на self-transition. Ошибки и reject из `condition` уходят в `onError`.
 
 ## Factories
 
-`createMachine`, `createConfig`, `createReducer`, `createActorMeta` и `definePlugin` — typed helpers: runtime-поведение не меняют, только фиксируют и сужают типы. `createEffect` — runtime wrapper: он оборачивает effect guard-ом для политики запуска.
+`createMachine`, `createConfig`, `createReducer` и `createActorMeta` — typed helpers: runtime-поведение не меняют, только фиксируют и сужают типы. `createEffect` — runtime wrapper: он оборачивает effect guard-ом для политики запуска.
 
 | Factory                                      | Назначение                                                     |
 | -------------------------------------------- | -------------------------------------------------------------- |
@@ -273,71 +273,14 @@ State effect приоритетнее `"*"`. Wildcard срабатывает и 
 | `createConfig(cfg)`                          | только граф переходов                                          |
 | `createReducer(fn)`                          | reducer с фиксированным action union                           |
 | `createActorMeta(meta)`                      | frozen `Readonly<ActorMeta>` для replacement/time-travel input |
-| `definePlugin(plugin)`                       | объявляет plugin value и фиксирует типовые capabilities        |
+| `definePlugin`                               | plugin authoring API находится на финализации                  |
 | `createEffect({ effect, type?, cancelFn? })` | возвращает effect с guard-ом для политики запуска              |
 
-### `definePlugin`
+### Plugin system
 
-```ts
-type AuditCapabilities = {
-  manager: { audit: unknown };
-};
+Plugin system public API находится на финализации. Старый authoring API с пользовательским `install(ctx)` не является целевым public API.
 
-const plugin = definePlugin({
-  name: "audit",
-  install() {},
-});
-
-const typedPlugin = definePlugin<AuditCapabilities, "audit">({
-  name: "audit",
-  install() {},
-});
-
-MachineManager({ counter }, { plugins: [plugin] });
-```
-
-`name` — стабильный идентификатор plugin. Обычный вызов `definePlugin(...)` сохраняет literal `name`; вызов `definePlugin<Capabilities>(...)` фиксирует типовые capabilities, но TypeScript не выводит literal `name` после явного generic. Если нужны оба контракта, используй `definePlugin<Capabilities, "audit">(...)`.
-
-`PluginCapabilities` задаёт только type-level поверхность plugin. `manager` расширяет returned manager object у менеджера, созданного с текущим tuple `plugins`. `transitionEvents` расширяет `manager.transition(...)`; эти события не попадают в `createMachine<AppEvents>`. `actionMeta` расширяет служебный `action.meta` поверх core keys (`actorId`, `groupId`, `groupTag`, sender fields). `deps` и `transition` описывают scoped deps и методы scoped `transition` внутри effects/reactions; для типизации используй `EffectDeps<AppDeps, Plugins>`. Для каждого runtime-supported meta key plugin обязан зарегистрировать resolver через `ctx.routing.registerMetaKey(...)`.
-
-Machine extensions подключаются через app wrapper:
-
-```ts
-type TestStorageExtension = {
-  storage: "test";
-  input: { test: { key: string } };
-};
-
-export const createAppMachine: TypedCreateMachineFn<AppEvents, AppDeps, TestStorageExtension> = createMachine;
-```
-
-Core `createMachine<AppEvents>(...)` принимает только отсутствие `storage` или явное `storage: "instance"`. Plugin-specific `storage`, config fields, internal events, reducer meta, effect/reaction deps, result metadata и override public state доступны только в wrapper, где третий generic `TypedCreateMachineFn` явно содержит `MachineRuntimeExtension`. Непустой machine extension обязан задавать `storage`. Прямой value `createMachine` остаётся совместимым с таким wrapper для assignability; plugin-specific overload у прямого вызова не является публичным способом настройки приложения.
-
-`MachineManager` сначала устанавливает встроенный runtime preset, затем вызывает пользовательские `install(ctx)` один раз при создании менеджера, в порядке массива `plugins`, до сборки машин. Встроенный preset регистрирует `storage: "instance"` как default kind; public API для custom runtime presets пока не публикуется.
-
-| Шаг lifecycle       | Контракт                                                               |
-| ------------------- | ---------------------------------------------------------------------- |
-| preset install      | core регистрирует default runtime `"instance"`                         |
-| user plugin install | `install(ctx)` вызывается один раз в порядке `options.plugins`         |
-| validation          | storage kind, route meta keys, manager/deps ownership и machine config |
-| compile/runtime     | storage runtime компилирует templates и создает runtime state          |
-| extension attach    | `ctx.manager.extend(...)` добавляет поля на returned manager object    |
-
-`ctx.storage` содержит рабочий registry `{ register(kind, runtime), get(kind) }`. `ctx.actions.intercept(handler)` регистрирует action interceptor, `ctx.dispatch.*(hook)` регистрирует dispatch hook в конкретной фазе. `ctx.routing.registerMetaKey(key, resolver)` регистрирует служебный `action.meta` key для routing. Resolver возвращает `string` или массив `string`, нормализованный в target set. `ctx.manager.extend(key, factory)` добавляет поле на returned manager object после сборки машин и runtime init; factory получает stable `ManagerRuntimeContext`. `ManagerRuntimeContext.config` — исходный machine store, переданный в `MachineManager`; manager extensions должны рассматривать его как immutable reference и не менять машины или их конфигурации. `ctx.deps.extendDeps(factory)` добавляет scoped deps, `ctx.deps.extendTransition(factory)` добавляет методы на scoped `transition`; `factory.keys` объявляет owned keys и проверяется на duplicate/core override при init. Registry можно менять только синхронно внутри `install(ctx)`; вызовы сохраненного `ctx` после завершения install являются ошибкой контракта.
-
-Storage runtime, передаваемый в `ctx.storage.register(kind, runtime)`, реализует базовый контракт `kind`, `validateTemplate`, `compileTemplate`, `createRuntimeState`, `createPublicInitialState`, `acceptsEvent`, `reduce`, `commit`. `runtime.kind` и `CompiledStorageTemplate.kind` должны совпадать с registered storage kind. Опциональные capability blocks: `effects`, `reactions`, `identity`, `snapshot`. Если runtime объявляет `routeMetaKeys`, plugin обязан зарегистрировать соответствующие route resolvers. `snapshot` capability пишет transport payload в `snapshot.storage[kind]`; `getSnapshot()` storage payloads не включает.
-
-Action interceptors выполняются после middleware `next(...)` и post-normalization, но до выбора templates для reduce. Interceptor получает текущий dispatch context и может вернуть `{ action, skipDelivery, stopInterceptors }`. Замена `action` становится committed public action для reducers, subscribers, effects, middleware post-`next` и return value. `skipDelivery: true` пропускает machine delivery, но не останавливает следующие interceptors и hooks. `stopInterceptors: true` останавливает только следующие interceptors.
-
-Dispatch hooks выполняются в порядке регистрации: `beforeReduce`, `afterReduce`, `beforeCommit`, `beforeSubscribers`, `beforeEffects`, `afterEffects`. Hook error является fatal: до commit state не меняется, после commit rollback не выполняется. `ctx.reportError(error)` вызывает `onError` и не меняет control flow; hook, которому нужна non-fatal external side effect, сам делает `try/catch`.
-
-Core routing priority: `actorId` → registered plugin keys в порядке регистрации → `groupId` → `groupTag` → unscoped. Если action содержит несколько route keys, применяется первый по приоритету, остальные не образуют intersection/union. Registered keys сохраняются при pre/post-normalization и middleware rewrite; неизвестные `action.meta` keys срезаются или игнорируются без ошибки. Пользовательские данные передаются через `payload`, не через `meta`.
-
-Manager extension не может перезаписать core manager methods (`transition`, `getState`, `setDependencies` и другие базовые методы). Duplicate manager extension key бросает init error. No-op manager extension registry не меняет форму менеджера.
-
-Scoped deps factory вызывается для каждого effect/reaction invocation и получает `{ source, event, indices, phase, transition }`. Extension может вернуть только keys из `factory.keys`; попытка заменить app/core key или чужой key бросает clear runtime error. Async effect сохраняет объект и scope конкретного invocation после `await`.
-
-Duplicate plugin names, duplicate storage kind, duplicate route meta key, duplicate manager extension key, duplicate scoped deps/transition key, unknown storage kind, отсутствующий default storage kind, runtime-supported meta key без resolver, invalid storage runtime kind и invalid storage-specific config бросают init error. Late registry mutation, invalid route resolver result, unsupported storage snapshot capability и invalid storage snapshot payload бросают runtime contract error. No-op plugin не меняет состояние, reducers, middleware, subscribers, effects, snapshot и hydrate. `@lite-fsm/entities` зависит от этой plugin system, но entity runtime и `manager.entities` не входят в текущий core API.
+Новая документация будет создана после завершения `definePlugin().create(...)` и storage DSL. До этого раздел не является источником контрактов для реализации plugins.
 
 ### `createEffect`
 
@@ -420,7 +363,7 @@ manager.transition({ type: "INC" });
 | Опция                      | Назначение                                                                                                                                                                           |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `middleware?`              | цепочка middleware на все user actions                                                                                                                                               |
-| `plugins?`                 | readonly tuple `LiteFsmPlugin`; встроенный preset ставится раньше, tuple расширяет типы returned manager object, `transition`, `action.meta` и scoped effect deps текущего менеджера |
+| `plugins?`                 | tuple plugins; public authoring API находится на финализации                                                                                                   |
 | `snapshot?`                | начальный snapshot, применяется со strategy `"replace"`                                                                                                                              |
 | `schemaVersion?`           | версия snapshot                                                                                                                                                                      |
 | `onError?`                 | ошибки effects / `condition`                                                                                                                                                         |

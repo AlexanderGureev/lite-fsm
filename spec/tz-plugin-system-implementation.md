@@ -1,5 +1,8 @@
 # Plugin system и pluggable runtimes для lite-fsm — ТЗ для реализации
 
+> Исторический документ. Не использовать как источник требований для финализации public plugin API.
+> Актуальная работа описана в [`tz-plugin-system-public-api-finalization.md`](./tz-plugin-system-public-api-finalization.md).
+
 ## 1. Цель
 
 Реализовать в `@lite-fsm/core` plugin system, которая позволяет подключать новые runtime capabilities без встраивания их в kernel manager. Текущее поведение lite-fsm должно стать встроенным default runtime preset внутри `@lite-fsm/core`, а внешние runtime вроде `@lite-fsm/entities` должны подключаться через plugins.

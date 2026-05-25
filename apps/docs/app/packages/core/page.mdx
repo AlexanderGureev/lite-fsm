@@ -17,7 +17,7 @@ npm install @lite-fsm/core @lite-fsm/middleware immer
 ## Entry point
 
 ```ts copy
-import { MachineManager, createEffect, createMachine, defineMachine, definePlugin } from "@lite-fsm/core";
+import { MachineManager, createEffect, createMachine, defineMachine } from "@lite-fsm/core";
 ```
 
 Основной импорт `@lite-fsm/core` экспортирует:
@@ -29,12 +29,12 @@ import { MachineManager, createEffect, createMachine, defineMachine, definePlugi
 | `createReducer`   | Типизированная фабрика reducer-а                                                               |
 | `createEffect`    | Обёртка effect с `every` или `latest` семантикой                                               |
 | `createActorMeta` | Замороженный `ActorMeta` для replacement/time-travel сценариев                                 |
-| `definePlugin`    | Объявляет plugin value для расширения текущего `MachineManager`                                 |
+| Plugin system     | Public API находится на финализации                                                            |
 | `MachineManager`  | Runtime-store для нескольких машин                                                             |
 | `Machine`         | Standalone pure machine                                                                        |
 | `defineMachine`   | Standalone-фабрика с зависимостями                                                             |
 | `LiteFsmError`    | Ошибка runtime с кодом                                                                         |
-| types             | `FSMEvent`, `MachineConfig`, `MachinesState`, `MachineEvents`, plugin/snapshot/actor/middleware types |
+| types             | `FSMEvent`, `MachineConfig`, `MachinesState`, `MachineEvents`, snapshot/actor/middleware types |
 
 ## Минимальный пример
 
@@ -73,7 +73,7 @@ manager.getState().toggle.state; // "ON"
 - Effects: state effects, wildcard effects, `condition`, nested `transition`.
 - Actor templates: spawn, routing через `meta`, groups, terminal states.
 - Snapshot: `dehydrate`, `hydrate`, предварительный расчёт состояния и обработчики версий схемы.
-- Plugin system: `definePlugin`, `MachineManager(..., { plugins })`, storage runtimes, scoped deps, manager extensions и `snapshot.storage[kind]`.
+- Plugin system: public API находится на финализации; новая документация будет создана после стабилизации DSL.
 - Middleware API: `getState`, `transition`, `replaceReducer`, `onTransition`, `condition`.
 
 ## Связанные разделы

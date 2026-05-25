@@ -1,5 +1,8 @@
 # Журнал реализации ТЗ plugin system и entities
 
+> Исторический журнал выполненной реализации. Не использовать как источник требований для финализации public plugin API.
+> Актуальная работа описана в [`tz-plugin-system-public-api-finalization.md`](./tz-plugin-system-public-api-finalization.md).
+
 Этот файл фиксирует краткий прогресс реализации трех актуальных реализационных ТЗ:
 
 - [`tz-plugin-system-implementation.md`](./tz-plugin-system-implementation.md)

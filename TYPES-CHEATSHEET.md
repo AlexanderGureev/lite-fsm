@@ -6,7 +6,7 @@
 
 | Импорт                       | Типы                                                                                                                                                                                                                                                                                              |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@lite-fsm/core`             | весь `types.ts` + `interfaces.ts`: `FSMEvent`, `MachineConfig`, `CFG`, `MachineReducer`, `MachineEffect`, `MachineManagerSnapshot`, `MachinesState`, `MachineEvents`, `MachineDependencies`, `IMachineManager`, `Middleware`, `LiteFsmPlugin`, plugin types, actor types, snapshot types, helpers |
+| `@lite-fsm/core`             | весь `types.ts` + `interfaces.ts`: `FSMEvent`, `MachineConfig`, `CFG`, `MachineReducer`, `MachineEffect`, `MachineManagerSnapshot`, `MachinesState`, `MachineEvents`, `MachineDependencies`, `IMachineManager`, `Middleware`, actor types, snapshot types, helpers; plugin types находятся на финализации |
 | `@lite-fsm/react`            | `FSMContextType`, `FSMContextProviderProps`, `FSMPersistLifecycle`, `FSMHydrationBoundaryProps`, typed hook aliases                                                                                                                                                                               |
 | `@lite-fsm/persist`          | `MaybePromise`, `PersistedRecord`, `PersistStorage`, `PersistStatus`, `PersistRestoreSettledResult`, `PersistManagerOptions`, `PersistController`                                                                                                                                                 |
 | `@lite-fsm/persist/react`    | runtime hooks only: `usePersistStatuses`, `useIsPersistRestoring`                                                                                                                                                                                                                                 |
@@ -67,7 +67,7 @@ type AppEvent = FSMEvent<"INC"> | FSMEvent<"SET", { count: number }> | FSMEvent<
 | `ManagerAction<P, Meta = CoreActionMeta>` | `P & { meta?: Meta }`                                                                |
 | `ManagerCommitAction<S, P>`               | user action или `HydrateAction<S>`                                                   |
 
-`actorId`, `groupId`, `groupTag` — `string | string[]`. Plugin-provided `meta` keys добавляются через `PluginCapabilities["actionMeta"]` и `ManagerActionMeta<Plugins>`. Runtime принимает только registered route keys: plugin обязан вызвать `PluginInstallContext.routing.registerMetaKey(...)` для каждого runtime-supported key.
+`actorId`, `groupId`, `groupTag` — `string | string[]`. Дополнительные route keys для plugin system находятся на финализации и не описываются как стабильный public API.
 
 ## Граф переходов · `CFG<C, P>`
 
@@ -172,7 +172,7 @@ const saveEffect: MachineEffect<"saving", SaveConfig, SaveEvent, { api: Api }> =
 | Тип                            | Назначение                                                                                                   |
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------ |
 | `MachineEffect<N, C, P, D>`    | `(deps: D & DefaultDeps...) => void \| Promise<void>`                                                        |
-| `EffectDeps<AppDeps, Plugins>` | `AppDeps & PluginDeps<Plugins>` плюс scoped `transition` extensions текущего plugin tuple                    |
+| `EffectDeps<AppDeps, Plugins>` | app deps плюс plugin-scoped extensions; plugin public API находится на финализации                           |
 | `EffectStateName<C>`           | domain: `StateName<C> \| "*"`; actor: `ActorPublicState<C> \| "*"`                                           |
 | `IncomingEventTypes<C, N>`     | event names, ведущие в state `N`                                                                             |
 | `ActionForState<C, N, P>`      | `Extract<P, { type: IncomingEventTypes<C, N> }>` (для `N = "*"` — весь `P`)                                  |
@@ -236,68 +236,9 @@ type AppDeps = MachineDependencies<Store>;
 
 ## Plugins
 
-```ts
-type AuditCapabilities = {
-  manager: { audit: unknown };
-};
+Plugin system public API находится на финализации. Старый authoring API с пользовательским `install(ctx)` не является целевым public API.
 
-const auditPlugin = definePlugin<AuditCapabilities>({
-  name: "audit",
-  install() {},
-});
-
-const namedAuditPlugin = definePlugin<AuditCapabilities, "audit">({
-  name: "audit",
-  install() {},
-});
-```
-
-| Тип                                              | Форма / назначение                                                                                                                                           |
-| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `LiteFsmPlugin<C = {}>`                          | plugin value с `name`, `install(ctx)` и типовыми capabilities для `MachineManager(..., { plugins })`                                                         |
-| `PluginCapabilities`                             | optional type-level keys: `manager`, `transitionEvents`, `machine`, `actionMeta`, `deps`, `transition`                                                       |
-| `PluginManagerExtensions<S, AppEvents, Plugins>` | intersection `manager` extensions из plugin tuple; generic capability может зависеть от `S` и `AppEvents` текущего менеджера                                 |
-| `PluginTransitionEvents<Plugins>`                | union `transitionEvents` из plugin tuple                                                                                                                     |
-| `ManagerTransitionEvents<AppEvents, Plugins>`    | `AppEvents \| PluginTransitionEvents<Plugins>`                                                                                                               |
-| `PluginActionMeta<Plugins>`                      | optional intersection `actionMeta` из plugin tuple                                                                                                           |
-| `ManagerActionMeta<Plugins>`                     | `CoreActionMeta & PluginActionMeta<Plugins>`                                                                                                                 |
-| `PluginDeps<Plugins>`                            | intersection `deps` из plugin tuple                                                                                                                          |
-| `PluginTransitionExtensions<Plugins>`            | intersection `transition` из plugin tuple                                                                                                                    |
-| `EffectDeps<AppDeps, Plugins>`                   | app deps плюс scoped deps и scoped transition methods для effects/reactions                                                                                  |
-| `ManagerFromPlugins<S, AppEvents, Plugins>`      | `IMachineManager` с manager extensions, transition events и action meta текущего tuple                                                                       |
-| `PluginInstallContext`                           | `{ readonly actions; readonly storage; readonly dispatch; readonly routing; readonly manager; readonly deps }`                                               |
-| `ManagerExtensionRegistry`                       | `{ extend(key, factory): void }`; регистрирует extension factory для returned manager object                                                                 |
-| `ManagerExtensionFactory`                        | `(ctx: ManagerRuntimeContext) => Value`                                                                                                                      |
-| `ManagerRuntimeContext`                          | stable runtime context для manager extension: `config`, options, schemaVersion, getState, transition, onTransition, getDependencies                          |
-| `ManagerExtensionCapability`                     | type-level generic manager capability; через `ManagerExtensionStore<C>` и `ManagerExtensionAppEvents<C>` можно связать extension с текущим `S` и `AppEvents` |
-| `ActionRegistry`                                 | `{ intercept(handler: ActionInterceptor): void }`                                                                                                            |
-| `ActionInterceptor`                              | `(ctx: ActionInterceptorContext) => void \| { action?, skipDelivery?, stopInterceptors? }`                                                                   |
-| `DispatchContext`                                | `{ options; runtime; originalAction; action; skipDelivery; reportError(error) }`                                                                             |
-| `DispatchRegistry`                               | методы `beforeReduce`, `afterReduce`, `beforeCommit`, `beforeSubscribers`, `beforeEffects`, `afterEffects`                                                   |
-| `DispatchHook`                                   | `(ctx: DispatchContext) => void`                                                                                                                             |
-| `DepsExtensionRegistry`                          | `{ extendDeps(factory); extendTransition(factory) }`                                                                                                         |
-| `ScopedDepsFactory`                              | callable с `keys: readonly string[]`, возвращает scoped deps                                                                                                 |
-| `ScopedTransitionFactory`                        | callable с `keys: readonly string[]`, возвращает методы scoped `transition`                                                                                  |
-| `ScopedInvocationContext`                        | `{ source: { storage; template }; event; indices; phase; transition }`                                                                                       |
-| `RoutingRegistry`                                | `{ registerMetaKey<Key extends string>(key: Key, resolver: RouteResolver<Key>): void }`                                                                      |
-| `RouteResolver<Key>`                             | `(value: unknown, ctx: RouteResolverContext<Key>) => string \| readonly string[]`                                                                            |
-| `RouteResolverContext`                           | `{ readonly key; readonly action: ManagerAction<AnyEvent>; readonly meta: Readonly<Record<string, unknown>> }`                                               |
-
-`definePlugin(...)` сохраняет literal `name` при обычном вызове. `definePlugin<Capabilities>(...)` фиксирует типовые capabilities, но TypeScript не выводит literal `name` после явного первого generic, поэтому тип `name` становится `string`. Если нужен контракт одновременно с explicit capabilities и literal `name`, укажи имя вторым generic: `definePlugin<Capabilities, "audit">(...)`. Literal tuple в `MachineManager(..., { plugins: [...] as const })` сохраняет типы элементов; широкий `LiteFsmPlugin[]` не обязан сохранять plugin-specific capabilities. Plugin manager extensions, transition events, action meta и scoped deps применяются только к текущему `MachineManager(...)` и не подмешиваются в global `createMachine<AppEvents>`.
-
-`ManagerRuntimeContext.config` передаёт manager extension исходный `MachineStore`, а не defensive copy. Считайте его read-only контрактом: extension может читать ключи и конфигурации, но не должен мутировать машины.
-
-Встроенный runtime preset устанавливается перед пользовательскими plugins и регистрирует default storage kind `"instance"`. Storage registry хранит runtime по `machine.storage`; duplicate storage kind, unknown storage kind, mismatched `runtime.kind` и отсутствующий default kind являются init errors. Registry-поля `PluginInstallContext` можно менять только синхронно внутри `install(ctx)`. Public API для custom runtime presets пока не публикуется: `MachineManager(...)` всегда использует встроенный preset.
-
-Storage runtime регистрируется через `PluginInstallContext["storage"].register(kind, runtime)`. `runtime` объект типизируется структурно через registry method: базовые поля `kind`, `validateTemplate`, `compileTemplate`, `createRuntimeState`, `createPublicInitialState`, `acceptsEvent`, `reduce`, `commit` обязательны; capability blocks `effects`, `reactions`, `identity`, `snapshot` опциональны. `runtime.kind` и `compileTemplate(...).kind` должны совпадать с registered storage kind. `snapshot` block работает через `MachineManagerSnapshot<S>["storage"][kind]`; payload остаётся `unknown` на уровне core и валидируется runtime-владельцем kind.
-
-Routing registry регистрирует runtime-owned `action.meta` keys до типового расширения `actionMeta`. Registered keys сохраняются при normalization и middleware rewrite. Priority фиксирован: `actorId`, затем registered keys в порядке регистрации, затем `groupId`, `groupTag`, unscoped. Resolver нормализует значение plugin key в target set; invalid result является runtime error. Неизвестные `meta` keys не являются ошибкой и не участвуют в routing.
-
-Action interceptor выполняется после middleware `next(...)` и post-normalization. Если он возвращает `action`, это значение становится committed public action для reducers, subscribers, effects, middleware post-`next` и return value. `skipDelivery: true` пропускает machine delivery, но не останавливает следующие interceptors; `stopInterceptors: true` останавливает только следующие interceptors.
-
-Dispatch hooks выполняются в порядке регистрации. Hook error является fatal. `DispatchContext.reportError(error)` вызывает `onError` и не меняет control flow dispatch.
-
-`@lite-fsm/entities` должен подключаться как внешний runtime plugin поверх этих extension points, но entity-specific types, `manager.entities` и React hooks не входят в текущий core type surface.
+Новая типовая документация будет создана после завершения `definePlugin().create(...)`, helper types и storage DSL. До этого раздел не является источником контрактов для реализации plugins.
 
 ## Snapshots
 
