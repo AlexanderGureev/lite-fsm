@@ -1,5 +1,3 @@
-/* eslint-disable @typescript-eslint/ban-ts-comment */
-
 // @ts-nocheck
 
 /*
@@ -61,11 +59,7 @@ export class MoveSystem extends System {
 
   update(entities: Entities) {
     for (const entity of entities) {
-      const [position, velocity] = this.ecs.getComponents(
-        entity,
-        Position,
-        Velocity,
-      );
+      const [position, velocity] = this.ecs.getComponents(entity, Position, Velocity);
       position.x += velocity.dx;
       position.y += velocity.dy;
     }
@@ -86,11 +80,7 @@ export class SpriteSyncSystem extends System {
 
   update(entities: Entities) {
     for (const entity of entities) {
-      const [position, sprite] = this.ecs.getComponents(
-        entity,
-        Position,
-        Sprite,
-      );
+      const [position, sprite] = this.ecs.getComponents(entity, Position, Sprite);
       this.sprites.setPosition(sprite.spriteId, {
         x: position.x,
         y: position.y,
@@ -120,19 +110,10 @@ export class LifetimeSystem extends System {
 }
 
 const ecs = createECS();
-ecs.addSystem(
-  new MoveSystem(),
-  new SpriteSyncSystem(new SpriteService()),
-  new LifetimeSystem(),
-);
+ecs.addSystem(new MoveSystem(), new SpriteSyncSystem(new SpriteService()), new LifetimeSystem());
 
 const unit = ecs.addEntity();
-ecs.addComponent(
-  unit,
-  new Position(10, 20),
-  new Velocity(1, 0),
-  new Sprite("unit-sprite-1"),
-);
+ecs.addComponent(unit, new Position(10, 20), new Velocity(1, 0), new Sprite("unit-sprite-1"));
 
 const projectile = ecs.addEntity();
 ecs.addComponent(

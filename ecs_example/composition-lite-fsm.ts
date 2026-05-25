@@ -1,6 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
-/* eslint-disable @typescript-eslint/ban-ts-comment */
-
 // @ts-nocheck
 
 import {
@@ -60,9 +57,7 @@ const spawnConfig = defineSpawnConfig({
   SPAWN_PROJECTILE: spawn<ProjectileSpawn>(),
 });
 
-type RegularEvents =
-  | { type: "TICK" }
-  | { type: "RESET_ROOM" };
+type RegularEvents = { type: "TICK" } | { type: "RESET_ROOM" };
 
 type AppEvents = RegularEvents;
 // manager.transition(...) still accepts SpawnEventsFrom<typeof spawnConfig>.
@@ -214,8 +209,7 @@ export const projectileActor = createMachine<AppEvents, AppDeps>({
       case "TICK":
         for (const entity of self.indices) {
           self.ticksLeft[entity] -= 1;
-          if (self.ticksLeft[entity] <= 0)
-            self.stateCode[entity] = self.states.EXPIRED;
+          if (self.ticksLeft[entity] <= 0) self.stateCode[entity] = self.states.EXPIRED;
         }
         return;
 
