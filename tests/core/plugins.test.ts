@@ -1,14 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { definePlugin, LiteFsmError, MachineManager } from "@lite-fsm/core";
-import type {
-  FSMEvent,
-  MachineConfig,
-  MachineManagerSnapshot,
-  Middleware,
-  PluginInstallContext,
-  ScopedDepsFactory,
-} from "@lite-fsm/core";
+import { definePlugin, defineStorageRuntime, LiteFsmError, MachineManager } from "@lite-fsm/core";
+import type { FSMEvent, MachineConfig, MachineManagerSnapshot, Middleware } from "@lite-fsm/core";
 
 type CounterEvent = FSMEvent<"GO"> | FSMEvent<"RESET">;
 type CounterConfig = { IDLE: { GO: "ACTIVE" }; ACTIVE: { RESET: "IDLE" } };
@@ -30,15 +23,25 @@ const createCounter = (effect: (deps: unknown) => void = () => {}): CounterMachi
   },
 });
 
+const expectLiteFsmError = (run: () => unknown, code: LiteFsmError["code"], message?: string) => {
+  expect(run).toThrow(LiteFsmError);
+
+  try {
+    run();
+  } catch (error) {
+    expect(error).toBeInstanceOf(LiteFsmError);
+    expect((error as LiteFsmError).code).toBe(code);
+    if (message) expect((error as Error).message).toContain(message);
+    return;
+  }
+
+  throw new Error("Expected LiteFsmError.");
+};
+
 describe("plugins в MachineManager", () => {
   it("no-op plugin сохраняет поведение manager", async () => {
     const effect = vi.fn();
-    const install = vi.fn((ctx) => {
-      expect(Object.isFrozen(ctx)).toBe(true);
-      expect(Object.keys(ctx)).toEqual(["actions", "storage", "dispatch", "routing", "manager", "deps"]);
-      expect(ctx.storage.get("instance")?.kind).toBe("instance");
-    });
-    const plugin = definePlugin({ name: "noop", install });
+    const plugin = definePlugin().create({ name: "noop" });
     const middlewareTrace: string[] = [];
     const middleware: Middleware<{ counter: CounterState }, CounterEvent> = () => (next) => (action) => {
       middlewareTrace.push(`pre:${action.type}`);
@@ -87,98 +90,136 @@ describe("plugins в MachineManager", () => {
     manager.hydrate(snapshot);
 
     expect(manager.getState()).toEqual({ counter: { state: "IDLE", context: { count: 10 } } });
-    expect(install).toHaveBeenCalledTimes(1);
   });
 
-  it("устанавливает plugins в порядке массива и не повторяет install после init", () => {
+  it("применяет final plugin sections в порядке tuple и не повторяет manager factories после init", () => {
     const order: string[] = [];
-    const first = definePlugin({ name: "first", install: () => order.push("first") });
-    const second = definePlugin({ name: "second", install: () => order.push("second") });
+    const first = definePlugin().create({
+      name: "first",
+      manager: {
+        first(ctx) {
+          order.push(`manager:first:${Object.keys(ctx.getState()).join(",")}`);
+          return "first" as const;
+        },
+      },
+      intercept(ctx) {
+        order.push(`intercept:first:${ctx.action.type}`);
+      },
+      hooks: {
+        beforeReduce(ctx) {
+          order.push(`beforeReduce:first:${ctx.action.type}`);
+        },
+        afterEffects(ctx) {
+          order.push(`afterEffects:first:${ctx.action.type}`);
+        },
+      },
+    });
+    const second = definePlugin().create({
+      name: "second",
+      manager: {
+        second(ctx) {
+          order.push(`manager:second:${Object.keys(ctx.getState()).join(",")}`);
+          return "second" as const;
+        },
+      },
+      intercept(ctx) {
+        order.push(`intercept:second:${ctx.action.type}`);
+      },
+      hooks: {
+        beforeReduce(ctx) {
+          order.push(`beforeReduce:second:${ctx.action.type}`);
+        },
+        afterEffects(ctx) {
+          order.push(`afterEffects:second:${ctx.action.type}`);
+        },
+      },
+    });
     const manager = MachineManager({ counter: createCounter() }, { plugins: [first, second] });
+
+    expect(manager.first).toBe("first");
+    expect(manager.second).toBe("second");
+    expect(order).toEqual(["manager:first:counter", "manager:second:counter"]);
 
     manager.transition({ type: "GO" });
     manager.hydrate({ machines: { counter: { state: "IDLE", context: { count: 2 } } } });
 
-    expect(order).toEqual(["first", "second"]);
+    expect(order).toEqual([
+      "manager:first:counter",
+      "manager:second:counter",
+      "intercept:first:GO",
+      "intercept:second:GO",
+      "beforeReduce:first:GO",
+      "beforeReduce:second:GO",
+      "afterEffects:first:GO",
+      "afterEffects:second:GO",
+    ]);
   });
 
-  it("устанавливает plugin до проверки машин", () => {
-    const calls: string[] = [];
-    const plugin = definePlugin({ name: "before-compile", install: () => calls.push("install") });
+  it("регистрирует storage runtime через final storage section до compile templates", () => {
+    const storage = defineStorageRuntime().create({
+      kind: "plugin-counter",
+      validateTemplate() {},
+      compileTemplate() {},
+      createRuntimeState() {
+        return {};
+      },
+      createPublicInitialState() {
+        return { state: "READY", context: { count: 5 } };
+      },
+      acceptsEvent() {
+        return false;
+      },
+      reduce() {},
+      commit() {},
+    });
+    const plugin = definePlugin().create({
+      name: "storage-plugin",
+      storage: [storage],
+    });
+    const manager = MachineManager(
+      {
+        counter: {
+          storage: "plugin-counter",
+          config: { READY: {} },
+          initialState: "READY",
+          initialContext: { count: 0 },
+        } as never,
+      },
+      { plugins: [plugin] },
+    );
 
-    expect(() =>
-      MachineManager(
-        {
-          bad: {
-            config: { IDLE: {} },
-            initialState: "IDLE",
-            initialContext: {},
-            persistence: "runtime",
-          } as never,
-        },
-        { plugins: [plugin] },
-      ),
-    ).toThrow(LiteFsmError);
-    expect(calls).toEqual(["install"]);
+    expect(manager.getState().counter).toEqual({ state: "READY", context: { count: 5 } });
   });
 
   it("duplicate plugin names бросают понятную ошибку на init", () => {
-    const firstInstall = vi.fn();
-    const secondInstall = vi.fn();
-    const first = definePlugin({ name: "duplicate", install: firstInstall });
-    const second = definePlugin({ name: "duplicate", install: secondInstall });
+    const first = definePlugin().create({ name: "duplicate" });
+    const second = definePlugin().create({ name: "duplicate" });
 
-    expect(() => MachineManager({ counter: createCounter() }, { plugins: [first, second] })).toThrow(
-      "[lite-fsm] duplicate plugin name 'duplicate'.",
+    expectLiteFsmError(
+      () => MachineManager({ counter: createCounter() }, { plugins: [first, second] }),
+      "LITE_FSM_DUPLICATE_PLUGIN",
+      "duplicate plugin name 'duplicate'",
     );
-    expect(firstInstall).toHaveBeenCalledTimes(1);
-    expect(secondInstall).not.toHaveBeenCalled();
   });
 
-  it("пробрасывает ошибку из install", () => {
-    const failure = new Error("install failed");
-    const plugin = definePlugin({
-      name: "failing",
-      install: () => {
-        throw failure;
-      },
-    });
+  it("отклоняет structural plugin-like objects без вызова callback", () => {
+    const callback = vi.fn();
 
-    expect(() => MachineManager({ counter: createCounter() }, { plugins: [plugin] })).toThrow(failure);
-  });
-
-  it("не разрешает менять registry после завершения install", () => {
-    let captured!: PluginInstallContext;
-    const plugin = definePlugin({
-      name: "capture-context",
-      install(ctx) {
-        captured = ctx;
-      },
-    });
-
-    const manager = MachineManager({ counter: createCounter() }, { plugins: [plugin] });
-
-    expect(() => captured.actions.intercept(() => undefined)).toThrow(
-      "[lite-fsm] plugin registry 'actions' can only be changed during plugin install.",
+    expectLiteFsmError(
+      () =>
+        MachineManager(
+          { counter: createCounter() },
+          {
+            plugins: [
+              {
+                name: "structural",
+                setup: callback,
+              },
+            ],
+          } as never,
+        ),
+      "LITE_FSM_INVALID_PLUGIN_DEFINITION",
     );
-    expect(() => captured.storage.register("late", undefined as never)).toThrow(
-      "[lite-fsm] plugin registry 'storage' can only be changed during plugin install.",
-    );
-    expect(() => captured.dispatch.beforeReduce(() => undefined)).toThrow(
-      "[lite-fsm] plugin registry 'dispatch' can only be changed during plugin install.",
-    );
-    expect(() => captured.routing.registerMetaKey("late", () => "late")).toThrow(
-      "[lite-fsm] plugin registry 'routing' can only be changed during plugin install.",
-    );
-    expect(() =>
-      captured.deps.extendDeps(Object.assign(() => ({}), { keys: ["late"] }) as ScopedDepsFactory),
-    ).toThrow("[lite-fsm] plugin registry 'deps' can only be changed during plugin install.");
-    expect(() => captured.manager.extend("late", () => ({}))).toThrow(
-      "[lite-fsm] plugin registry 'manager' can only be changed during plugin install.",
-    );
-
-    manager.transition({ type: "GO" });
-
-    expect(manager.getState()).toEqual({ counter: { state: "ACTIVE", context: { count: 1 } } });
+    expect(callback).not.toHaveBeenCalled();
   });
 });

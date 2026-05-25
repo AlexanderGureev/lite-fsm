@@ -4,7 +4,9 @@ import type {
   LiteFsmPlugin,
   ManagerActionMeta,
   ManagerTransitionEvents,
+  NormalizedPlugin,
 } from "../../plugin";
+import { getNormalizedPlugin, isLiteFsmPluginValue } from "../../plugin";
 import type {
   AnyEvent,
   DehydrateOptions,
@@ -42,7 +44,7 @@ import {
 export type RuntimePreset = {
   readonly name: string;
   readonly defaultStorageKind: string;
-  readonly plugins: readonly LiteFsmPlugin[];
+  readonly plugins: readonly NormalizedPlugin[];
 };
 
 export type MachineManagerFactory = {
@@ -50,7 +52,7 @@ export type MachineManagerFactory = {
   <
     S extends MachineStore,
     P extends AnyEvent = MachineEvents<S>,
-    const Plugins extends readonly LiteFsmPlugin[] = readonly LiteFsmPlugin[],
+    const Plugins extends readonly LiteFsmPlugin<any, any, any>[] = readonly [],
   >(
     config: S,
     opts: MachineManagerOptions<S, P, Plugins>,
@@ -92,14 +94,15 @@ const groupTemplatesByRuntime = (
 
 const hasOwn = (value: object, key: string): boolean => Object.prototype.hasOwnProperty.call(value, key);
 
-const assertKnownStorageKind = (kind: string, bucketsByKind: Map<string, RuntimeBucket>, context: "dehydrate" | "hydrate") => {
+const assertKnownStorageKind = (
+  kind: string,
+  bucketsByKind: Map<string, RuntimeBucket>,
+  context: "dehydrate" | "hydrate",
+) => {
   const bucket = bucketsByKind.get(kind);
   if (bucket) return bucket;
 
-  throw new LiteFsmError(
-    "LITE_FSM_UNKNOWN_STORAGE_KIND",
-    `[lite-fsm] ${context}: unknown storage kind '${kind}'.`,
-  );
+  throw new LiteFsmError("LITE_FSM_UNKNOWN_STORAGE_KIND", `[lite-fsm] ${context}: unknown storage kind '${kind}'.`);
 };
 
 const assertStorageSnapshotRuntime = (
@@ -115,11 +118,20 @@ const assertStorageSnapshotRuntime = (
   );
 };
 
+const assertManagerPluginValue = (value: unknown): LiteFsmPlugin => {
+  if (isLiteFsmPluginValue(value)) return value;
+
+  throw new LiteFsmError(
+    "LITE_FSM_INVALID_PLUGIN_DEFINITION",
+    "[lite-fsm] invalid plugin definition: MachineManager plugins must be values returned by definePlugin().create(...).",
+  );
+};
+
 export const createMachineManagerFactory = (preset: RuntimePreset): MachineManagerFactory => {
   return function createMachineManager<
     S extends MachineStore,
     P extends AnyEvent = MachineEvents<S>,
-    const Plugins extends readonly LiteFsmPlugin[] = readonly [],
+    const Plugins extends readonly LiteFsmPlugin<any, any, any>[] = readonly [],
   >(config: S, opts?: MachineManagerOptions<S, P, Plugins>): ManagerFromPlugins<S, P, Plugins> {
     type RuntimeEvents = ManagerTransitionEvents<P, Plugins>;
     type RuntimeMeta = ManagerActionMeta<Plugins>;
@@ -127,16 +139,22 @@ export const createMachineManagerFactory = (preset: RuntimePreset): MachineManag
 
     const pluginRegistry = createPluginRegistry({ defaultStorageKind: preset.defaultStorageKind });
     for (const plugin of preset.plugins) {
-      pluginRegistry.install(plugin);
+      pluginRegistry.addPlugin(plugin);
     }
-    for (const plugin of opts?.plugins ?? []) {
-      pluginRegistry.install(plugin);
+    const runtimeOptions = opts as ({ readonly plugins?: readonly unknown[] } & typeof opts) | undefined;
+    for (const plugin of runtimeOptions?.plugins ?? []) {
+      pluginRegistry.addPlugin(getNormalizedPlugin(assertManagerPluginValue(plugin)));
     }
     pluginRegistry.assertDefaultStorageRegistered();
     pluginRegistry.assertStorageRouteResolversRegistered();
 
     const machineKeys = Object.keys(config);
-    const templates = compileStorageTemplates(config, machineKeys, pluginRegistry.storage, pluginRegistry.defaultStorageKind);
+    const templates = compileStorageTemplates(
+      config,
+      machineKeys,
+      pluginRegistry.storage,
+      pluginRegistry.defaultStorageKind,
+    );
     const buckets = groupTemplatesByRuntime(templates, pluginRegistry.listStorageRuntimes());
     const bucketsByKind = new Map(buckets.map((bucket) => [bucket.runtime.kind, bucket]));
     const templateKindByKey = new Map(templates.map((template) => [template.key, template.kind]));
@@ -210,11 +228,7 @@ export const createMachineManagerFactory = (preset: RuntimePreset): MachineManag
       },
     });
 
-    const setDispatchAction = (
-      dispatch: StorageDispatchContext,
-      action: Action,
-      committedPrevState?: RootState,
-    ) => {
+    const setDispatchAction = (dispatch: StorageDispatchContext, action: Action, committedPrevState?: RootState) => {
       dispatch.action = action;
       dispatch.committedAction = action;
       dispatch.route = pluginRegistry.routing.resolveRoute(action);
@@ -244,7 +258,13 @@ export const createMachineManagerFactory = (preset: RuntimePreset): MachineManag
       for (const bucket of buckets) {
         for (const template of bucket.templates) {
           if (!bucket.runtime.acceptsEvent({ template, action, state: bucket.state, dispatch })) continue;
-          const result = bucket.runtime.reduce({ template, action, state: bucket.state, manager: managerContext, dispatch });
+          const result = bucket.runtime.reduce({
+            template,
+            action,
+            state: bucket.state,
+            manager: managerContext,
+            dispatch,
+          });
           if (result !== false) dispatch.touched.add(bucket.runtime.kind);
         }
       }

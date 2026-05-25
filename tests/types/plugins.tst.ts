@@ -1,40 +1,35 @@
 import { describe, expect, test } from "tstyche";
-import { definePlugin, MachineManager } from "@lite-fsm/core";
+import { definePlugin, defineStorageRuntime, MachineManager } from "@lite-fsm/core";
 import type {
-  ActionInterceptor,
-  ActionInterceptorContext,
-  ActionInterceptorResult,
-  ActionRegistry,
-  DepsExtensionRegistry,
-  DispatchContext,
-  DispatchHook,
-  DispatchRegistry,
   AnyEvent,
+  EffectDeps,
   FSMEvent,
   IMachineManager,
-  LiteFsmPlugin,
   MachineConfig,
   MachineManagerOptions,
+  MachinesState,
+  Middleware,
   ManagerAction,
-  ManagerExtensionRegistry,
   ManagerFromPlugins,
-  PluginCapabilities,
-  PluginInstallContext,
-  RouteResolver,
-  RouteResolverContext,
-  RouteResolverResult,
-  ScopedDepsContext,
-  ScopedTransitionContext,
+  PluginMachineExtensions,
+  PluginManagerEvents,
+  PluginManagerExtensions,
+  PluginRouteMeta,
+  PluginScopedDeps,
+  PluginScopedTransition,
 } from "@lite-fsm/core";
 
 import type { Assert, Equal } from "./_helpers";
 
 type Ping = FSMEvent<"PING">;
 type Pong = FSMEvent<"PONG", { id: string }>;
-type Event = Ping | Pong;
+type AppEvent = Ping | Pong;
+type PluginEvent = FSMEvent<"PLUGIN_EVENT", { source: "plugin" }>;
+type HostEvent = FSMEvent<"HOST_EVENT", { id: string }>;
 type Config = { idle: { PING: "ready" }; ready: { PONG: "idle" } };
 type Context = { id: string };
-type Machine = MachineConfig<Config, Context, Event>;
+type Machine = MachineConfig<Config, Context, AppEvent>;
+type Store = { machine: Machine };
 
 const machine: Machine = {
   config: { idle: { PING: "ready" }, ready: { PONG: "idle" } },
@@ -42,152 +37,141 @@ const machine: Machine = {
   initialContext: { id: "" },
 };
 
-const machines = { machine };
+const machines: Store = { machine };
 
-type FactoryCapabilities<Name extends string> = {
-  manager: { readonly name: Name };
-  transitionEvents: FSMEvent<"PLUGIN_EVENT", { source: Name }>;
+type CacheExtension = {
+  readonly input: {
+    readonly initialContext: { readonly value: number };
+  };
+  readonly publicState: { readonly value: number };
+  readonly effectDeps: { readonly cache: () => void };
 };
 
-const createFactoryPlugin = <Name extends string>(name: Name): LiteFsmPlugin<FactoryCapabilities<Name>> =>
-  definePlugin<FactoryCapabilities<Name>>({
-    name: `factory:${name}`,
-    install() {},
-  });
+const cacheStorage = defineStorageRuntime<CacheExtension>().create({
+  kind: "cache",
+  validateTemplate(ctx) {
+    expect(ctx.storageKind).type.toBe<"cache">();
+    expect(ctx.machine.initialContext).type.toBeAssignableTo<{ readonly value: number }>();
+  },
+  compileTemplate(ctx) {
+    expect(ctx.storageKind).type.toBe<"cache">();
+    return { data: { value: ctx.machine.initialContext.value } };
+  },
+  createRuntimeState() {
+    return {};
+  },
+  createPublicInitialState() {
+    return { value: 0 };
+  },
+  acceptsEvent() {
+    return false;
+  },
+  reduce() {},
+  commit() {},
+});
 
-describe("definePlugin(...)", () => {
-  test("сохраняет literal name", () => {
-    const plugin = definePlugin({
-      name: "literal-plugin",
-      install(ctx) {
-        expect(ctx).type.toBe<PluginInstallContext>();
-        expect(ctx.actions.intercept).type.toBe<(handler: ActionInterceptor) => void>();
-        ctx.actions.intercept((dispatch) => {
-          expect(dispatch).type.toBe<ActionInterceptorContext>();
-          expect(dispatch.action).type.toBe<ManagerAction<AnyEvent>>();
-          return { action: { type: "PLUGIN_ACTION" }, skipDelivery: true, stopInterceptors: true };
-        });
-        expect(ctx.storage.register).type.toBe<
-          (kind: string, runtime: Parameters<typeof ctx.storage.register>[1]) => void
-        >();
-        expect(ctx.storage.get("instance")).type.toBe<Parameters<typeof ctx.storage.register>[1] | undefined>();
-        expect(ctx.dispatch.beforeReduce).type.toBe<(hook: DispatchHook) => void>();
-        ctx.dispatch.beforeEffects((dispatch) => {
-          expect(dispatch).type.toBe<DispatchContext>();
-          dispatch.reportError(new Error("optional"));
-        });
-        expect(ctx.routing.registerMetaKey).type.toBe<
-          <Key extends string>(key: Key, resolver: RouteResolver<Key>) => void
-        >();
-        ctx.routing.registerMetaKey("entityId", (value, resolverCtx) => {
-          expect(value).type.toBe<unknown>();
-          expect(resolverCtx).type.toBe<RouteResolverContext<"entityId">>();
-          expect(resolverCtx.key).type.toBe<"entityId">();
-          return String(value);
-        });
-        expect(ctx.manager).type.toBe<ManagerExtensionRegistry>();
-        ctx.manager.extend("tools", (runtime) => {
-          expect(runtime.config).type.toBeAssignableTo<Record<string, unknown>>();
-          return { ready: true };
-        });
-        expect(ctx.deps).type.toBe<DepsExtensionRegistry>();
-        ctx.deps.extendDeps(
-          Object.assign(
-            (scope: ScopedDepsContext) => {
-              expect(scope.phase).type.toBe<"effect" | "reaction">();
-              return { scoped: true };
-            },
-            { keys: ["scoped"] as const },
-          ),
-        );
-        ctx.deps.extendTransition(
-          Object.assign(
-            (scope: ScopedTransitionContext) => {
-              expect(scope.source.template).type.toBe<string>();
-              return { scopedTransition: () => undefined };
-            },
-            { keys: ["scopedTransition"] as const },
-          ),
-        );
-      },
-    });
+const plugin = definePlugin<PluginEvent, HostEvent>().create({
+  name: "typed-plugin",
+  routeMeta: {
+    entityId(value: string, ctx) {
+      expect(ctx.key).type.toBe<"entityId">();
+      expect(ctx.action).type.toBe<ManagerAction<PluginEvent | HostEvent>>();
 
-    expect(plugin.name).type.toBe<"literal-plugin">();
-  });
+      return value;
+    },
+  },
+  manager: {
+    tools(ctx) {
+      expect(ctx.transition({ type: "PLUGIN_EVENT", payload: { source: "plugin" } })).type.toBe<
+        ManagerAction<AnyEvent>
+      >();
 
-  test("сохраняет phantom capabilities при явном generic capabilities", () => {
-    type Capabilities = {
-      manager: { readonly ready: true };
-      transitionEvents: FSMEvent<"PLUGIN_READY">;
-      actionMeta: { readonly source: "plugin" };
-      deps: { readonly clock: () => number };
-      transition: { readonly pluginTransition: () => void };
-      machine: { readonly storage: "plugin" };
-    };
+      return {
+        ready: true,
+        emit: () => ctx.transition({ type: "PLUGIN_EVENT", payload: { source: "plugin" } }),
+      } as const;
+    },
+  },
+  scopedDeps: {
+    current(scope) {
+      expect(scope.event).type.toBe<ManagerAction<PluginEvent | HostEvent>>();
 
-    const plugin = definePlugin<Capabilities>({
-      name: "capability-plugin",
-      install() {},
-    });
+      return { template: scope.source.template } as const;
+    },
+  },
+  scopedTransition: {
+    pluginOnly(scope) {
+      expect(scope.transition({ type: "PLUGIN_EVENT", payload: { source: "plugin" } })).type.toBe<
+        ManagerAction<PluginEvent>
+      >();
 
-    type Inferred = NonNullable<(typeof plugin)["__capabilities"]>;
-    type _Capabilities = Assert<Equal<Inferred, Capabilities>>;
-    expect(plugin.name).type.toBe<string>();
-  });
+      return () => scope.transition({ type: "PLUGIN_EVENT", payload: { source: "plugin" } });
+    },
+  },
+  intercept(ctx) {
+    expect(ctx.action).type.toBe<ManagerAction<PluginEvent | HostEvent>>();
 
-  test("сохраняет literal name и phantom capabilities при явном generic name", () => {
-    type Capabilities = {
-      manager: { readonly ready: true };
-    };
+    return { skipDelivery: false };
+  },
+  hooks: {
+    beforeEffects(ctx) {
+      expect(ctx.runtime).type.toBe<Map<string, unknown>>();
+      ctx.reportError(new Error("optional"));
+    },
+  },
+});
 
-    const plugin = definePlugin<Capabilities, "capability-plugin">({
-      name: "capability-plugin",
-      install() {},
-    });
+const storagePlugin = definePlugin<PluginEvent>().create({
+  name: "storage-plugin",
+  storage: [cacheStorage],
+});
 
-    type Inferred = NonNullable<(typeof plugin)["__capabilities"]>;
-    type _Capabilities = Assert<Equal<Inferred, Capabilities>>;
+describe("definePlugin().create(...)", () => {
+  test("сохраняет literal name и contextual typing final sections", () => {
+    expect(plugin.name).type.toBe<"typed-plugin">();
 
-    expect(plugin.name).type.toBe<"capability-plugin">();
-  });
+    // @ts-expect-error!
+    definePlugin({ name: "direct-call", setup() {} });
 
-  test("явный generic name проверяет значение name", () => {
-    type Capabilities = {
-      manager: { readonly ready: true };
-    };
-
-    definePlugin<Capabilities, "expected-plugin">({
+    definePlugin().create({
+      name: "unknown-callback",
       // @ts-expect-error!
-      name: "actual-plugin",
-      install() {},
+      setup() {},
     });
   });
 
-  test("plugin factory сохраняет inferred capabilities", () => {
-    const plugin = createFactoryPlugin("alpha");
-
-    type Inferred = NonNullable<(typeof plugin)["__capabilities"]>;
-
-    expect<Inferred["manager"]>().type.toBe<{ readonly name: "alpha" }>();
-    expect<Inferred["transitionEvents"]>().type.toBe<FSMEvent<"PLUGIN_EVENT", { source: "alpha" }>>();
+  test("выводит public helper types из DSL sections", () => {
+    type _Events = Assert<Equal<PluginManagerEvents<typeof plugin>, PluginEvent>>;
+    type _RouteMeta = Assert<Equal<PluginRouteMeta<typeof plugin>, { readonly entityId: string }>>;
+    type _Manager = Assert<
+      Equal<
+        PluginManagerExtensions<typeof plugin>,
+        { readonly tools: { readonly ready: true; readonly emit: () => ManagerAction<AnyEvent> } }
+      >
+    >;
+    type _ScopedDeps = Assert<Equal<PluginScopedDeps<typeof plugin>, { readonly current: { readonly template: string } }>>;
+    type _ScopedTransition = Assert<
+      Equal<PluginScopedTransition<typeof plugin>, { readonly pluginOnly: () => ManagerAction<PluginEvent> }>
+    >;
   });
 
-  test("широкий LiteFsmPlugin[] не обязан сохранять plugin-specific inference", () => {
-    const plugin = createFactoryPlugin("alpha");
-    const plugins: LiteFsmPlugin[] = [plugin];
+  test("выводит storage machine extension из defineStorageRuntime", () => {
+    type Expected = {
+      readonly input: {
+        readonly initialContext: { readonly value: number };
+      };
+      readonly publicState: { readonly value: number };
+      readonly effectDeps: { readonly cache: () => void };
+      readonly storage: "cache";
+    };
 
-    type WideCapabilities = NonNullable<(typeof plugins)[number]["__capabilities"]>;
-    type HasManager = "manager" extends keyof WideCapabilities ? true : false;
-
-    expect<WideCapabilities>().type.toBe<{}>();
-    expect<HasManager>().type.toBe<false>();
+    type _MachineExtension = Assert<Equal<PluginMachineExtensions<typeof storagePlugin>, Expected>>;
   });
 });
 
 describe("MachineManager(..., { plugins })", () => {
   test("MachineManagerOptions сохраняет literal tuple plugins", () => {
-    const plugin = createFactoryPlugin("tuple");
-    type Options = MachineManagerOptions<typeof machines, Event, readonly [typeof plugin]>;
+    type Options = MachineManagerOptions<typeof machines, AppEvent, readonly [typeof plugin]>;
 
     expect<NonNullable<Options["plugins"]>>().type.toBe<readonly [typeof plugin]>();
   });
@@ -195,60 +179,64 @@ describe("MachineManager(..., { plugins })", () => {
   test("отсутствие plugins сохраняет default event inference", () => {
     const manager = MachineManager(machines);
 
-    expect(manager.transition).type.toBe<IMachineManager<typeof machines, Event>["transition"]>();
+    expect(manager.transition).type.toBe<IMachineManager<typeof machines, AppEvent>["transition"]>();
+    // @ts-expect-error!
+    manager.transition({ type: "PLUGIN_EVENT", payload: { source: "plugin" } });
+    // @ts-expect-error!
+    manager.tools;
   });
 
-  test("MachineManager добавляет transitionEvents из plugin tuple", () => {
-    const plugin = createFactoryPlugin("manager");
+  test("явные generic S/P с opts без plugins не расширяют события plugin union", () => {
+    const middleware: Middleware<MachinesState<Store>, AppEvent> = () => (next) => (action) => next(action);
+    const manager = MachineManager<Store, AppEvent>(machines, { middleware: [middleware] });
+
+    manager.transition({ type: "PING" });
+    manager.transition({ type: "PONG", payload: { id: "pong" } });
+    expect(manager.onTransition).type.toBe<IMachineManager<Store, AppEvent>["onTransition"]>();
+
+    // @ts-expect-error!
+    manager.transition({ type: "PLUGIN_EVENT", payload: { source: "plugin" } });
+    // @ts-expect-error!
+    manager.tools;
+  });
+
+  test("MachineManager добавляет PluginEvents и manager extensions из plugin tuple", () => {
     const manager = MachineManager(machines, { plugins: [plugin] as const });
 
-    expect(manager).type.toBe<ManagerFromPlugins<typeof machines, Event, readonly [typeof plugin]>>();
-    expect(manager.name).type.toBe<"manager">();
+    expect(manager).type.toBe<ManagerFromPlugins<typeof machines, AppEvent, readonly [typeof plugin]>>();
+    manager.transition({ type: "PING" });
+    manager.transition({ type: "PLUGIN_EVENT", payload: { source: "plugin" } });
+    expect(manager.tools.ready).type.toBe<true>();
+
+    // @ts-expect-error!
+    manager.transition({ type: "HOST_EVENT", payload: { id: "host" } });
+  });
+
+  test("не принимает structural plugin-like object на type-level", () => {
+    MachineManager(machines, {
+      plugins: [
+        {
+          name: "structural",
+          // @ts-expect-error!
+          setup() {},
+        },
+      ],
+    });
   });
 });
 
-describe("PluginCapabilities", () => {
-  test("публикует type-level capability keys", () => {
-    type _Keys = Assert<
-      Equal<keyof PluginCapabilities, "manager" | "transitionEvents" | "machine" | "actionMeta" | "deps" | "transition">
-    >;
-  });
+describe("EffectDeps<AppDeps, Plugin>", () => {
+  test("добавляет scoped deps и scoped transition methods для tuple и union", () => {
+    type AppDeps = { readonly api: () => void };
+    type TupleDeps = EffectDeps<AppDeps, readonly [typeof plugin]>;
+    type UnionDeps = EffectDeps<AppDeps, typeof plugin | typeof storagePlugin>;
+    type ExpectedTransition = { readonly pluginOnly: () => ManagerAction<PluginEvent> };
 
-  test("публикует routing resolver types", () => {
-    type _Result = Assert<Equal<RouteResolverResult, string | readonly string[]>>;
-    const resolver: RouteResolver<"entityId"> = (value, ctx) => {
-      expect(ctx).type.toBe<RouteResolverContext<"entityId">>();
-      return [String(value)];
-    };
-
-    expect(resolver).type.toBe<RouteResolver<"entityId">>();
-  });
-
-  test("публикует action interceptors и dispatch hook types", () => {
-    type _ActionResult = Assert<
-      Equal<
-        ActionInterceptorResult,
-        | void
-        | {
-            readonly action?: ManagerAction<AnyEvent>;
-            readonly skipDelivery?: boolean;
-            readonly stopInterceptors?: boolean;
-          }
-      >
-    >;
-    type _ActionRegistry = Assert<Equal<ActionRegistry, { intercept(handler: ActionInterceptor): void }>>;
-    type _DispatchRegistry = Assert<
-      Equal<
-        DispatchRegistry,
-        {
-          beforeReduce(hook: DispatchHook): void;
-          afterReduce(hook: DispatchHook): void;
-          beforeCommit(hook: DispatchHook): void;
-          beforeSubscribers(hook: DispatchHook): void;
-          beforeEffects(hook: DispatchHook): void;
-          afterEffects(hook: DispatchHook): void;
-        }
-      >
-    >;
+    expect<TupleDeps>().type.toBeAssignableTo<{
+      readonly api: () => void;
+      readonly current: { readonly template: string };
+      readonly transition: ExpectedTransition;
+    }>();
+    expect<UnionDeps["transition"]>().type.toBe<ExpectedTransition>();
   });
 });

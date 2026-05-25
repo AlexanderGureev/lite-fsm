@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { definePlugin, MachineManager } from "@lite-fsm/core";
+import { definePlugin, defineStorageRuntime, MachineManager } from "@lite-fsm/core";
+import type { NormalizedPlugin } from "@lite-fsm/core/internal/plugin";
 import {
   createMachineManagerFactory,
   type RuntimePreset,
 } from "@lite-fsm/core/internal/runtime/kernel/createMachineManagerFactory";
-import { instanceRuntimePlugin } from "@lite-fsm/core/internal/runtime/instance/plugin";
+import { INSTANCE_RUNTIME_PLUGIN_NAME, instanceRuntimePlugin } from "@lite-fsm/core/internal/runtime/instance/plugin";
 import { instanceStorageRuntime } from "@lite-fsm/core/internal/runtime/instance/storage";
 import { createRoutingRuntime } from "@lite-fsm/core/internal/runtime/kernel/routing";
 import type { FSMEvent, MachineConfig } from "@lite-fsm/core";
@@ -51,16 +52,40 @@ const testStorageRuntime = (kind: string): StorageRuntime => ({
   commit() {},
 });
 
+const testStorageDefinition = (kind: string) =>
+  defineStorageRuntime().create({
+    kind,
+    validateTemplate() {},
+    compileTemplate() {},
+    createRuntimeState() {
+      return undefined;
+    },
+    createPublicInitialState() {
+      return undefined;
+    },
+    acceptsEvent() {
+      return true;
+    },
+    reduce() {},
+    commit() {},
+  });
+
+const runtimePlugin = (
+  name: string,
+  entries: readonly { readonly kind: string; readonly runtime: StorageRuntime }[],
+): NormalizedPlugin => ({
+  name,
+  storage: entries.map(({ kind, runtime }) => ({ owner: name, kind, value: runtime })),
+  routeMeta: [],
+  scopedDeps: [],
+  scopedTransition: [],
+  manager: [],
+  hooks: {},
+});
+
 describe("runtime preset MachineManager", () => {
   it("machine без storage использует default storage kind instance", () => {
-    const userPlugin = definePlugin({
-      name: "assert-instance-default",
-      install(ctx) {
-        expect(ctx.storage.get("instance")).toBe(instanceStorageRuntime);
-      },
-    });
-
-    const manager = MachineManager({ counter: createCounter() }, { plugins: [userPlugin] });
+    const manager = MachineManager({ counter: createCounter() });
 
     manager.transition({ type: "INC" });
 
@@ -90,18 +115,8 @@ describe("runtime preset MachineManager", () => {
   });
 
   it("duplicate storage kind бросает init error", () => {
-    const first = definePlugin({
-      name: "first-storage",
-      install(ctx) {
-        ctx.storage.register("custom", testStorageRuntime("custom"));
-      },
-    });
-    const second = definePlugin({
-      name: "second-storage",
-      install(ctx) {
-        ctx.storage.register("custom", testStorageRuntime("custom"));
-      },
-    });
+    const first = definePlugin().create({ name: "first-storage", storage: [testStorageDefinition("custom")] });
+    const second = definePlugin().create({ name: "second-storage", storage: [testStorageDefinition("custom")] });
 
     expect(() => MachineManager({ counter: createCounter() }, { plugins: [first, second] })).toThrow(
       "[lite-fsm] duplicate storage kind 'custom'.",
@@ -109,14 +124,17 @@ describe("runtime preset MachineManager", () => {
   });
 
   it("storage registry проверяет совпадение registered kind и runtime.kind", () => {
-    const plugin = definePlugin({
-      name: "storage-kind-mismatch",
-      install(ctx) {
-        ctx.storage.register("custom", testStorageRuntime("other"));
-      },
-    });
+    const plugin = runtimePlugin("storage-kind-mismatch", [
+      { kind: "custom", runtime: testStorageRuntime("other") },
+    ]);
 
-    expect(() => MachineManager({ counter: createCounter() }, { plugins: [plugin] })).toThrow(
+    expect(() =>
+      createMachineManagerFactory({
+        name: "test/storage-kind-mismatch",
+        defaultStorageKind: "instance",
+        plugins: [instanceRuntimePlugin, plugin],
+      })({ counter: createCounter() }),
+    ).toThrow(
       "[lite-fsm] storage runtime registered for kind 'custom' declared kind 'other'.",
     );
   });
@@ -128,15 +146,16 @@ describe("runtime preset MachineManager", () => {
         return { key: ctx.key, kind: "other" };
       },
     };
-    const plugin = definePlugin({
-      name: "compiled-kind-mismatch",
-      install(ctx) {
-        ctx.storage.register("custom", runtime);
-      },
-    });
+    const plugin = runtimePlugin("compiled-kind-mismatch", [{ kind: "custom", runtime }]);
     const machine = { ...createCounter(), storage: "custom" } as never;
 
-    expect(() => MachineManager({ counter: machine }, { plugins: [plugin] })).toThrow(
+    expect(() =>
+      createMachineManagerFactory({
+        name: "test/compiled-kind-mismatch",
+        defaultStorageKind: "custom",
+        plugins: [plugin],
+      })({ counter: machine }),
+    ).toThrow(
       "[lite-fsm] storage runtime 'custom' compiled machine 'counter' with kind 'other'.",
     );
   });
@@ -155,37 +174,40 @@ describe("runtime preset MachineManager", () => {
 
   it("preset plugins устанавливаются раньше user plugins", () => {
     const order: string[] = [];
-    const presetPlugin = definePlugin({
+    const presetPlugin: NormalizedPlugin = {
       name: "preset-storage",
-      install(ctx) {
+      storage: [],
+      routeMeta: [],
+      scopedDeps: [],
+      scopedTransition: [],
+      manager: [],
+      intercept() {
         order.push("preset");
-        ctx.storage.register("instance", instanceStorageRuntime);
       },
-    });
-    const userPlugin = definePlugin({
+      hooks: {},
+    };
+    const userPlugin = definePlugin().create({
       name: "user-storage",
-      install(ctx) {
+      intercept() {
         order.push("user");
-        expect(ctx.storage.get("instance")).toBe(instanceStorageRuntime);
       },
     });
     const preset: RuntimePreset = {
       name: "test/runtime",
       defaultStorageKind: "instance",
-      plugins: [presetPlugin],
+      plugins: [instanceRuntimePlugin, presetPlugin],
     };
 
-    createMachineManagerFactory(preset)({ counter: createCounter() }, { plugins: [userPlugin] });
+    const manager = createMachineManagerFactory(preset)({ counter: createCounter() }, { plugins: [userPlugin] });
+    manager.transition({ type: "INC" });
 
     expect(order).toEqual(["preset", "user"]);
   });
 
   it("user plugin не может повторно занять instance", () => {
-    const plugin = definePlugin({
+    const plugin = definePlugin().create({
       name: "duplicate-instance-storage",
-      install(ctx) {
-        ctx.storage.register("instance", testStorageRuntime("instance"));
-      },
+      storage: [testStorageDefinition("instance")],
     });
 
     expect(() => MachineManager({ counter: createCounter() }, { plugins: [plugin] })).toThrow(
@@ -195,7 +217,7 @@ describe("runtime preset MachineManager", () => {
 
   it("no-op plugin не меняет поведение", () => {
     const effect = vi.fn();
-    const plugin = definePlugin({ name: "runtime-preset-noop", install() {} });
+    const plugin = definePlugin().create({ name: "runtime-preset-noop" });
     const manager = MachineManager(
       {
         counter: {
@@ -215,7 +237,6 @@ describe("runtime preset MachineManager", () => {
 
 describe("instanceStorageRuntime", () => {
   it("регистрируется через instanceRuntimePlugin и реализует runtime capability contract", () => {
-    const registered = new Map<string, StorageRuntime>();
     const config = { counter: createCounter() };
     let rootState = {};
     const routing = createRoutingRuntime();
@@ -231,39 +252,16 @@ describe("instanceStorageRuntime", () => {
       createScopedDeps: (baseDeps) => baseDeps,
     };
 
-    instanceRuntimePlugin.install({
-      actions: {
-        intercept() {},
-      },
-      storage: {
-        register: (kind, runtime) => registered.set(kind, runtime),
-        get: (kind) => registered.get(kind),
-      },
-      dispatch: {
-        beforeReduce() {},
-        afterReduce() {},
-        beforeCommit() {},
-        beforeSubscribers() {},
-        beforeEffects() {},
-        afterEffects() {},
-      },
-      routing: routing.registry,
-      manager: {
-        extend() {},
-      },
-      deps: {
-        extendDeps() {},
-        extendTransition() {},
-      },
-    });
-
     const template: CompiledStorageTemplate = { key: "counter", kind: "instance" };
     const runtimeState: StorageRuntimeState = instanceStorageRuntime.createRuntimeState({ templates: [template], manager });
     rootState = {
       counter: instanceStorageRuntime.createPublicInitialState({ template, state: runtimeState }),
     };
 
-    expect(registered.get("instance")).toBe(instanceStorageRuntime);
+    expect(instanceRuntimePlugin).toMatchObject({
+      name: INSTANCE_RUNTIME_PLUGIN_NAME,
+      storage: [{ owner: INSTANCE_RUNTIME_PLUGIN_NAME, kind: "instance", value: instanceStorageRuntime }],
+    });
     expect(instanceStorageRuntime).not.toHaveProperty("createManagerRuntime");
     expect(instanceStorageRuntime.effects).toBeDefined();
     expect(instanceStorageRuntime.snapshot).toBeDefined();

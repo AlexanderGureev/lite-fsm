@@ -6,7 +6,7 @@
 
 | Импорт                       | Типы                                                                                                                                                                                                                                                                                              |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@lite-fsm/core`             | весь `types.ts` + `interfaces.ts`: `FSMEvent`, `MachineConfig`, `CFG`, `MachineReducer`, `MachineEffect`, `MachineManagerSnapshot`, `MachinesState`, `MachineEvents`, `MachineDependencies`, `IMachineManager`, `Middleware`, actor types, snapshot types, helpers; plugin types находятся на финализации |
+| `@lite-fsm/core`             | весь `types.ts` + `interfaces.ts`: `FSMEvent`, `MachineConfig`, `CFG`, `MachineReducer`, `MachineEffect`, `MachineManagerSnapshot`, `MachinesState`, `MachineEvents`, `MachineDependencies`, `IMachineManager`, `Middleware`, actor types, snapshot types, helpers; plugin helper types для `definePlugin().create(...)` |
 | `@lite-fsm/react`            | `FSMContextType`, `FSMContextProviderProps`, `FSMPersistLifecycle`, `FSMHydrationBoundaryProps`, typed hook aliases                                                                                                                                                                               |
 | `@lite-fsm/persist`          | `MaybePromise`, `PersistedRecord`, `PersistStorage`, `PersistStatus`, `PersistRestoreSettledResult`, `PersistManagerOptions`, `PersistController`                                                                                                                                                 |
 | `@lite-fsm/persist/react`    | runtime hooks only: `usePersistStatuses`, `useIsPersistRestoring`                                                                                                                                                                                                                                 |
@@ -67,7 +67,7 @@ type AppEvent = FSMEvent<"INC"> | FSMEvent<"SET", { count: number }> | FSMEvent<
 | `ManagerAction<P, Meta = CoreActionMeta>` | `P & { meta?: Meta }`                                                                |
 | `ManagerCommitAction<S, P>`               | user action или `HydrateAction<S>`                                                   |
 
-`actorId`, `groupId`, `groupTag` — `string | string[]`. Дополнительные route keys для plugin system находятся на финализации и не описываются как стабильный public API.
+`actorId`, `groupId`, `groupTag` — `string | string[]`. Дополнительные route keys объявляются plugin section `routeMeta`; helper `PluginRouteMeta<Plugins>` описывает raw map этих значений.
 
 ## Граф переходов · `CFG<C, P>`
 
@@ -106,11 +106,11 @@ const config = {
 Default `Snapshot`: domain → `StateType<C, T>`, actor hook payload → `DefaultActorSnapshot<C, T>`.
 Custom domain hooks переопределяют `Snapshot`: `SnapshotForMachine<M>`, `MachineManagerSnapshot<S>`, `dehydrate()` и `hydrate()` используют transport payload из `dehydrate` / `hydrate`, включая машины, созданные через `TypedCreateMachineFn<P, D, Extensions>`.
 Storage runtime payloads не меняют `SnapshotForMachine<M>`: они передаются отдельно через `MachineManagerSnapshot<S>["storage"]`.
-Отсутствие `storage` эквивалентно `storage: "instance"` в public `MachineManager`; standalone `Machine(...)` и `defineMachine().create(...)` поддерживают только эти два варианта.
+Отсутствие `storage` эквивалентно `storage: "instance"` в public `MachineManager`; custom storage kinds доступны через `TypedCreateMachineFn<P, D, PluginMachineExtensions<Plugins>>` и должны быть зарегистрированы plugin tuple в `MachineManager(..., { plugins })`. Standalone `Machine(...)` и `defineMachine().create(...)` поддерживают только отсутствие `storage` и `storage: "instance"`.
 
 ## Machine runtime extensions
 
-`MachineRuntimeExtension` описывает type-level расширение machine config для app wrappers. Core `createMachine<AppEvents>(...)` не читает plugin values и не получает plugin-specific fields автоматически.
+`MachineRuntimeExtension` описывает type-level расширение machine config для app wrappers. Core `createMachine<AppEvents>(...)` не читает plugin values и не получает plugin-specific fields автоматически. Public `defineStorageRuntime<Extension>().create(...)` принимает `Extension` без поля `storage` и возвращает normalized extension с `storage` из literal `kind`.
 
 ```ts
 type TestStorageExtension = {
@@ -172,13 +172,13 @@ const saveEffect: MachineEffect<"saving", SaveConfig, SaveEvent, { api: Api }> =
 | Тип                            | Назначение                                                                                                   |
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------ |
 | `MachineEffect<N, C, P, D>`    | `(deps: D & DefaultDeps...) => void \| Promise<void>`                                                        |
-| `EffectDeps<AppDeps, Plugins>` | app deps плюс plugin-scoped extensions; plugin public API находится на финализации                           |
+| `EffectDeps<AppDeps, Plugins>` | app deps плюс plugin-scoped deps и методы `transition`, выведенные из `definePlugin().create(...)`           |
 | `EffectStateName<C>`           | domain: `StateName<C> \| "*"`; actor: `ActorPublicState<C> \| "*"`                                           |
 | `IncomingEventTypes<C, N>`     | event names, ведущие в state `N`                                                                             |
 | `ActionForState<C, N, P>`      | `Extract<P, { type: IncomingEventTypes<C, N> }>` (для `N = "*"` — весь `P`)                                  |
 | `DefaultDeps<N, C, P>`         | `{ transition: (action: ManagerAction<P>) => ManagerAction<P>, action: ActionForState<C, N, P>, condition }` |
 
-`transition` в domain effects принимает `ManagerAction<P>`, поэтому новое событие может нести routing `meta`. `action` и `condition` остаются типизированы через исходный `P` и сохраняют сужение по state. Plugin-scoped deps доступны только в effect/reaction deps; они не входят в `MachineDependencies<S>` и не передаются через `manager.setDependencies(...)`.
+`transition` в domain effects принимает `ManagerAction<P>`, поэтому новое событие может нести routing `meta`. Если `D` задан как `EffectDeps<AppDeps, Plugins>`, фактический `transition` в effect является callable core `transition(action)` с пересечением plugin-scoped methods. `action` и `condition` остаются типизированы через исходный `P` и сохраняют сужение по state. Plugin-scoped deps доступны только в effect/reaction deps; они не входят в `MachineDependencies<S>` и не передаются через `manager.setDependencies(...)`.
 
 ### Actor effects
 
@@ -236,9 +236,38 @@ type AppDeps = MachineDependencies<Store>;
 
 ## Plugins
 
-Plugin system public API находится на финализации. Старый authoring API с пользовательским `install(ctx)` не является целевым public API.
+Публичный plugin объявляется только через `definePlugin<PluginEvents, HostEvents>().create(...)`. Публичного callback `install` нет. `MachineManager(..., { plugins })` принимает tuple values из builder API; structural objects не являются plugin values.
 
-Новая типовая документация будет создана после завершения `definePlugin().create(...)`, helper types и storage DSL. До этого раздел не является источником контрактов для реализации plugins.
+`PluginEvents` расширяют manager-level `transition` для текущего plugin tuple, но не расширяют события машин автоматически. Если machine config должен обрабатывать plugin event, включите его явно:
+
+```ts
+type AppPlugins = typeof cachePlugin;
+type AppEvents = HostEvents | PluginManagerEvents<AppPlugins>;
+```
+
+`HostEvents` используются для contextual typing callbacks внутри plugin definition. Они не входят в `PluginManagerEvents<Plugins>` и не добавляются в manager-level composition.
+
+Доступные helper types:
+
+| Тип                                      | Контракт                                                                                         |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `PluginManagerEvents<Plugins>`           | union событий из `PluginEvents`; `HostEvents` не входят в manager-level composition              |
+| `PluginRouteMeta<Plugins>`               | raw map route meta values; в `manager.transition(...).meta` поля текущего tuple становятся optional |
+| `PluginScopedDeps<Plugins>`              | поля из `scopedDeps` по ключам section и return types builder-ов                                 |
+| `PluginScopedTransition<Plugins>`        | методы из `scopedTransition` по ключам section и return types builder-ов                         |
+| `PluginManagerExtensions<Plugins>`       | поля returned manager по ключам `manager` и return types factory-функций                         |
+| `PluginMachineExtensions<Plugins>`       | union normalized machine extensions из storage definitions; для plugins без storage возвращает `never` |
+| `EffectDeps<AppDeps, Plugins>`           | `AppDeps` плюс `PluginScopedDeps<Plugins>` и `transition: PluginScopedTransition<Plugins>`       |
+
+Helpers принимают plugin union и runtime tuple; tuple нормализуется через `[number]`. `PluginRouteMeta<PluginUnion>` возвращает raw value map: annotated resolver `(value: string, ctx) => ...` дает `string`, а unannotated `value` считается `unknown`. Optional semantics относятся к `manager.transition(...).meta`: эти ключи optional и доступны только для подключенного plugin tuple. `ctx.key` внутри resolver типизируется literal ключом resolver, `ctx.action` — `ManagerAction<HostEvents | PluginEvents>`.
+
+`PluginManagerExtensions<Plugins>` остается helper type с одним input и возвращает поля manager по return type factory из section `manager`. Factory получает широкий `ManagerRuntimeContext`; `ctx.transition(...)` принимает `ManagerAction<AnyEvent>`, без параметризации конкретным `MachineStore` или событиями приложения.
+
+`intercept` и hooks получают action context с `action` и `originalAction` типа `ManagerAction<HostEvents | PluginEvents>`. `intercept` может вернуть replacement action того же типа, `skipDelivery` и `stopInterceptors`. Hooks получают read-only context без API для replacement/skip/stop; их return value runtime игнорирует. Отдельные public helper types для этих context не публикуются.
+
+`defineStorageRuntime<Extension>().create(...)` связывает advanced storage runtime contract и type-level machine extension. `Extension` не содержит `storage`; builder добавляет `storage: Kind`, где `Kind` берется из literal `kind`. Public `compileTemplate(ctx)` возвращает только `void | { data?: unknown }`; `key` и `kind` формируются builder-ом. Storage methods пишутся inline и получают contextual typing без imports named context types. Runtime state, template data и snapshot payload остаются широкими `unknown` без дополнительных public generics. `effectDeps` и `reactionDeps` в `Extension` являются type contract для machines этого storage kind. Storage definitions регистрируются только через `definePlugin().create({ storage: [...] })` и `MachineManager(..., { plugins })`.
+
+Configurable и multi-instance plugins типизируются как обычные factory functions вокруг `definePlugin().create(...)`; helper types принимают `ReturnType<typeof createCachePlugin>` так же, как concrete plugin value.
 
 ## Snapshots
 

@@ -1,16 +1,21 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { definePlugin, LiteFsmError, MachineManager } from "@lite-fsm/core";
+import { definePlugin, defineStorageRuntime, LiteFsmError, MachineManager } from "@lite-fsm/core";
 import type { FSMEvent, MachineConfig } from "@lite-fsm/core";
+import type { NormalizedPlugin } from "@lite-fsm/core/internal/plugin";
+import {
+  getStorageRuntimePayload,
+  type LiteFsmStorageRuntimeDefinition,
+} from "@lite-fsm/core/internal/pluginStorage";
 import {
   createMachineManagerFactory,
   type RuntimePreset,
 } from "@lite-fsm/core/internal/runtime/kernel/createMachineManagerFactory";
+import { createRoutingRuntime } from "@lite-fsm/core/internal/runtime/kernel/routing";
 import type {
   CompiledStorageTemplate,
   StorageDehydrateContext,
   StorageHydrateContext,
-  StorageRuntime,
 } from "@lite-fsm/core/internal/runtime/kernel/storage";
 
 type IncEvent = FSMEvent<"INC">;
@@ -32,8 +37,9 @@ const createStorageMachine = (kind: string) =>
   }) as never;
 
 type StoragePayload = { value: number };
+type StageStorageDefinition = LiteFsmStorageRuntimeDefinition<string>;
 
-type SnapshotRuntimeOptions = {
+type SnapshotStorageOptions = {
   readonly initialValue?: number;
   readonly hydrate?: ReturnType<typeof vi.fn<(ctx: StorageHydrateContext) => void>>;
   readonly dehydrate?: ReturnType<typeof vi.fn<(ctx: StorageDehydrateContext) => void>>;
@@ -51,7 +57,7 @@ const readStoragePayload = (kind: string, ctx: StorageHydrateContext): StoragePa
   return payload as StoragePayload;
 };
 
-const createSnapshotRuntime = (kind: string, options: SnapshotRuntimeOptions = {}) => {
+const createSnapshotStorage = (kind: string, options: SnapshotStorageOptions = {}) => {
   const runtimeState = {
     value: options.initialValue ?? 0,
     templates: [] as readonly CompiledStorageTemplate[],
@@ -59,12 +65,10 @@ const createSnapshotRuntime = (kind: string, options: SnapshotRuntimeOptions = {
   const hydrate = options.hydrate ?? vi.fn<(ctx: StorageHydrateContext) => void>();
   const dehydrate = options.dehydrate ?? vi.fn<(ctx: StorageDehydrateContext) => void>();
 
-  const runtime: StorageRuntime = {
+  const storage = defineStorageRuntime().create({
     kind,
     validateTemplate() {},
-    compileTemplate(ctx) {
-      return { key: ctx.key, kind };
-    },
+    compileTemplate() {},
     createRuntimeState(ctx) {
       runtimeState.templates = ctx.templates;
       return runtimeState;
@@ -108,65 +112,85 @@ const createSnapshotRuntime = (kind: string, options: SnapshotRuntimeOptions = {
         return { nextState, changed: payload.value !== runtimeState.value || runtimeState.templates.length > 0 };
       },
     },
-  };
+  });
 
-  return { runtime, runtimeState, hydrate, dehydrate };
+  return { storage, runtimeState, hydrate, dehydrate };
 };
 
-const createRuntimePlugin = (runtime: StorageRuntime) =>
-  definePlugin({
-    name: `stage9/${runtime.kind}`,
-    install(ctx) {
-      ctx.storage.register(runtime.kind, runtime);
-    },
+const createPluginWithStorage = (storage: StageStorageDefinition) =>
+  definePlugin().create({
+    name: `stage9/${storage.kind}`,
+    storage: [storage],
   });
 
-const createNoSnapshotRuntime = (kind: string): StorageRuntime => ({
-  kind,
-  validateTemplate() {},
-  compileTemplate(ctx) {
-    return { key: ctx.key, kind };
-  },
-  createRuntimeState() {
-    return {};
-  },
-  createPublicInitialState() {
-    return { state: "READY", context: { value: 0 } };
-  },
-  acceptsEvent() {
-    return false;
-  },
-  reduce() {},
-  commit() {},
-});
+const createNoSnapshotStorage = (kind: string) =>
+  defineStorageRuntime().create({
+    kind,
+    validateTemplate() {},
+    compileTemplate() {},
+    createRuntimeState() {
+      return {};
+    },
+    createPublicInitialState() {
+      return { state: "READY", context: { value: 0 } };
+    },
+    acceptsEvent() {
+      return false;
+    },
+    reduce() {},
+    commit() {},
+  });
 
-const createPassthroughSnapshotRuntime = (
+const createPassthroughSnapshotStorage = (
   kind: string,
   hydrate = vi.fn<(ctx: StorageHydrateContext) => void>(),
-): StorageRuntime => ({
-  ...createNoSnapshotRuntime(kind),
-  snapshot: {
-    dehydrate() {
-      return { machines: {} };
+): StageStorageDefinition =>
+  defineStorageRuntime().create({
+    kind,
+    validateTemplate() {},
+    compileTemplate() {},
+    createRuntimeState() {
+      return {};
     },
-    hydrate(ctx) {
-      hydrate(ctx);
-      return { nextState: ctx.baseState, changed: false };
+    createPublicInitialState() {
+      return { state: "READY", context: { value: 0 } };
     },
-  },
-});
-
-const createPresetManager = (runtimes: readonly StorageRuntime[], defaultStorageKind: string) => {
-  const plugin = definePlugin({
-    name: `stage9-preset/${defaultStorageKind}`,
-    install(ctx) {
-      for (const runtime of runtimes) ctx.storage.register(runtime.kind, runtime);
+    acceptsEvent() {
+      return false;
+    },
+    reduce() {},
+    commit() {},
+    snapshot: {
+      dehydrate() {
+        return { machines: {} };
+      },
+      hydrate(ctx) {
+        hydrate(ctx);
+        return { nextState: ctx.baseState, changed: false };
+      },
     },
   });
+
+const createPresetPlugin = (name: string, storages: readonly StageStorageDefinition[]): NormalizedPlugin => ({
+  name,
+  storage: storages.map((storage) => ({
+    owner: name,
+    kind: storage.kind,
+    value: getStorageRuntimePayload(storage),
+  })),
+  routeMeta: [],
+  scopedDeps: [],
+  scopedTransition: [],
+  manager: [],
+  hooks: {},
+});
+
+const createPresetManager = (storages: readonly StageStorageDefinition[], defaultStorageKind: string) => {
+  const pluginName = `stage9-preset/${defaultStorageKind}`;
   const preset: RuntimePreset = {
     name: `stage9-preset/${defaultStorageKind}`,
     defaultStorageKind,
-    plugins: [plugin],
+    plugins: [createPresetPlugin(pluginName, storages)],
   };
 
   return createMachineManagerFactory(preset)({ custom: createStorageMachine(defaultStorageKind) });
@@ -174,10 +198,10 @@ const createPresetManager = (runtimes: readonly StorageRuntime[], defaultStorage
 
 describe("storage snapshot extension points у MachineManager", () => {
   it("round-trip custom runtime проходит через snapshot.storage[kind]", () => {
-    const sourceRuntime = createSnapshotRuntime("stage9");
+    const sourceStorage = createSnapshotStorage("stage9");
     const source = MachineManager(
       { counter: counterMachine, custom: createStorageMachine("stage9") },
-      { plugins: [createRuntimePlugin(sourceRuntime.runtime)] },
+      { plugins: [createPluginWithStorage(sourceStorage.storage)] },
     );
     source.transition({ type: "BUMP" } as never);
 
@@ -192,21 +216,21 @@ describe("storage snapshot extension points у MachineManager", () => {
         stage9: { value: 1 },
       },
     });
-    expect(sourceRuntime.dehydrate).toHaveBeenCalledOnce();
+    expect(sourceStorage.dehydrate).toHaveBeenCalledOnce();
 
-    const restoredRuntime = createSnapshotRuntime("stage9");
+    const restoredStorage = createSnapshotStorage("stage9");
     const restored = MachineManager(
       { counter: counterMachine, custom: createStorageMachine("stage9") },
-      { plugins: [createRuntimePlugin(restoredRuntime.runtime)], snapshot },
+      { plugins: [createPluginWithStorage(restoredStorage.storage)], snapshot },
     );
 
-    expect(restoredRuntime.hydrate).toHaveBeenCalledOnce();
+    expect(restoredStorage.hydrate).toHaveBeenCalledOnce();
     expect(restored.getState().custom).toEqual({ state: "READY", context: { value: 1 } });
   });
 
   it("dehydrate по умолчанию включает storage runtimes со snapshot capability", () => {
-    const custom = createSnapshotRuntime("stage9", { initialValue: 7 });
-    const manager = MachineManager({ counter: counterMachine }, { plugins: [createRuntimePlugin(custom.runtime)] });
+    const custom = createSnapshotStorage("stage9", { initialValue: 7 });
+    const manager = MachineManager({ counter: counterMachine }, { plugins: [createPluginWithStorage(custom.storage)] });
 
     expect(manager.dehydrate()).toEqual({
       schemaVersion: undefined,
@@ -220,8 +244,8 @@ describe("storage snapshot extension points у MachineManager", () => {
   });
 
   it("dehydrate({ machines }) не отключает storage snapshot", () => {
-    const custom = createSnapshotRuntime("stage9", { initialValue: 3 });
-    const manager = MachineManager({ counter: counterMachine }, { plugins: [createRuntimePlugin(custom.runtime)] });
+    const custom = createSnapshotStorage("stage9", { initialValue: 3 });
+    const manager = MachineManager({ counter: counterMachine }, { plugins: [createPluginWithStorage(custom.storage)] });
 
     expect(manager.dehydrate({ machines: ["counter"] })).toEqual({
       schemaVersion: undefined,
@@ -235,11 +259,11 @@ describe("storage snapshot extension points у MachineManager", () => {
   });
 
   it("dehydrate({ storage }) фильтрует только storage и не отключает machines", () => {
-    const alpha = createSnapshotRuntime("alpha", { initialValue: 1 });
-    const beta = createSnapshotRuntime("beta", { initialValue: 2 });
+    const alpha = createSnapshotStorage("alpha", { initialValue: 1 });
+    const beta = createSnapshotStorage("beta", { initialValue: 2 });
     const manager = MachineManager(
       { counter: counterMachine },
-      { plugins: [createRuntimePlugin(alpha.runtime), createRuntimePlugin(beta.runtime)] },
+      { plugins: [createPluginWithStorage(alpha.storage), createPluginWithStorage(beta.storage)] },
     );
 
     expect(manager.dehydrate({ storage: ["beta"] })).toEqual({
@@ -256,8 +280,8 @@ describe("storage snapshot extension points у MachineManager", () => {
   });
 
   it("dehydrate({ storage: [] }) отключает storage snapshot", () => {
-    const custom = createSnapshotRuntime("stage9", { initialValue: 5 });
-    const manager = MachineManager({ counter: counterMachine }, { plugins: [createRuntimePlugin(custom.runtime)] });
+    const custom = createSnapshotStorage("stage9", { initialValue: 5 });
+    const manager = MachineManager({ counter: counterMachine }, { plugins: [createPluginWithStorage(custom.storage)] });
 
     expect(manager.dehydrate({ storage: [] })).toEqual({
       schemaVersion: undefined,
@@ -271,7 +295,7 @@ describe("storage snapshot extension points у MachineManager", () => {
   it("runtime без snapshot capability не добавляет storage payload", () => {
     const manager = MachineManager(
       { counter: counterMachine },
-      { plugins: [createRuntimePlugin(createNoSnapshotRuntime("ephemeral"))] },
+      { plugins: [createPluginWithStorage(createNoSnapshotStorage("ephemeral"))] },
     );
 
     expect(manager.dehydrate()).toEqual({
@@ -285,7 +309,7 @@ describe("storage snapshot extension points у MachineManager", () => {
   it("явный dehydrate({ storage }) для runtime без capability бросает clear error", () => {
     const manager = MachineManager(
       { counter: counterMachine },
-      { plugins: [createRuntimePlugin(createNoSnapshotRuntime("ephemeral"))] },
+      { plugins: [createPluginWithStorage(createNoSnapshotStorage("ephemeral"))] },
     );
 
     expect(() => manager.dehydrate({ storage: ["ephemeral"] })).toThrow(
@@ -296,7 +320,7 @@ describe("storage snapshot extension points у MachineManager", () => {
   it("hydrate storage данных известного runtime без capability бросает clear error", () => {
     const manager = MachineManager(
       { counter: counterMachine },
-      { plugins: [createRuntimePlugin(createNoSnapshotRuntime("ephemeral"))] },
+      { plugins: [createPluginWithStorage(createNoSnapshotStorage("ephemeral"))] },
     );
 
     expect(() => manager.hydrate({ machines: {}, storage: { ephemeral: { value: 1 } } })).toThrow(
@@ -316,10 +340,10 @@ describe("storage snapshot extension points у MachineManager", () => {
   });
 
   it("invalid storage snapshot payload бросает clear error", () => {
-    const custom = createSnapshotRuntime("stage9");
+    const custom = createSnapshotStorage("stage9");
     const manager = MachineManager(
       { custom: createStorageMachine("stage9") },
-      { plugins: [createRuntimePlugin(custom.runtime)] },
+      { plugins: [createPluginWithStorage(custom.storage)] },
     );
 
     expect(() => manager.hydrate({ machines: {}, storage: { stage9: { value: "bad" } } })).toThrow(
@@ -328,8 +352,8 @@ describe("storage snapshot extension points у MachineManager", () => {
   });
 
   it("getSnapshot не вызывает StorageSnapshotRuntime.dehydrate и не включает storage", () => {
-    const custom = createSnapshotRuntime("stage9", { initialValue: 9 });
-    const manager = MachineManager({ counter: counterMachine }, { plugins: [createRuntimePlugin(custom.runtime)] });
+    const custom = createSnapshotStorage("stage9", { initialValue: 9 });
+    const manager = MachineManager({ counter: counterMachine }, { plugins: [createPluginWithStorage(custom.storage)] });
 
     expect(manager.getSnapshot()).toEqual({
       schemaVersion: undefined,
@@ -341,8 +365,8 @@ describe("storage snapshot extension points у MachineManager", () => {
   });
 
   it("legacy snapshot без storage сохраняет hydrate и getHydratedState behavior", () => {
-    const custom = createSnapshotRuntime("stage9");
-    const manager = MachineManager({ counter: counterMachine }, { plugins: [createRuntimePlugin(custom.runtime)] });
+    const custom = createSnapshotStorage("stage9");
+    const manager = MachineManager({ counter: counterMachine }, { plugins: [createPluginWithStorage(custom.storage)] });
 
     const preview = manager.getHydratedState({
       machines: {
@@ -364,11 +388,11 @@ describe("storage snapshot extension points у MachineManager", () => {
   });
 
   it("storage snapshot не влияет на чужие runtimes и hydrate вызывает только владельца kind", () => {
-    const alpha = createSnapshotRuntime("alpha");
-    const beta = createSnapshotRuntime("beta");
+    const alpha = createSnapshotStorage("alpha");
+    const beta = createSnapshotStorage("beta");
     const manager = MachineManager(
       { counter: counterMachine },
-      { plugins: [createRuntimePlugin(alpha.runtime), createRuntimePlugin(beta.runtime)] },
+      { plugins: [createPluginWithStorage(alpha.storage), createPluginWithStorage(beta.storage)] },
     );
 
     manager.hydrate({ machines: {}, storage: { alpha: { value: 10 } } });
@@ -378,10 +402,10 @@ describe("storage snapshot extension points у MachineManager", () => {
   });
 
   it("getHydratedState со storage payload не мутирует runtime state", () => {
-    const custom = createSnapshotRuntime("stage9");
+    const custom = createSnapshotStorage("stage9");
     const manager = MachineManager(
       { custom: createStorageMachine("stage9") },
-      { plugins: [createRuntimePlugin(custom.runtime)] },
+      { plugins: [createPluginWithStorage(custom.storage)] },
     );
 
     const preview = manager.getHydratedState({ machines: {}, storage: { stage9: { value: 11 } } });
@@ -394,7 +418,7 @@ describe("storage snapshot extension points у MachineManager", () => {
   it("unknown machine hydrate использует первый snapshot runtime, если default runtime не поддерживает snapshot", () => {
     const hydrate = vi.fn<(ctx: StorageHydrateContext) => void>();
     const manager = createPresetManager(
-      [createNoSnapshotRuntime("plain"), createPassthroughSnapshotRuntime("snapshot", hydrate)],
+      [createNoSnapshotStorage("plain"), createPassthroughSnapshotStorage("snapshot", hydrate)],
       "plain",
     );
 
@@ -404,10 +428,111 @@ describe("storage snapshot extension points у MachineManager", () => {
   });
 
   it("unknown machine hydrate бросает unsupported snapshot error без snapshot runtimes", () => {
-    const manager = createPresetManager([createNoSnapshotRuntime("plain")], "plain");
+    const manager = createPresetManager([createNoSnapshotStorage("plain")], "plain");
 
     expect(() =>
       manager.hydrate({ machines: { missing: { state: "READY", context: { value: 1 } } } } as never),
     ).toThrow("[lite-fsm] snapshot is not supported by the configured storage runtimes.");
+  });
+});
+
+describe("routing runtime cleanup coverage", () => {
+  it("сохраняет route meta registration, stripping helpers и priority", () => {
+    const routing = createRoutingRuntime();
+
+    expect(routing.registeredMetaKeys).toEqual([]);
+    expect(routing.hasRoute(undefined)).toBe(false);
+    expect(routing.stripSenderFields(undefined)).toEqual({});
+
+    routing.registry.registerRouteMeta("cacheKey", (value) => [String(value), String(value), "fallback"]);
+
+    expect(routing.registeredMetaKeys).toEqual(["cacheKey"]);
+    expect(routing.hasMetaKey("cacheKey")).toBe(true);
+    expect(routing.stripSenderFields({})).toEqual({});
+    expect(routing.stripRouting({})).toEqual({});
+    expect(
+      routing.stripSenderFields({
+        actorId: "actor/a",
+        groupId: "group/a",
+        groupTag: "tag/a",
+        senderActorId: "sender/a",
+        senderGroupId: "sender-group/a",
+        senderGroupTag: "sender-tag/a",
+        cacheKey: "cache/a",
+      } as never),
+    ).toEqual({
+      actorId: "actor/a",
+      groupId: "group/a",
+      groupTag: "tag/a",
+      cacheKey: "cache/a",
+    });
+    expect(
+      routing.stripRouting({
+        actorId: "actor/a",
+        groupId: "group/a",
+        groupTag: "tag/a",
+        senderActorId: "sender/a",
+        senderGroupId: "sender-group/a",
+        senderGroupTag: "sender-tag/a",
+        cacheKey: "cache/a",
+      } as never),
+    ).toEqual({
+      senderActorId: "sender/a",
+      senderGroupId: "sender-group/a",
+      senderGroupTag: "sender-tag/a",
+      cacheKey: "cache/a",
+    });
+
+    expect(routing.hasRoute({ senderActorId: "sender/a" })).toBe(false);
+    expect(routing.hasRoute({ actorId: "actor/a" })).toBe(true);
+    expect(routing.hasRoute({ cacheKey: "cache/a" } as never)).toBe(true);
+    expect(routing.hasRoute({ groupId: "group/a" })).toBe(true);
+    expect(routing.hasRoute({ groupTag: "tag/a" })).toBe(true);
+    expect(routing.resolveRoute({ type: "PING", meta: { senderActorId: "sender/a" } })).toEqual({
+      scope: "unscoped",
+      key: undefined,
+      targetSet: [],
+    });
+    expect(routing.resolveRoute({ type: "PING", meta: { actorId: ["actor/a", "actor/a"] } })).toEqual({
+      scope: "actor",
+      key: "actorId",
+      targetSet: ["actor/a"],
+    });
+    expect(routing.resolveRoute({ type: "PING", meta: { cacheKey: "cache/a" } as never })).toEqual({
+      scope: "plugin",
+      key: "cacheKey",
+      targetSet: ["cache/a", "fallback"],
+    });
+    expect(routing.resolveRoute({ type: "PING", meta: { groupId: "group/a" } })).toEqual({
+      scope: "group",
+      key: "groupId",
+      targetSet: ["group/a"],
+    });
+    expect(routing.resolveRoute({ type: "PING", meta: { groupTag: "tag/a" } })).toEqual({
+      scope: "tag",
+      key: "groupTag",
+      targetSet: ["tag/a"],
+    });
+  });
+
+  it("сохраняет diagnostics для duplicate keys и invalid resolver result", () => {
+    const routing = createRoutingRuntime();
+
+    routing.registry.registerRouteMeta("cacheKey", () => "cache/a");
+
+    expect(() => routing.registry.registerRouteMeta("cacheKey", () => "cache/b")).toThrow(LiteFsmError);
+    expect(() => routing.registry.registerRouteMeta("actorId", () => "actor/a")).toThrow(LiteFsmError);
+
+    const invalidObject = createRoutingRuntime();
+    invalidObject.registry.registerRouteMeta("cacheKey", () => ({ id: "cache/a" }) as never);
+    expect(() => invalidObject.resolveRoute({ type: "PING", meta: { cacheKey: "cache/a" } as never })).toThrow(
+      LiteFsmError,
+    );
+
+    const invalidArray = createRoutingRuntime();
+    invalidArray.registry.registerRouteMeta("cacheKey", () => ["cache/a", 1] as never);
+    expect(() => invalidArray.resolveRoute({ type: "PING", meta: { cacheKey: "cache/a" } as never })).toThrow(
+      LiteFsmError,
+    );
   });
 });

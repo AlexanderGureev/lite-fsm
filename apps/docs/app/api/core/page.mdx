@@ -70,7 +70,7 @@ const counter = createMachine({
 | `createReducer(fn)`     | Типизированная фабрика reducer-а                 |
 | `createEffect(opts)`    | Обёртка effect с `every` или `latest` семантикой |
 | `createActorMeta(meta)` | Замороженный `Readonly<ActorMeta>`               |
-| Plugin system           | Public API находится на финализации              |
+| Plugin system           | `definePlugin().create(...)`, `defineStorageRuntime().create(...)` |
 
 `createEffect`:
 
@@ -106,7 +106,7 @@ manager.transition({ type: "INC" });
 | Опция                      | Назначение                                      |
 | -------------------------- | ----------------------------------------------- |
 | `middleware?`              | Цепочка middleware для пользовательских actions |
-| `plugins?`                 | Tuple plugins; расширяет типы текущего manager  |
+| `plugins?`                 | Tuple values из `definePlugin().create(...)`; расширяет типы текущего manager |
 | `snapshot?`                | Начальный snapshot                              |
 | `schemaVersion?`           | Версия snapshot                                 |
 | `onError?`                 | Ошибки effects и `condition`                    |
@@ -132,9 +132,10 @@ manager.transition({ type: "INC" });
 
 ## Plugins
 
-Plugin system public API находится на финализации. Старый authoring API с пользовательским `install(ctx)` не является целевым public API.
+Публичный plugin объявляется через `definePlugin<PluginEvents, HostEvents>().create(...)`.
+`MachineManager(..., { plugins })` принимает только values из builder API и расширяет типы текущего manager по переданному tuple.
 
-Новая документация будет создана после завершения `definePlugin().create(...)` и storage DSL. До этого раздел не является источником контрактов для реализации plugins.
+Краткий контракт финального API описан в repository cheatsheets. Полная документация сайта для plugin system выполняется отдельной задачей.
 
 ### Стратегия восстановления
 

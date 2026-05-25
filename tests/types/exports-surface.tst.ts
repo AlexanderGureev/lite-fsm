@@ -1,10 +1,6 @@
 import { describe, expect, test } from "tstyche";
-import { createActorMeta, definePlugin } from "@lite-fsm/core";
+import { createActorMeta, definePlugin, defineStorageRuntime } from "@lite-fsm/core";
 import type {
-  ActionInterceptor,
-  ActionInterceptorContext,
-  ActionInterceptorResult,
-  ActionRegistry,
   ActionForState,
   ActorActionForState,
   ActorDataSlice,
@@ -26,10 +22,6 @@ import type {
   CoreActionMeta,
   DefaultDeps,
   DefaultActorSnapshot,
-  DepsExtensionRegistry,
-  DispatchContext,
-  DispatchHook,
-  DispatchRegistry,
   DehydrateOptions,
   DomainTransitionTarget,
   EffectDeps,
@@ -61,7 +53,6 @@ import type {
   MachineReducer,
   MachineReducerInputState,
   MachineReducerState,
-  LiteFsmPlugin,
   MachineResultMetadata,
   MachineRuntimeSnapshot,
   MachineRuntimeSnapshotForMachine,
@@ -72,40 +63,19 @@ import type {
   MachineState,
   MachineStore,
   MachinesState,
-  ManagerActionMeta,
   ManagerAction,
   ManagerCommitAction,
-  ManagerExtensionAppEvents,
-  ManagerExtensionCapability,
-  ManagerExtensionFactory,
-  ManagerExtensionRegistry,
-  ManagerExtensionStore,
   ManagerFromPlugins,
-  ManagerRuntimeContext,
-  ManagerTransitionEvents,
   Middleware,
   MiddlewareApi,
-  PluginCapabilities,
-  PluginActionMeta,
-  PluginDeps,
-  PluginInstallContext,
+  PluginMachineExtensions,
+  PluginManagerEvents,
   PluginManagerExtensions,
-  PluginTransitionExtensions,
-  PluginTransitionEvents,
+  PluginRouteMeta,
+  PluginScopedDeps,
+  PluginScopedTransition,
   PublicActorSlice,
   Reducer,
-  RouteResolver,
-  RouteResolverContext,
-  RouteResolverResult,
-  RoutingRegistry,
-  ScopedDepsContext,
-  ScopedDepsFactory,
-  ScopedInvocationContext,
-  ScopedInvocationIndices,
-  ScopedInvocationPhase,
-  ScopedInvocationSource,
-  ScopedTransitionContext,
-  ScopedTransitionFactory,
   SType,
   Self,
   SnapshotActorTemplateKey,
@@ -418,160 +388,59 @@ describe("canary поверхности экспорта core-типов", () =>
       >
     >;
     type _GenerateSpawnIdFn = Assert<Equal<GenerateSpawnIdFn<Event>, (ctx: SpawnIdContext<Event>) => string>>;
-    type _PluginCapabilities = Assert<
-      Equal<keyof PluginCapabilities, "manager" | "transitionEvents" | "machine" | "actionMeta" | "deps" | "transition">
-    >;
-    type TestPlugin = LiteFsmPlugin<{
-      readonly manager: { readonly audit: { readonly enabled: true } };
-      readonly transitionEvents: Ping;
-      readonly actionMeta: { readonly routeId: string };
-      readonly deps: { readonly trace: () => string };
-      readonly transition: { readonly finish: () => ManagerAction<Event> };
-    }>;
+    const testPlugin = definePlugin<Ping>().create({
+      name: "export-surface-plugin",
+      routeMeta: {
+        routeId(value: string) {
+          return value;
+        },
+      },
+      scopedDeps: {
+        trace() {
+          return () => "trace";
+        },
+      },
+      scopedTransition: {
+        finish(scope) {
+          return () => scope.transition({ type: "PING", payload: { id: "p" } });
+        },
+      },
+      manager: {
+        audit() {
+          return { enabled: true } as const;
+        },
+      },
+    });
+    type TestPlugin = typeof testPlugin;
+    type _PluginManagerEvents = Assert<Equal<PluginManagerEvents<TestPlugin>, Ping>>;
+    type _PluginRouteMeta = Assert<Equal<PluginRouteMeta<TestPlugin>, { readonly routeId: string }>>;
     type _PluginManagerExtensions = Assert<
-      Equal<
-        PluginManagerExtensions<Store, Event, readonly [TestPlugin]>,
-        { readonly audit: { readonly enabled: true } }
-      >
+      Equal<PluginManagerExtensions<TestPlugin>, { readonly audit: { readonly enabled: true } }>
     >;
-    type _PluginTransitionEvents = Assert<Equal<PluginTransitionEvents<readonly [TestPlugin]>, Ping>>;
-    type _ManagerTransitionEvents = Assert<Equal<ManagerTransitionEvents<Done, readonly [TestPlugin]>, Done | Ping>>;
-    type _PluginActionMeta = Assert<Equal<PluginActionMeta<readonly [TestPlugin]>, { readonly routeId?: string }>>;
-    type _PluginDeps = Assert<Equal<PluginDeps<readonly [TestPlugin]>, { readonly trace: () => string }>>;
-    type _PluginTransitionExtensions = Assert<
-      Equal<PluginTransitionExtensions<readonly [TestPlugin]>, { readonly finish: () => ManagerAction<Event> }>
+    type _PluginScopedDeps = Assert<Equal<PluginScopedDeps<TestPlugin>, { readonly trace: () => "trace" }>>;
+    type _PluginScopedTransition = Assert<
+      Equal<PluginScopedTransition<TestPlugin>, { readonly finish: () => ManagerAction<Ping> }>
     >;
+    type _PluginMachineExtensions = Assert<Equal<PluginMachineExtensions<TestPlugin>, never>>;
     type _EffectDeps = Assert<
       EffectDeps<Deps, readonly [TestPlugin]> extends Deps & {
         readonly trace: () => string;
-        readonly transition: { readonly finish: () => ManagerAction<Event> };
+        readonly transition: { readonly finish: () => ManagerAction<Ping> };
       }
         ? true
         : false
     >;
-    type _ManagerActionMeta = Assert<
-      Equal<ManagerActionMeta<readonly [TestPlugin]>, CoreActionMeta & { readonly routeId?: string }>
-    >;
     type _ManagerFromPlugins = Assert<
-      Equal<
-        ManagerFromPlugins<Store, Event, readonly [TestPlugin]>,
-        IMachineManager<Store, Event | Ping, ManagerActionMeta<readonly [TestPlugin]>, readonly [TestPlugin]> & {
-          readonly audit: { readonly enabled: true };
-        }
-      >
-    >;
-    type _LiteFsmPlugin = Assert<
-      Equal<LiteFsmPlugin<{ manager: { ready: true } }>["install"], (ctx: PluginInstallContext) => void>
-    >;
-    type _PluginInstallContext = Assert<
-      Equal<keyof PluginInstallContext, "actions" | "storage" | "dispatch" | "routing" | "manager" | "deps">
-    >;
-    type _ManagerExtensionCapability = Assert<ManagerExtensionCapability extends { (): object } ? true : false>;
-    type _ManagerExtensionStore = Assert<Equal<ManagerExtensionStore<ManagerExtensionCapability>, MachineStore>>;
-    type _ManagerExtensionAppEvents = Assert<Equal<ManagerExtensionAppEvents<ManagerExtensionCapability>, AnyEvent>>;
-    type _ManagerRuntimeContextKeys = Assert<
-      Equal<
-        keyof ManagerRuntimeContext,
-        "config" | "options" | "schemaVersion" | "getState" | "transition" | "onTransition" | "getDependencies"
-      >
-    >;
-    type _ManagerExtensionFactory = Assert<
-      Equal<ManagerExtensionFactory<{ ok: true }>, (ctx: ManagerRuntimeContext) => { ok: true }>
-    >;
-    type _ManagerExtensionRegistry = Assert<
-      Equal<
-        ManagerExtensionRegistry,
-        { extend<Key extends string, Value>(key: Key, factory: ManagerExtensionFactory<Value>): void }
-      >
-    >;
-    type _ScopedPhase = Assert<Equal<ScopedInvocationPhase, "effect" | "reaction">>;
-    type _ScopedSource = Assert<Equal<ScopedInvocationSource, { readonly storage: string; readonly template: string }>>;
-    type _ScopedIndices = Assert<Equal<ScopedInvocationIndices, Readonly<Record<string, unknown>>>>;
-    type _ScopedContext = Assert<
-      Equal<
-        ScopedInvocationContext,
-        {
-          readonly source: ScopedInvocationSource;
-          readonly event: ManagerAction<AnyEvent>;
-          readonly indices: ScopedInvocationIndices;
-          readonly phase: ScopedInvocationPhase;
-          readonly transition: (action: ManagerAction<AnyEvent>) => ManagerAction<AnyEvent>;
-        }
-      >
-    >;
-    type _ScopedDepsContext = Assert<Equal<ScopedDepsContext, ScopedInvocationContext>>;
-    type _ScopedTransitionContext = Assert<Equal<ScopedTransitionContext, ScopedInvocationContext>>;
-    type _DepsFactory = Assert<
-      Equal<ScopedDepsFactory<{ readonly trace: string }>["keys"], readonly string[]>
-    >;
-    type _TransitionFactory = Assert<
-      Equal<ScopedTransitionFactory<{ readonly finish: () => void }>["keys"], readonly string[]>
-    >;
-    type _DepsExtensionRegistry = Assert<
-      Equal<
-        DepsExtensionRegistry,
-        {
-          extendDeps(factory: ScopedDepsFactory): void;
-          extendTransition(factory: ScopedTransitionFactory): void;
-        }
-      >
-    >;
-    type _DispatchContext = Assert<
-      Equal<
-        DispatchContext,
-        {
-          readonly options: unknown;
-          readonly runtime: Map<string, unknown>;
-          readonly originalAction: ManagerAction<AnyEvent>;
-          readonly action: ManagerAction<AnyEvent>;
-          readonly skipDelivery: boolean;
-          reportError(error: unknown): void;
-        }
-      >
-    >;
-    type _ActionInterceptorContext = Assert<Equal<ActionInterceptorContext, DispatchContext>>;
-    type _ActionInterceptorResult = Assert<
-      Equal<
-        ActionInterceptorResult,
-        | void
-        | {
-            readonly action?: ManagerAction<AnyEvent>;
-            readonly skipDelivery?: boolean;
-            readonly stopInterceptors?: boolean;
-          }
-      >
-    >;
-    type _ActionRegistry = Assert<Equal<ActionRegistry, { intercept(handler: ActionInterceptor): void }>>;
-    type _DispatchHook = Assert<Equal<DispatchHook, (ctx: DispatchContext) => void>>;
-    type _DispatchRegistry = Assert<
-      Equal<
-        DispatchRegistry,
-        {
-          beforeReduce(hook: DispatchHook): void;
-          afterReduce(hook: DispatchHook): void;
-          beforeCommit(hook: DispatchHook): void;
-          beforeSubscribers(hook: DispatchHook): void;
-          beforeEffects(hook: DispatchHook): void;
-          afterEffects(hook: DispatchHook): void;
-        }
-      >
-    >;
-    type _RouteResolverResult = Assert<Equal<RouteResolverResult, string | readonly string[]>>;
-    type _RouteResolverContext = Assert<
-      Equal<
-        RouteResolverContext<"entityId">,
-        {
-          readonly key: "entityId";
-          readonly action: ManagerAction<AnyEvent>;
-          readonly meta: Readonly<Record<string, unknown>>;
-        }
-      >
-    >;
-    type _RouteResolver = Assert<
-      Equal<RouteResolver<"entityId">, (value: unknown, ctx: RouteResolverContext<"entityId">) => RouteResolverResult>
-    >;
-    type _RoutingRegistry = Assert<
-      Equal<RoutingRegistry, { registerMetaKey<Key extends string>(key: Key, resolver: RouteResolver<Key>): void }>
+      ManagerFromPlugins<Store, Done, readonly [TestPlugin]> extends IMachineManager<
+        Store,
+        Done | Ping,
+        CoreActionMeta & { readonly routeId?: string },
+        readonly [TestPlugin]
+      > & {
+        readonly audit: { readonly enabled: true };
+      }
+        ? true
+        : false
     >;
   });
 
@@ -584,10 +453,30 @@ describe("canary поверхности экспорта core-типов", () =>
   });
 
   test("экспортирует definePlugin как public runtime helper", () => {
-    const plugin = definePlugin({ name: "exported-plugin", install() {} });
+    const plugin = definePlugin().create({ name: "exported-plugin" });
 
     expect(plugin.name).type.toBe<"exported-plugin">();
-    expect(plugin.install).type.toBeAssignableTo<(ctx: PluginInstallContext) => void>();
+  });
+
+  test("экспортирует defineStorageRuntime как public runtime helper", () => {
+    const storage = defineStorageRuntime().create({
+      kind: "exported-storage",
+      validateTemplate() {},
+      compileTemplate() {},
+      createRuntimeState() {
+        return undefined;
+      },
+      createPublicInitialState() {
+        return {};
+      },
+      acceptsEvent() {
+        return false;
+      },
+      reduce() {},
+      commit() {},
+    });
+
+    expect(storage.kind).type.toBe<"exported-storage">();
   });
 
   test("экспортирует все публичные core type-алиасы из interfaces.ts", () => {
@@ -599,7 +488,7 @@ describe("canary поверхности экспорта core-типов", () =>
     expect<MachineManagerOptions<Store, Event>["originId"]>().type.toBe<string | undefined>();
     expect<MachineManagerOptions<Store, Event>["generateActorId"]>().type.toBe<GenerateSpawnIdFn<Event> | undefined>();
     expect<MachineManagerOptions<Store, Event>["generateGroupId"]>().type.toBe<GenerateSpawnIdFn<Event> | undefined>();
-    expect<MachineManagerOptions<Store, Event>["plugins"]>().type.toBe<readonly LiteFsmPlugin[] | undefined>();
+    expect<MachineManagerOptions<Store, Event>["plugins"]>().type.toBe<readonly [] | undefined>();
     expect<IMachine<DomainCfg, Ctx, Event, Deps>["transition"]>().type.toBe<
       (state: StateType<DomainCfg, Ctx>, action: Event) => StateType<DomainCfg, Ctx>
     >();

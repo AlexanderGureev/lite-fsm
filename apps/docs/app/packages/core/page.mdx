@@ -29,7 +29,7 @@ import { MachineManager, createEffect, createMachine, defineMachine } from "@lit
 | `createReducer`   | Типизированная фабрика reducer-а                                                               |
 | `createEffect`    | Обёртка effect с `every` или `latest` семантикой                                               |
 | `createActorMeta` | Замороженный `ActorMeta` для replacement/time-travel сценариев                                 |
-| Plugin system     | Public API находится на финализации                                                            |
+| Plugin system     | Декларативные sections через `definePlugin().create(...)` и advanced storage runtimes           |
 | `MachineManager`  | Runtime-store для нескольких машин                                                             |
 | `Machine`         | Standalone pure machine                                                                        |
 | `defineMachine`   | Standalone-фабрика с зависимостями                                                             |
@@ -73,7 +73,7 @@ manager.getState().toggle.state; // "ON"
 - Effects: state effects, wildcard effects, `condition`, nested `transition`.
 - Actor templates: spawn, routing через `meta`, groups, terminal states.
 - Snapshot: `dehydrate`, `hydrate`, предварительный расчёт состояния и обработчики версий схемы.
-- Plugin system: public API находится на финализации; новая документация будет создана после стабилизации DSL.
+- Plugin system: финальный краткий контракт описан в repository cheatsheets; полная документация сайта выполняется отдельно.
 - Middleware API: `getState`, `transition`, `replaceReducer`, `onTransition`, `condition`.
 
 ## Связанные разделы

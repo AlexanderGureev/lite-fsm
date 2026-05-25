@@ -1,8 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { definePlugin, MachineManager } from "@lite-fsm/core";
+import { definePlugin, defineStorageRuntime, MachineManager } from "@lite-fsm/core";
 import type { FSMEvent, IMachineManager, MachineConfig, Middleware } from "@lite-fsm/core";
-import type { StorageRuntime } from "@lite-fsm/core/internal/runtime/kernel/storage";
 
 type CounterEvent = FSMEvent<"GO"> | FSMEvent<"ALT"> | FSMEvent<"RESET"> | FSMEvent<"NOOP">;
 type CounterConfig = {
@@ -57,15 +56,14 @@ const createRuntimeMachine = (): RuntimeMachine => ({
   initialContext: { count: 0 },
 });
 
-const createHookRuntime = (
+const createHookStorage = (
   order: string[],
   options: { readonly reactions?: boolean; readonly effects?: boolean } = {},
-): StorageRuntime => ({
+) =>
+  defineStorageRuntime().create({
   kind: "hook-test",
   validateTemplate() {},
-  compileTemplate(ctx) {
-    return { key: ctx.key, kind: "hook-test" };
-  },
+  compileTemplate() {},
   createRuntimeState() {
     return {};
   },
@@ -108,24 +106,43 @@ const createHookRuntime = (
         },
       }
     : {}),
-});
+  });
 
 describe("action interceptors и dispatch hooks", () => {
   it("no-op hooks не меняют state и выполняются в порядке регистрации фаз", () => {
     const order: string[] = [];
-    const plugin = definePlugin({
+    const first = definePlugin().create({
       name: "hooks/noop",
-      install(ctx) {
-        ctx.dispatch.beforeReduce(() => order.push("beforeReduce:first"));
-        ctx.dispatch.beforeReduce(() => order.push("beforeReduce:second"));
-        ctx.dispatch.afterReduce(() => order.push("afterReduce"));
-        ctx.dispatch.beforeCommit(() => order.push("beforeCommit"));
-        ctx.dispatch.beforeSubscribers(() => order.push("beforeSubscribers"));
-        ctx.dispatch.beforeEffects(() => order.push("beforeEffects"));
-        ctx.dispatch.afterEffects(() => order.push("afterEffects"));
+      hooks: {
+        beforeReduce() {
+          order.push("beforeReduce:first");
+        },
       },
     });
-    const manager = MachineManager({ counter: createCounter() }, { plugins: [plugin] });
+    const second = definePlugin().create({
+      name: "hooks/noop-second",
+      hooks: {
+        beforeReduce() {
+          order.push("beforeReduce:second");
+        },
+        afterReduce() {
+          order.push("afterReduce");
+        },
+        beforeCommit() {
+          order.push("beforeCommit");
+        },
+        beforeSubscribers() {
+          order.push("beforeSubscribers");
+        },
+        beforeEffects() {
+          order.push("beforeEffects");
+        },
+        afterEffects() {
+          order.push("afterEffects");
+        },
+      },
+    });
+    const manager = MachineManager({ counter: createCounter() }, { plugins: [first, second] });
 
     manager.transition({ type: "GO" });
 
@@ -144,26 +161,33 @@ describe("action interceptors и dispatch hooks", () => {
   it("interceptors выполняются по порядку, skipDelivery не останавливает цепочку, а stopInterceptors останавливает", () => {
     const order: string[] = [];
     const reducer = vi.fn();
-    const plugin = definePlugin({
-      name: "interceptors/order",
-      install(ctx) {
-        ctx.actions.intercept(() => {
-          order.push("first");
-        });
-        ctx.actions.intercept(() => {
-          order.push("second");
-          return { skipDelivery: true };
-        });
-        ctx.actions.intercept(() => {
-          order.push("third");
-          return { stopInterceptors: true };
-        });
-        ctx.actions.intercept(() => {
-          order.push("fourth");
-        });
+    const first = definePlugin().create({
+      name: "interceptors/order-first",
+      intercept() {
+        order.push("first");
       },
     });
-    const manager = MachineManager({ counter: createCounter({ reducer }) }, { plugins: [plugin] });
+    const second = definePlugin().create({
+      name: "interceptors/order-second",
+      intercept() {
+        order.push("second");
+        return { skipDelivery: true };
+      },
+    });
+    const third = definePlugin().create({
+      name: "interceptors/order-third",
+      intercept() {
+        order.push("third");
+        return { stopInterceptors: true };
+      },
+    });
+    const fourth = definePlugin().create({
+      name: "interceptors/order-fourth",
+      intercept() {
+        order.push("fourth");
+      },
+    });
+    const manager = MachineManager({ counter: createCounter({ reducer }) }, { plugins: [first, second, third, fourth] });
 
     manager.transition({ type: "GO" });
 
@@ -177,10 +201,10 @@ describe("action interceptors и dispatch hooks", () => {
     const subscriberActions: string[] = [];
     const effectActions: string[] = [];
     const middlewareOrder: string[] = [];
-    const plugin = definePlugin({
+    const plugin = definePlugin().create({
       name: "interceptors/replace",
-      install(ctx) {
-        ctx.actions.intercept(() => ({ action: { type: "ALT" } }));
+      intercept() {
+        return { action: { type: "ALT" } };
       },
     });
     const middleware: Middleware<CounterState, CounterEvent> = () => (next) => (action) => {
@@ -209,10 +233,10 @@ describe("action interceptors и dispatch hooks", () => {
     const reducer = vi.fn();
     const effect = vi.fn();
     const subscriber = vi.fn();
-    const plugin = definePlugin({
+    const plugin = definePlugin().create({
       name: "interceptors/skip-delivery",
-      install(ctx) {
-        ctx.actions.intercept(() => ({ skipDelivery: true }));
+      intercept() {
+        return { skipDelivery: true };
       },
     });
     const manager = MachineManager({ counter: createCounter({ reducer, effect }) }, { plugins: [plugin] });
@@ -230,23 +254,29 @@ describe("action interceptors и dispatch hooks", () => {
 
   it("stopInterceptors не отменяет staged operations и без skipDelivery сохраняет delivery", () => {
     const order: string[] = [];
-    const plugin = definePlugin({
+    const first = definePlugin().create({
       name: "interceptors/stop-staged",
-      install(ctx) {
-        ctx.actions.intercept((dispatch) => {
-          order.push("interceptor:first");
-          dispatch.runtime.set("operation", "staged");
-          return { stopInterceptors: true };
-        });
-        ctx.actions.intercept(() => {
-          order.push("interceptor:second");
-        });
-        ctx.dispatch.beforeReduce((dispatch) => {
+      intercept(dispatch) {
+        order.push("interceptor:first");
+        dispatch.runtime.set("operation", "staged");
+        return { stopInterceptors: true };
+      },
+      hooks: {
+        beforeReduce(dispatch) {
           order.push(`hook:${String(dispatch.runtime.get("operation"))}`);
-        });
+        },
       },
     });
-    const manager = MachineManager({ counter: createCounter({ reducer: () => order.push("reducer") }) }, { plugins: [plugin] });
+    const second = definePlugin().create({
+      name: "interceptors/stop-staged-second",
+      intercept() {
+        order.push("interceptor:second");
+      },
+    });
+    const manager = MachineManager(
+      { counter: createCounter({ reducer: () => order.push("reducer") }) },
+      { plugins: [first, second] },
+    );
 
     manager.transition({ type: "GO" });
 
@@ -260,12 +290,12 @@ describe("action interceptors и dispatch hooks", () => {
     const reducer = vi.fn();
     const effect = vi.fn();
     const middleware: Middleware<CounterState, CounterEvent> = () => () => (action) => action;
-    const plugin = definePlugin({
+    const plugin = definePlugin().create({
       name: "middleware/no-next",
-      install(ctx) {
-        ctx.actions.intercept(interceptor);
-        ctx.dispatch.beforeReduce(hook);
-        ctx.dispatch.beforeEffects(hook);
+      intercept: interceptor,
+      hooks: {
+        beforeReduce: hook,
+        beforeEffects: hook,
       },
     });
     const manager = MachineManager({ counter: createCounter({ reducer, effect }) }, { middleware: [middleware], plugins: [plugin] });
@@ -282,16 +312,29 @@ describe("action interceptors и dispatch hooks", () => {
 
   it("hooks окружают storage reduce/commit, reactions идут перед subscribers, effects остаются после middleware chain", () => {
     const order: string[] = [];
-    const plugin = definePlugin({
+    const storage = createHookStorage(order, { reactions: true, effects: true });
+    const plugin = definePlugin().create({
       name: "storage/hooks-order",
-      install(ctx) {
-        ctx.storage.register("hook-test", createHookRuntime(order, { reactions: true, effects: true }));
-        ctx.dispatch.beforeReduce(() => order.push("hook:beforeReduce"));
-        ctx.dispatch.afterReduce(() => order.push("hook:afterReduce"));
-        ctx.dispatch.beforeCommit(() => order.push("hook:beforeCommit"));
-        ctx.dispatch.beforeSubscribers(() => order.push("hook:beforeSubscribers"));
-        ctx.dispatch.beforeEffects(() => order.push("hook:beforeEffects"));
-        ctx.dispatch.afterEffects(() => order.push("hook:afterEffects"));
+      storage: [storage],
+      hooks: {
+        beforeReduce() {
+          order.push("hook:beforeReduce");
+        },
+        afterReduce() {
+          order.push("hook:afterReduce");
+        },
+        beforeCommit() {
+          order.push("hook:beforeCommit");
+        },
+        beforeSubscribers() {
+          order.push("hook:beforeSubscribers");
+        },
+        beforeEffects() {
+          order.push("hook:beforeEffects");
+        },
+        afterEffects() {
+          order.push("hook:afterEffects");
+        },
       },
     });
     const middleware: Middleware<RuntimeState, TickEvent> = () => (next) => (action) => {
@@ -300,7 +343,7 @@ describe("action interceptors и dispatch hooks", () => {
       order.push("middleware:after");
       return result;
     };
-    const manager = MachineManager<RuntimeStore, TickEvent>(
+    const manager = MachineManager<RuntimeStore, TickEvent, readonly [typeof plugin]>(
       { counter: createRuntimeMachine() },
       { middleware: [middleware], plugins: [plugin] },
     );
@@ -331,12 +374,12 @@ describe("action interceptors и dispatch hooks", () => {
     const failure = new Error("before commit failed");
     const onError = vi.fn();
     const subscriber = vi.fn();
-    const plugin = definePlugin({
+    const plugin = definePlugin().create({
       name: "hooks/error-before-commit",
-      install(ctx) {
-        ctx.dispatch.beforeCommit(() => {
+      hooks: {
+        beforeCommit() {
           throw failure;
-        });
+        },
       },
     });
     const manager = MachineManager({ counter: createCounter() }, { onError, plugins: [plugin] });
@@ -352,18 +395,21 @@ describe("action interceptors и dispatch hooks", () => {
     const failure = new Error("after commit failed");
     const order: string[] = [];
     const onError = vi.fn();
-    const plugin = definePlugin({
+    const storage = createHookStorage(order, { reactions: true, effects: true });
+    const plugin = definePlugin().create({
       name: "hooks/error-after-commit",
-      install(ctx) {
-        ctx.storage.register("hook-test", createHookRuntime(order, { reactions: true, effects: true }));
-        ctx.dispatch.beforeSubscribers(() => {
+      storage: [storage],
+      hooks: {
+        beforeSubscribers() {
           order.push("hook:beforeSubscribers");
           throw failure;
-        });
-        ctx.dispatch.beforeEffects(() => order.push("hook:beforeEffects"));
+        },
+        beforeEffects() {
+          order.push("hook:beforeEffects");
+        },
       },
     });
-    const manager = MachineManager<RuntimeStore, TickEvent>(
+    const manager = MachineManager<RuntimeStore, TickEvent, readonly [typeof plugin]>(
       { counter: createRuntimeMachine() },
       { onError, plugins: [plugin] },
     );
@@ -378,12 +424,12 @@ describe("action interceptors и dispatch hooks", () => {
   it("reportError вызывает onError и не меняет control flow", () => {
     const reported = new Error("reported");
     const onError = vi.fn();
-    const plugin = definePlugin({
+    const plugin = definePlugin().create({
       name: "hooks/report-error",
-      install(ctx) {
-        ctx.dispatch.beforeReduce((dispatch) => {
+      hooks: {
+        beforeReduce(dispatch) {
           dispatch.reportError(reported);
-        });
+        },
       },
     });
     const manager = MachineManager({ counter: createCounter() }, { onError, plugins: [plugin] });
@@ -395,12 +441,12 @@ describe("action interceptors и dispatch hooks", () => {
 
   it("reentrant dispatch внутри hook запрещен", () => {
     let manager!: IMachineManager<{ counter: CounterMachine }, CounterEvent>;
-    const plugin = definePlugin({
+    const plugin = definePlugin().create({
       name: "hooks/reentrant",
-      install(ctx) {
-        ctx.dispatch.beforeReduce(() => {
+      hooks: {
+        beforeReduce() {
           manager.transition({ type: "GO" });
-        });
+        },
       },
     });
     manager = MachineManager({ counter: createCounter() }, { plugins: [plugin] });

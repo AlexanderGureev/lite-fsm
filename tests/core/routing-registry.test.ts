@@ -1,9 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { definePlugin, MachineManager } from "@lite-fsm/core";
-import type { FSMEvent, LiteFsmPlugin, MachineConfig, Middleware } from "@lite-fsm/core";
+import { definePlugin, defineStorageRuntime, MachineManager } from "@lite-fsm/core";
+import type { FSMEvent, MachineConfig, Middleware } from "@lite-fsm/core";
 import { createRoutingRuntime } from "@lite-fsm/core/internal/runtime/kernel/routing";
-import type { StorageRuntime } from "@lite-fsm/core/internal/runtime/kernel/storage";
 
 import { createLikeSync } from "./MachineManager.actors.fixtures";
 
@@ -33,19 +32,15 @@ const createRouteMachine = (options: { routeId?: string; groupTag?: string } = {
     initialContext: { hits: 0 },
   }) as never;
 
-const createRouteRuntime = () => {
+const createRouteStorage = () => {
   const runtimeState: RouteRuntimeState = { routes: [], reduces: 0, commits: 0 };
 
-  const runtime: StorageRuntime = {
+  const storage = defineStorageRuntime().create({
     kind: "route-test",
     validateTemplate() {},
-    compileTemplate(ctx) {
-      const machine = ctx.machine as Partial<RouteMachine>;
-      return {
-        key: ctx.key,
-        kind: "route-test",
-        data: { routeId: machine.routeId, groupTag: machine.groupTag },
-      };
+    compileTemplate({ machine }) {
+      const routeMachine = machine as Partial<RouteMachine>;
+      return { data: { routeId: routeMachine.routeId, groupTag: routeMachine.groupTag } };
     },
     createRuntimeState() {
       return runtimeState;
@@ -79,36 +74,36 @@ const createRouteRuntime = () => {
     commit({ state }) {
       (state as RouteRuntimeState).commits += 1;
     },
-  };
-
-  return { runtime, runtimeState };
-};
-
-const routeRuntimePlugin = (runtime: StorageRuntime) =>
-  definePlugin({
-    name: "route-runtime",
-    install(ctx) {
-      ctx.storage.register("route-test", runtime);
-    },
   });
 
-const entityRoutingPlugin = (resolver: (value: unknown) => string | readonly string[] = (value) => String(value)) =>
-  definePlugin({
+  return { storage, runtimeState };
+};
+
+const routeStoragePlugin = (storage: ReturnType<typeof createRouteStorage>["storage"]) =>
+  definePlugin().create({
+    name: "route-runtime",
+    storage: [storage],
+  });
+
+const entityRoutingPlugin = (
+  resolver: (value: unknown) => string | readonly string[] = (value) => String(value),
+) =>
+  definePlugin().create({
     name: "entity-routing",
-    install(ctx) {
-      ctx.routing.registerMetaKey("entityId", resolver);
+    routeMeta: {
+      entityId: resolver,
     },
   });
 
 describe("routing meta registry", () => {
   it("route resolver обрабатывает plugin meta key", () => {
-    const { runtime, runtimeState } = createRouteRuntime();
+    const { storage, runtimeState } = createRouteStorage();
     const manager = MachineManager(
       {
         entity: createRouteMachine({ routeId: "entity/a" }) as never,
       },
       {
-        plugins: [routeRuntimePlugin(runtime), entityRoutingPlugin((value) => [`entity/${String(value)}`, `entity/${String(value)}`])],
+        plugins: [routeStoragePlugin(storage), entityRoutingPlugin((value) => [`entity/${String(value)}`, `entity/${String(value)}`])],
       },
     );
 
@@ -121,16 +116,20 @@ describe("routing meta registry", () => {
 
   it("duplicate route meta key бросает init error", () => {
     const first = entityRoutingPlugin();
-    const second = definePlugin({
+    const second = definePlugin().create({
       name: "entity-routing-duplicate",
-      install(ctx) {
-        ctx.routing.registerMetaKey("entityId", (value) => String(value));
+      routeMeta: {
+        entityId(value) {
+          return String(value);
+        },
       },
     });
-    const coreDuplicate = definePlugin({
+    const coreDuplicate = definePlugin().create({
       name: "actor-routing-duplicate",
-      install(ctx) {
-        ctx.routing.registerMetaKey("actorId", (value) => String(value));
+      routeMeta: {
+        actorId(value) {
+          return String(value);
+        },
       },
     });
 
@@ -164,7 +163,7 @@ describe("routing meta registry", () => {
   });
 
   it("meta.entityId не теряется при middleware rewrite и post-normalization", () => {
-    const { runtime } = createRouteRuntime();
+    const { storage } = createRouteStorage();
     const committed: unknown[] = [];
     const rewrite: Middleware<any, RouteEvent> = () => (next) => (action) =>
       next({
@@ -177,7 +176,7 @@ describe("routing meta registry", () => {
       },
       {
         middleware: [rewrite],
-        plugins: [routeRuntimePlugin(runtime), entityRoutingPlugin()],
+        plugins: [routeStoragePlugin(storage), entityRoutingPlugin()],
       },
     );
     manager.onTransition((_prev, _current, action) => committed.push(action));
@@ -189,13 +188,13 @@ describe("routing meta registry", () => {
   });
 
   it("registered plugin route key имеет priority между actorId и groupId", () => {
-    const { runtime, runtimeState } = createRouteRuntime();
+    const { storage, runtimeState } = createRouteStorage();
     const manager = MachineManager(
       {
         entity: createRouteMachine({ routeId: "entity/a" }) as never,
       },
       {
-        plugins: [routeRuntimePlugin(runtime), entityRoutingPlugin()],
+        plugins: [routeStoragePlugin(storage), entityRoutingPlugin()],
       },
     );
 
@@ -210,14 +209,14 @@ describe("routing meta registry", () => {
   });
 
   it("несколько registered plugin route keys применяются по priority-first в порядке регистрации", () => {
-    const { runtime, runtimeState } = createRouteRuntime();
+    const { storage, runtimeState } = createRouteStorage();
     const entityResolver = vi.fn((value: unknown) => String(value));
     const tenantResolver = vi.fn((value: unknown) => String(value));
-    const routingPlugin = definePlugin({
+    const routingPlugin = definePlugin().create({
       name: "multi-routing",
-      install(ctx) {
-        ctx.routing.registerMetaKey("tenantId", tenantResolver);
-        ctx.routing.registerMetaKey("entityId", entityResolver);
+      routeMeta: {
+        tenantId: tenantResolver,
+        entityId: entityResolver,
       },
     });
     const manager = MachineManager(
@@ -225,7 +224,7 @@ describe("routing meta registry", () => {
         entity: createRouteMachine({ routeId: "tenant/a" }) as never,
       },
       {
-        plugins: [routeRuntimePlugin(runtime), routingPlugin],
+        plugins: [routeStoragePlugin(storage), routingPlugin],
       },
     );
 
@@ -239,14 +238,14 @@ describe("routing meta registry", () => {
   });
 
   it("groupTag остается доступным нескольким storage runtimes", () => {
-    const { runtime } = createRouteRuntime();
+    const { storage } = createRouteStorage();
     const manager = MachineManager(
       {
         likeSync: createLikeSync(),
         tagged: createRouteMachine({ groupTag: "likeSync" }) as never,
       },
       {
-        plugins: [routeRuntimePlugin(runtime)],
+        plugins: [routeStoragePlugin(storage)],
       },
     );
 
@@ -258,7 +257,7 @@ describe("routing meta registry", () => {
   });
 
   it("route resolver не мутирует storage runtime state", () => {
-    const { runtime, runtimeState } = createRouteRuntime();
+    const { storage, runtimeState } = createRouteStorage();
     const resolver = vi.fn((value: unknown) => {
       expect(runtimeState.reduces).toBe(0);
       expect(runtimeState.commits).toBe(0);
@@ -269,7 +268,7 @@ describe("routing meta registry", () => {
         entity: createRouteMachine({ routeId: "entity/a" }) as never,
       },
       {
-        plugins: [routeRuntimePlugin(runtime), entityRoutingPlugin(resolver)],
+        plugins: [routeStoragePlugin(storage), entityRoutingPlugin(resolver)],
       },
     );
 
@@ -281,10 +280,7 @@ describe("routing meta registry", () => {
   });
 
   it("plugin route key не доставляется в instance actor runtime как unscoped", () => {
-    const manager = MachineManager(
-      { likeSync: createLikeSync() },
-      { plugins: [entityRoutingPlugin()] },
-    );
+    const manager = MachineManager({ likeSync: createLikeSync() }, { plugins: [entityRoutingPlugin()] });
 
     manager.transition({ type: "LIKE", payload: { id: "a" } });
     manager.transition({ type: "BUMP", meta: { entityId: "entity/a" } } as never);
@@ -293,33 +289,45 @@ describe("routing meta registry", () => {
   });
 
   it("invalid route resolver result бросает clear error", () => {
-    const objectResult = definePlugin({
+    const objectResult = definePlugin().create({
       name: "bad-object-route",
-      install(ctx) {
-        ctx.routing.registerMetaKey("entityId", () => ({ id: "a" }) as never);
+      routeMeta: {
+        entityId() {
+          return { id: "a" } as never;
+        },
       },
     });
-    const arrayResult = definePlugin({
+    const arrayResult = definePlugin().create({
       name: "bad-array-route",
-      install(ctx) {
-        ctx.routing.registerMetaKey("entityId", () => ["a", 1] as never);
+      routeMeta: {
+        entityId() {
+          return ["a", 1] as never;
+        },
       },
     });
 
-    const createManager = (plugin: LiteFsmPlugin) => {
-      const { runtime } = createRouteRuntime();
-      return MachineManager(
+    {
+      const { storage } = createRouteStorage();
+      const manager = MachineManager(
         { entity: createRouteMachine({ routeId: "a" }) as never },
-        { plugins: [routeRuntimePlugin(runtime), plugin] },
+        { plugins: [routeStoragePlugin(storage), objectResult] },
       );
-    };
 
-    expect(() => createManager(objectResult).transition({ type: "HIT", meta: { entityId: "a" } } as never)).toThrow(
-      "[lite-fsm] route resolver for meta key 'entityId' must return a string or an array of strings.",
-    );
-    expect(() => createManager(arrayResult).transition({ type: "HIT", meta: { entityId: "a" } } as never)).toThrow(
-      "[lite-fsm] route resolver for meta key 'entityId' must return a string or an array of strings.",
-    );
+      expect(() => manager.transition({ type: "HIT", meta: { entityId: "a" } } as never)).toThrow(
+        "[lite-fsm] route resolver for meta key 'entityId' must return a string or an array of strings.",
+      );
+    }
+    {
+      const { storage } = createRouteStorage();
+      const manager = MachineManager(
+        { entity: createRouteMachine({ routeId: "a" }) as never },
+        { plugins: [routeStoragePlugin(storage), arrayResult] },
+      );
+
+      expect(() => manager.transition({ type: "HIT", meta: { entityId: "a" } } as never)).toThrow(
+        "[lite-fsm] route resolver for meta key 'entityId' must return a string or an array of strings.",
+      );
+    }
   });
 });
 
@@ -330,7 +338,7 @@ describe("routing runtime helpers", () => {
     expect(routing.registeredMetaKeys).toEqual([]);
     expect(routing.hasRoute(undefined)).toBe(false);
 
-    routing.registry.registerMetaKey("entityId", (value) => [String(value), String(value)]);
+    routing.registry.registerRouteMeta("entityId", (value) => [String(value), String(value)]);
 
     expect(routing.registeredMetaKeys).toEqual(["entityId"]);
     expect(routing.hasRoute({ entityId: "a" } as never)).toBe(true);

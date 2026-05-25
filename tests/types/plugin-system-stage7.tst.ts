@@ -1,206 +1,365 @@
 import { describe, expect, test } from "tstyche";
-import { createMachine, definePlugin, MachineManager } from "@lite-fsm/core";
+import { createMachine, definePlugin, defineStorageRuntime } from "@lite-fsm/core";
 import type {
-  EffectDeps,
   FSMEvent,
-  MachineConfig,
-  MachineDependencies,
   ManagerAction,
-  PluginDeps,
-  PluginTransitionExtensions,
-  ScopedDepsContext,
-  ScopedDepsFactory,
-  ScopedInvocationContext,
-  ScopedInvocationIndices,
-  ScopedInvocationPhase,
-  ScopedInvocationSource,
-  ScopedTransitionContext,
-  ScopedTransitionFactory,
+  PluginMachineExtensions,
   TypedCreateMachineFn,
 } from "@lite-fsm/core";
 
-import type { Assert, Equal } from "./_helpers";
+import type { Assert, IsNever } from "./_helpers";
 
-type Start = FSMEvent<"START">;
-type Done = FSMEvent<"DONE">;
-type AppEvent = Start | Done;
-type Config = { idle: { START: "loading" }; loading: { DONE: "idle" } };
-type Ctx = { id: string };
+type AppEvent = FSMEvent<"LOAD"> | FSMEvent<"RESET">;
+type CacheInternalEvent = FSMEvent<"CACHE_INVALIDATED", { readonly key: string }>;
 type AppDeps = { readonly api: { readonly load: () => Promise<string> } };
-
-type ScopedCapabilities = {
-  readonly deps: {
-    readonly requestId: () => string;
+type CacheExtension = {
+  readonly input: {
+    readonly initialContext: { readonly token: string };
+    readonly ttl: number;
   };
-  readonly transition: {
-    readonly finish: (id: string) => ManagerAction<AppEvent>;
+  readonly internalEvents: CacheInternalEvent;
+  readonly effectDeps: {
+    readonly cacheApi: { readonly read: () => string };
+  };
+  readonly reactionDeps: {
+    readonly cacheLog: (message: string) => void;
+  };
+  readonly resultMetadata: {
+    readonly cacheKind: "cache";
+  };
+  readonly publicState: {
+    readonly ready: boolean;
   };
 };
+type CacheMachineExtension = CacheExtension & { readonly storage: "cache" };
 
-const scopedPlugin = definePlugin<ScopedCapabilities>({
-  name: "scoped-plugin",
-  install(ctx) {
-    ctx.deps.extendDeps(
-      Object.assign(
-        (scope: ScopedDepsContext) => ({
-          requestId: () => `${scope.source.template}:${scope.event.type}`,
-        }),
-        { keys: ["requestId"] as const },
-      ),
-    );
-    ctx.deps.extendTransition(
-      Object.assign(
-        (scope: ScopedTransitionContext) => ({
-          finish: (id: string) => scope.transition({ type: "DONE", payload: { id } } as never),
-        }),
-        { keys: ["finish"] as const },
-      ),
-    );
+const cacheStorage = defineStorageRuntime<CacheExtension>().create({
+  kind: "cache",
+  routeMetaKeys: ["cacheKey"],
+  validateTemplate(ctx) {
+    expect(ctx.storageKind).type.toBe<"cache">();
+    expect(ctx.machine.initialContext.token).type.toBe<string>();
+    expect(ctx.machine.ttl).type.toBe<number>();
+  },
+  compileTemplate(ctx) {
+    expect(ctx.machine.initialContext.token).type.toBe<string>();
+    return { data: { key: ctx.key } };
+  },
+  createRuntimeState(ctx) {
+    expect(ctx.templates[0]?.data).type.toBe<unknown>();
+    return { ready: true };
+  },
+  createPublicInitialState(ctx) {
+    expect(ctx.state).type.toBe<unknown>();
+    expect(ctx.template.data).type.toBe<unknown>();
+    return { ready: true };
+  },
+  acceptsEvent(ctx) {
+    expect(ctx.action).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
+    return false;
+  },
+  reduce(ctx) {
+    expect(ctx.state).type.toBe<unknown>();
+  },
+  commit(ctx) {
+    expect(ctx.state).type.toBe<unknown>();
   },
 });
 
-const otherPlugin = definePlugin<{ readonly deps: { readonly otherDep: () => number } }>({
-  name: "other-scoped-plugin",
-  install(ctx) {
-    ctx.deps.extendDeps(
-      Object.assign(
-        () => ({
-          otherDep: () => 1,
-        }),
-        { keys: ["otherDep"] as const },
-      ),
-    );
+const sessionStorage = defineStorageRuntime().create({
+  kind: "session",
+  validateTemplate() {},
+  compileTemplate() {},
+  createRuntimeState() {
+    return undefined;
   },
+  createPublicInitialState() {
+    return { state: "IDLE", context: {} };
+  },
+  acceptsEvent() {
+    return false;
+  },
+  reduce() {},
+  commit() {},
 });
 
-type ScopedPlugins = readonly [typeof scopedPlugin];
-type ScopedDeps = EffectDeps<AppDeps, ScopedPlugins>;
-const createScopedMachine: TypedCreateMachineFn<AppEvent, ScopedDeps> = createMachine;
-const createPlainMachine: TypedCreateMachineFn<AppEvent, AppDeps> = createMachine;
-
-const scopedMachine = createScopedMachine({
-  config: { idle: { START: "loading" }, loading: { DONE: "idle" } },
-  initialState: "idle",
-  initialContext: { id: "" },
-  effects: {
-    loading: async ({ api, requestId, transition }) => {
-      const id = await api.load();
-      expect(requestId()).type.toBe<string>();
-      expect(transition.finish(id)).type.toBe<ManagerAction<AppEvent>>();
-      transition({ type: "DONE" });
-    },
-  },
+const cachePlugin = definePlugin().create({
+  name: "stage-seven-cache",
+  storage: [cacheStorage],
+});
+const multiStoragePlugin = definePlugin().create({
+  name: "stage-seven-multiple-storage",
+  storage: [cacheStorage, sessionStorage],
+});
+const noStoragePlugin = definePlugin().create({
+  name: "stage-seven-no-storage",
 });
 
-const plainMachine = createPlainMachine({
-  config: { idle: { START: "loading" }, loading: { DONE: "idle" } },
-  initialState: "idle",
-  initialContext: { id: "" },
-  effects: {
-    loading: ({ api, transition }) => {
-      void api.load();
-      transition({ type: "DONE" });
+describe("plugin system — этап 7 storage types", () => {
+  test("defineStorageRuntime сохраняет literal kind и выводит normalized machine extension", () => {
+    expect(cacheStorage.kind).type.toBe<"cache">();
+    expect(sessionStorage.kind).type.toBe<"session">();
+
+    type _CacheExtension = Assert<
+      PluginMachineExtensions<typeof cachePlugin> extends CacheMachineExtension
+        ? CacheMachineExtension extends PluginMachineExtensions<typeof cachePlugin>
+          ? true
+          : false
+        : false
+    >;
+    type _DefaultExtension = Assert<
+      PluginMachineExtensions<typeof multiStoragePlugin> extends
+        | CacheMachineExtension
+        | { readonly storage: "session" }
+        ? (CacheMachineExtension | { readonly storage: "session" }) extends PluginMachineExtensions<
+            typeof multiStoragePlugin
+          >
+          ? true
+          : false
+        : false
+    >;
+    type _NoStorage = Assert<IsNever<PluginMachineExtensions<typeof noStoragePlugin>>>;
+  });
+
+  test("PluginMachineExtensions одинаково принимает tuple и union", () => {
+    type TupleExtensions = PluginMachineExtensions<readonly [typeof cachePlugin, typeof multiStoragePlugin]>;
+    type UnionExtensions = PluginMachineExtensions<typeof cachePlugin | typeof multiStoragePlugin>;
+
+    expect<TupleExtensions>().type.toBeAssignableTo<UnionExtensions>();
+    expect<UnionExtensions>().type.toBeAssignableTo<TupleExtensions>();
+  });
+
+  test("plugin с несколькими storage definitions дает union extensions", () => {
+    type Extensions = PluginMachineExtensions<typeof multiStoragePlugin>;
+
+    expect<Extensions>().type.toBe<CacheMachineExtension | { readonly storage: "session" }>();
+  });
+
+  test("TypedCreateMachineFn принимает declared storage kind и отклоняет unknown", () => {
+    type Extensions = PluginMachineExtensions<typeof multiStoragePlugin>;
+    const createAppMachine: TypedCreateMachineFn<AppEvent, AppDeps, Extensions> = createMachine;
+
+    const cacheMachine = createAppMachine({
+      storage: "cache",
+      ttl: 60,
+      config: {
+        IDLE: { LOAD: "LOADING", CACHE_INVALIDATED: "IDLE" },
+        LOADING: { RESET: "IDLE" },
+      },
+      initialState: "IDLE",
+      initialContext: { token: "" },
+      effects: {
+        LOADING: ({ api, cacheApi, cacheLog, transition }) => {
+          expect(api.load()).type.toBe<Promise<string>>();
+          expect(cacheApi.read()).type.toBe<string>();
+          expect(cacheLog("loaded")).type.toBe<void>();
+          expect(transition({ type: "CACHE_INVALIDATED", payload: { key: "user" } })).type.toBe<
+            ManagerAction<AppEvent | CacheInternalEvent>
+          >();
+        },
+      },
+    });
+    const sessionMachine = createAppMachine({
+      storage: "session",
+      config: { IDLE: { LOAD: "IDLE" } },
+      initialState: "IDLE",
+      initialContext: {},
+    });
+
+    expect(cacheMachine.storage).type.toBe<"cache">();
+    expect(sessionMachine.storage).type.toBe<"session">();
+
+    createAppMachine({
       // @ts-expect-error!
-      transition.finish("missing-plugin");
-    },
-  },
-});
-
-const machines = {
-  scoped: scopedMachine satisfies MachineConfig<Config, Ctx, AppEvent, ScopedDeps>,
-};
-
-describe("plugin system stage 7 — scoped deps types", () => {
-  test("PluginCapabilities deps и transition попадают в effect deps через tuple текущего manager", () => {
-    type _PluginDeps = Assert<Equal<PluginDeps<ScopedPlugins>, ScopedCapabilities["deps"]>>;
-    type _PluginTransition = Assert<
-      Equal<PluginTransitionExtensions<ScopedPlugins>, ScopedCapabilities["transition"]>
-    >;
-
-    const manager = MachineManager(machines, { plugins: [scopedPlugin] as const });
-    manager.setDependencies({ api: { load: async () => "ok" } });
-
-    // @ts-expect-error!
-    manager.setDependencies({ api: { load: async () => "ok" }, requestId: () => "outside" });
-    // @ts-expect-error!
-    manager.transition.finish("outside-effect");
+      storage: "unknown",
+      config: { IDLE: { LOAD: "IDLE" } },
+      initialState: "IDLE",
+      initialContext: {},
+    });
   });
 
-  test("typed scoped deps недоступны без plugin capability", () => {
-    createPlainMachine({
-      config: { idle: { START: "loading" }, loading: { DONE: "idle" } },
-      initialState: "idle",
-      initialContext: { id: "" },
+  test("public compileTemplate не принимает ручные key или kind", () => {
+    defineStorageRuntime().create({
+      kind: "manual-key",
+      validateTemplate() {},
+      // @ts-expect-error!
+      compileTemplate(ctx) {
+        return { key: ctx.key };
+      },
+      createRuntimeState() {
+        return undefined;
+      },
+      createPublicInitialState() {
+        return {};
+      },
+      acceptsEvent() {
+        return false;
+      },
+      reduce() {},
+      commit() {},
+    });
+
+    defineStorageRuntime().create({
+      kind: "manual-kind",
+      validateTemplate() {},
+      // @ts-expect-error!
+      compileTemplate() {
+        return { kind: "manual-kind" };
+      },
+      createRuntimeState() {
+        return undefined;
+      },
+      createPublicInitialState() {
+        return {};
+      },
+      acceptsEvent() {
+        return false;
+      },
+      reduce() {},
+      commit() {},
+    });
+  });
+
+  test("optional runtime blocks принимают текущий storage runtime contract", () => {
+    defineStorageRuntime().create({
+      kind: "with-optional-blocks",
+      validateTemplate() {},
+      compileTemplate() {
+        return { data: undefined };
+      },
+      createRuntimeState() {
+        return {};
+      },
+      createPublicInitialState(ctx) {
+        expect(ctx.state).type.toBe<unknown>();
+        return {};
+      },
+      prepareAction(ctx) {
+        expect(ctx.state).type.toBe<unknown>();
+        return ctx.action;
+      },
+      beginReduce(ctx) {
+        expect(ctx.state).type.toBe<unknown>();
+        return false;
+      },
+      acceptsEvent() {
+        return true;
+      },
+      reduce(ctx) {
+        expect(ctx.template.data).type.toBe<unknown>();
+        return false;
+      },
+      commit(ctx) {
+        expect(ctx.state).type.toBe<unknown>();
+      },
       effects: {
-        loading: ({
-          // @ts-expect-error!
-          requestId,
-        }) => {
-          requestId();
+        condition(ctx) {
+          expect(ctx.state).type.toBe<unknown>();
+          return Promise.resolve(ctx.predicate({ type: "LOAD" }));
+        },
+        resolveInvocations(ctx) {
+          expect(ctx.state).type.toBe<unknown>();
+          return [{ id: "invoke" }];
+        },
+        invoke(ctx) {
+          expect(ctx.invocation).type.toBe<unknown>();
+        },
+      },
+      snapshot: {
+        dehydrate(ctx) {
+          expect(ctx.rootState).type.toBe<Record<string, unknown>>();
+          return { storage: { ready: true } };
+        },
+        hydrate(ctx) {
+          expect(ctx.snapshot).type.toBe<unknown>();
+          return { nextState: ctx.baseState, changed: false };
+        },
+      },
+      identity: {
+        resolve(ctx) {
+          expect(ctx.state).type.toBe<unknown>();
+          return { type: ctx.action.type };
+        },
+      },
+      reactions: {
+        run(ctx) {
+          expect(ctx.state).type.toBe<unknown>();
         },
       },
     });
   });
 
-  test("typed scoped deps недоступны вне effects/reactions", () => {
-    expect<MachineDependencies<typeof machines, ScopedPlugins>>().type.toBeAssignableTo<AppDeps>();
-    expect<AppDeps>().type.toBeAssignableTo<MachineDependencies<typeof machines, ScopedPlugins>>();
-    expect<MachineDependencies<typeof machines>>().type.toBeAssignableTo<AppDeps>();
-    expect<AppDeps>().type.toBeAssignableTo<MachineDependencies<typeof machines>>();
-
-    const manager = MachineManager(machines, { plugins: [scopedPlugin] as const });
-    manager.setDependencies({ api: { load: async () => "ok" } });
+  test("Extension generic не принимает storage и unknown keys", () => {
+    // @ts-expect-error!
+    defineStorageRuntime<{ readonly input: {}; readonly storage: "bad" }>().create({
+      kind: "bad-storage-extension",
+      validateTemplate() {},
+      compileTemplate() {},
+      createRuntimeState() {
+        return undefined;
+      },
+      createPublicInitialState() {
+        return {};
+      },
+      acceptsEvent() {
+        return false;
+      },
+      reduce() {},
+      commit() {},
+    });
 
     // @ts-expect-error!
-    manager.setDependencies({ requestId: () => "not-app-dep" });
-  });
-
-  test("scoped transition недоступен без plugin capability текущего tuple", () => {
-    type OtherScopedDeps = EffectDeps<AppDeps, readonly [typeof otherPlugin]>;
-    const createOtherMachine: TypedCreateMachineFn<AppEvent, OtherScopedDeps> = createMachine;
-
-    createOtherMachine({
-      config: { idle: { START: "loading" }, loading: { DONE: "idle" } },
-      initialState: "idle",
-      initialContext: { id: "" },
-      effects: {
-        loading: ({ otherDep, transition }) => {
-          expect(otherDep()).type.toBe<number>();
-          // @ts-expect-error!
-          transition.finish("missing-plugin");
-        },
+    defineStorageRuntime<{ readonly input: {}; readonly unknown: string }>().create({
+      kind: "bad-unknown-extension",
+      validateTemplate() {},
+      compileTemplate() {},
+      createRuntimeState() {
+        return undefined;
       },
+      createPublicInitialState() {
+        return {};
+      },
+      acceptsEvent() {
+        return false;
+      },
+      reduce() {},
+      commit() {},
     });
   });
 
-  test("публикует scoped registry и context types", () => {
-    type _Phase = Assert<Equal<ScopedInvocationPhase, "effect" | "reaction">>;
-    type _Source = Assert<Equal<ScopedInvocationSource, { readonly storage: string; readonly template: string }>>;
-    type _Indices = Assert<Equal<ScopedInvocationIndices, Readonly<Record<string, unknown>>>>;
-    type _Context = Assert<
-      Equal<
-        ScopedInvocationContext,
+  test("plugin storage section принимает readonly array definitions, но не object map или inline runtime", () => {
+    definePlugin().create({
+      name: "stage-seven-readonly-array",
+      storage: [cacheStorage] as const,
+    });
+
+    definePlugin().create({
+      name: "stage-seven-object-form",
+      // @ts-expect-error!
+      storage: { cache: cacheStorage },
+    });
+
+    definePlugin().create({
+      name: "stage-seven-inline-form",
+      storage: [
         {
-          readonly source: ScopedInvocationSource;
-          readonly event: ManagerAction<{ type: string; payload?: unknown }>;
-          readonly indices: ScopedInvocationIndices;
-          readonly phase: ScopedInvocationPhase;
-          readonly transition: (
-            action: ManagerAction<{ type: string; payload?: unknown }>,
-          ) => ManagerAction<{ type: string; payload?: unknown }>;
-        }
-      >
-    >;
-
-    expect<ScopedDepsFactory<{ value: string }>["keys"]>().type.toBe<readonly string[]>();
-    expect<ScopedTransitionFactory<{ finish: () => void }>["keys"]>().type.toBe<readonly string[]>();
-  });
-
-  test("plain machine сохраняет обычные deps", () => {
-    type PlainStore = { plain: typeof plainMachine };
-    const manager = MachineManager({ plain: plainMachine });
-
-    expect<MachineDependencies<PlainStore>>().type.toBe<AppDeps>();
-    manager.setDependencies({ api: { load: async () => "ok" } });
+          kind: "inline",
+          // @ts-expect-error!
+          validateTemplate() {},
+          compileTemplate() {},
+          createRuntimeState() {
+            return undefined;
+          },
+          createPublicInitialState() {
+            return {};
+          },
+          acceptsEvent() {
+            return false;
+          },
+          reduce() {},
+          commit() {},
+        },
+      ],
+    });
   });
 });

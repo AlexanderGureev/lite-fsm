@@ -1,155 +1,113 @@
 import { describe, expect, test } from "tstyche";
-import { definePlugin, MachineManager } from "@lite-fsm/core";
+import { createMachine, definePlugin, defineStorageRuntime, MachineManager } from "@lite-fsm/core";
 import type {
+  AnyEvent,
   FSMEvent,
-  LiteFsmPlugin,
-  MachineConfig,
   ManagerAction,
-  ManagerExtensionAppEvents,
-  ManagerExtensionCapability,
-  ManagerExtensionFactory,
-  ManagerExtensionRegistry,
-  ManagerExtensionStore,
-  ManagerFromPlugins,
-  ManagerRuntimeContext,
-  PluginManagerExtensions,
+  PluginMachineExtensions,
+  PluginManagerEvents,
+  TypedCreateMachineFn,
 } from "@lite-fsm/core";
 
 import type { Assert, Equal } from "./_helpers";
 
-type Start = FSMEvent<"START">;
-type Stop = FSMEvent<"STOP">;
-type AppEvent = Start | Stop;
-type Config = { idle: { START: "active" }; active: { STOP: "idle" } };
-type Ctx = { id: string };
-type CounterMachine = MachineConfig<Config, Ctx, AppEvent>;
-
-const counter: CounterMachine = {
-  config: { idle: { START: "active" }, active: { STOP: "idle" } },
-  initialState: "idle",
-  initialContext: { id: "counter" },
-};
-
-const machines = {
-  counter,
-};
-
-type AuditExtension = {
-  readonly audit: {
-    readonly machineKeys: () => readonly string[];
-    readonly start: () => ManagerAction<AppEvent>;
+type AppEvent = FSMEvent<"LOAD"> | FSMEvent<"RESET">;
+type CacheEvent = FSMEvent<"CACHE_REFRESH", { readonly key: string }>;
+type CacheExtension = {
+  readonly input: {
+    readonly ttl: number;
+    readonly initialContext: { readonly token: string };
+  };
+  readonly internalEvents: CacheEvent;
+  readonly effectDeps: {
+    readonly cacheApi: { readonly read: () => string };
+  };
+  readonly publicState: {
+    readonly ready: boolean;
+    readonly value: string;
   };
 };
+type CacheMachineExtension = CacheExtension & { readonly storage: "cache" };
 
-const auditPlugin = definePlugin<{ readonly manager: AuditExtension }>({
-  name: "manager-audit",
-  install(ctx) {
-    ctx.manager.extend("audit", (runtime) => ({
-      machineKeys: () => Object.keys(runtime.config),
-      start: () => runtime.transition({ type: "START" }) as ManagerAction<AppEvent>,
-    }));
+const cacheStorage = defineStorageRuntime<CacheExtension>().create({
+  kind: "cache",
+  validateTemplate(ctx) {
+    expect(ctx.storageKind).type.toBe<"cache">();
+    expect(ctx.machine.ttl).type.toBe<number>();
+    expect(ctx.machine.initialContext.token).type.toBe<string>();
+  },
+  compileTemplate(ctx) {
+    expect(ctx.machine.ttl).type.toBe<number>();
+    return { data: { key: ctx.key } };
+  },
+  createRuntimeState() {
+    return {};
+  },
+  createPublicInitialState() {
+    return { ready: true, value: "cached" };
+  },
+  acceptsEvent() {
+    return false;
+  },
+  reduce() {},
+  commit() {},
+});
+
+const cachePlugin = definePlugin<CacheEvent>().create({
+  name: "stage-eight-cache",
+  storage: [cacheStorage],
+  manager: {
+    cacheTools: (runtime) => ({
+      refresh: (key: string) => runtime.transition({ type: "CACHE_REFRESH", payload: { key } }),
+    }),
   },
 });
 
-type MachineKeysManagerExtension<Capability extends ManagerExtensionCapability> = {
-  readonly machineTools: {
-    readonly key: keyof ManagerExtensionStore<Capability>;
-    readonly transition: (
-      action: ManagerAction<ManagerExtensionAppEvents<Capability>>,
-    ) => ManagerAction<ManagerExtensionAppEvents<Capability>>;
-  };
-};
-
-interface MachineKeysManagerCapability extends ManagerExtensionCapability {
-  __liteFsmManagerExtension(): MachineKeysManagerExtension<this>;
-}
-
-const machineKeysPlugin = definePlugin<{ readonly manager: MachineKeysManagerCapability }>({
-  name: "machine-keys",
-  install(ctx) {
-    ctx.manager.extend("machineTools", (runtime) => ({
-      key: Object.keys(runtime.config)[0],
-      transition: runtime.transition,
-    }));
-  },
-});
-
-describe("plugin system stage 8 — manager extension types", () => {
-  test("plugin добавляет typed manager.foo", () => {
-    const manager = MachineManager(machines, { plugins: [auditPlugin] as const });
-
-    expect(manager.audit.machineKeys()).type.toBe<readonly string[]>();
-    expect(manager.audit.start()).type.toBe<ManagerAction<AppEvent>>();
-    expect(manager).type.toBe<ManagerFromPlugins<typeof machines, AppEvent, readonly [typeof auditPlugin]>>();
-  });
-
-  test("PluginManagerExtensions выводит object capability из текущего tuple", () => {
-    type _AuditExtension = Assert<
-      Equal<PluginManagerExtensions<typeof machines, AppEvent, readonly [typeof auditPlugin]>, AuditExtension>
+describe("plugin system — этап 8 storage types", () => {
+  test("definePlugin storage section выводит machine extension из storage definition", () => {
+    type _CacheExtension = Assert<
+      PluginMachineExtensions<typeof cachePlugin> extends CacheMachineExtension
+        ? CacheMachineExtension extends PluginMachineExtensions<typeof cachePlugin>
+          ? true
+          : false
+        : false
     >;
-    const manager = MachineManager(machines, { plugins: [auditPlugin] as const });
-
-    expect<PluginManagerExtensions<typeof machines, AppEvent, readonly [typeof auditPlugin]>>().type.toBeAssignableTo<
-      AuditExtension
-    >();
-    expect(manager.audit.start()).type.toBe<ManagerAction<AppEvent>>();
+    type _PluginEvents = Assert<Equal<PluginManagerEvents<typeof cachePlugin>, CacheEvent>>;
   });
 
-  test("manager extension capability может зависеть от S и AppEvents текущего manager", () => {
-    const manager = MachineManager(machines, { plugins: [machineKeysPlugin] as const });
-
-    expect(manager.machineTools.key).type.toBe<"counter">();
-    expect(manager.machineTools.transition({ type: "START" })).type.toBe<ManagerAction<AppEvent>>();
-    // @ts-expect-error!
-    manager.machineTools.transition({ type: "OTHER" });
-  });
-
-  test("без plugin TypeScript не показывает manager extension field", () => {
-    const manager = MachineManager(machines);
-
-    // @ts-expect-error!
-    manager.audit;
-    // @ts-expect-error!
-    manager.machineTools;
-  });
-
-  test("широкий LiteFsmPlugin[] не обязан сохранять plugin-specific manager extension inference", () => {
-    const plugins: LiteFsmPlugin[] = [auditPlugin, machineKeysPlugin];
-    const manager = MachineManager(machines, { plugins });
-
-    // @ts-expect-error!
-    manager.audit;
-    // @ts-expect-error!
-    manager.machineTools;
-  });
-
-  test("публикует manager extension registry и factory/context types", () => {
-    type _Registry = Assert<
-      Equal<
-        ManagerExtensionRegistry,
-        {
-          extend<Key extends string, Value>(key: Key, factory: ManagerExtensionFactory<Value>): void;
-        }
-      >
-    >;
-    type _ContextKeys = Assert<
-      Equal<
-        keyof ManagerRuntimeContext,
-        | "config"
-        | "options"
-        | "schemaVersion"
-        | "getState"
-        | "transition"
-        | "onTransition"
-        | "getDependencies"
-      >
-    >;
-    const factory: ManagerExtensionFactory<{ readonly ready: true }> = (runtime) => {
-      expect(runtime.config).type.toBeAssignableTo<Record<string, unknown>>();
-      expect(runtime.getState()).type.toBeAssignableTo<Record<string, unknown>>();
-      return { ready: true };
+  test("MachineManager сохраняет tuple inference после storage plugin", () => {
+    const createAppMachine: TypedCreateMachineFn<
+      AppEvent,
+      {},
+      PluginMachineExtensions<typeof cachePlugin>
+    > = createMachine;
+    const machines = {
+      cache: createAppMachine({
+        storage: "cache",
+        ttl: 60,
+        config: {
+          IDLE: { LOAD: "IDLE", CACHE_REFRESH: "IDLE" },
+        },
+        initialState: "IDLE",
+        initialContext: { token: "token" },
+        effects: {
+          IDLE: ({ cacheApi, transition }) => {
+            expect(cacheApi.read()).type.toBe<string>();
+            expect(transition({ type: "CACHE_REFRESH", payload: { key: "user" } })).type.toBe<
+              ManagerAction<AppEvent | CacheEvent>
+            >();
+          },
+        },
+      }),
     };
+    const manager = MachineManager(machines, { plugins: [cachePlugin] as const });
 
-    expect(factory).type.toBe<(ctx: ManagerRuntimeContext) => { readonly ready: true }>();
+    expect(manager.getState().cache).type.toBe<{ readonly ready: boolean; readonly value: string }>();
+    expect(manager.cacheTools.refresh("user")).type.toBe<ManagerAction<AnyEvent>>();
+    expect(manager.transition({ type: "CACHE_REFRESH", payload: { key: "user" } })).type.toBeAssignableTo<
+      ManagerAction<AppEvent | CacheEvent>
+    >();
+    // @ts-expect-error!
+    manager.transition({ type: "UNKNOWN" });
   });
 });

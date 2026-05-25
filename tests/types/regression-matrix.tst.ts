@@ -39,6 +39,7 @@ describe("регрессионная матрица public entry points", () => 
         | "createMachine"
         | "createReducer"
         | "definePlugin"
+        | "defineStorageRuntime"
         | "defineMachine"
       >
     >;

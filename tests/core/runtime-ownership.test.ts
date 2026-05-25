@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { definePlugin } from "@lite-fsm/core";
 import {
   createMachineManagerFactory,
   type RuntimePreset,
 } from "@lite-fsm/core/internal/runtime/kernel/createMachineManagerFactory";
+import type { NormalizedPlugin } from "@lite-fsm/core/internal/plugin";
 import { instanceStorageRuntime } from "@lite-fsm/core/internal/runtime/instance/storage";
 import type { StorageRuntime } from "@lite-fsm/core/internal/runtime/kernel/storage";
 import type { FSMEvent, MachineConfig, ManagerAction, Middleware } from "@lite-fsm/core";
@@ -94,17 +94,24 @@ const createTestRuntime = (kind: string, options: TestRuntimeOptions = {}): Stor
   };
 };
 
+const runtimePlugin = (
+  name: string,
+  entries: readonly { readonly kind: string; readonly runtime: StorageRuntime }[],
+): NormalizedPlugin => ({
+  name,
+  storage: entries.map(({ kind, runtime }) => ({ owner: name, kind, value: runtime })),
+  routeMeta: [],
+  scopedDeps: [],
+  scopedTransition: [],
+  manager: [],
+  hooks: {},
+});
+
 const createManagerWithRuntime = (runtime: StorageRuntime, machines: Record<string, CounterMachine>) => {
-  const plugin = definePlugin({
-    name: `plugin/${runtime.kind}`,
-    install(ctx) {
-      ctx.storage.register(runtime.kind, runtime);
-    },
-  });
   const preset: RuntimePreset = {
     name: `preset/${runtime.kind}`,
     defaultStorageKind: runtime.kind,
-    plugins: [plugin],
+    plugins: [runtimePlugin(`plugin/${runtime.kind}`, [{ kind: runtime.kind, runtime }])],
   };
 
   return createMachineManagerFactory(preset)(machines);
@@ -225,16 +232,10 @@ describe("storage runtime ownership", () => {
   it("effect phase выполняется после subscribers и middleware post-next code", () => {
     const order: string[] = [];
     const runtime = createTestRuntime("custom", { effects: true, order });
-    const plugin = definePlugin({
-      name: "plugin/custom",
-      install(ctx) {
-        ctx.storage.register("custom", runtime);
-      },
-    });
     const manager = createMachineManagerFactory({
       name: "preset/custom",
       defaultStorageKind: "custom",
-      plugins: [plugin],
+      plugins: [runtimePlugin("plugin/custom", [{ kind: "custom", runtime }])],
     })(
       { counter: createCounter("custom") },
       {
@@ -269,22 +270,15 @@ describe("storage runtime ownership", () => {
     const effects: string[] = [];
     const runtimeA = createNestedRuntime("a", (action) => action.type === "OUTER" || action.type === "INNER", effects);
     const runtimeB = createNestedRuntime("b", (action) => action.type === "OUTER", effects);
-    const pluginA = definePlugin({
-      name: "plugin/nested-a",
-      install(ctx) {
-        ctx.storage.register("a", runtimeA);
-      },
-    });
-    const pluginB = definePlugin({
-      name: "plugin/nested-b",
-      install(ctx) {
-        ctx.storage.register("b", runtimeB);
-      },
-    });
     const manager = createMachineManagerFactory({
       name: "preset/nested",
       defaultStorageKind: "a",
-      plugins: [pluginA, pluginB],
+      plugins: [
+        runtimePlugin("plugin/nested", [
+          { kind: "a", runtime: runtimeA },
+          { kind: "b", runtime: runtimeB },
+        ]),
+      ],
     })({
       a: createNestedMachine("a"),
       b: createNestedMachine("b"),
@@ -310,22 +304,15 @@ describe("storage runtime ownership", () => {
     const runtimeB = createNestedRuntime("b", (action) => action.type === "OUTER", effects, {
       nestedFrom: "reaction",
     });
-    const pluginA = definePlugin({
-      name: "plugin/nested-reaction-a",
-      install(ctx) {
-        ctx.storage.register("a", runtimeA);
-      },
-    });
-    const pluginB = definePlugin({
-      name: "plugin/nested-reaction-b",
-      install(ctx) {
-        ctx.storage.register("b", runtimeB);
-      },
-    });
     const manager = createMachineManagerFactory({
       name: "preset/nested-reaction",
       defaultStorageKind: "a",
-      plugins: [pluginA, pluginB],
+      plugins: [
+        runtimePlugin("plugin/nested-reaction", [
+          { kind: "a", runtime: runtimeA },
+          { kind: "b", runtime: runtimeB },
+        ]),
+      ],
     })({
       a: createNestedMachine("a"),
       b: createNestedMachine("b"),
@@ -351,22 +338,15 @@ describe("storage runtime ownership", () => {
     const effects: string[] = [];
     const runtimeA = createNestedRuntime("a", (action) => action.type === "OUTER" || action.type === "INNER", effects, {});
     const runtimeB = createNestedRuntime("b", (action) => action.type === "OUTER", effects, {});
-    const pluginA = definePlugin({
-      name: "plugin/nested-subscriber-a",
-      install(ctx) {
-        ctx.storage.register("a", runtimeA);
-      },
-    });
-    const pluginB = definePlugin({
-      name: "plugin/nested-subscriber-b",
-      install(ctx) {
-        ctx.storage.register("b", runtimeB);
-      },
-    });
     const manager = createMachineManagerFactory({
       name: "preset/nested-subscriber",
       defaultStorageKind: "a",
-      plugins: [pluginA, pluginB],
+      plugins: [
+        runtimePlugin("plugin/nested-subscriber", [
+          { kind: "a", runtime: runtimeA },
+          { kind: "b", runtime: runtimeB },
+        ]),
+      ],
     })({
       a: createNestedMachine("a"),
       b: createNestedMachine("b"),
@@ -401,16 +381,10 @@ describe("storage runtime ownership", () => {
       }
       return next(action);
     };
-    const plugin = definePlugin({
-      name: "plugin/custom-api",
-      install(ctx) {
-        ctx.storage.register("custom", runtime);
-      },
-    });
     const manager = createMachineManagerFactory({
       name: "preset/custom-api",
       defaultStorageKind: "custom",
-      plugins: [plugin],
+      plugins: [runtimePlugin("plugin/custom-api", [{ kind: "custom", runtime }])],
     })(
       { counter: createCounter("custom") },
       {
@@ -434,13 +408,10 @@ describe("storage runtime ownership", () => {
         return runtime.createRuntimeState(ctx);
       },
     });
-    const plugin = definePlugin({
-      name: "plugin/storage-state",
-      install(ctx) {
-        ctx.storage.register("first", wrap(first));
-        ctx.storage.register("second", wrap(second));
-      },
-    });
+    const plugin = runtimePlugin("plugin/storage-state", [
+      { kind: "first", runtime: wrap(first) },
+      { kind: "second", runtime: wrap(second) },
+    ]);
 
     createMachineManagerFactory({ name: "preset/storage-state", defaultStorageKind: "first", plugins: [plugin] })({
       alpha: createCounter("first"),
@@ -495,13 +466,10 @@ describe("storage runtime ownership", () => {
 
 describe("storage diagnostics", () => {
   it("unknown и duplicate storage diagnostics сохраняются", () => {
-    const duplicate = definePlugin({
-      name: "duplicate-storage",
-      install(ctx) {
-        ctx.storage.register("custom", createTestRuntime("custom"));
-        ctx.storage.register("custom", createTestRuntime("custom"));
-      },
-    });
+    const duplicate = runtimePlugin("duplicate-storage", [
+      { kind: "custom", runtime: createTestRuntime("custom") },
+      { kind: "custom", runtime: createTestRuntime("custom") },
+    ]);
 
     expect(() =>
       createMachineManagerFactory({ name: "preset/duplicate", defaultStorageKind: "custom", plugins: [duplicate] })({

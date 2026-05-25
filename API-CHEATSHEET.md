@@ -6,7 +6,7 @@
 
 | Импорт                                                         | Runtime exports                                                                                                                                                   |
 | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@lite-fsm/core`                                               | `createMachine`, `createConfig`, `createReducer`, `createEffect`, `createActorMeta`, `definePlugin`, `Machine`, `defineMachine`, `MachineManager`, `LiteFsmError` |
+| `@lite-fsm/core`                                               | `createMachine`, `createConfig`, `createReducer`, `createEffect`, `createActorMeta`, `definePlugin`, `defineStorageRuntime`, `Machine`, `defineMachine`, `MachineManager`, `LiteFsmError` |
 | `@lite-fsm/persist`                                            | `persistManager`, `createJsonStorage`                                                                                                                             |
 | `@lite-fsm/persist/react`                                      | `usePersistStatuses`, `useIsPersistRestoring`                                                                                                                     |
 | `@lite-fsm/middleware`                                         | `immerMiddleware`, `devToolsMiddleware`                                                                                                                           |
@@ -259,7 +259,7 @@ Effect получает один объект:
 | `condition(predicate)` | promise, резолвится на ближайший matching action                        |
 | `self`                 | (actor only) `{ actorId, groupId, groupTag }`                           |
 | user deps              | из `defineMachine({ dependencies })` или `manager.setDependencies(...)` |
-| plugin scoped deps     | public API находится на финализации; документация будет создана после стабилизации DSL |
+| plugin scoped deps     | `scopedDeps` добавляет invocation dep по object key; `scopedTransition` добавляет методы на `deps.transition` |
 
 State effect приоритетнее `"*"`. Wildcard срабатывает и на self-transition. Ошибки и reject из `condition` уходят в `onError`.
 
@@ -273,14 +273,31 @@ State effect приоритетнее `"*"`. Wildcard срабатывает и 
 | `createConfig(cfg)`                          | только граф переходов                                          |
 | `createReducer(fn)`                          | reducer с фиксированным action union                           |
 | `createActorMeta(meta)`                      | frozen `Readonly<ActorMeta>` для replacement/time-travel input |
-| `definePlugin`                               | plugin authoring API находится на финализации                  |
+| `definePlugin().create(definition)`          | объявляет marked plugin value для `MachineManager`; plugin sections подключаются через normalized registry |
+| `defineStorageRuntime<Extension>().create(definition)` | объявляет opaque storage definition для `definePlugin().create({ storage: [...] })` |
 | `createEffect({ effect, type?, cancelFn? })` | возвращает effect с guard-ом для политики запуска              |
 
 ### Plugin system
 
-Plugin system public API находится на финализации. Старый authoring API с пользовательским `install(ctx)` не является целевым public API.
+Публичный plugin объявляется только через `definePlugin<PluginEvents, HostEvents>().create({ name, ...sections })`. Публичного callback `install` нет. `MachineManager(..., { plugins })` принимает только marked values из builder API; structural objects отклоняются runtime validation.
 
-Новая документация будет создана после завершения `definePlugin().create(...)` и storage DSL. До этого раздел не является источником контрактов для реализации plugins.
+`PluginEvents` добавляются к manager-level `transition` для текущего plugin tuple, но не становятся событиями машин автоматически. Если машина обрабатывает plugin event, включите его явно: `type AppEvents = HostEvents | PluginManagerEvents<AppPlugins>`. `HostEvents` используются только для contextual typing внутри plugin definition и не входят в `PluginManagerEvents<Plugins>`.
+
+`routeMeta` объявляет routing contract, а не пользовательские данные. Ключ section становится action meta key; используйте scalar keys вроде `entityId`, `cacheKey`, `documentId`, `tenantId`. Reserved route/sender keys запрещены. Resolver возвращает `string | readonly string[]`; runtime не проверяет тип входного `value`, но проверяет результат resolver. `PluginRouteMeta<PluginUnion>` возвращает raw map значений, а optional semantics относятся к `manager.transition(...).meta`.
+
+`manager` объявляет manager extensions. Ключ section становится полем returned manager, тип поля равен return type factory. Factory вызывается один раз при создании manager после compile templates, runtime state и initial public state.
+
+`intercept(ctx)` выполняется после storage `prepareAction`, в plugin order и до reducer delivery. Context содержит `action`, `originalAction`, `skipDelivery`, `options`, `runtime` и `reportError(error)`. Возврат `{ action }` заменяет committed action и пересчитывает route; `{ skipDelivery: true }` пропускает delivery в machines; `{ stopInterceptors: true }` останавливает только следующие interceptors.
+
+`hooks` задает функции фаз `beforeReduce`, `afterReduce`, `beforeCommit`, `beforeSubscribers`, `beforeEffects`, `afterEffects`. Hooks выполняются по фазе и plugin order, видят финальный action после interceptors, не управляют replacement/skip/stop, а return value игнорируется.
+
+Ошибки из `intercept` и hooks пробрасываются из `manager.transition(...)` и не вызывают `onError` автоматически. `ctx.reportError(error)` вызывает текущий `onError` и не меняет control flow.
+
+`scopedDeps` добавляет dep только на время effect/reaction invocation: ключ section становится ключом deps, factory возвращает значение. `scopedTransition` добавляет методы к invocation `deps.transition`, сохраняя callable core `transition(action)`. `scope.event` видит `HostEvents | PluginEvents`, а `scope.transition(...)` принимает только `PluginEvents`. `EffectDeps<AppDeps, Plugins>` добавляет эти scoped deps/methods к app deps.
+
+`defineStorageRuntime<Extension>().create(...)` объявляет advanced storage definition для plugin section `storage: [definition]`. `Extension` описывает machine extension без поля `storage`; storage kind берется только из `kind`, а public `compileTemplate(ctx)` возвращает только `void | { data?: unknown }`. Методы storage runtime пишутся inline с contextual typing; named context-type imports не нужны. `effectDeps` и `reactionDeps` в extension являются type contract. Дубликат `kind` внутри одного plugin считается `LITE_FSM_INVALID_PLUGIN_DEFINITION`; дубликат между plugins или с internal preset — `LITE_FSM_DUPLICATE_STORAGE_KIND`.
+
+Configurable и multi-instance plugins объявляйте обычными factory functions вокруг `definePlugin().create(...)`; каждый экземпляр должен иметь уникальный `name`.
 
 ### `createEffect`
 
@@ -363,7 +380,7 @@ manager.transition({ type: "INC" });
 | Опция                      | Назначение                                                                                                                                                                           |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `middleware?`              | цепочка middleware на все user actions                                                                                                                                               |
-| `plugins?`                 | tuple plugins; public authoring API находится на финализации                                                                                                   |
+| `plugins?`                 | tuple values из `definePlugin().create(...)`; включает plugin events, optional route meta и manager extensions текущего tuple                                      |
 | `snapshot?`                | начальный snapshot, применяется со strategy `"replace"`                                                                                                                              |
 | `schemaVersion?`           | версия snapshot                                                                                                                                                                      |
 | `onError?`                 | ошибки effects / `condition`                                                                                                                                                         |

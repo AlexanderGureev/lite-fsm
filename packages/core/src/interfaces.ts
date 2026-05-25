@@ -25,9 +25,9 @@ import {
 import type {
   LiteFsmPlugin,
   ManagerActionMeta,
-  PluginManagerExtensions,
   ManagerTransitionEvents,
-  PluginDeps,
+  PluginManagerExtensions,
+  PluginScopedDeps,
   ScopedPluginDepsOf,
 } from "./plugin";
 
@@ -41,7 +41,9 @@ type MachineRuntimeOwnedDependencyKeys<E> =
   | (MachineRuntimeMetadata<E> extends { readonly effectDeps: infer Deps extends object } ? keyof Deps : never)
   | (MachineRuntimeMetadata<E> extends { readonly reactionDeps: infer Deps extends object } ? keyof Deps : never);
 
-type MachineDeclaredDependencies<E> = E extends { readonly __liteFsmDependencies?: infer D extends AnyRecord } ? D : never;
+type MachineDeclaredDependencies<E> = E extends { readonly __liteFsmDependencies?: infer D extends AnyRecord }
+  ? D
+  : never;
 
 type ConfigDependencies<E> =
   MachineDeclaredDependencies<E> extends never
@@ -56,19 +58,21 @@ type ConfigDependencies<E> =
         : never
     : MachineDeclaredDependencies<E>;
 
-type StripScopedDependencies<D, Plugins extends readonly LiteFsmPlugin[], E> = Prettify<
+type StripScopedDependencies<D, Plugins extends readonly LiteFsmPlugin<any, any, any>[], E> = Prettify<
   Omit<
     D,
-    keyof DefaultDeps | "self" | keyof ScopedPluginDepsOf<D> | keyof PluginDeps<Plugins> | MachineRuntimeOwnedDependencyKeys<E>
+    | keyof DefaultDeps
+    | "self"
+    | keyof ScopedPluginDepsOf<D>
+    | keyof PluginScopedDeps<Plugins>
+    | MachineRuntimeOwnedDependencyKeys<E>
   >
 >;
 
-type EffectFunctionDependencies<F, Plugins extends readonly LiteFsmPlugin[], E> =
-  NonNullable<F> extends (deps: infer D) => unknown
-    ? StripScopedDependencies<D, Plugins, E>
-    : {};
+type EffectFunctionDependencies<F, Plugins extends readonly LiteFsmPlugin<any, any, any>[], E> =
+  NonNullable<F> extends (deps: infer D) => unknown ? StripScopedDependencies<D, Plugins, E> : {};
 
-type EffectDependencies<E, Plugins extends readonly LiteFsmPlugin[]> = "effects" extends keyof E
+type EffectDependencies<E, Plugins extends readonly LiteFsmPlugin<any, any, any>[]> = "effects" extends keyof E
   ? keyof NonNullable<E["effects"]> extends never
     ? {}
     : [ConfigDependencies<E>] extends [never]
@@ -86,7 +90,7 @@ type EffectDependencies<E, Plugins extends readonly LiteFsmPlugin[]> = "effects"
 
 export type MachineDependencies<
   S extends MachineStore,
-  Plugins extends readonly LiteFsmPlugin[] = readonly [],
+  Plugins extends readonly LiteFsmPlugin<any, any, any>[] = readonly [],
 > = keyof S extends never
   ? {}
   : Prettify<
@@ -96,7 +100,7 @@ export type MachineDependencies<
             [key in keyof S]: EffectDependencies<S[key], Plugins>;
           }[keyof S]
         >,
-        keyof PluginDeps<Plugins>
+        keyof PluginScopedDeps<Plugins>
       >
     >;
 
@@ -129,7 +133,7 @@ export type MachineEvents<S extends MachineStore> = {
 export type MachineManagerOptions<
   S extends MachineStore,
   P extends AnyEvent = MachineEvents<S>,
-  Plugins extends readonly LiteFsmPlugin[] = readonly LiteFsmPlugin[],
+  Plugins extends readonly LiteFsmPlugin<any, any, any>[] = readonly [],
 > = {
   onError?: (err: unknown) => void;
   middleware?: Middleware<MachinesState<S>, ManagerTransitionEvents<P, Plugins>, ManagerActionMeta<Plugins>>[];
@@ -140,7 +144,7 @@ export type MachineManagerOptions<
   originId?: string;
   generateActorId?: GenerateSpawnIdFn<ManagerTransitionEvents<P, Plugins>>;
   generateGroupId?: GenerateSpawnIdFn<ManagerTransitionEvents<P, Plugins>>;
-  plugins?: readonly [...Plugins];
+  plugins?: Plugins;
 };
 
 export type IMachine<
@@ -162,7 +166,7 @@ export type IMachineManager<
   S extends MachineStore,
   P extends AnyEvent = MachineEvents<S>,
   Meta extends object = CoreActionMeta,
-  Plugins extends readonly LiteFsmPlugin[] = readonly [],
+  Plugins extends readonly LiteFsmPlugin<any, any, any>[] = readonly [],
 > = {
   transition: (payload: ManagerAction<P, Meta>) => ManagerAction<P, Meta>;
   getState: () => MachinesState<S>;
@@ -185,6 +189,6 @@ export type IMachineManager<
 export type ManagerFromPlugins<
   S extends MachineStore,
   AppEvents extends AnyEvent,
-  Plugins extends readonly LiteFsmPlugin[],
+  Plugins extends readonly LiteFsmPlugin<any, any, any>[],
 > = IMachineManager<S, ManagerTransitionEvents<AppEvents, Plugins>, ManagerActionMeta<Plugins>, Plugins> &
-  PluginManagerExtensions<S, AppEvents, Plugins>;
+  PluginManagerExtensions<Plugins>;

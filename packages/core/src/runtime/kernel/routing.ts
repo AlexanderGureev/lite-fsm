@@ -100,7 +100,7 @@ export const createRoutingRuntime = (): RoutingRuntime => {
   };
 
   const registry: RoutingRegistry = Object.freeze({
-    registerMetaKey(key, resolver) {
+    registerRouteMeta(key, resolver) {
       if (RESERVED_META_KEYS.has(key) || resolvers.has(key)) {
         throw new LiteFsmError("LITE_FSM_DUPLICATE_ROUTE_META_KEY", `[lite-fsm] duplicate route meta key '${key}'.`);
       }
