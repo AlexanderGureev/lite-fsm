@@ -805,16 +805,16 @@ describe("MachineManager и middleware", () => {
       clock: () => deps.clock() + 1,
     }));
 
+    // @ts-expect-error!
     manager.setDependencies({
       api: { loadUser: async () => ({ name: "Lin" }) },
       clock: () => 0,
-      // @ts-expect-error!
       audit: (_event: AppEvent) => undefined,
     });
 
+    // @ts-expect-error!
     manager.setDependencies({
       api: { loadUser: async () => ({ name: "Lin" }) },
-      // @ts-expect-error!
       clock: "wrong",
     });
   });

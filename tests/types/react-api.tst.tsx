@@ -468,7 +468,10 @@ describe("вывод store dependencies через hooks", () => {
   test("useSelector внутри provider читает MachineDependencies<S> через manager", () => {
     const Example = () => {
       const manager = useManager<Store, Evt>();
-      expect(manager.setDependencies).type.toBe<(d: Deps | ((deps: Deps) => Deps)) => void>();
+      expect(manager.setDependencies).type.toBe<{
+        (deps: Deps): void;
+        (updater: (deps: Deps) => Deps): void;
+      }>();
       expect<MachineDependencies<Store>>().type.toBe<Deps>();
       return null;
     };

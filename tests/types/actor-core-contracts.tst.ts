@@ -61,8 +61,6 @@ import type { ActorRuntime } from "@lite-fsm/core";
 import type { InternalActorEffectDeps } from "@lite-fsm/core";
 // @ts-expect-error! внутренний sidecar state не экспортируется из публичного entrypoint
 import type { SidecarState } from "@lite-fsm/core";
-// @ts-expect-error! внутренний dispatch context не экспортируется из публичного entrypoint
-import type { DispatchContext } from "@lite-fsm/core";
 
 type Spawn = FSMEvent<"SPAWN", { id: string }>;
 type Done = FSMEvent<"DONE", { ok: boolean }>;

@@ -112,9 +112,7 @@ describe("структурные ограничения CFG", () => {
 
   test("type-параметр K в CFG управляет разрешёнными target states", () => {
     type Map = { idle?: { X: "done" | null }; done?: { X: null } };
-    type _IsCfg = Assert<
-      Equal<CFG<Map, FSMEvent<"X">, "idle" | "done">, CFG<Map, FSMEvent<"X">, "idle" | "done">>
-    >;
+    type _IsCfg = Assert<Equal<CFG<Map, FSMEvent<"X">, "idle" | "done">, CFG<Map, FSMEvent<"X">, "idle" | "done">>>;
   });
 });
 
@@ -128,7 +126,12 @@ describe("минимальные формы MachineConfig", () => {
     };
     expect(min.reducer).type.toBe<MachineReducer<{ a: { E: "b" }; b: {} }, MinEvent, { v: number }> | undefined>();
     expect(min.effects).type.toBe<
-      { a?: MachineEffect<"a", { a: { E: "b" }; b: {} }, MinEvent, {}>; b?: MachineEffect<"b", { a: { E: "b" }; b: {} }, MinEvent, {}>; "*"?: MachineEffect<"*", { a: { E: "b" }; b: {} }, MinEvent, {}> } | undefined
+      | {
+          a?: MachineEffect<"a", { a: { E: "b" }; b: {} }, MinEvent, {}>;
+          b?: MachineEffect<"b", { a: { E: "b" }; b: {} }, MinEvent, {}>;
+          "*"?: MachineEffect<"*", { a: { E: "b" }; b: {} }, MinEvent, {}>;
+        }
+      | undefined
     >();
   });
 
@@ -160,7 +163,7 @@ describe("минимальные формы MachineConfig", () => {
     >();
   });
 
-  test("отклоняет initialState === \"*\", потому что wildcard не public state", () => {
+  test('отклоняет initialState === "*", потому что wildcard не public state', () => {
     createFlowMachine({
       config: { idle: {} },
       // @ts-expect-error!
@@ -204,9 +207,26 @@ describe("минимальные формы MachineConfig", () => {
     type _DomainKeys = Assert<
       Equal<
         keyof DomainM,
-        "config" | "initialState" | "initialContext" | "reducer" | "hydrate" | "dehydrate" | "effects"
+        "storage" | "config" | "initialState" | "initialContext" | "reducer" | "hydrate" | "dehydrate" | "effects"
       >
     >;
+  });
+
+  test("MachineConfig принимает только core storage instance", () => {
+    createMachine({
+      storage: "instance",
+      config: { a: {} },
+      initialState: "a",
+      initialContext: { x: 1 },
+    });
+
+    // @ts-expect-error!
+    createMachine({
+      storage: "custom",
+      config: { a: {} },
+      initialState: "a",
+      initialContext: { x: 1 },
+    });
   });
 
   test("форма MachineConfig для actor template включает persistence и groupTag", () => {
@@ -214,6 +234,7 @@ describe("минимальные формы MachineConfig", () => {
     type _ActorKeys = Assert<
       Equal<
         keyof ActorM,
+        | "storage"
         | "config"
         | "initialState"
         | "initialContext"
@@ -259,9 +280,7 @@ describe("структурный контракт DefaultDeps", () => {
     expect<DefaultDeps<"running", Cfg, Evt>["transition"]>().type.toBe<
       (data: ManagerAction<Evt>) => ManagerAction<Evt>
     >();
-    expect<DefaultDeps<"*", Cfg, Evt>["transition"]>().type.toBe<
-      (data: ManagerAction<Evt>) => ManagerAction<Evt>
-    >();
+    expect<DefaultDeps<"*", Cfg, Evt>["transition"]>().type.toBe<(data: ManagerAction<Evt>) => ManagerAction<Evt>>();
 
     const transition: DefaultDeps<"running", Cfg, Evt>["transition"] = (action) => action;
     transition({ type: "START", meta: { groupTag: "player" } });

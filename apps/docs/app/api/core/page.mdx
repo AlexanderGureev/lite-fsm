@@ -12,6 +12,7 @@ import {
   createEffect,
   createMachine,
   createReducer,
+  definePlugin,
   defineMachine,
   Machine,
   LiteFsmError,
@@ -70,6 +71,7 @@ const counter = createMachine({
 | `createReducer(fn)`     | Типизированная фабрика reducer-а                 |
 | `createEffect(opts)`    | Обёртка effect с `every` или `latest` семантикой |
 | `createActorMeta(meta)` | Замороженный `Readonly<ActorMeta>`               |
+| `definePlugin(plugin)`  | Объявляет plugin value для `MachineManager`      |
 
 `createEffect`:
 
@@ -105,6 +107,7 @@ manager.transition({ type: "INC" });
 | Опция                      | Назначение                                      |
 | -------------------------- | ----------------------------------------------- |
 | `middleware?`              | Цепочка middleware для пользовательских actions |
+| `plugins?`                 | Tuple plugins; расширяет типы текущего manager  |
 | `snapshot?`                | Начальный snapshot                              |
 | `schemaVersion?`           | Версия snapshot                                 |
 | `onError?`                 | Ошибки effects и `condition`                    |
@@ -127,6 +130,89 @@ manager.transition({ type: "INC" });
 | `dehydrate(opts?)`                  | Собрать снимок для передачи или сохранения                       |
 | `hydrate(snapshot, opts?)`          | Применить снимок                                                 |
 | `getHydratedState(snapshot, opts?)` | Рассчитать состояние после `hydrate` без изменения менеджера     |
+
+## Plugins
+
+Plugin — объект с `name` и `install(ctx)`. `definePlugin(...)` не меняет runtime-значение, но фиксирует тип capabilities и сохраняет literal `name` при обычном вызове.
+
+```ts showLineNumbers copy
+import { MachineManager, definePlugin } from "@lite-fsm/core";
+
+const auditPlugin = definePlugin<
+  {
+    manager: {
+      audit: {
+        machineKeys: () => string[];
+      };
+    };
+  },
+  "audit"
+>({
+  name: "audit",
+  install(ctx) {
+    ctx.manager.extend("audit", (runtime) => ({
+      machineKeys: () => Object.keys(runtime.config),
+    }));
+  },
+});
+
+const manager = MachineManager(
+  { counter },
+  {
+    plugins: [auditPlugin] as const,
+  },
+);
+
+manager.audit.machineKeys();
+```
+
+Жизненный цикл фиксирован: `MachineManager(...)` сначала устанавливает встроенный default runtime preset, затем вызывает пользовательские `install(ctx)` один раз и в порядке массива `plugins`, после этого валидирует машины и собирает runtime state. Встроенный preset регистрирует storage kind `"instance"` и остаётся частью `@lite-fsm/core`; public API для custom runtime presets пока не публикуется.
+
+`PluginCapabilities` описывает только типовую поверхность текущего tuple `plugins`: `transitionEvents` расширяет `manager.transition(...)`, `actionMeta` расширяет служебный `action.meta`, `machine` используется в typed `createMachine` wrapper, `deps` и `transition` доступны только в effect/reaction deps, `manager` добавляет поле на returned manager object. Непустой machine extension обязан задавать `storage`. Plugin-specific события не добавляются в `MachineEvents<S>` и не становятся событиями обычного `createMachine<AppEvents>(...)`.
+
+```ts showLineNumbers copy
+import { createMachine, type EffectDeps, type LiteFsmPlugin, type TypedCreateMachineFn } from "@lite-fsm/core";
+
+type AppEvent = { type: "START" } | { type: "DONE" };
+
+type TestStorageExtension = {
+  storage: "test";
+  input: {
+    test: { key: string };
+  };
+  publicState: { state: "READY"; context: { key: string } };
+};
+
+type TestPluginCapabilities = {
+  machine: TestStorageExtension;
+  deps: { trace: () => string };
+  transition: { finish: () => void };
+};
+
+type Plugins = readonly [LiteFsmPlugin<TestPluginCapabilities>];
+type AppDeps = EffectDeps<{}, Plugins>;
+
+export const createAppMachine: TypedCreateMachineFn<AppEvent, AppDeps, TestStorageExtension> = createMachine;
+```
+
+Plugin-specific machine extensions фиксируются через app wrapper `TypedCreateMachineFn`. Прямой value `createMachine` остаётся совместимым с таким wrapper для assignability, но прямой plugin-specific overload не является публичным способом настройки приложения.
+
+Storage runtime подключается через `ctx.storage.register(kind, runtime)`. Базовый контракт runtime: `kind`, `validateTemplate`, `compileTemplate`, `createRuntimeState`, `createPublicInitialState`, `acceptsEvent`, `reduce` и `commit`. `runtime.kind` и `compileTemplate(...).kind` должны совпадать с registered storage kind. Registry можно менять только синхронно внутри `install(ctx)`. Опциональные capability blocks подключают дополнительные фазы:
+
+| Блок        | Контракт                                                       |
+| ----------- | -------------------------------------------------------------- |
+| `effects`   | conditions и effect invocations для storage runtime            |
+| `reactions` | синхронные реакции после commit и до subscribers               |
+| `identity`  | runtime identity для routing и диагностики                     |
+| `snapshot`  | `dehydrate` / `hydrate` payload через `snapshot.storage[kind]` |
+
+Если runtime указывает `routeMetaKeys`, plugin обязан зарегистрировать каждый ключ через `ctx.routing.registerMetaKey(...)`. Пользовательские данные должны идти через `payload`; `action.meta` остаётся служебным routing/sender contract.
+
+Manager extension factory получает `ManagerRuntimeContext`. Поле `config` в этом контексте — исходный machine store, переданный в `MachineManager`; extension должен читать его как immutable reference и не мутировать машины.
+
+`dehydrate()` включает storage payloads runtime с `snapshot` capability в top-level envelope `snapshot.storage[kind]`. `dehydrate({ storage: [] })` отключает storage payloads, `dehydrate({ storage: ["test"] })` выбирает только указанные runtimes. `getSnapshot()` не вызывает storage `dehydrate` и не добавляет `storage`.
+
+`@lite-fsm/entities` проектируется как внешний runtime поверх этой plugin system, но entity runtime, `manager.entities`, React entity hooks и graph support для entities не входят в текущий core API.
 
 ### Стратегия восстановления
 

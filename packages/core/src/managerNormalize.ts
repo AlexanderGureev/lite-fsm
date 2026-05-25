@@ -1,8 +1,9 @@
 // Action normalization вокруг middleware: ФАЗА 0 pre-normalize и ФАЗА 2 post-normalize.
 // Reducer/subscribers/effects всегда видят чистый action, даже если middleware его мутировал.
 
-import { attachMeta, type NormalizeOptions, stripRouting, stripSenderFields } from "./actor";
+import { attachMeta, type NormalizeOptions } from "./actor";
 import type { DispatchContext } from "./dispatchContext";
+import type { RoutingRuntime } from "./runtime/kernel/routing";
 import type { SidecarState } from "./sidecar";
 import type { AnyEvent, ManagerAction, MachineStore } from "./types";
 import { isSystemAction } from "./utils";
@@ -25,8 +26,9 @@ export const assertUserAction = (action: { type: string }): void => {
 
 export const createNormalizer = <S extends MachineStore, P extends AnyEvent>(deps: {
   sidecar: SidecarState;
+  routing: RoutingRuntime;
 }): Normalizer<S, P> => {
-  const { sidecar } = deps;
+  const { routing, sidecar } = deps;
 
   const normalizeAction = (
     raw: ManagerAction<P>,
@@ -39,7 +41,7 @@ export const createNormalizer = <S extends MachineStore, P extends AnyEvent>(dep
     if (sender && !sidecar.actorById.has(sender.actorId)) return NORMALIZE_DROP;
 
     // Срезаем sender-поля и переписываем настоящими — middleware не подделает sender.
-    const meta = stripSenderFields(raw.meta);
+    const meta = routing.stripSenderFields(raw.meta);
     if (sender) {
       meta.senderActorId = sender.actorId;
       meta.senderGroupId = sender.groupId;
@@ -47,14 +49,20 @@ export const createNormalizer = <S extends MachineStore, P extends AnyEvent>(dep
     }
 
     // transition.unscoped() обязан остаться unscoped — рубим routing и пропускаем default routing.
-    if (routingMode === "unscoped") return attachMeta(raw, stripRouting(meta));
+    if (routingMode === "unscoped") {
+      const normalized = attachMeta(raw, routing.stripRouting(meta));
+      routing.resolveRoute(normalized as ManagerAction<AnyEvent>);
+      return normalized;
+    }
 
     // Default routing: actor-dispatch без явного routing → в свою группу.
-    if (sender && meta.actorId === undefined && meta.groupId === undefined && meta.groupTag === undefined) {
+    if (sender && !routing.hasRoute(meta)) {
       meta.groupId = sender.groupId;
       meta.groupTag = sender.groupTag;
     }
-    return attachMeta(raw, meta);
+    const normalized = attachMeta(raw, meta);
+    routing.resolveRoute(normalized as ManagerAction<AnyEvent>);
+    return normalized;
   };
 
   // ФАЗА 2: post-normalize после middleware. Пишет clean action в ctx.committed.

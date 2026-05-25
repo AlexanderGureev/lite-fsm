@@ -237,6 +237,7 @@ describe("MachineManager(machines, opts?)", () => {
     >();
     expect(manager.dehydrate()).type.toBe<MachineManagerDehydratedSnapshot<Machines>>();
     expect(manager.dehydrate({ machines: ["counter"] }).machines.counter).type.toBe<StateType<CounterCfg, CounterCtx>>();
+    expect(manager.dehydrate({ storage: ["custom"] }).storage).type.toBe<Record<string, unknown> | undefined>();
     expect(manager.dehydrate({}).machines.counter).type.toBe<StateType<CounterCfg, CounterCtx>>();
     expect(manager.hydrate).type.toBe<
       (snapshot: MachineManagerSnapshot<Machines>, opts?: { strategy?: "replace" | "merge" }) => void
@@ -326,7 +327,10 @@ describe("MachineManager(machines, opts?)", () => {
     const manager = MachineManager<Machines, CounterEvt>(machines);
     expect<MachineDependencies<Machines>>().type.toBe<CounterDeps>();
     expect(manager.setDependencies).type.toBe<
-      (d: CounterDeps | ((deps: CounterDeps) => CounterDeps)) => void
+      {
+        (deps: CounterDeps): void;
+        (updater: (deps: CounterDeps) => CounterDeps): void;
+      }
     >();
     manager.setDependencies({ clock: () => 0 });
     manager.setDependencies((deps: CounterDeps) => ({ ...deps, clock: () => deps.clock() + 1 }));
@@ -358,12 +362,15 @@ describe("MachineManager(machines, opts?)", () => {
     const manager = MachineManager<CircularMachines, CircularEvt>(circularMachines);
     expect<MachineDependencies<CircularMachines>>().type.toBe<CircularDeps>();
     expect(manager.setDependencies).type.toBe<
-      (d: CircularDeps | ((deps: CircularDeps) => CircularDeps)) => void
+      {
+        (deps: CircularDeps): void;
+        (updater: (deps: CircularDeps) => CircularDeps): void;
+      }
     >();
     manager.setDependencies({ getState: manager.getState, random: () => 0 });
+    // @ts-expect-error!
     manager.setDependencies({
       getState: manager.getState,
-      // @ts-expect-error!
       random: "wrong",
     });
   });

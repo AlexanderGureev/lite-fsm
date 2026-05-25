@@ -1,8 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { applySnapshot, assertSnapshotEnvelope, type ApplySnapshotDeps } from "@lite-fsm/core/internal/hydration";
+import {
+  applySnapshot,
+  assertSnapshotEnvelope,
+  buildDehydratedEnvelope,
+  type ApplySnapshotDeps,
+} from "@lite-fsm/core/internal/hydration";
 import { LiteFsmError } from "@lite-fsm/core/internal/utils";
 import type { MachineStore } from "@lite-fsm/core";
+import { createSidecarState } from "@lite-fsm/core/internal/sidecar";
 
 type DomainCfg = { config: object; hydrate?: unknown; dehydrate?: unknown };
 type StoreShape = Record<string, DomainCfg>;
@@ -34,6 +40,32 @@ describe("applySnapshot — unit", () => {
     it("schemaVersion парсится только для number, иначе undefined", () => {
       expect(assertSnapshotEnvelope({ schemaVersion: 3, machines: {} }).schemaVersion).toBe(3);
       expect(assertSnapshotEnvelope({ schemaVersion: "v3", machines: {} }).schemaVersion).toBeUndefined();
+    });
+
+    it("storage envelope должен быть object, если поле передано", () => {
+      expect(() => assertSnapshotEnvelope({ machines: {}, storage: 42 })).toThrow(
+        /snapshot\.storage must be an object/,
+      );
+      expect(assertSnapshotEnvelope({ machines: {}, storage: { custom: { value: 1 } } }).storage).toEqual({
+        custom: { value: 1 },
+      });
+    });
+  });
+
+  describe("buildDehydratedEnvelope", () => {
+    it("явный неизвестный machine key бросает clear error", () => {
+      expect(() =>
+        buildDehydratedEnvelope(
+          {},
+          {} as MachineStore,
+          createSidecarState(),
+          [],
+          [],
+          [],
+          undefined,
+          { machines: ["missing" as never] },
+        ),
+      ).toThrow("[lite-fsm] dehydrate: unknown machine key 'missing'.");
     });
   });
 

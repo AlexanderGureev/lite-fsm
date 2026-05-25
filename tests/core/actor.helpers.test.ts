@@ -98,6 +98,7 @@ describe("stripSenderFields / stripRouting", () => {
     expect(stripSenderFields(undefined)).toEqual({});
     expect(stripRouting(undefined)).toEqual({});
     expect(stripSenderFields({ actorId: undefined, groupTag: "t" })).toEqual({ groupTag: "t" });
+    expect(stripSenderFields({ groupId: "g", groupTag: undefined })).toEqual({ groupId: "g" });
   });
 });
 

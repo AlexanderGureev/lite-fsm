@@ -4,18 +4,18 @@
 
 ## Точки входа
 
-| Импорт                                                         | Runtime exports                                                                                                                                   |
-| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@lite-fsm/core`                                               | `createMachine`, `createConfig`, `createReducer`, `createEffect`, `createActorMeta`, `Machine`, `defineMachine`, `MachineManager`, `LiteFsmError` |
-| `@lite-fsm/persist`                                            | `persistManager`, `createJsonStorage`                                                                                                             |
-| `@lite-fsm/persist/react`                                      | `usePersistStatuses`, `useIsPersistRestoring`                                                                                                     |
-| `@lite-fsm/middleware`                                         | `immerMiddleware`, `devToolsMiddleware`                                                                                                           |
-| `@lite-fsm/middleware/immer` · `@lite-fsm/middleware/devTools` | per-feature entry points                                                                                                                          |
-| `@lite-fsm/react`                                              | `FSMContext`, `FSMContextProvider`, `FSMHydrationBoundary`, `useHydrateSnapshot`, `useManager`, `useSelector`, `useTransition`, `defineMachine`   |
-| `@lite-fsm/graph`                                              | alpha: `compileLiteFsmGraph`, `compileLiteFsmGraphProject`, `selectMachineGraph`, `analyzeLiteFsmGraph` и IR-типы для graph tooling                |
-| `@lite-fsm/graph/simulator`                                    | alpha: `createGraphSimulator`, `createMachineGraphSimulator` для headless symbolic simulation поверх graph IR                                      |
-| `@lite-fsm/graph/view-model`                                   | alpha: `buildGraphVisualizerModel`, `buildMachineWorkbenchModel`, `buildMachineFlowModel` для read-only visualizer projections                     |
-| `@lite-fsm/cli`                                                | alpha binary `lite-fsm`; JS runtime entrypoint не публикуется                                                                                      |
+| Импорт                                                         | Runtime exports                                                                                                                                                   |
+| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@lite-fsm/core`                                               | `createMachine`, `createConfig`, `createReducer`, `createEffect`, `createActorMeta`, `definePlugin`, `Machine`, `defineMachine`, `MachineManager`, `LiteFsmError` |
+| `@lite-fsm/persist`                                            | `persistManager`, `createJsonStorage`                                                                                                                             |
+| `@lite-fsm/persist/react`                                      | `usePersistStatuses`, `useIsPersistRestoring`                                                                                                                     |
+| `@lite-fsm/middleware`                                         | `immerMiddleware`, `devToolsMiddleware`                                                                                                                           |
+| `@lite-fsm/middleware/immer` · `@lite-fsm/middleware/devTools` | per-feature entry points                                                                                                                                          |
+| `@lite-fsm/react`                                              | `FSMContext`, `FSMContextProvider`, `FSMHydrationBoundary`, `useHydrateSnapshot`, `useManager`, `useSelector`, `useTransition`, `defineMachine`                   |
+| `@lite-fsm/graph`                                              | alpha: `compileLiteFsmGraph`, `compileLiteFsmGraphProject`, `selectMachineGraph`, `analyzeLiteFsmGraph` и IR-типы для graph tooling                               |
+| `@lite-fsm/graph/simulator`                                    | alpha: `createGraphSimulator`, `createMachineGraphSimulator` для headless symbolic simulation поверх graph IR                                                     |
+| `@lite-fsm/graph/view-model`                                   | alpha: `buildGraphVisualizerModel`, `buildMachineWorkbenchModel`, `buildMachineFlowModel` для read-only visualizer projections                                    |
+| `@lite-fsm/cli`                                                | alpha binary `lite-fsm`; JS runtime entrypoint не публикуется                                                                                                     |
 |                                                                |
 
 `@lite-fsm/react` помечен `"use client"`. Импортировать можно из SSR/RSC, hooks/provider — только в client tree.
@@ -65,34 +65,34 @@ lite-fsm create my-app --template vite
 lite-fsm add-machine user-session
 ```
 
-| Command                  | Назначение                                                                                                      |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------- |
-| `lite-fsm create`        | создает Next/Vite starter с generated `src/store`, `app.Events` aggregator и React wiring                       |
-| `lite-fsm add-machine`   | добавляет доменный автомат в generated `src/store`, регистрирует key и подключает локальные `Events` автомата   |
-| `lite-fsm export-graph`  | строит project graph через public `compileLiteFsmGraphProject` и пишет JSON export document для visualizer-а   |
-| `lite-fsm visualize`     | строит project graph, запускает local host `127.0.0.1:<port>` и отдает visualizer static + session/source API  |
-| `<project-name>`          | `create` only: relative target path внутри cwd; parent должен существовать, target не должен существовать       |
-| `<name>`                 | `add-machine` only: `kebab-case`, `snake_case` или `camelCase`, например `user-session` → `userSession`         |
-| `--template <next\|vite>` | `create` only: required framework starter                                                                      |
-| `--css <tailwind\|none>` | `create` only: styling preset, default `tailwind`                                                              |
-| `--package-manager <...>` | `create` only: `pnpm`, `npm`, `yarn` или `bun`, default `npm`                                                   |
-| `--install`/`--no-install` | `create` only: dependency install после генерации, default install                                             |
-| `--entry <path>`         | обязательный TypeScript entrypoint с выбранным top-level `MachineManager(...)`                                  |
-| `--out <path>`           | обязательный output file; stdout JSON (`--out -`) не поддерживается                                             |
-| `--tsconfig <path>`      | optional explicit tsconfig; без него CLI ищет ближайший `tsconfig.json`, затем fallback к default TS resolution |
-| `--include-source`       | opt-in: добавляет top-level `sources.files[]` с текстом discovered project files для static source overlay      |
-| `--port <number>`        | `visualize` only: local host port, default `3030`, допустимы integer `1..65535`                                  |
-| `--no-open`              | `visualize` only: не запускать browser opener, только напечатать session URL                                    |
+| Command                    | Назначение                                                                                                      |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `lite-fsm create`          | создает Next/Vite starter с generated `src/store`, `app.Events` aggregator и React wiring                       |
+| `lite-fsm add-machine`     | добавляет доменный автомат в generated `src/store`, регистрирует key и подключает локальные `Events` автомата   |
+| `lite-fsm export-graph`    | строит project graph через public `compileLiteFsmGraphProject` и пишет JSON export document для visualizer-а    |
+| `lite-fsm visualize`       | строит project graph, запускает local host `127.0.0.1:<port>` и отдает visualizer static + session/source API   |
+| `<project-name>`           | `create` only: relative target path внутри cwd; parent должен существовать, target не должен существовать       |
+| `<name>`                   | `add-machine` only: `kebab-case`, `snake_case` или `camelCase`, например `user-session` → `userSession`         |
+| `--template <next\|vite>`  | `create` only: required framework starter                                                                       |
+| `--css <tailwind\|none>`   | `create` only: styling preset, default `tailwind`                                                               |
+| `--package-manager <...>`  | `create` only: `pnpm`, `npm`, `yarn` или `bun`, default `npm`                                                   |
+| `--install`/`--no-install` | `create` only: dependency install после генерации, default install                                              |
+| `--entry <path>`           | обязательный TypeScript entrypoint с выбранным top-level `MachineManager(...)`                                  |
+| `--out <path>`             | обязательный output file; stdout JSON (`--out -`) не поддерживается                                             |
+| `--tsconfig <path>`        | optional explicit tsconfig; без него CLI ищет ближайший `tsconfig.json`, затем fallback к default TS resolution |
+| `--include-source`         | opt-in: добавляет top-level `sources.files[]` с текстом discovered project files для static source overlay      |
+| `--port <number>`          | `visualize` only: local host port, default `3030`, допустимы integer `1..65535`                                 |
+| `--no-open`                | `visualize` only: не запускать browser opener, только напечатать session URL                                    |
 
-| Export document field | Назначение                                                                                       |
-| --------------------- | ------------------------------------------------------------------------------------------------ |
-| `version`             | `"lite-fsm.project-graph-export/v1"`                                                             |
-| `createdBy`           | `{ package: "@lite-fsm/cli", version }`                                                          |
-| `entry`               | display path entrypoint-а и optional `tsconfigPath`                                               |
-| `graph`               | `LiteFsmGraphDocument` из `compileLiteFsmGraphProject(...).document`                              |
-| `files`               | discovered project files из `LiteFsmGraphProjectResult.files`: path, language, roles и hash       |
-| `diagnostics`         | только CLI diagnostics `LFC_*`; graph compiler diagnostics остаются в `graph.diagnostics`         |
-| `sources`             | optional bundle из `--include-source`; хранит source `text` вне `graph`                           |
+| Export document field | Назначение                                                                                  |
+| --------------------- | ------------------------------------------------------------------------------------------- |
+| `version`             | `"lite-fsm.project-graph-export/v1"`                                                        |
+| `createdBy`           | `{ package: "@lite-fsm/cli", version }`                                                     |
+| `entry`               | display path entrypoint-а и optional `tsconfigPath`                                         |
+| `graph`               | `LiteFsmGraphDocument` из `compileLiteFsmGraphProject(...).document`                        |
+| `files`               | discovered project files из `LiteFsmGraphProjectResult.files`: path, language, roles и hash |
+| `diagnostics`         | только CLI diagnostics `LFC_*`; graph compiler diagnostics остаются в `graph.diagnostics`   |
+| `sources`             | optional bundle из `--include-source`; хранит source `text` вне `graph`                     |
 
 CLI не пишет export, если опции невалидны, tsconfig не читается, graph compile вернул blocking diagnostics, manager не содержит resolved machine refs или output file нельзя записать. По умолчанию JSON export не содержит исходный source text; `--include-source` добавляет его вне `graph`.
 
@@ -111,18 +111,18 @@ const started = simulator.start();
 const sent = simulator.send({ event: { type: "SUBMIT", payload: { id: 1 } } });
 ```
 
-| API                                  | Назначение                                                                                           |
-| ------------------------------------ | ---------------------------------------------------------------------------------------------------- |
-| `createGraphSimulator(doc, opts?)`   | создает simulator для document/manager/machines scope                                                |
-| `createMachineGraphSimulator(...)`   | wrapper для scope из одной machine                                                                   |
-| `start()` / `reset()`                | создает initial immutable snapshot; effects initial states не запускаются                            |
-| `getAvailableTransitions(filter?)`   | возвращает применимые config/reducer candidates для текущих slices                                   |
-| `getSuggestedEmissions(filter?)`     | возвращает manual effect emissions последнего committed step                                         |
-| `send({ event })`                    | dispatch object event через общую event bus                                                          |
-| `sendFromTransition(...)`            | отправляет event выбранного transition; origin branch фиксируется явно                               |
-| `sendFromEmission(...)`              | отправляет event выбранной effect emission с routing из IR                                           |
-| `choose(...)`                        | commit ранее возвращенного pending branch choice                                                     |
-| `GraphSimulationSnapshot.timeline`   | immutable timeline graph: `stepsById`, `childrenByStepId`, `linearStepIds` для будущего time travel |
+| API                                | Назначение                                                                                          |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `createGraphSimulator(doc, opts?)` | создает simulator для document/manager/machines scope                                               |
+| `createMachineGraphSimulator(...)` | wrapper для scope из одной machine                                                                  |
+| `start()` / `reset()`              | создает initial immutable snapshot; effects initial states не запускаются                           |
+| `getAvailableTransitions(filter?)` | возвращает применимые config/reducer candidates для текущих slices                                  |
+| `getSuggestedEmissions(filter?)`   | возвращает manual effect emissions последнего committed step                                        |
+| `send({ event })`                  | dispatch object event через общую event bus                                                         |
+| `sendFromTransition(...)`          | отправляет event выбранного transition; origin branch фиксируется явно                              |
+| `sendFromEmission(...)`            | отправляет event выбранной effect emission с routing из IR                                          |
+| `choose(...)`                      | commit ранее возвращенного pending branch choice                                                    |
+| `GraphSimulationSnapshot.timeline` | immutable timeline graph: `stepsById`, `childrenByStepId`, `linearStepIds` для будущего time travel |
 
 Simulator не исполняет user reducer/effect/guard code. Context берется из `initialContextJson`, initial overrides или summary/unknown fallback; `GraphValueSummary.text` не парсится.
 
@@ -136,48 +136,49 @@ const model = buildGraphVisualizerModel(document, {
 });
 ```
 
-| API                                  | Назначение                                                                                                   |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
-| `buildGraphVisualizerModel(doc,?)`   | строит L1/L2/L3 projection: machines, managers, topics, relation index, diagnostics, workbench rows          |
-| `buildMachineWorkbenchModel(m, ?)`   | isolated helper для workbench preview/unit tests одной machine                                               |
-| `buildMachineFlowModel({ model, machineId })` | строит semantic state graph одной machine для Machine Canvas Board без React Flow/DOM/layout state           |
-| `GraphVisualizerModel.topics`        | каталог event topics с producers, consumers, reducer branches и routing summary                              |
-| `GraphVisualizerModel.rowMappings`   | canonical mapping simulator row refs / transition-emission ids к workbench `rowId` с diagnostics ambiguity   |
-| `GraphMachineWorkbenchModel.states`  | state blocks и строки `config` / `reducer` / `effect` / `diagnostic` без JSX, DOM, simulator runtime или UI state |
-| `MachineFlowModel.edgeGroups`        | grouped semantic edges: accepted transitions, self-emitted/from-other transitions и emission-only source chips |
+| API                                           | Назначение                                                                                                        |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `buildGraphVisualizerModel(doc,?)`            | строит L1/L2/L3 projection: machines, managers, topics, relation index, diagnostics, workbench rows               |
+| `buildMachineWorkbenchModel(m, ?)`            | isolated helper для workbench preview/unit tests одной machine                                                    |
+| `buildMachineFlowModel({ model, machineId })` | строит semantic state graph одной machine для Machine Canvas Board без React Flow/DOM/layout state                |
+| `GraphVisualizerModel.topics`                 | каталог event topics с producers, consumers, reducer branches и routing summary                                   |
+| `GraphVisualizerModel.rowMappings`            | canonical mapping simulator row refs / transition-emission ids к workbench `rowId` с diagnostics ambiguity        |
+| `GraphMachineWorkbenchModel.states`           | state blocks и строки `config` / `reducer` / `effect` / `diagnostic` без JSX, DOM, simulator runtime или UI state |
+| `MachineFlowModel.edgeGroups`                 | grouped semantic edges: accepted transitions, self-emitted/from-other transitions и emission-only source chips    |
 
 View-model не запускает simulator и не исполняет пользовательский код. Simulation overlay принимает только готовые ids/flags (`currentStateIds*`, `availableTransitionIds*`, `suggestedEmissionIds*`, `firedRefs`, `inspectedRefs`) и проставляет display flags на rows.
 Machine Flow строится только поверх `GraphVisualizerModel`: сохраняет semantic ids, source anchors, row refs, producer refs, source state для transition rows, current state из overlay/workbench и не содержит renderer coordinates/styles.
 
 ## Mental model
 
-| Термин         | Форма                                                              |
-| -------------- | ------------------------------------------------------------------ |
-| Event / action | `{ type: string; payload?: unknown; meta?: FSMEventMeta }`         |
-| Domain slice   | `{ state, context }`                                               |
-| Actor slice    | `{ state, context, meta: { actorId, groupId, groupTag } }`         |
-| Manager state  | `{ [machineKey]: domainSlice \| Record<actorId, actorSlice> }`     |
-| Snapshot       | `{ schemaVersion?: number; machines: { [machineKey]: snapshot } }` |
+| Термин         | Форма                                                                                                 |
+| -------------- | ----------------------------------------------------------------------------------------------------- |
+| Event / action | `{ type: string; payload?: unknown; meta?: FSMEventMeta }`                                            |
+| Domain slice   | `{ state, context }`                                                                                  |
+| Actor slice    | `{ state, context, meta: { actorId, groupId, groupTag } }`                                            |
+| Manager state  | `{ [machineKey]: domainSlice \| Record<actorId, actorSlice> }`                                        |
+| Snapshot       | `{ schemaVersion?: number; machines: { [machineKey]: snapshot }; storage?: Record<string, unknown> }` |
 
-Pipeline события: `middleware (pre next) → reducer graph → subscribers → middleware (post next) → effects`. Middleware "оборачивает" reducer + subscribers; effects идут уже после возврата всей middleware-цепочки. `transition(action)` возвращает action, дошедший до reducer-а.
+Pipeline события: `middleware (pre next) → action interceptors → dispatch hooks → reducer graph → commit → subscribers → middleware (post next) → effects hooks → effects`. Middleware "оборачивает" reducer + subscribers; effects идут уже после возврата всей middleware-цепочки. `transition(action)` возвращает committed public action.
 
 ## Фазы обработки события (transition)
 
 Что происходит внутри `manager.transition(action)`.
 
-| #   | Фаза                    | Что происходит                                                                             |
-| --- | ----------------------- | ------------------------------------------------------------------------------------------ |
-| 0   | pre-normalize           | sender / default routing; late-dispatch отбрасывается                                      |
-| 1   | middleware (pre next)   | каждое middleware до `next(action)` в порядке регистрации                                  |
-| 2   | post-normalize          | committed action фиксируется в `ctx.committed`                                             |
-| 3–7 | root reducer            | routing → domain reducers → spawn actors → reduce routed actors → collapse terminal actors |
-| 9   | commit                  | `state` + sidecar обновляются атомарно                                                     |
-| 10  | resolve effects targets | список domain + delivered/spawned actors для фазы 12                                       |
-| 11  | subscribers             | `onTransition` (sync)                                                                      |
-| —   | middleware (post next)  | каждое middleware после `next(action)` в обратном порядке                                  |
-| 12  | effects                 | domain effects на каждом dispatch + actor effects для delivered/spawned                    |
+| #   | Фаза                   | Что происходит                                                                             |
+| --- | ---------------------- | ------------------------------------------------------------------------------------------ |
+| 0   | pre-normalize          | sender, registered routing keys и default routing; late-dispatch отбрасывается             |
+| 1   | middleware (pre next)  | каждое middleware до `next(action)` в порядке регистрации                                  |
+| 2   | post-normalize         | committed action фиксируется в `ctx.committed`; middleware rewrite повторно нормализуется  |
+| 3   | action interceptors    | plugins могут заменить committed action или выставить `skipDelivery`                       |
+| 4   | `beforeReduce` hooks   | plugins выполняют staged runtime operations до delivery                                    |
+| 5–8 | root reducer           | routing → domain reducers → spawn actors → reduce routed actors → collapse terminal actors |
+| 9   | commit                 | `beforeCommit` hooks, commit storage runtimes и commit root state                          |
+| 10  | reactions/subscribers  | `beforeSubscribers` hooks → storage reactions → `onTransition` (sync)                      |
+| —   | middleware (post next) | каждое middleware после `next(action)` в обратном порядке                                  |
+| 12  | effects                | `beforeEffects` hooks → storage effects → `afterEffects` hooks                             |
 
-Фазы 2–11 проходят внутри middleware-чейна (через `next` → `_transition`). Effects (12) — после возврата всей цепочки. Standalone-машина из `Machine.ts` использует подмножество: middleware → reducer → subscribers → middleware (post) → effects, без actor-фаз 5–7, 10, 12.
+Фазы 2–10 проходят внутри middleware-чейна (через `next` → `_transition`). Effects (12) — после возврата всей цепочки. Если middleware не вызывает `next`, interceptors, hooks, reducers, subscribers и effects не выполняются. Standalone-машина из `Machine.ts` использует подмножество: middleware → reducer → subscribers → middleware (post) → effects, без actor/runtime hook-фаз.
 
 ## Описание машины
 
@@ -194,8 +195,8 @@ const counter = createMachine({
     context: { count: action.type === "RESET" ? 0 : slice.context.count + 1 },
   }),
   effects: {
-    idle: ({ action }) => console.log(action.type),
-    "*": ({ action }) => console.log("any", action.type),
+    idle: ({ action }) => void action.type,
+    "*": ({ action }) => void action.type,
   },
 });
 ```
@@ -245,7 +246,7 @@ effects: {
     await condition((e) => e.type === "ACK");
     transition({ type: "DONE" });
   },
-  "*": ({ action }) => console.log(action.type),
+  "*": ({ action }) => void action.type,
 }
 ```
 
@@ -258,12 +259,13 @@ Effect получает один объект:
 | `condition(predicate)` | promise, резолвится на ближайший matching action                        |
 | `self`                 | (actor only) `{ actorId, groupId, groupTag }`                           |
 | user deps              | из `defineMachine({ dependencies })` или `manager.setDependencies(...)` |
+| plugin scoped deps     | добавляются через `ctx.deps.extendDeps(...)` только на время invocation |
 
 State effect приоритетнее `"*"`. Wildcard срабатывает и на self-transition. Ошибки и reject из `condition` уходят в `onError`.
 
 ## Factories
 
-`createMachine`, `createConfig`, `createReducer` и `createActorMeta` — typed helpers: runtime-поведение не меняют, только фиксируют и сужают типы. `createEffect` — runtime wrapper: он оборачивает effect guard-ом для политики запуска.
+`createMachine`, `createConfig`, `createReducer`, `createActorMeta` и `definePlugin` — typed helpers: runtime-поведение не меняют, только фиксируют и сужают типы. `createEffect` — runtime wrapper: он оборачивает effect guard-ом для политики запуска.
 
 | Factory                                      | Назначение                                                     |
 | -------------------------------------------- | -------------------------------------------------------------- |
@@ -271,7 +273,71 @@ State effect приоритетнее `"*"`. Wildcard срабатывает и 
 | `createConfig(cfg)`                          | только граф переходов                                          |
 | `createReducer(fn)`                          | reducer с фиксированным action union                           |
 | `createActorMeta(meta)`                      | frozen `Readonly<ActorMeta>` для replacement/time-travel input |
+| `definePlugin(plugin)`                       | объявляет plugin value и фиксирует типовые capabilities        |
 | `createEffect({ effect, type?, cancelFn? })` | возвращает effect с guard-ом для политики запуска              |
+
+### `definePlugin`
+
+```ts
+type AuditCapabilities = {
+  manager: { audit: unknown };
+};
+
+const plugin = definePlugin({
+  name: "audit",
+  install() {},
+});
+
+const typedPlugin = definePlugin<AuditCapabilities, "audit">({
+  name: "audit",
+  install() {},
+});
+
+MachineManager({ counter }, { plugins: [plugin] });
+```
+
+`name` — стабильный идентификатор plugin. Обычный вызов `definePlugin(...)` сохраняет literal `name`; вызов `definePlugin<Capabilities>(...)` фиксирует типовые capabilities, но TypeScript не выводит literal `name` после явного generic. Если нужны оба контракта, используй `definePlugin<Capabilities, "audit">(...)`.
+
+`PluginCapabilities` задаёт только type-level поверхность plugin. `manager` расширяет returned manager object у менеджера, созданного с текущим tuple `plugins`. `transitionEvents` расширяет `manager.transition(...)`; эти события не попадают в `createMachine<AppEvents>`. `actionMeta` расширяет служебный `action.meta` поверх core keys (`actorId`, `groupId`, `groupTag`, sender fields). `deps` и `transition` описывают scoped deps и методы scoped `transition` внутри effects/reactions; для типизации используй `EffectDeps<AppDeps, Plugins>`. Для каждого runtime-supported meta key plugin обязан зарегистрировать resolver через `ctx.routing.registerMetaKey(...)`.
+
+Machine extensions подключаются через app wrapper:
+
+```ts
+type TestStorageExtension = {
+  storage: "test";
+  input: { test: { key: string } };
+};
+
+export const createAppMachine: TypedCreateMachineFn<AppEvents, AppDeps, TestStorageExtension> = createMachine;
+```
+
+Core `createMachine<AppEvents>(...)` принимает только отсутствие `storage` или явное `storage: "instance"`. Plugin-specific `storage`, config fields, internal events, reducer meta, effect/reaction deps, result metadata и override public state доступны только в wrapper, где третий generic `TypedCreateMachineFn` явно содержит `MachineRuntimeExtension`. Непустой machine extension обязан задавать `storage`. Прямой value `createMachine` остаётся совместимым с таким wrapper для assignability; plugin-specific overload у прямого вызова не является публичным способом настройки приложения.
+
+`MachineManager` сначала устанавливает встроенный runtime preset, затем вызывает пользовательские `install(ctx)` один раз при создании менеджера, в порядке массива `plugins`, до сборки машин. Встроенный preset регистрирует `storage: "instance"` как default kind; public API для custom runtime presets пока не публикуется.
+
+| Шаг lifecycle       | Контракт                                                               |
+| ------------------- | ---------------------------------------------------------------------- |
+| preset install      | core регистрирует default runtime `"instance"`                         |
+| user plugin install | `install(ctx)` вызывается один раз в порядке `options.plugins`         |
+| validation          | storage kind, route meta keys, manager/deps ownership и machine config |
+| compile/runtime     | storage runtime компилирует templates и создает runtime state          |
+| extension attach    | `ctx.manager.extend(...)` добавляет поля на returned manager object    |
+
+`ctx.storage` содержит рабочий registry `{ register(kind, runtime), get(kind) }`. `ctx.actions.intercept(handler)` регистрирует action interceptor, `ctx.dispatch.*(hook)` регистрирует dispatch hook в конкретной фазе. `ctx.routing.registerMetaKey(key, resolver)` регистрирует служебный `action.meta` key для routing. Resolver возвращает `string` или массив `string`, нормализованный в target set. `ctx.manager.extend(key, factory)` добавляет поле на returned manager object после сборки машин и runtime init; factory получает stable `ManagerRuntimeContext`. `ManagerRuntimeContext.config` — исходный machine store, переданный в `MachineManager`; manager extensions должны рассматривать его как immutable reference и не менять машины или их конфигурации. `ctx.deps.extendDeps(factory)` добавляет scoped deps, `ctx.deps.extendTransition(factory)` добавляет методы на scoped `transition`; `factory.keys` объявляет owned keys и проверяется на duplicate/core override при init. Registry можно менять только синхронно внутри `install(ctx)`; вызовы сохраненного `ctx` после завершения install являются ошибкой контракта.
+
+Storage runtime, передаваемый в `ctx.storage.register(kind, runtime)`, реализует базовый контракт `kind`, `validateTemplate`, `compileTemplate`, `createRuntimeState`, `createPublicInitialState`, `acceptsEvent`, `reduce`, `commit`. `runtime.kind` и `CompiledStorageTemplate.kind` должны совпадать с registered storage kind. Опциональные capability blocks: `effects`, `reactions`, `identity`, `snapshot`. Если runtime объявляет `routeMetaKeys`, plugin обязан зарегистрировать соответствующие route resolvers. `snapshot` capability пишет transport payload в `snapshot.storage[kind]`; `getSnapshot()` storage payloads не включает.
+
+Action interceptors выполняются после middleware `next(...)` и post-normalization, но до выбора templates для reduce. Interceptor получает текущий dispatch context и может вернуть `{ action, skipDelivery, stopInterceptors }`. Замена `action` становится committed public action для reducers, subscribers, effects, middleware post-`next` и return value. `skipDelivery: true` пропускает machine delivery, но не останавливает следующие interceptors и hooks. `stopInterceptors: true` останавливает только следующие interceptors.
+
+Dispatch hooks выполняются в порядке регистрации: `beforeReduce`, `afterReduce`, `beforeCommit`, `beforeSubscribers`, `beforeEffects`, `afterEffects`. Hook error является fatal: до commit state не меняется, после commit rollback не выполняется. `ctx.reportError(error)` вызывает `onError` и не меняет control flow; hook, которому нужна non-fatal external side effect, сам делает `try/catch`.
+
+Core routing priority: `actorId` → registered plugin keys в порядке регистрации → `groupId` → `groupTag` → unscoped. Если action содержит несколько route keys, применяется первый по приоритету, остальные не образуют intersection/union. Registered keys сохраняются при pre/post-normalization и middleware rewrite; неизвестные `action.meta` keys срезаются или игнорируются без ошибки. Пользовательские данные передаются через `payload`, не через `meta`.
+
+Manager extension не может перезаписать core manager methods (`transition`, `getState`, `setDependencies` и другие базовые методы). Duplicate manager extension key бросает init error. No-op manager extension registry не меняет форму менеджера.
+
+Scoped deps factory вызывается для каждого effect/reaction invocation и получает `{ source, event, indices, phase, transition }`. Extension может вернуть только keys из `factory.keys`; попытка заменить app/core key или чужой key бросает clear runtime error. Async effect сохраняет объект и scope конкретного invocation после `await`.
+
+Duplicate plugin names, duplicate storage kind, duplicate route meta key, duplicate manager extension key, duplicate scoped deps/transition key, unknown storage kind, отсутствующий default storage kind, runtime-supported meta key без resolver, invalid storage runtime kind и invalid storage-specific config бросают init error. Late registry mutation, invalid route resolver result, unsupported storage snapshot capability и invalid storage snapshot payload бросают runtime contract error. No-op plugin не меняет состояние, reducers, middleware, subscribers, effects, snapshot и hydrate. `@lite-fsm/entities` зависит от этой plugin system, но entity runtime и `manager.entities` не входят в текущий core API.
 
 ### `createEffect`
 
@@ -286,10 +352,10 @@ const load = createEffect({
 });
 ```
 
-| Опция                     | Поведение                                                                            |
-| ------------------------- | ------------------------------------------------------------------------------------ |
-| `type: "every"` (default) | каждый запуск получает рабочий `transition`                                          |
-| `type: "latest"`          | новый запуск делает предыдущие запуски stale; их `transition` возвращает action без dispatch |
+| Опция                     | Поведение                                                                                           |
+| ------------------------- | --------------------------------------------------------------------------------------------------- |
+| `type: "every"` (default) | каждый запуск получает рабочий `transition`                                                         |
+| `type: "latest"`          | новый запуск делает предыдущие запуски stale; их `transition` возвращает action без dispatch        |
 | `cancelFn(deps)`          | возвращает `cancel(): boolean`; `true` подавляет `transition`, но не отменяет async-работу effect-а |
 
 `createEffect` не отменяет promise, request или timer внутри effect-а. Он контролирует только возможность отправить новое событие через `transition`. В actor effect guard покрывает и callable `transition`, и `transition.unscoped/actor/group/tag`.
@@ -311,6 +377,7 @@ await machine.invokeEffect("idle", next.state, deps);
 | `invokeEffect(prev, current, deps)` | вызывает state effect или `"*"` |
 
 Actor templates standalone не работают — только в `MachineManager`.
+Standalone `Machine(...)` поддерживает отсутствие `storage` и явное `storage: "instance"`; другие значения отклоняются на init.
 
 ## `defineMachine(opts?).create(cfg)` — standalone stateful
 
@@ -330,7 +397,7 @@ machine.addMiddleware(immerMiddleware);
 | `onTransition(cb)`     | подписка `(prev, current, action) => void`; возвращает unsubscribe |
 | `addMiddleware(...mw)` | добавляет middleware в конец цепочки                               |
 
-`defineMachine` фиксирует `P`, `D`, `opts` один раз; каждый `.create(cfg)` возвращает независимую машину.
+`defineMachine` фиксирует `P`, `D`, `opts` один раз; каждый `.create(cfg)` возвращает независимую машину. Standalone `.create(cfg)` поддерживает только отсутствие `storage` и `storage: "instance"`.
 
 ## `MachineManager(machines, opts?)`
 
@@ -339,6 +406,7 @@ const manager = MachineManager(
   { counter, todos, syncActor },
   {
     middleware: [immerMiddleware, devToolsMiddleware()],
+    plugins: [plugin],
     schemaVersion: 1,
     snapshot: initialSnapshot,
     onError: console.error,
@@ -349,38 +417,39 @@ manager.setDependencies({ api });
 manager.transition({ type: "INC" });
 ```
 
-| Опция                      | Назначение                                                                                                                   |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `middleware?`              | цепочка middleware на все user actions                                                                                       |
-| `snapshot?`                | начальный snapshot, применяется со strategy `"replace"`                                                                      |
-| `schemaVersion?`           | версия snapshot                                                                                                              |
-| `onError?`                 | ошибки effects / `condition`                                                                                                 |
-| `onUnknownMachineKey?`     | unknown key в `hydrate` или initial snapshot                                                                                 |
-| `onSchemaVersionMismatch?` | mismatch `snapshot.schemaVersion`                                                                                            |
-| `originId?`                | префикс владельца, добавляется ко всем created id (`originId#templateKey/counter`); строка без `#` (P2P / multi-tab / шарды) |
-| `generateActorId?`         | `(ctx: SpawnIdContext<P>) => string` — кастомный actor id; counter в ctx инкрементируется всегда                             |
-| `generateGroupId?`         | то же для groupId (применяется только при unscoped spawn)                                                                    |
+| Опция                      | Назначение                                                                                                                                                                           |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `middleware?`              | цепочка middleware на все user actions                                                                                                                                               |
+| `plugins?`                 | readonly tuple `LiteFsmPlugin`; встроенный preset ставится раньше, tuple расширяет типы returned manager object, `transition`, `action.meta` и scoped effect deps текущего менеджера |
+| `snapshot?`                | начальный snapshot, применяется со strategy `"replace"`                                                                                                                              |
+| `schemaVersion?`           | версия snapshot                                                                                                                                                                      |
+| `onError?`                 | ошибки effects / `condition`                                                                                                                                                         |
+| `onUnknownMachineKey?`     | unknown key в `hydrate` или initial snapshot                                                                                                                                         |
+| `onSchemaVersionMismatch?` | mismatch `snapshot.schemaVersion`                                                                                                                                                    |
+| `originId?`                | префикс владельца, добавляется ко всем created id (`originId#templateKey/counter`); строка без `#` (P2P / multi-tab / шарды)                                                         |
+| `generateActorId?`         | `(ctx: SpawnIdContext<P>) => string` — кастомный actor id; counter в ctx инкрементируется всегда                                                                                     |
+| `generateGroupId?`         | то же для groupId (применяется только при unscoped spawn)                                                                                                                            |
 
-| Метод                               | Назначение                                                     |
-| ----------------------------------- | -------------------------------------------------------------- |
-| `getState()`                        | текущее состояние менеджера                                    |
-| `transition(action)`                | dispatch user action; возвращает фактически применённый action |
-| `onTransition(cb)`                  | `(prev, current, action) => void`                              |
-| `setDependencies(deps \| updater)`  | задаёт user deps для effects                                   |
-| `replaceReducer(enhancer)`          | подменяет root reducer (вызывается из middleware)              |
-| `getSnapshot()`                     | runtime snapshot `{ schemaVersion, machines }` без hooks       |
-| `dehydrate(opts?)`                  | snapshot с `dehydrate` hooks                                   |
-| `hydrate(snapshot, opts?)`          | применяет снимок без middleware/effects                        |
-| `getHydratedState(snapshot, opts?)` | предварительный результат `hydrate` без изменения менеджера    |
+| Метод                               | Назначение                                                               |
+| ----------------------------------- | ------------------------------------------------------------------------ |
+| `getState()`                        | текущее состояние менеджера                                              |
+| `transition(action)`                | dispatch user action; возвращает фактически применённый action           |
+| `onTransition(cb)`                  | `(prev, current, action) => void`                                        |
+| `setDependencies(deps \| updater)`  | задаёт user deps для effects                                             |
+| `replaceReducer(enhancer)`          | подменяет root reducer (вызывается из middleware)                        |
+| `getSnapshot()`                     | runtime snapshot `{ schemaVersion, machines }` без hooks и `storage`     |
+| `dehydrate(opts?)`                  | snapshot с machine hooks и `snapshot.storage[kind]` для storage runtimes |
+| `hydrate(snapshot, opts?)`          | применяет снимок без middleware/effects                                  |
+| `getHydratedState(snapshot, opts?)` | предварительный результат `hydrate` без изменения менеджера              |
 
-Тип `deps` для `setDependencies` выводится из `MachineConfig` / `TypedCreateMachineFn<P, D>` и из signatures `effects`; runtime deps (`action`, `transition`, `condition`, `self`) в user deps не входят.
+Тип `deps` для `setDependencies` выводится из `MachineConfig` / `TypedCreateMachineFn<P, D, Extensions>` и из signatures `effects`; runtime deps (`action`, `transition`, `condition`, `self`) в user deps не входят.
 
 Action идёт во все доменные автоматы; автомат без подходящего transition остаётся без изменений (селекторы не дёргаются). Префикс `@@lite-fsm/*` зарезервирован — отправлять через `transition` нельзя.
 
 ## Hydration
 
 ```ts
-const snapshot = manager.dehydrate({ machines: ["counter"] });
+const snapshot = manager.dehydrate({ machines: ["counter"], storage: ["custom"] });
 manager.hydrate(snapshot, { strategy: "merge" });
 
 const preview = manager.getHydratedState(snapshot, {
@@ -389,7 +458,7 @@ const preview = manager.getHydratedState(snapshot, {
 });
 ```
 
-`dehydrate()` типизирует все машины, которые участвуют в снимке, как обязательные. `dehydrate({ machines: ["counter"] })` делает обязательными только выбранные literal keys; dynamic array остаётся partial envelope для безопасности.
+`dehydrate()` типизирует все машины, которые участвуют в снимке, как обязательные. `dehydrate({ machines: ["counter"] })` делает обязательными только выбранные literal keys; dynamic array остаётся partial envelope для безопасности. `storage` filter независим от `machines`: `dehydrate({ machines })` не отключает storage payloads, `dehydrate({ storage: [] })` отключает их явно, `dehydrate({ storage: [kind] })` выбирает только указанные storage runtimes. `getSnapshot()` не вызывает storage `dehydrate` и не добавляет `storage`.
 
 | API                  | Hooks       | Mutates | Subscribers          | Effects |
 | -------------------- | ----------- | ------- | -------------------- | ------- |
@@ -398,11 +467,11 @@ const preview = manager.getHydratedState(snapshot, {
 | `getHydratedState()` | `hydrate`   | —       | —                    | —       |
 | `hydrate()`          | `hydrate`   | да      | `@@lite-fsm/HYDRATE` | —       |
 
-`strategy` не выполняет глубокое объединение поля `context` и не заменяет всё состояние менеджера. В обоих режимах `hydrate()` рассматривает только ключи из `snapshot.machines`; отсутствующие доменные машины остаются как есть.
+`strategy` не выполняет глубокое объединение поля `context` и не заменяет всё состояние менеджера. В обоих режимах `hydrate()` рассматривает только ключи из `snapshot.machines`; отсутствующие доменные машины остаются как есть. `snapshot.storage[kind]` передается только runtime, который зарегистрировал этот `kind`; неизвестный kind или runtime без snapshot capability бросает ошибку.
 
-| Strategy    | Поведение                                                                                                                                                 |
-| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `"merge"`   | частичное наложение: ключи доменных машин из снимка применяются; акторы, сохраняемые в снимок, вне входящего набора записей остаются                        |
+| Strategy    | Поведение                                                                                                                                                                                                                       |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `"merge"`   | частичное наложение: ключи доменных машин из снимка применяются; акторы, сохраняемые в снимок, вне входящего набора записей остаются                                                                                            |
 | `"replace"` | полный набор записей акторов: ключи доменных машин из снимка применяются; акторы, сохраняемые в снимок, но отсутствующие во входящем наборе записей, удаляются; для доменных машин семантику замены задаёт обработчик `hydrate` |
 
 Domain hooks:
@@ -446,17 +515,17 @@ await persist.flush();
 stop();
 ```
 
-| API                                   | Что делает                                                                   |
-| ------------------------------------- | ---------------------------------------------------------------------------- |
-| `persistManager(manager, opts)`       | создаёт controller для restore/save/clear и подписки на manager/storage      |
+| API                                   | Что делает                                                                                        |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `persistManager(manager, opts)`       | создаёт controller для restore/save/clear и подписки на manager/storage                           |
 | `createJsonStorage({ key, storage })` | адаптер для `localStorage` / `sessionStorage`-совместимых JSON-хранилищ; `storage` — lazy factory |
-| `controller.start()`                  | ref-counted start; запускает background restore и подписки                   |
-| `controller.restore()`                | читает запись, валидирует envelope persist-слоя и вызывает `manager.hydrate` |
-| `controller.save()`                   | сразу пишет `manager.dehydrate({ machines })`                                |
-| `controller.flush()`                  | немедленно пишет отложенный throttled save                                   |
-| `controller.clear()`                  | отменяет pending save, удаляет storage record и сбрасывает status            |
-| `controller.getStatus()`              | текущий `{ phase }` snapshot                                                 |
-| `controller.subscribeStatus(cb)`      | подписка на смену status                                                     |
+| `controller.start()`                  | ref-counted start; запускает background restore и подписки                                        |
+| `controller.restore()`                | читает запись, валидирует envelope persist-слоя и вызывает `manager.hydrate`                      |
+| `controller.save()`                   | сразу пишет `manager.dehydrate({ machines })`                                                     |
+| `controller.flush()`                  | немедленно пишет отложенный throttled save                                                        |
+| `controller.clear()`                  | отменяет pending save, удаляет storage record и сбрасывает status                                 |
+| `controller.getStatus()`              | текущий `{ phase }` snapshot                                                                      |
+| `controller.subscribeStatus(cb)`      | подписка на смену status                                                                          |
 
 `createJsonStorage` принимает только `storage: () => { getItem; setItem; removeItem }`. Factory не вызывается при создании adapter-а, вызывается заново на каждом `get`, `set`, `remove` и не кешируется; `subscribe` добавляйте вручную через `PersistStorage`. `persistManager` не проверяет browser/server environment.
 
@@ -493,14 +562,14 @@ const request = createMachine({
 });
 ```
 
-| Правило          | Значение                                                  |
-| ---------------- | --------------------------------------------------------- |
-| `initialState`   | всегда `"__INIT"`                                         |
-| spawn            | action должен match-ить `__INIT` transition               |
-| public record    | `state.requests[actorId] = { state, context, meta }`      |
-| terminal targets | `__RESOLVED` · `__REJECTED` · `__CANCELLED` удаляют actor |
+| Правило           | Значение                                                  |
+| ----------------- | --------------------------------------------------------- |
+| `initialState`    | всегда `"__INIT"`                                         |
+| spawn             | action должен match-ить `__INIT` transition               |
+| public record     | `state.requests[actorId] = { state, context, meta }`      |
+| terminal targets  | `__RESOLVED` · `__REJECTED` · `__CANCELLED` удаляют actor |
 | доменные автоматы | получают action независимо от actor routing               |
-| standalone       | actor templates работают только в `MachineManager`        |
+| standalone        | actor templates работают только в `MachineManager`        |
 
 ### Routing
 
@@ -572,7 +641,8 @@ const request = createMachine({
 ```ts
 const logger: Middleware<AppState, AppEvent> = (api) => (next) => (action) => {
   const result = next(action);
-  console.log(api.getState(), action);
+  void api.getState();
+  void action;
   return result;
 };
 ```

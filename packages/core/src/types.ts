@@ -16,7 +16,20 @@ export type FSMEventMeta = {
   senderGroupTag?: string;
 };
 
-export type ManagerAction<P extends AnyEvent> = P & { meta?: FSMEventMeta };
+export type CoreActionMeta = FSMEventMeta;
+
+export type ManagerAction<P extends AnyEvent, Meta extends object = CoreActionMeta> = P & { meta?: Meta };
+
+export type MachineRuntimeExtension = {
+  readonly storage?: string;
+  readonly input?: object;
+  readonly internalEvents?: AnyEvent;
+  readonly reducerContext?: object;
+  readonly effectDeps?: object;
+  readonly reactionDeps?: object;
+  readonly resultMetadata?: object;
+  readonly publicState?: unknown;
+};
 
 export type ActorMeta = {
   actorId: string;
@@ -132,19 +145,25 @@ export type HydrateAction<S extends MachineStore> = {
 
 export type ManagerCommitAction<S extends MachineStore, P extends AnyEvent = AnyEvent> = P | HydrateAction<S>;
 
-export type MiddlewareApi<S, P extends AnyEvent = AnyEvent> = {
+export type MiddlewareApi<S, P extends AnyEvent = AnyEvent, Meta extends object = CoreActionMeta> = {
   getState: () => S;
-  transition: (action: ManagerAction<P>) => ManagerAction<P>;
-  replaceReducer: (cb: (reducer: Reducer<S, ManagerAction<P>>) => Reducer<S, ManagerAction<P>>) => void;
+  transition: (action: ManagerAction<P, Meta>) => ManagerAction<P, Meta>;
+  replaceReducer: (cb: (reducer: Reducer<S, ManagerAction<P, Meta>>) => Reducer<S, ManagerAction<P, Meta>>) => void;
   onTransition: (
     cb: (prevState: S, currentState: S, action: ManagerCommitAction<MachineStore, AnyEvent>) => void,
   ) => () => void;
-  condition: (predicate: (a: ManagerAction<P>) => boolean) => Promise<boolean>;
+  condition: (predicate: (a: ManagerAction<P, Meta>) => boolean) => Promise<boolean>;
 };
 
-export type Middleware<S = unknown, P extends AnyEvent = AnyEvent> = (
-  api: MiddlewareApi<S, P>,
-) => (next: (action: ManagerAction<P>) => ManagerAction<P>) => (action: ManagerAction<P>) => ManagerAction<P>;
+export type Middleware<
+  S = unknown,
+  P extends AnyEvent = AnyEvent,
+  Meta extends object = CoreActionMeta,
+> = (
+  api: MiddlewareApi<S, P, Meta>,
+) => (
+  next: (action: ManagerAction<P, Meta>) => ManagerAction<P, Meta>,
+) => (action: ManagerAction<P, Meta>) => ManagerAction<P, Meta>;
 
 export type GenericMiddleware = <S, P extends AnyEvent>(
   api: MiddlewareApi<S, P>,
@@ -219,7 +238,10 @@ export type MachineEffect<
 export type EffectStateName<C extends object> =
   HasLiteralInit<C> extends true ? ActorPublicState<C> | WILDCARD : StateName<C> | WILDCARD;
 
+type CoreStorageKind = "instance";
+
 type BaseMachineConfig<C extends object, T extends AnyRecord, P extends AnyEvent, D extends AnyRecord> = {
+  storage?: CoreStorageKind;
   config: C;
   initialState: StateName<C>;
   initialContext: T;
@@ -262,6 +284,7 @@ export type MachineConfig<
   (HasLiteralInit<C> extends true ? ActorPersistenceConfig<C, T, Snapshot> : DomainPersistenceConfig<C, T, Snapshot>);
 
 type AnyMachineConfig = {
+  storage?: unknown;
   config: object;
   initialState: string;
   initialContext: AnyRecord;
@@ -279,7 +302,17 @@ export type IsActorTemplate<M> = M extends { config: infer C extends object } ? 
 
 type ActorRuntimeRecord<C extends object, T extends AnyRecord> = Record<string, PublicActorSlice<C, T>>;
 
-export type MachineSliceState<M> = M extends {
+export type MachineRuntimeMetadata<M> = M extends { readonly __liteFsmRuntime?: infer Metadata }
+  ? NonNullable<Metadata>
+  : {};
+
+export type MachineResultMetadata<M> =
+  MachineRuntimeMetadata<M> extends { readonly resultMetadata: infer Metadata } ? Metadata : {};
+
+type MachinePublicStateOverride<M> =
+  MachineRuntimeMetadata<M> extends { readonly publicState: infer PublicState } ? PublicState : never;
+
+type DefaultMachineSliceState<M> = M extends {
   config: infer C extends object;
   initialContext: infer T extends AnyRecord;
 }
@@ -287,6 +320,9 @@ export type MachineSliceState<M> = M extends {
     ? ActorRuntimeRecord<C, T>
     : { state: StateName<C>; context: T }
   : never;
+
+export type MachineSliceState<M> =
+  [MachinePublicStateOverride<M>] extends [never] ? DefaultMachineSliceState<M> : MachinePublicStateOverride<M>;
 
 export type MachinesState<S extends MachineStore> = {
   [key in keyof S]: MachineSliceState<S[key]>;
@@ -370,6 +406,7 @@ export type SnapshotMachineKey<S extends MachineStore> = DomainKey<S> | Snapshot
 export type MachineManagerSnapshot<S extends MachineStore> = {
   schemaVersion?: number;
   machines: Partial<{ [key in SnapshotMachineKey<S>]: SnapshotForMachine<S[key]> }>;
+  storage?: Record<string, unknown>;
 };
 
 export type MachineManagerDehydratedSnapshot<
@@ -378,6 +415,7 @@ export type MachineManagerDehydratedSnapshot<
 > = {
   schemaVersion?: number;
   machines: { [key in K]: SnapshotForMachine<S[key]> };
+  storage?: Record<string, unknown>;
 };
 
 export type MachineManagerDehydrateResult<
@@ -392,20 +430,26 @@ export type MachineManagerRuntimeSnapshot<S extends MachineStore> = {
 
 export type DehydrateOptions<S extends MachineStore, K extends SnapshotMachineKey<S> = SnapshotMachineKey<S>> = {
   machines?: ReadonlyArray<K>;
+  storage?: readonly string[];
 };
 
 export type MachineManagerDehydrateFn<S extends MachineStore> = {
-  (opts?: { machines?: undefined }): MachineManagerDehydratedSnapshot<S>;
+  (opts?: { machines?: undefined; storage?: readonly string[] }): MachineManagerDehydratedSnapshot<S>;
   <const Keys extends ReadonlyArray<SnapshotMachineKey<S>>>(opts: {
     machines: Keys;
+    storage?: readonly string[];
   }): MachineManagerDehydrateResult<S, Keys>;
   (opts: DehydrateOptions<S>): MachineManagerSnapshot<S>;
 };
 
-export type TransitionSubscriber<S extends MachineStore, P extends AnyEvent = AnyEvent> = (
+export type TransitionSubscriber<
+  S extends MachineStore,
+  P extends AnyEvent = AnyEvent,
+  Meta extends object = CoreActionMeta,
+> = (
   prevState: MachinesState<S>,
   currentState: MachinesState<S>,
-  action: ManagerCommitAction<S, ManagerAction<P>>,
+  action: ManagerCommitAction<S, ManagerAction<P, Meta>>,
 ) => void;
 
 type IsAny<T> = 0 extends 1 & T ? true : false;

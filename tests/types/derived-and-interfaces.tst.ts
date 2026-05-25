@@ -347,7 +347,10 @@ describe("IMachineManager<S, P>", () => {
   });
 
   test("setDependencies принимает объект и updater-функцию", () => {
-    expect<Manager["setDependencies"]>().type.toBe<(d: Deps | ((deps: Deps) => Deps)) => void>();
+    expect<Manager["setDependencies"]>().type.toBe<{
+      (deps: Deps): void;
+      (updater: (deps: Deps) => Deps): void;
+    }>();
   });
 
   test("P по умолчанию совпадает с явным MachineEvents<S>", () => {

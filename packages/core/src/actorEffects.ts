@@ -11,6 +11,7 @@ import type {
   ManagerAction,
   Self,
 } from "./types";
+import type { ScopedInvocationContext } from "./plugin";
 import { isSystemAction, LiteFsmError } from "./utils";
 
 // === Internal effect-deps shape =============================================
@@ -30,6 +31,7 @@ type MachineLike = {
 };
 type EffectsTargets = ActorRuntime[];
 type DomainTransition<P extends AnyEvent> = (action: ManagerAction<P>) => ManagerAction<P>;
+type ScopedTransition = ScopedInvocationContext["transition"];
 type EffectSubscriber<P extends AnyEvent> = (
   prev: unknown,
   current: unknown,
@@ -48,6 +50,7 @@ export type ActorEffectsDeps<P extends AnyEvent> = {
   domainKeys: readonly string[];
   refs: ActorEffectsRefs<P>;
   onTransition: (cb: EffectSubscriber<P>) => () => void;
+  createScopedDeps: (baseDeps: AnyRecord, ctx: ScopedInvocationContext) => AnyRecord;
   onError?: (err: unknown) => void;
 };
 
@@ -64,7 +67,7 @@ export type ActorEffectsRuntime<P extends AnyEvent> = {
 export const createActorEffectsRuntime = <P extends AnyEvent>(
   deps: ActorEffectsDeps<P>,
 ): ActorEffectsRuntime<P> => {
-  const { sidecar, machines, domainKeys, refs, onTransition, onError } = deps;
+  const { sidecar, machines, domainKeys, refs, onTransition, createScopedDeps, onError } = deps;
 
   const registerInBag = (actorId: string, key: symbol, dispose: () => void) => {
     sidecar.actorById.get(actorId)?.bag.set(key, dispose);
@@ -148,13 +151,24 @@ export const createActorEffectsRuntime = <P extends AnyEvent>(
       const machine = machines[name];
       const prev = prevState[name] as { state: string; context: AnyRecord };
       const current = currentState[name] as { state: string; context: AnyRecord };
+      const baseDeps = {
+        ...refs.userDeps,
+        transition,
+        action,
+        condition,
+      };
       machine
-        .invokeEffect(prev.state, current.state, {
-          ...refs.userDeps,
-          transition,
-          action,
-          condition,
-        })
+        .invokeEffect(
+          prev.state,
+          current.state,
+          createScopedDeps(baseDeps, {
+            source: { storage: "instance", template: name },
+            event: action,
+            indices: {},
+            phase: "effect",
+            transition: transition as unknown as ScopedTransition,
+          }) as typeof baseDeps,
+        )
         .catch((err) => onError?.(err));
     }
   };
@@ -176,16 +190,28 @@ export const createActorEffectsRuntime = <P extends AnyEvent>(
       if (!currentSlice) continue;
 
       const self: Self = { actorId, groupId, groupTag };
+      const transition = buildActorTransition(self);
+      const baseDeps = {
+        ...refs.userDeps,
+        transition,
+        action,
+        condition: (predicate: (a: ManagerAction<P>) => boolean) => wrappedCondition(predicate, self),
+        self,
+        [REGISTER_BAG_DISPOSE]: registerInBag,
+      };
 
       machine
-        .invokeEffect(prevSlice?.state ?? "__INIT", currentSlice.state, {
-          ...refs.userDeps,
-          transition: buildActorTransition(self),
-          action,
-          condition: (predicate: (a: ManagerAction<P>) => boolean) => wrappedCondition(predicate, self),
-          self,
-          [REGISTER_BAG_DISPOSE]: registerInBag,
-        })
+        .invokeEffect(
+          prevSlice?.state ?? "__INIT",
+          currentSlice.state,
+          createScopedDeps(baseDeps, {
+            source: { storage: "instance", template: actor.templateKey },
+            event: action,
+            indices: { actorId, groupId, groupTag },
+            phase: "effect",
+            transition: transition as unknown as ScopedTransition,
+          }) as typeof baseDeps,
+        )
         .catch((err) => onError?.(err));
     }
   };

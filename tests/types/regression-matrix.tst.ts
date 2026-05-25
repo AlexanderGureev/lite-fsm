@@ -38,6 +38,7 @@ describe("регрессионная матрица public entry points", () => 
         | "createEffect"
         | "createMachine"
         | "createReducer"
+        | "definePlugin"
         | "defineMachine"
       >
     >;
@@ -319,10 +320,10 @@ describe("регрессионная матрица events и dependencies дл�
       },
     });
 
+    // @ts-expect-error!
     manager.setDependencies({
       service: {
         load: async (id) => id,
-        // @ts-expect-error!
         save: (id: string) => {
           void id;
         },

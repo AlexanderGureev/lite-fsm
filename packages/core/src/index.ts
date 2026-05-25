@@ -17,6 +17,46 @@ export type * from "./interfaces";
 export { createActorMeta } from "./actor";
 export { CreateMachine as Machine, defineMachine } from "./Machine";
 export { MachineManager } from "./MachineManager";
+export {
+  type ActionInterceptor,
+  type ActionInterceptorContext,
+  type ActionInterceptorResult,
+  type ActionRegistry,
+  definePlugin,
+  type DepsExtensionRegistry,
+  type DispatchContext,
+  type DispatchHook,
+  type DispatchRegistry,
+  type EffectDeps,
+  type LiteFsmPlugin,
+  type ManagerActionMeta,
+  type ManagerExtensionAppEvents,
+  type ManagerExtensionCapability,
+  type ManagerExtensionFactory,
+  type ManagerExtensionRegistry,
+  type ManagerExtensionStore,
+  type ManagerRuntimeContext,
+  type ManagerTransitionEvents,
+  type PluginCapabilities,
+  type PluginActionMeta,
+  type PluginDeps,
+  type PluginInstallContext,
+  type PluginManagerExtensions,
+  type PluginTransitionExtensions,
+  type PluginTransitionEvents,
+  type RouteResolver,
+  type RouteResolverContext,
+  type RouteResolverResult,
+  type RoutingRegistry,
+  type ScopedDepsContext,
+  type ScopedDepsFactory,
+  type ScopedInvocationContext,
+  type ScopedInvocationIndices,
+  type ScopedInvocationPhase,
+  type ScopedInvocationSource,
+  type ScopedTransitionContext,
+  type ScopedTransitionFactory,
+} from "./plugin";
 export * from "./types";
 export { createMachine, type TypedCreateMachineFn } from "./createMachine";
 export { HYDRATE_ACTION_TYPE, LiteFsmError, VOID_REDUCER_MIDDLEWARE_MARKER } from "./utils";

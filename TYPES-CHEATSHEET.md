@@ -4,18 +4,18 @@
 
 ## Точки входа
 
-| Импорт                    | Типы                                                                                                                                                                                                                                                               |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `@lite-fsm/core`          | весь `types.ts` + `interfaces.ts`: `FSMEvent`, `MachineConfig`, `CFG`, `MachineReducer`, `MachineEffect`, `MachineManagerSnapshot`, `MachinesState`, `MachineEvents`, `MachineDependencies`, `IMachineManager`, `Middleware`, actor types, snapshot types, helpers |
-| `@lite-fsm/react`         | `FSMContextType`, `FSMContextProviderProps`, `FSMPersistLifecycle`, `FSMHydrationBoundaryProps`, typed hook aliases                                                                                                                                                |
-| `@lite-fsm/persist`       | `MaybePromise`, `PersistedRecord`, `PersistStorage`, `PersistStatus`, `PersistRestoreSettledResult`, `PersistManagerOptions`, `PersistController`                                                                                                                  |
-| `@lite-fsm/persist/react` | runtime hooks only: `usePersistStatuses`, `useIsPersistRestoring`                                                                                                                                                                                                  |
-| `@lite-fsm/middleware`    | только runtime middleware                                                                                                                                                                                                                                          |
-| `@lite-fsm/graph`         | alpha graph compiler/analyzer IR-типы                                                                                                                                                                                                                              |
-| `@lite-fsm/graph/simulator` | alpha simulator-типы: snapshots, slices, timeline, choices, available transitions, suggested emissions                                                                                                                                                            |
-| `@lite-fsm/graph/view-model` | alpha visualizer projection-типы: summaries, topics, workbench rows, anchors, row mappings, overlay inputs, Machine Flow Model                                                                                                                                   |
-| `@lite-fsm/cli`           | public TS entrypoint не публикуется; типовые contracts CLI — JSON export document `lite-fsm.project-graph-export/v1` и local visualize HTTP API                                                                                                                    |
-|                           |
+| Импорт                       | Типы                                                                                                                                                                                                                                                                                              |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@lite-fsm/core`             | весь `types.ts` + `interfaces.ts`: `FSMEvent`, `MachineConfig`, `CFG`, `MachineReducer`, `MachineEffect`, `MachineManagerSnapshot`, `MachinesState`, `MachineEvents`, `MachineDependencies`, `IMachineManager`, `Middleware`, `LiteFsmPlugin`, plugin types, actor types, snapshot types, helpers |
+| `@lite-fsm/react`            | `FSMContextType`, `FSMContextProviderProps`, `FSMPersistLifecycle`, `FSMHydrationBoundaryProps`, typed hook aliases                                                                                                                                                                               |
+| `@lite-fsm/persist`          | `MaybePromise`, `PersistedRecord`, `PersistStorage`, `PersistStatus`, `PersistRestoreSettledResult`, `PersistManagerOptions`, `PersistController`                                                                                                                                                 |
+| `@lite-fsm/persist/react`    | runtime hooks only: `usePersistStatuses`, `useIsPersistRestoring`                                                                                                                                                                                                                                 |
+| `@lite-fsm/middleware`       | только runtime middleware                                                                                                                                                                                                                                                                         |
+| `@lite-fsm/graph`            | alpha graph compiler/analyzer IR-типы                                                                                                                                                                                                                                                             |
+| `@lite-fsm/graph/simulator`  | alpha simulator-типы: snapshots, slices, timeline, choices, available transitions, suggested emissions                                                                                                                                                                                            |
+| `@lite-fsm/graph/view-model` | alpha visualizer projection-типы: summaries, topics, workbench rows, anchors, row mappings, overlay inputs, Machine Flow Model                                                                                                                                                                    |
+| `@lite-fsm/cli`              | public TS entrypoint не публикуется; типовые contracts CLI — JSON export document `lite-fsm.project-graph-export/v1` и local visualize HTTP API                                                                                                                                                   |
+|                              |
 
 ## Generics
 
@@ -61,13 +61,13 @@ type AppEvent = FSMEvent<"INC"> | FSMEvent<"SET", { count: number }> | FSMEvent<
 
 ### Routed actions
 
-| Тип                         | Форма                                                                                |
-| --------------------------- | ------------------------------------------------------------------------------------ |
-| `FSMEventMeta`              | `{ actorId?, groupId?, groupTag?, senderActorId?, senderGroupId?, senderGroupTag? }` |
-| `ManagerAction<P>`          | `P & { meta?: FSMEventMeta }`                                                        |
-| `ManagerCommitAction<S, P>` | user action или `HydrateAction<S>`                                                   |
+| Тип                                       | Форма                                                                                |
+| ----------------------------------------- | ------------------------------------------------------------------------------------ |
+| `FSMEventMeta` · `CoreActionMeta`         | `{ actorId?, groupId?, groupTag?, senderActorId?, senderGroupId?, senderGroupTag? }` |
+| `ManagerAction<P, Meta = CoreActionMeta>` | `P & { meta?: Meta }`                                                                |
+| `ManagerCommitAction<S, P>`               | user action или `HydrateAction<S>`                                                   |
 
-`actorId`, `groupId`, `groupTag` — `string | string[]`.
+`actorId`, `groupId`, `groupTag` — `string | string[]`. Plugin-provided `meta` keys добавляются через `PluginCapabilities["actionMeta"]` и `ManagerActionMeta<Plugins>`. Runtime принимает только registered route keys: plugin обязан вызвать `PluginInstallContext.routing.registerMetaKey(...)` для каждого runtime-supported key.
 
 ## Граф переходов · `CFG<C, P>`
 
@@ -93,6 +93,7 @@ const config = {
 
 | Поле                      | Тип                                                         |
 | ------------------------- | ----------------------------------------------------------- |
+| `storage?`                | core storage kind: сейчас только `"instance"`               |
 | `config`                  | `C`                                                         |
 | `initialState`            | `StateName<C>`                                              |
 | `initialContext`          | `T`                                                         |
@@ -103,7 +104,40 @@ const config = {
 | `persistence?`            | actor template only: `"runtime"` (default) \| `"snapshot"`  |
 
 Default `Snapshot`: domain → `StateType<C, T>`, actor hook payload → `DefaultActorSnapshot<C, T>`.
-Custom domain hooks переопределяют `Snapshot`: `SnapshotForMachine<M>`, `MachineManagerSnapshot<S>`, `dehydrate()` и `hydrate()` используют transport payload из `dehydrate` / `hydrate`, включая машины, созданные через `TypedCreateMachineFn<P, D>`.
+Custom domain hooks переопределяют `Snapshot`: `SnapshotForMachine<M>`, `MachineManagerSnapshot<S>`, `dehydrate()` и `hydrate()` используют transport payload из `dehydrate` / `hydrate`, включая машины, созданные через `TypedCreateMachineFn<P, D, Extensions>`.
+Storage runtime payloads не меняют `SnapshotForMachine<M>`: они передаются отдельно через `MachineManagerSnapshot<S>["storage"]`.
+Отсутствие `storage` эквивалентно `storage: "instance"` в public `MachineManager`; standalone `Machine(...)` и `defineMachine().create(...)` поддерживают только эти два варианта.
+
+## Machine runtime extensions
+
+`MachineRuntimeExtension` описывает type-level расширение machine config для app wrappers. Core `createMachine<AppEvents>(...)` не читает plugin values и не получает plugin-specific fields автоматически.
+
+```ts
+type TestStorageExtension = {
+  storage: "test";
+  input: { test: { key: string } };
+  internalEvents: FSMEvent<"TEST_INTERNAL">;
+  reducerContext: { testKey: string };
+  effectDeps: { testClock: () => number };
+  reactionDeps: { testReaction: () => string };
+  resultMetadata: { storage: "test" };
+  publicState: { state: "READY"; context: { key: string } };
+};
+
+export const createAppMachine: TypedCreateMachineFn<AppEvents, AppDeps, TestStorageExtension> = createMachine;
+```
+
+| Ключ `MachineRuntimeExtension` | Назначение                                                                             |
+| ------------------------------ | -------------------------------------------------------------------------------------- |
+| `storage`                      | storage kind, обязательный для любого непустого extension                              |
+| `input`                        | storage-specific поля и переопределения input (`initialContext`, `reducer`, `effects`) |
+| `internalEvents`               | события, допустимые в `config` / reducer / effects без добавления в `AppEvents`        |
+| `reducerContext`               | дополнительные поля третьего аргумента reducer для этого storage kind                  |
+| `effectDeps` · `reactionDeps`  | storage-specific deps на type-level; сохраняются в `MachineRuntimeMetadata<M>`         |
+| `resultMetadata`               | типовая metadata результата для plugin helpers (`MachineResultMetadata<M>`)            |
+| `publicState`                  | override фрагмента `MachinesState<S>[key]`                                             |
+
+`TypedCreateMachineFn<AppEvents, AppDeps, Extensions>` принимает union extensions. Каждый непустой extension обязан задавать `storage`; storage-less extension отклоняется типами, чтобы не создавать мертвую ветку inference. Выбор storage-specific input идёт по `cfg.storage`. `storage: "instance"` остаётся явным core kind и не требует extension. `MachineEvents<S>` выводит только public `AppEvents`; `internalEvents` не становятся допустимыми public `manager.transition(...)`. Прямой value `createMachine` остаётся совместимым с wrapper для assignability; plugin-specific overload у прямого вызова не считается публичным способом фиксации extensions.
 
 ## `MachineReducer<C, P, T>`
 
@@ -135,15 +169,16 @@ const saveEffect: MachineEffect<"saving", SaveConfig, SaveEvent, { api: Api }> =
 };
 ```
 
-| Тип                         | Назначение                                                                                                   |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `MachineEffect<N, C, P, D>` | `(deps: D & DefaultDeps...) => void \| Promise<void>`                                                        |
-| `EffectStateName<C>`        | domain: `StateName<C> \| "*"`; actor: `ActorPublicState<C> \| "*"`                                           |
-| `IncomingEventTypes<C, N>`  | event names, ведущие в state `N`                                                                             |
-| `ActionForState<C, N, P>`   | `Extract<P, { type: IncomingEventTypes<C, N> }>` (для `N = "*"` — весь `P`)                                  |
-| `DefaultDeps<N, C, P>`      | `{ transition: (action: ManagerAction<P>) => ManagerAction<P>, action: ActionForState<C, N, P>, condition }` |
+| Тип                            | Назначение                                                                                                   |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| `MachineEffect<N, C, P, D>`    | `(deps: D & DefaultDeps...) => void \| Promise<void>`                                                        |
+| `EffectDeps<AppDeps, Plugins>` | `AppDeps & PluginDeps<Plugins>` плюс scoped `transition` extensions текущего plugin tuple                    |
+| `EffectStateName<C>`           | domain: `StateName<C> \| "*"`; actor: `ActorPublicState<C> \| "*"`                                           |
+| `IncomingEventTypes<C, N>`     | event names, ведущие в state `N`                                                                             |
+| `ActionForState<C, N, P>`      | `Extract<P, { type: IncomingEventTypes<C, N> }>` (для `N = "*"` — весь `P`)                                  |
+| `DefaultDeps<N, C, P>`         | `{ transition: (action: ManagerAction<P>) => ManagerAction<P>, action: ActionForState<C, N, P>, condition }` |
 
-`transition` в domain effects принимает `ManagerAction<P>`, поэтому новое событие может нести routing `meta`. `action` и `condition` остаются типизированы через исходный `P` и сохраняют сужение по state.
+`transition` в domain effects принимает `ManagerAction<P>`, поэтому новое событие может нести routing `meta`. `action` и `condition` остаются типизированы через исходный `P` и сохраняют сужение по state. Plugin-scoped deps доступны только в effect/reaction deps; они не входят в `MachineDependencies<S>` и не передаются через `manager.setDependencies(...)`.
 
 ### Actor effects
 
@@ -187,15 +222,82 @@ type AppEvents = MachineEvents<Store>;
 type AppDeps = MachineDependencies<Store>;
 ```
 
-| Тип                      | Что выводит                                    |
-| ------------------------ | ---------------------------------------------- |
-| `MachineStore`           | `Record<string, AnyMachineConfig>`             |
-| `MachineSliceState<M>`   | фрагмент состояния доменной машины или набор записей акторов |
-| `MachinesState<S>`       | состояние менеджера по карте машин                         |
-| `MachineEvents<S>`       | union событий всех машин                       |
-| `MachineDependencies<S>` | intersection custom deps всех effects          |
+| Тип                         | Что выводит                                                  |
+| --------------------------- | ------------------------------------------------------------ |
+| `MachineStore`              | `Record<string, AnyMachineConfig>`                           |
+| `MachineSliceState<M>`      | фрагмент состояния доменной машины или набор записей акторов |
+| `MachinesState<S>`          | состояние менеджера по карте машин                           |
+| `MachineEvents<S>`          | union событий всех машин                                     |
+| `MachineDependencies<S>`    | intersection custom deps всех effects                        |
+| `MachineRuntimeMetadata<M>` | типовая metadata машины, созданной через extension wrapper   |
+| `MachineResultMetadata<M>`  | `resultMetadata` из `MachineRuntimeExtension`, иначе `{}`    |
 
-`MachineEvents<{}>` → `never`. `MachineDependencies<{}>` → `{}`.
+`MachineEvents<{}>` → `never`. `MachineDependencies<{}>` → `{}`. Если extension задаёт `publicState`, `MachinesState<S>` использует этот тип вместо core `{ state, context }` / actor record shape.
+
+## Plugins
+
+```ts
+type AuditCapabilities = {
+  manager: { audit: unknown };
+};
+
+const auditPlugin = definePlugin<AuditCapabilities>({
+  name: "audit",
+  install() {},
+});
+
+const namedAuditPlugin = definePlugin<AuditCapabilities, "audit">({
+  name: "audit",
+  install() {},
+});
+```
+
+| Тип                                              | Форма / назначение                                                                                                                                           |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `LiteFsmPlugin<C = {}>`                          | plugin value с `name`, `install(ctx)` и типовыми capabilities для `MachineManager(..., { plugins })`                                                         |
+| `PluginCapabilities`                             | optional type-level keys: `manager`, `transitionEvents`, `machine`, `actionMeta`, `deps`, `transition`                                                       |
+| `PluginManagerExtensions<S, AppEvents, Plugins>` | intersection `manager` extensions из plugin tuple; generic capability может зависеть от `S` и `AppEvents` текущего менеджера                                 |
+| `PluginTransitionEvents<Plugins>`                | union `transitionEvents` из plugin tuple                                                                                                                     |
+| `ManagerTransitionEvents<AppEvents, Plugins>`    | `AppEvents \| PluginTransitionEvents<Plugins>`                                                                                                               |
+| `PluginActionMeta<Plugins>`                      | optional intersection `actionMeta` из plugin tuple                                                                                                           |
+| `ManagerActionMeta<Plugins>`                     | `CoreActionMeta & PluginActionMeta<Plugins>`                                                                                                                 |
+| `PluginDeps<Plugins>`                            | intersection `deps` из plugin tuple                                                                                                                          |
+| `PluginTransitionExtensions<Plugins>`            | intersection `transition` из plugin tuple                                                                                                                    |
+| `EffectDeps<AppDeps, Plugins>`                   | app deps плюс scoped deps и scoped transition methods для effects/reactions                                                                                  |
+| `ManagerFromPlugins<S, AppEvents, Plugins>`      | `IMachineManager` с manager extensions, transition events и action meta текущего tuple                                                                       |
+| `PluginInstallContext`                           | `{ readonly actions; readonly storage; readonly dispatch; readonly routing; readonly manager; readonly deps }`                                               |
+| `ManagerExtensionRegistry`                       | `{ extend(key, factory): void }`; регистрирует extension factory для returned manager object                                                                 |
+| `ManagerExtensionFactory`                        | `(ctx: ManagerRuntimeContext) => Value`                                                                                                                      |
+| `ManagerRuntimeContext`                          | stable runtime context для manager extension: `config`, options, schemaVersion, getState, transition, onTransition, getDependencies                          |
+| `ManagerExtensionCapability`                     | type-level generic manager capability; через `ManagerExtensionStore<C>` и `ManagerExtensionAppEvents<C>` можно связать extension с текущим `S` и `AppEvents` |
+| `ActionRegistry`                                 | `{ intercept(handler: ActionInterceptor): void }`                                                                                                            |
+| `ActionInterceptor`                              | `(ctx: ActionInterceptorContext) => void \| { action?, skipDelivery?, stopInterceptors? }`                                                                   |
+| `DispatchContext`                                | `{ options; runtime; originalAction; action; skipDelivery; reportError(error) }`                                                                             |
+| `DispatchRegistry`                               | методы `beforeReduce`, `afterReduce`, `beforeCommit`, `beforeSubscribers`, `beforeEffects`, `afterEffects`                                                   |
+| `DispatchHook`                                   | `(ctx: DispatchContext) => void`                                                                                                                             |
+| `DepsExtensionRegistry`                          | `{ extendDeps(factory); extendTransition(factory) }`                                                                                                         |
+| `ScopedDepsFactory`                              | callable с `keys: readonly string[]`, возвращает scoped deps                                                                                                 |
+| `ScopedTransitionFactory`                        | callable с `keys: readonly string[]`, возвращает методы scoped `transition`                                                                                  |
+| `ScopedInvocationContext`                        | `{ source: { storage; template }; event; indices; phase; transition }`                                                                                       |
+| `RoutingRegistry`                                | `{ registerMetaKey<Key extends string>(key: Key, resolver: RouteResolver<Key>): void }`                                                                      |
+| `RouteResolver<Key>`                             | `(value: unknown, ctx: RouteResolverContext<Key>) => string \| readonly string[]`                                                                            |
+| `RouteResolverContext`                           | `{ readonly key; readonly action: ManagerAction<AnyEvent>; readonly meta: Readonly<Record<string, unknown>> }`                                               |
+
+`definePlugin(...)` сохраняет literal `name` при обычном вызове. `definePlugin<Capabilities>(...)` фиксирует типовые capabilities, но TypeScript не выводит literal `name` после явного первого generic, поэтому тип `name` становится `string`. Если нужен контракт одновременно с explicit capabilities и literal `name`, укажи имя вторым generic: `definePlugin<Capabilities, "audit">(...)`. Literal tuple в `MachineManager(..., { plugins: [...] as const })` сохраняет типы элементов; широкий `LiteFsmPlugin[]` не обязан сохранять plugin-specific capabilities. Plugin manager extensions, transition events, action meta и scoped deps применяются только к текущему `MachineManager(...)` и не подмешиваются в global `createMachine<AppEvents>`.
+
+`ManagerRuntimeContext.config` передаёт manager extension исходный `MachineStore`, а не defensive copy. Считайте его read-only контрактом: extension может читать ключи и конфигурации, но не должен мутировать машины.
+
+Встроенный runtime preset устанавливается перед пользовательскими plugins и регистрирует default storage kind `"instance"`. Storage registry хранит runtime по `machine.storage`; duplicate storage kind, unknown storage kind, mismatched `runtime.kind` и отсутствующий default kind являются init errors. Registry-поля `PluginInstallContext` можно менять только синхронно внутри `install(ctx)`. Public API для custom runtime presets пока не публикуется: `MachineManager(...)` всегда использует встроенный preset.
+
+Storage runtime регистрируется через `PluginInstallContext["storage"].register(kind, runtime)`. `runtime` объект типизируется структурно через registry method: базовые поля `kind`, `validateTemplate`, `compileTemplate`, `createRuntimeState`, `createPublicInitialState`, `acceptsEvent`, `reduce`, `commit` обязательны; capability blocks `effects`, `reactions`, `identity`, `snapshot` опциональны. `runtime.kind` и `compileTemplate(...).kind` должны совпадать с registered storage kind. `snapshot` block работает через `MachineManagerSnapshot<S>["storage"][kind]`; payload остаётся `unknown` на уровне core и валидируется runtime-владельцем kind.
+
+Routing registry регистрирует runtime-owned `action.meta` keys до типового расширения `actionMeta`. Registered keys сохраняются при normalization и middleware rewrite. Priority фиксирован: `actorId`, затем registered keys в порядке регистрации, затем `groupId`, `groupTag`, unscoped. Resolver нормализует значение plugin key в target set; invalid result является runtime error. Неизвестные `meta` keys не являются ошибкой и не участвуют в routing.
+
+Action interceptor выполняется после middleware `next(...)` и post-normalization. Если он возвращает `action`, это значение становится committed public action для reducers, subscribers, effects, middleware post-`next` и return value. `skipDelivery: true` пропускает machine delivery, но не останавливает следующие interceptors; `stopInterceptors: true` останавливает только следующие interceptors.
+
+Dispatch hooks выполняются в порядке регистрации. Hook error является fatal. `DispatchContext.reportError(error)` вызывает `onError` и не меняет control flow dispatch.
+
+`@lite-fsm/entities` должен подключаться как внешний runtime plugin поверх этих extension points, но entity-specific types, `manager.entities` и React hooks не входят в текущий core type surface.
 
 ## Snapshots
 
@@ -204,27 +306,27 @@ type AppDeps = MachineDependencies<Store>;
 | `MachineRuntimeSnapshot<C, T>`                 | runtime domain slice (= `StateType<C, T>`)                                                        |
 | `MachineRuntimeSnapshotForMachine<M>`          | runtime snapshot одного machine config                                                            |
 | `SnapshotForMachine<M>` · `MachineSnapshot<M>` | transport snapshot одной machine                                                                  |
-| `MachineManagerRuntimeSnapshot<S>`             | envelope из `getSnapshot()`; включает активные записи акторов                                     |
-| `MachineManagerSnapshot<S>`                    | partial envelope для `hydrate()`; доменные машины + акторы, сохраняемые в снимок                  |
-| `MachineManagerDehydratedSnapshot<S, K>`       | точный envelope из `dehydrate()`; ключи `K` обязательны                                           |
+| `MachineManagerRuntimeSnapshot<S>`             | envelope из `getSnapshot()`; включает активные записи акторов, не включает `storage`              |
+| `MachineManagerSnapshot<S>`                    | partial envelope для `hydrate()`; `machines` + optional `storage?: Record<string, unknown>`       |
+| `MachineManagerDehydratedSnapshot<S, K>`       | точный envelope из `dehydrate()`; ключи `K` обязательны, `storage` остается optional              |
 | `MachineManagerDehydrateResult<S, Keys>`       | результат `dehydrate({ machines: Keys })`: tuple keys обязательны, dynamic array остаётся partial |
-| `MachineManagerDehydrateFn<S>`                 | overloads для `dehydrate`: без opts все snapshot keys, с literal `machines` выбранные keys        |
+| `MachineManagerDehydrateFn<S>`                 | overloads для `dehydrate`: `machines` и `storage` filters независимы                              |
 | `SnapshotActorTemplateKey<S>`                  | ключи actor templates с `persistence: "snapshot"`                                                 |
 | `SnapshotMachineKey<S>`                        | ключи доменных машин + ключи акторов, сохраняемых в снимок                                        |
-| `DehydrateOptions<S>`                          | `{ machines?: ReadonlyArray<SnapshotMachineKey<S>> }`                                             |
+| `DehydrateOptions<S>`                          | `{ machines?: ReadonlyArray<SnapshotMachineKey<S>>; storage?: readonly string[] }`                |
 
 ### Hydration
 
-| Тип                        | Форма                                                             |
-| -------------------------- | ----------------------------------------------------------------- |
+| Тип                        | Форма                                                                    |
+| -------------------------- | ------------------------------------------------------------------------ |
 | `HydrateStrategy`          | `"replace" \| "merge"`; режим применения снимка, не глубокое объединение |
-| `HydrateOptions`           | `{ strategy?: HydrateStrategy }`                                  |
-| `HydratePreviewOptions<S>` | `HydrateOptions & { baseState?: MachinesState<S> }`               |
-| `HydrateMeta`              | `{ strategy: HydrateStrategy }`                                   |
-| `HydrateAction<S>`         | `{ type: "@@lite-fsm/HYDRATE"; payload: { strategy; snapshot } }` |
-| `UnknownMachineKeyContext` | `"hydrate" \| "opts.snapshot"`                                    |
+| `HydrateOptions`           | `{ strategy?: HydrateStrategy }`                                         |
+| `HydratePreviewOptions<S>` | `HydrateOptions & { baseState?: MachinesState<S> }`                      |
+| `HydrateMeta`              | `{ strategy: HydrateStrategy }`                                          |
+| `HydrateAction<S>`         | `{ type: "@@lite-fsm/HYDRATE"; payload: { strategy; snapshot } }`        |
+| `UnknownMachineKeyContext` | `"hydrate" \| "opts.snapshot"`                                           |
 
-`HydrateStrategy` различает частичное наложение и полный набор записей акторов. В обоих режимах `hydrate()` применяет только ключи из `snapshot.machines`; отсутствующие доменные машины не сбрасываются. Для обработчиков доменных машин значение приходит как `HydrateMeta["strategy"]`.
+`HydrateStrategy` различает частичное наложение и полный набор записей акторов. В обоих режимах `hydrate()` применяет только ключи из `snapshot.machines`; отсутствующие доменные машины не сбрасываются. Для обработчиков доменных машин значение приходит как `HydrateMeta["strategy"]`. `snapshot.storage[kind]` имеет базовый тип `unknown` внутри `Record<string, unknown>` и валидируется runtime, который зарегистрировал этот `kind`; неизвестный kind и runtime без snapshot capability являются ошибками.
 
 ## Persist
 
@@ -303,21 +405,21 @@ const persist = persistManager(manager, {
 
 ### Manager options и subscribers
 
-| Тип                           | Форма                                                                                                                                                 |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `MachineManagerOptions<S, P>` | `{ onError?, middleware?, snapshot?, schemaVersion?, onUnknownMachineKey?, onSchemaVersionMismatch?, originId?, generateActorId?, generateGroupId? }` |
-| `SpawnIdContext<P>`           | `{ templateKey: string; groupTag: string; counter: number; originId: string \| undefined; action: ManagerAction<P> }`                                 |
-| `GenerateSpawnIdFn<P>`        | `(ctx: SpawnIdContext<P>) => string`                                                                                                                  |
-| `Subscriber<C, T, P>`         | `(prev: StateType<C, T>, current: StateType<C, T>, action: P) => void`                                                                                |
-| `TransitionSubscriber<S, P>`  | `(prev: MachinesState<S>, current: MachinesState<S>, action: ManagerCommitAction<S, ManagerAction<P>>) => void`                                       |
+| Тип                                    | Форма                                                                                                                                                           |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MachineManagerOptions<S, P, Plugins>` | `{ onError?, middleware?, snapshot?, schemaVersion?, onUnknownMachineKey?, onSchemaVersionMismatch?, originId?, generateActorId?, generateGroupId?, plugins? }` |
+| `SpawnIdContext<P>`                    | `{ templateKey: string; groupTag: string; counter: number; originId: string \| undefined; action: ManagerAction<P> }`                                           |
+| `GenerateSpawnIdFn<P>`                 | `(ctx: SpawnIdContext<P>) => string`                                                                                                                            |
+| `Subscriber<C, T, P>`                  | `(prev: StateType<C, T>, current: StateType<C, T>, action: P) => void`                                                                                          |
+| `TransitionSubscriber<S, P>`           | `(prev: MachinesState<S>, current: MachinesState<S>, action: ManagerCommitAction<S, ManagerAction<P>>) => void`                                                 |
 
 `originId?: string` (без `#`) и кастомные `generateActorId` / `generateGroupId` обеспечивают изоляцию id между менеджерами в P2P / multi-tab / шарды-сценариях. Подробнее — в гайде [Распределенный спавн](/guide/actors#распределенный-спавн).
 
-`MachineDependencies<S>` берёт пользовательские зависимости из `MachineConfig` / `TypedCreateMachineFn<P, D>` и signatures `effects`, исключая runtime deps менеджера и актора.
+`MachineDependencies<S>` берёт пользовательские зависимости из `MachineConfig` / `TypedCreateMachineFn<P, D, Extensions>` и signatures `effects`, исключая runtime deps менеджера и актора.
 
 ## Typed factory aliases
 
-`Typed*Fn` фиксируют `P`/`D` один раз для всего приложения.
+`Typed*Fn` фиксируют `P`/`D` один раз для всего приложения. `TypedCreateMachineFn` дополнительно может фиксировать storage-specific `MachineRuntimeExtension`.
 
 ```ts
 export const defineConfig: TypedCreateConfigFn<AppEvent> = createConfig;
@@ -326,12 +428,12 @@ export const defineMachine: TypedCreateMachineFn<AppEvent, Deps> = createMachine
 export const defineEffect: TypedCreateEffectFn<AppEvent, Deps> = createEffect;
 ```
 
-| Alias                        | Фиксирует                     |
-| ---------------------------- | ----------------------------- |
-| `TypedCreateConfigFn<P>`     | union событий для `CFG`       |
-| `TypedCreateReducerFn<P>`    | `action` в reducer            |
-| `TypedCreateMachineFn<P, D>` | union событий и deps эффектов |
-| `TypedCreateEffectFn<P, D>`  | union событий и deps эффектов |
+| Alias                                    | Фиксирует                                                          |
+| ---------------------------------------- | ------------------------------------------------------------------ |
+| `TypedCreateConfigFn<P>`                 | union событий для `CFG`                                            |
+| `TypedCreateReducerFn<P>`                | `action` в reducer                                                 |
+| `TypedCreateMachineFn<P, D, Extensions>` | union событий, deps эффектов и optional machine runtime extensions |
+| `TypedCreateEffectFn<P, D>`              | union событий и deps эффектов                                      |
 
 ## Alpha graph IR
 
@@ -357,40 +459,40 @@ const analysis = analyzeLiteFsmGraph(document, { strict: true });
 const snapshot: GraphSimulationSnapshot | undefined = createGraphSimulator(document).getSnapshot();
 ```
 
-| Тип                                  | Форма                                                                                                                                                                               |
-| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `LiteFsmGraphResult`                 | `{ document: LiteFsmGraphDocument; diagnostics: GraphDiagnostic[] }`                                                                                                                |
-| `LiteFsmGraphProjectResult`          | `LiteFsmGraphResult & { files: readonly LiteFsmGraphProjectFile[] }` для project graph compiler                                                                                     |
-| `GraphAnalysisResult`                | `{ diagnostics: GraphDiagnostic[] }` для semantic analyzer-а                                                                                                                        |
-| `LiteFsmGraphDocument`               | `{ version: "lite-fsm.graph/v1", source, machines, managers, diagnostics }`                                                                                                        |
-| `GraphLanguage`                      | `"ts" \| "tsx" \| "js" \| "jsx" \| "unknown"`                                                                                                                                     |
-| `GraphSource`                        | `{ filename?, language, hash?, kind?, entryFileName?, files? }`; project mode использует `kind: "project"` и file-aware metadata                                                     |
-| `GraphSourceFile`                    | `{ fileName, language, hash? }` для source files внутри project document                                                                                                            |
-| `LiteFsmGraphManager`                | manager metadata плюс `machineRefs: { key, machineId, loc? }[]`                                                                                                                     |
-| `LiteFsmGraphMachine`                | machine metadata плюс `kind`, `states`, `transitions`, `emissions`, `reducerCases`, `initialContextSummary`, `initialContextJson?`, `persistence?`                                  |
-| `GraphState`                         | state metadata: `key`, `kind`, `isInitial`, `isPublicActorState`, optional `loc`                                                                                                    |
-| `GraphStateRef` / `GraphEventRef`    | symbolic refs для source state и event type без привязки к runtime union                                                                                                            |
-| `GraphJsonValue/Object`              | JSON-safe values для graph IR, simulator payload и initial context overrides                                                                                                        |
-| `GraphTarget`                        | target union: concrete state, self, actor terminal, dynamic, blocked или unknown                                                                                                    |
-| `GraphTransition`                    | accepted event edge слоя `config` или `reducer`                                                                                                                                     |
-| `GraphReducerCase`                   | symbolic reducer branch: event, guard, state-write targets, confidence                                                                                                              |
-| `GraphEmission`                      | событие, которое может отправить effect при входе в state; не является transition                                                                                                   |
-| `GraphRouting`                       | routing emission-а: `default`, `unscoped`, `actor`, `group`, `tag` или `unknown`                                                                                                    |
-| `GraphRoutingTarget`                 | literal, array, `self.actorId/groupId/groupTag` или dynamic routing target                                                                                                          |
-| `GraphCondition`                     | captured guard/branch condition: text, kind и optional source location                                                                                                              |
-| `GraphValueSummary`                  | summary для initial context или dynamic values: `empty`, `literal`, `object`, `array`, `external`, `dynamic`, `unknown`                                                             |
-| `GraphDiagnostic`                    | `{ code, severity, message, machineId?, loc? }`                                                                                                                                     |
-| `SourceLocation`                     | `{ fileName?, start, end }`; `fileName` заполняется в project mode                                                                                                                  |
-| `MachineSelector`                    | `{ index }`, `{ id }`, `{ variableName }`, `{ exportName }`, `{ managerKey }` или `{ managerId, managerKey }`                                                                       |
-| `SelectMachineGraphResult`           | success `{ ok: true, machine, diagnostics }` или failure `{ ok: false, candidates, diagnostics }`                                                                                   |
-| `CompileLiteFsmGraphOptions`         | `{ filename?, language?, parser?: "static", maxMachines? }`                                                                                                                         |
-| `CompileLiteFsmGraphProjectOptions`  | `{ entryFileName, projectRoot?, host }`; host владеет чтением source и module resolution                                                                                            |
-| `LiteFsmGraphProjectHost`            | `{ readSource(fileName), resolveModule({ fromFileName, moduleSpecifier }) }`                                                                                                        |
+| Тип                                   | Форма                                                                                                                                                                               |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LiteFsmGraphResult`                  | `{ document: LiteFsmGraphDocument; diagnostics: GraphDiagnostic[] }`                                                                                                                |
+| `LiteFsmGraphProjectResult`           | `LiteFsmGraphResult & { files: readonly LiteFsmGraphProjectFile[] }` для project graph compiler                                                                                     |
+| `GraphAnalysisResult`                 | `{ diagnostics: GraphDiagnostic[] }` для semantic analyzer-а                                                                                                                        |
+| `LiteFsmGraphDocument`                | `{ version: "lite-fsm.graph/v1", source, machines, managers, diagnostics }`                                                                                                         |
+| `GraphLanguage`                       | `"ts" \| "tsx" \| "js" \| "jsx" \| "unknown"`                                                                                                                                       |
+| `GraphSource`                         | `{ filename?, language, hash?, kind?, entryFileName?, files? }`; project mode использует `kind: "project"` и file-aware metadata                                                    |
+| `GraphSourceFile`                     | `{ fileName, language, hash? }` для source files внутри project document                                                                                                            |
+| `LiteFsmGraphManager`                 | manager metadata плюс `machineRefs: { key, machineId, loc? }[]`                                                                                                                     |
+| `LiteFsmGraphMachine`                 | machine metadata плюс `kind`, `states`, `transitions`, `emissions`, `reducerCases`, `initialContextSummary`, `initialContextJson?`, `persistence?`                                  |
+| `GraphState`                          | state metadata: `key`, `kind`, `isInitial`, `isPublicActorState`, optional `loc`                                                                                                    |
+| `GraphStateRef` / `GraphEventRef`     | symbolic refs для source state и event type без привязки к runtime union                                                                                                            |
+| `GraphJsonValue/Object`               | JSON-safe values для graph IR, simulator payload и initial context overrides                                                                                                        |
+| `GraphTarget`                         | target union: concrete state, self, actor terminal, dynamic, blocked или unknown                                                                                                    |
+| `GraphTransition`                     | accepted event edge слоя `config` или `reducer`                                                                                                                                     |
+| `GraphReducerCase`                    | symbolic reducer branch: event, guard, state-write targets, confidence                                                                                                              |
+| `GraphEmission`                       | событие, которое может отправить effect при входе в state; не является transition                                                                                                   |
+| `GraphRouting`                        | routing emission-а: `default`, `unscoped`, `actor`, `group`, `tag` или `unknown`                                                                                                    |
+| `GraphRoutingTarget`                  | literal, array, `self.actorId/groupId/groupTag` или dynamic routing target                                                                                                          |
+| `GraphCondition`                      | captured guard/branch condition: text, kind и optional source location                                                                                                              |
+| `GraphValueSummary`                   | summary для initial context или dynamic values: `empty`, `literal`, `object`, `array`, `external`, `dynamic`, `unknown`                                                             |
+| `GraphDiagnostic`                     | `{ code, severity, message, machineId?, loc? }`                                                                                                                                     |
+| `SourceLocation`                      | `{ fileName?, start, end }`; `fileName` заполняется в project mode                                                                                                                  |
+| `MachineSelector`                     | `{ index }`, `{ id }`, `{ variableName }`, `{ exportName }`, `{ managerKey }` или `{ managerId, managerKey }`                                                                       |
+| `SelectMachineGraphResult`            | success `{ ok: true, machine, diagnostics }` или failure `{ ok: false, candidates, diagnostics }`                                                                                   |
+| `CompileLiteFsmGraphOptions`          | `{ filename?, language?, parser?: "static", maxMachines? }`                                                                                                                         |
+| `CompileLiteFsmGraphProjectOptions`   | `{ entryFileName, projectRoot?, host }`; host владеет чтением source и module resolution                                                                                            |
+| `LiteFsmGraphProjectHost`             | `{ readSource(fileName), resolveModule({ fromFileName, moduleSpecifier }) }`                                                                                                        |
 | `LiteFsmGraphProjectModuleResolution` | discriminated union `resolved`/`core`/`external`/`not-found`/`unsupported-extension`                                                                                                |
-| `LiteFsmGraphProjectFile`            | `{ fileName, language: "ts", roles, hash }`; roles: `entry`, `machine`, `barrel`, `helper`                                                                                         |
-| `AnalyzeLiteFsmGraphOptions`         | `{ rules?: GraphAnalysisRuleId[], strict?: boolean, scope?: GraphAnalysisScope }`                                                                                                   |
-| `GraphAnalysisScope`                 | `{ kind: "document" }`, `{ kind: "machine", machineId }` или `{ kind: "manager", managerId }`                                                                                       |
-| `GraphAnalysisRuleId`                | analyzer rule union: `unknown-target`, `unreachable-state`, `dead-end-state`, `actor-template-shape`, `reducer-config-consistency`, `effect-event-acceptance`, `wildcard-shadowing` |
+| `LiteFsmGraphProjectFile`             | `{ fileName, language: "ts", roles, hash }`; roles: `entry`, `machine`, `barrel`, `helper`                                                                                          |
+| `AnalyzeLiteFsmGraphOptions`          | `{ rules?: GraphAnalysisRuleId[], strict?: boolean, scope?: GraphAnalysisScope }`                                                                                                   |
+| `GraphAnalysisScope`                  | `{ kind: "document" }`, `{ kind: "machine", machineId }` или `{ kind: "manager", managerId }`                                                                                       |
+| `GraphAnalysisRuleId`                 | analyzer rule union: `unknown-target`, `unreachable-state`, `dead-end-state`, `actor-template-shape`, `reducer-config-consistency`, `effect-event-acceptance`, `wildcard-shadowing` |
 
 `LiteFsmGraphDocument.diagnostics` содержит compiler diagnostics. Diagnostics analyzer-а возвращаются отдельно из `GraphAnalysisResult` и имеют коды `LFG_ANALYZER_*`.
 
@@ -417,14 +519,14 @@ type LiteFsmProjectGraphExportDocument = {
 };
 ```
 
-| Тип / поле        | Назначение                                                                                      |
-| ----------------- | ----------------------------------------------------------------------------------------------- |
-| `entry.path`      | entrypoint path relative to CLI cwd, когда возможно                                             |
-| `entry.tsconfigPath` | присутствует только если CLI использовал explicit или nearest tsconfig                       |
-| `graph`           | ровно `compileLiteFsmGraphProject(...).document`; `graph.diagnostics` хранит `LFG_*` diagnostics |
-| `files`           | ровно `compileLiteFsmGraphProject(...).files`                                                    |
-| `diagnostics`     | только CLI diagnostics `LFC_*`; graph diagnostics печатаются командой, но в JSON остаются внутри `graph.diagnostics` |
-| `sources`         | optional `--include-source` bundle; порядок и metadata совпадают с `files`, `text` не входит в `graph` |
+| Тип / поле           | Назначение                                                                                                           |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `entry.path`         | entrypoint path relative to CLI cwd, когда возможно                                                                  |
+| `entry.tsconfigPath` | присутствует только если CLI использовал explicit или nearest tsconfig                                               |
+| `graph`              | ровно `compileLiteFsmGraphProject(...).document`; `graph.diagnostics` хранит `LFG_*` diagnostics                     |
+| `files`              | ровно `compileLiteFsmGraphProject(...).files`                                                                        |
+| `diagnostics`        | только CLI diagnostics `LFC_*`; graph diagnostics печатаются командой, но в JSON остаются внутри `graph.diagnostics` |
+| `sources`            | optional `--include-source` bundle; порядок и metadata совпадают с `files`, `text` не входит в `graph`               |
 
 `CliDiagnostic` имеет форму `{ code, severity, message, file?, loc?, hint? }`, где `severity` — `"info" | "warning" | "error"`, а code в MVP: `LFC_INVALID_OPTIONS`, `LFC_TSCONFIG_NOT_FOUND`, `LFC_TSCONFIG_INVALID`, `LFC_GRAPH_PROJECT_FAILED`, `LFC_NO_MACHINES_EXPORTED`, `LFC_SOURCE_BUNDLE_FILE_UNREADABLE`, `LFC_VISUALIZER_STATIC_MISSING`, `LFC_VISUALIZER_PORT_UNAVAILABLE`, `LFC_VISUALIZER_SERVER_FAILED`, `LFC_VISUALIZER_OPEN_FAILED`, `LFC_WRITE_FAILED`.
 
@@ -463,9 +565,9 @@ type VisualizeApiError = {
 };
 ```
 
-| Route                                    | Contract                                                                                 |
-| ---------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `GET /api/session?token=...`             | возвращает current session metadata и `LiteFsmProjectGraphExportDocument` без source text |
+| Route                                    | Contract                                                                                         |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `GET /api/session?token=...`             | возвращает current session metadata и `LiteFsmProjectGraphExportDocument` без source text        |
 | `GET /api/source?token=...&fileName=...` | возвращает source только для `exportDocument.files[].fileName`; hash совместим с graph file hash |
 
 `/api/source` отклоняет absolute paths, `..`, encoded traversal и файлы вне allowlist. `409 source-stale` означает, что текущий file text уже не совпадает с `exportDocument.files[].hash`.
@@ -474,18 +576,18 @@ type VisualizeApiError = {
 
 `@lite-fsm/graph/simulator` экспортирует типы headless simulation runtime. Они не зависят от DOM, React или app modules.
 
-| Тип                               | Форма/назначение                                                                                                            |
-| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `CreateGraphSimulatorOptions`     | `scope`, `actorMode`, `effectMode`, branch/evaluation policies, initial state/context overrides                            |
-| `GraphSimulationScope`            | `{ kind: "document" }`, `{ kind: "manager", managerId }` или `{ kind: "machines", machineIds }`                            |
-| `GraphSimulationEvent`            | `{ type: string; payload?: GraphJsonValue; meta?: GraphSimulationEventMeta }`                                               |
-| `GraphSimulationSliceRef`         | domain, actorTemplate или future actor ref                                                                                  |
-| `GraphSimulationSnapshot`         | immutable текущие slices, slice indexes, diagnostics и `GraphSimulationTimeline`                                            |
-| `GraphAvailableTransition`        | accepted/effective transition candidate с `canApply`, layer, target, guard и confidence                                    |
-| `GraphSuggestedEmission`          | manual effect emission candidate последнего committed step                                                                  |
-| `GraphSendResult`                 | success `{ ok: true, snapshot, step }` или controlled failure `{ ok: false, reason, snapshot?, pendingChoice?, diagnostics }` |
-| `GraphSimulationPendingChoice`    | pending branch choice для `choose(...)`, keyed by `sliceId`                                                                 |
-| `GraphEvaluationPolicy`           | optional symbolic hooks `evaluateTransition` и `reduceContext`; default policy не исполняет user code                      |
+| Тип                            | Форма/назначение                                                                                                              |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| `CreateGraphSimulatorOptions`  | `scope`, `actorMode`, `effectMode`, branch/evaluation policies, initial state/context overrides                               |
+| `GraphSimulationScope`         | `{ kind: "document" }`, `{ kind: "manager", managerId }` или `{ kind: "machines", machineIds }`                               |
+| `GraphSimulationEvent`         | `{ type: string; payload?: GraphJsonValue; meta?: GraphSimulationEventMeta }`                                                 |
+| `GraphSimulationSliceRef`      | domain, actorTemplate или future actor ref                                                                                    |
+| `GraphSimulationSnapshot`      | immutable текущие slices, slice indexes, diagnostics и `GraphSimulationTimeline`                                              |
+| `GraphAvailableTransition`     | accepted/effective transition candidate с `canApply`, layer, target, guard и confidence                                       |
+| `GraphSuggestedEmission`       | manual effect emission candidate последнего committed step                                                                    |
+| `GraphSendResult`              | success `{ ok: true, snapshot, step }` или controlled failure `{ ok: false, reason, snapshot?, pendingChoice?, diagnostics }` |
+| `GraphSimulationPendingChoice` | pending branch choice для `choose(...)`, keyed by `sliceId`                                                                   |
+| `GraphEvaluationPolicy`        | optional symbolic hooks `evaluateTransition` и `reduceContext`; default policy не исполняет user code                         |
 
 `sendFromTransition` принимает `payload`, но не принимает routing `meta`: routing override задается только через обычный `send({ event })` или через IR routing у `sendFromEmission`.
 
@@ -493,21 +595,21 @@ type VisualizeApiError = {
 
 `@lite-fsm/graph/view-model` типизирует read-only данные для visualizer-а. Эти типы не содержат React, DOM, CodeMirror, layout или simulator runtime lifecycle.
 
-| Тип                                          | Назначение                                                                                         |
-| -------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `GraphVisualizerModel`                       | root projection: machines, managers, topics, relations, diagnostics, row mappings, workbench models |
-| `GraphMachineSummary` / `GraphManagerSummary` | L1 inventory summaries с counts, topic types, source anchors и diagnostic ids                       |
-| `GraphTopicSummary`                          | L2 event catalog: producers, config consumers, reducer branches, routing kinds/values                |
-| `GraphMachineWorkbenchModel`                 | L3 state blocks, global behavior, rows, diagnostics и source anchors одной machine                   |
-| `GraphWorkbenchRow`                          | union строк `config`, `reducer`, `effect`, `diagnostic`, `unknown`                                  |
-| `GraphTargetView`                            | display-safe target: `state`, `self`, `terminal`, `dynamic`, `blocked`, `unknown`                    |
-| `GraphSourceAnchor`                          | read-only source binding; `editable` всегда `false`                                                 |
-| `GraphDiagnosticAnchor`                      | build-local diagnostic id + origin + optional graph/source binding                                   |
-| `GraphVisualizerRowMappingIndex`             | mapping transition/emission identifiers к `rowId`, включая folded reducer rows                       |
-| `GraphVisualizerSimulationOverlayInput`      | готовые simulation ids/flags для подсветки rows без запуска simulator-а                              |
-| `MachineFlowModel`                           | controlled `missing-machine` или ready semantic graph одной machine                                  |
-| `MachineFlowNode`                            | state/wildcard/effect-source/synthetic target node с semantic id, role, badges, anchors и stats      |
-| `MachineFlowEdgeGroup`                       | grouped transition/emission edge с semantic refs, row refs, producer refs и diagnostics              |
+| Тип                                            | Назначение                                                                                                                                                         |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GraphVisualizerModel`                         | root projection: machines, managers, topics, relations, diagnostics, row mappings, workbench models                                                                |
+| `GraphMachineSummary` / `GraphManagerSummary`  | L1 inventory summaries с counts, topic types, source anchors и diagnostic ids                                                                                      |
+| `GraphTopicSummary`                            | L2 event catalog: producers, config consumers, reducer branches, routing kinds/values                                                                              |
+| `GraphMachineWorkbenchModel`                   | L3 state blocks, global behavior, rows, diagnostics и source anchors одной machine                                                                                 |
+| `GraphWorkbenchRow`                            | union строк `config`, `reducer`, `effect`, `diagnostic`, `unknown`                                                                                                 |
+| `GraphTargetView`                              | display-safe target: `state`, `self`, `terminal`, `dynamic`, `blocked`, `unknown`                                                                                  |
+| `GraphSourceAnchor`                            | read-only source binding; `editable` всегда `false`                                                                                                                |
+| `GraphDiagnosticAnchor`                        | build-local diagnostic id + origin + optional graph/source binding                                                                                                 |
+| `GraphVisualizerRowMappingIndex`               | mapping transition/emission identifiers к `rowId`, включая folded reducer rows                                                                                     |
+| `GraphVisualizerSimulationOverlayInput`        | готовые simulation ids/flags для подсветки rows без запуска simulator-а                                                                                            |
+| `MachineFlowModel`                             | controlled `missing-machine` или ready semantic graph одной machine                                                                                                |
+| `MachineFlowNode`                              | state/wildcard/effect-source/synthetic target node с semantic id, role, badges, anchors и stats                                                                    |
+| `MachineFlowEdgeGroup`                         | grouped transition/emission edge с semantic refs, row refs, producer refs и diagnostics                                                                            |
 | `MachineFlowRowRef` / `MachineFlowProducerRef` | compact source metadata для edge popover/detail panel без восстановления semantics в renderer; config/reducer row refs хранят `sourceStateKey` для wildcard labels |
 
 `GraphConfigRow.foldedReducerTransitionIds` показывает reducer branches, свернутые в config row. Для команд visualizer app использует `GraphConfigRow.transitionId` или `GraphReducerRow.transitionId`; ambiguous/no-match mapping виден через `GraphVisualizerRowMappingIndex.diagnostics`.
@@ -592,17 +694,17 @@ export type AppManager = IMachineManager<Store, AppEvent>;
 
 ## Подводные камни
 
-| Камень                     | Правило                                                               |
-| -------------------------- | --------------------------------------------------------------------- |
-| расширенный `initialState` | используйте literal / `as const`, иначе state станет `string`         |
-| потерянные derived events  | типизируйте через `MachineConfig` или typed factory                   |
-| `FSMEvent<"X", undefined>` | payload обязателен: `{ type: "X", payload: undefined }`               |
-| wildcard target            | `"*"` — только source key, не target и не `initialState`              |
-| actor `__INIT`             | system state, не public state и не effect key                         |
+| Камень                     | Правило                                                                                        |
+| -------------------------- | ---------------------------------------------------------------------------------------------- |
+| расширенный `initialState` | используйте literal / `as const`, иначе state станет `string`                                  |
+| потерянные derived events  | типизируйте через `MachineConfig` или typed factory                                            |
+| `FSMEvent<"X", undefined>` | payload обязателен: `{ type: "X", payload: undefined }`                                        |
+| wildcard target            | `"*"` — только source key, не target и не `initialState`                                       |
+| actor `__INIT`             | system state, не public state и не effect key                                                  |
 | runtime actors в snapshot  | `DehydrateOptions` принимает только ключи доменных машин и ключи акторов, сохраняемых в снимок |
-| `MachineManager({})`       | events → `never`, deps → `{}`, state → `{}`                           |
-| тип action в middleware    | используйте `ManagerAction<P>`, если нужен routing `meta`             |
-| `TypedUseSelectorHook`     | generic `S` — store config, не computed state                         |
+| `MachineManager({})`       | events → `never`, deps → `{}`, state → `{}`                                                    |
+| тип action в middleware    | используйте `ManagerAction<P>`, если нужен routing `meta`                                      |
+| `TypedUseSelectorHook`     | generic `S` — store config, не computed state                                                  |
 
 ## Команды
 

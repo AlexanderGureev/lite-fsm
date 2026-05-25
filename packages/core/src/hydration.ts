@@ -19,7 +19,11 @@ import type {
 import type { SidecarState } from "./sidecar";
 import { IS_DEV, LiteFsmError } from "./utils";
 
-type SnapshotEnvelope = { schemaVersion?: number; machines: Record<string, unknown> };
+export type SnapshotEnvelope = {
+  schemaVersion?: number;
+  machines: Record<string, unknown>;
+  storage?: Record<string, unknown>;
+};
 type MachineKey<S extends MachineStore> = Extract<keyof S, string>;
 type RuntimeConfig = { persistence?: unknown; hydrate?: unknown; dehydrate?: unknown };
 type ActorSlice = PublicActorSlice<any, AnyRecord>;
@@ -63,9 +67,16 @@ export const assertSnapshotEnvelope = (snapshot: unknown): SnapshotEnvelope => {
       "[lite-fsm] hydrate: snapshot.machines must be an object.",
     );
   }
+  if (hasOwn(snapshot, "storage") && snapshot.storage !== undefined && !isObjectRecord(snapshot.storage)) {
+    throw new LiteFsmError(
+      "LITE_FSM_INVALID_HYDRATION_ENVELOPE",
+      "[lite-fsm] hydrate: snapshot.storage must be an object.",
+    );
+  }
   return {
     schemaVersion: typeof snapshot.schemaVersion === "number" ? snapshot.schemaVersion : undefined,
     machines: snapshot.machines,
+    storage: snapshot.storage as Record<string, unknown> | undefined,
   };
 };
 

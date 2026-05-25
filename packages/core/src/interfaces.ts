@@ -1,12 +1,14 @@
 import {
   AnyEvent,
   AnyRecord,
+  CoreActionMeta,
   DefaultDeps,
   GenerateSpawnIdFn,
   MachineConfig,
   MachineManagerDehydrateFn,
   MachineManagerRuntimeSnapshot,
   MachineManagerSnapshot,
+  MachineRuntimeMetadata,
   MachineStore,
   MachinesState,
   Reducer,
@@ -20,39 +22,82 @@ import {
   WILDCARD,
   ManagerAction,
 } from "./types";
+import type {
+  LiteFsmPlugin,
+  ManagerActionMeta,
+  PluginManagerExtensions,
+  ManagerTransitionEvents,
+  PluginDeps,
+  ScopedPluginDepsOf,
+} from "./plugin";
 
 type UnionToIntersection<U> = (U extends unknown ? (value: U) => void : never) extends (value: infer I) => void
   ? I
   : never;
 
+type Prettify<T> = { [K in keyof T]: T[K] };
+
+type MachineRuntimeOwnedDependencyKeys<E> =
+  | (MachineRuntimeMetadata<E> extends { readonly effectDeps: infer Deps extends object } ? keyof Deps : never)
+  | (MachineRuntimeMetadata<E> extends { readonly reactionDeps: infer Deps extends object } ? keyof Deps : never);
+
+type MachineDeclaredDependencies<E> = E extends { readonly __liteFsmDependencies?: infer D extends AnyRecord } ? D : never;
+
 type ConfigDependencies<E> =
-  E extends MachineConfig<infer C, infer T, infer P, infer D, infer Snapshot>
-    ? [C, T, P, D, Snapshot] extends [object, AnyRecord, AnyEvent, AnyRecord, unknown]
-      ? D
-      : never
-    : never;
+  MachineDeclaredDependencies<E> extends never
+    ? E extends MachineConfig<infer C, infer T, infer P, infer D, infer Snapshot>
+      ? [C, T, P, D, Snapshot] extends [object, AnyRecord, AnyEvent, AnyRecord, unknown]
+        ? D
+        : never
+      : Omit<E, "storage"> extends MachineConfig<infer C, infer T, infer P, infer D, infer Snapshot>
+        ? [C, T, P, D, Snapshot] extends [object, AnyRecord, AnyEvent, AnyRecord, unknown]
+          ? D
+          : never
+        : never
+    : MachineDeclaredDependencies<E>;
 
-type EffectFunctionDependencies<F> =
-  NonNullable<F> extends (deps: infer D) => unknown ? Omit<D, keyof DefaultDeps | "self"> : {};
+type StripScopedDependencies<D, Plugins extends readonly LiteFsmPlugin[], E> = Prettify<
+  Omit<
+    D,
+    keyof DefaultDeps | "self" | keyof ScopedPluginDepsOf<D> | keyof PluginDeps<Plugins> | MachineRuntimeOwnedDependencyKeys<E>
+  >
+>;
 
-type EffectDependencies<E> = "effects" extends keyof E
+type EffectFunctionDependencies<F, Plugins extends readonly LiteFsmPlugin[], E> =
+  NonNullable<F> extends (deps: infer D) => unknown
+    ? StripScopedDependencies<D, Plugins, E>
+    : {};
+
+type EffectDependencies<E, Plugins extends readonly LiteFsmPlugin[]> = "effects" extends keyof E
   ? keyof NonNullable<E["effects"]> extends never
     ? {}
     : [ConfigDependencies<E>] extends [never]
       ? UnionToIntersection<
           {
-            [key in keyof NonNullable<E["effects"]>]: EffectFunctionDependencies<NonNullable<E["effects"]>[key]>;
+            [key in keyof NonNullable<E["effects"]>]: EffectFunctionDependencies<
+              NonNullable<E["effects"]>[key],
+              Plugins,
+              E
+            >;
           }[keyof NonNullable<E["effects"]>]
         >
-      : ConfigDependencies<E>
+      : StripScopedDependencies<ConfigDependencies<E>, Plugins, E>
   : {};
 
-export type MachineDependencies<S extends MachineStore> = keyof S extends never
+export type MachineDependencies<
+  S extends MachineStore,
+  Plugins extends readonly LiteFsmPlugin[] = readonly [],
+> = keyof S extends never
   ? {}
-  : UnionToIntersection<
-      {
-        [key in keyof S]: EffectDependencies<S[key]>;
-      }[keyof S]
+  : Prettify<
+      Omit<
+        UnionToIntersection<
+          {
+            [key in keyof S]: EffectDependencies<S[key], Plugins>;
+          }[keyof S]
+        >,
+        keyof PluginDeps<Plugins>
+      >
     >;
 
 type EventFromReducer<M> = M extends { reducer: MachineConfig<infer C, infer T, infer P, infer D>["reducer"] }
@@ -68,24 +113,34 @@ type EventFromMachineConfig<M> =
       : never
     : never;
 
+type EventFromRuntimeMetadata<M> =
+  MachineRuntimeMetadata<M> extends { readonly publicEvents: infer P extends AnyEvent } ? P : never;
+
 export type MachineEvents<S extends MachineStore> = {
-  [key in keyof S]: EventFromReducer<S[key]> extends never
-    ? EventFromMachineConfig<S[key]> extends never
-      ? AnyEvent
-      : EventFromMachineConfig<S[key]>
-    : EventFromReducer<S[key]>;
+  [key in keyof S]: EventFromRuntimeMetadata<S[key]> extends never
+    ? EventFromReducer<S[key]> extends never
+      ? EventFromMachineConfig<S[key]> extends never
+        ? AnyEvent
+        : EventFromMachineConfig<S[key]>
+      : EventFromReducer<S[key]>
+    : EventFromRuntimeMetadata<S[key]>;
 }[keyof S];
 
-export type MachineManagerOptions<S extends MachineStore, P extends AnyEvent = MachineEvents<S>> = {
+export type MachineManagerOptions<
+  S extends MachineStore,
+  P extends AnyEvent = MachineEvents<S>,
+  Plugins extends readonly LiteFsmPlugin[] = readonly LiteFsmPlugin[],
+> = {
   onError?: (err: unknown) => void;
-  middleware?: Middleware<MachinesState<S>, P>[];
+  middleware?: Middleware<MachinesState<S>, ManagerTransitionEvents<P, Plugins>, ManagerActionMeta<Plugins>>[];
   snapshot?: MachineManagerSnapshot<S>;
   schemaVersion?: number;
   onUnknownMachineKey?: (key: string, context: UnknownMachineKeyContext) => void;
   onSchemaVersionMismatch?: (incoming: number | undefined, current: number | undefined) => void;
   originId?: string;
-  generateActorId?: GenerateSpawnIdFn<P>;
-  generateGroupId?: GenerateSpawnIdFn<P>;
+  generateActorId?: GenerateSpawnIdFn<ManagerTransitionEvents<P, Plugins>>;
+  generateGroupId?: GenerateSpawnIdFn<ManagerTransitionEvents<P, Plugins>>;
+  plugins?: readonly [...Plugins];
 };
 
 export type IMachine<
@@ -103,16 +158,33 @@ export type IMachine<
   config: C;
 };
 
-export type IMachineManager<S extends MachineStore, P extends AnyEvent = MachineEvents<S>> = {
-  transition: (payload: ManagerAction<P>) => ManagerAction<P>;
+export type IMachineManager<
+  S extends MachineStore,
+  P extends AnyEvent = MachineEvents<S>,
+  Meta extends object = CoreActionMeta,
+  Plugins extends readonly LiteFsmPlugin[] = readonly [],
+> = {
+  transition: (payload: ManagerAction<P, Meta>) => ManagerAction<P, Meta>;
   getState: () => MachinesState<S>;
   getSnapshot: () => MachineManagerRuntimeSnapshot<S>;
   getHydratedState: (snapshot: MachineManagerSnapshot<S>, opts?: HydratePreviewOptions<S>) => MachinesState<S>;
   hydrate: (snapshot: MachineManagerSnapshot<S>, opts?: HydrateOptions) => void;
   dehydrate: MachineManagerDehydrateFn<S>;
-  onTransition: (cb: TransitionSubscriber<S, P>) => () => void;
+  onTransition: (cb: TransitionSubscriber<S, P, Meta>) => () => void;
   replaceReducer: (
-    cb: (reducer: Reducer<MachinesState<S>, ManagerAction<P>>) => Reducer<MachinesState<S>, ManagerAction<P>>,
+    cb: (
+      reducer: Reducer<MachinesState<S>, ManagerAction<P, Meta>>,
+    ) => Reducer<MachinesState<S>, ManagerAction<P, Meta>>,
   ) => void;
-  setDependencies: (d: MachineDependencies<S> | ((deps: MachineDependencies<S>) => MachineDependencies<S>)) => void;
+  setDependencies: {
+    (deps: MachineDependencies<S, Plugins>): void;
+    (updater: (deps: MachineDependencies<S, Plugins>) => MachineDependencies<S, Plugins>): void;
+  };
 };
+
+export type ManagerFromPlugins<
+  S extends MachineStore,
+  AppEvents extends AnyEvent,
+  Plugins extends readonly LiteFsmPlugin[],
+> = IMachineManager<S, ManagerTransitionEvents<AppEvents, Plugins>, ManagerActionMeta<Plugins>, Plugins> &
+  PluginManagerExtensions<S, AppEvents, Plugins>;

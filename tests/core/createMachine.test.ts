@@ -89,6 +89,36 @@ describe("createMachine — stateful-обёртка", () => {
       expect(result).toEqual({ type: "GO" });
     });
 
+    it("storage instance работает как отсутствие storage", () => {
+      const implicit = createMachine({
+        config: { IDLE: { GO: "ACTIVE" }, ACTIVE: {} },
+        initialState: "IDLE",
+        initialContext: { count: 0 },
+      });
+      const explicit = defineMachine<{ type: "GO" }>().create({
+        storage: "instance",
+        config: { IDLE: { GO: "ACTIVE" }, ACTIVE: {} },
+        initialState: "IDLE",
+        initialContext: { count: 0 },
+      });
+
+      implicit.transition({ type: "GO" });
+      explicit.transition({ type: "GO" });
+
+      expect(explicit.getState()).toEqual(implicit.getState());
+    });
+
+    it("standalone Machine отклоняет storage, отличный от instance", () => {
+      expect(() =>
+        createMachine({
+          storage: "custom",
+          config: { IDLE: {} },
+          initialState: "IDLE",
+          initialContext: {},
+        } as never),
+      ).toThrow("[lite-fsm] standalone Machine supports only storage kind 'instance'.");
+    });
+
     it("reducer без return без immerMiddleware бросает понятную ошибку", () => {
       const machine = createMachine({
         config: { IDLE: { GO: "ACTIVE" }, ACTIVE: {} },
@@ -159,12 +189,7 @@ describe("createMachine — stateful-обёртка", () => {
       machine.transition({ type: "E1" });
 
       await vi.waitFor(() => {
-        expect(trace).toEqual([
-          "in:LEVEL1:LEVEL1",
-          "in:LEVEL2:LEVEL2",
-          "out:LEVEL2:DONE",
-          "out:LEVEL1:DONE",
-        ]);
+        expect(trace).toEqual(["in:LEVEL1:LEVEL1", "in:LEVEL2:LEVEL2", "out:LEVEL2:DONE", "out:LEVEL1:DONE"]);
       });
       expect(machine.getState().state).toBe("DONE");
     });
@@ -473,9 +498,9 @@ describe("createMachine — stateful-обёртка", () => {
     });
 
     it("кастомный middleware с маркером разрешает void reducer без подключения immer", () => {
-      const allowVoidReducer = (((_api) => (next) => (action) => next(action)) as Middleware<any, any> & {
+      const allowVoidReducer = ((_api) => (next) => (action) => next(action)) as Middleware<any, any> & {
         [VOID_REDUCER_MIDDLEWARE_MARKER]: true;
-      });
+      };
       allowVoidReducer[VOID_REDUCER_MIDDLEWARE_MARKER] = true;
 
       const machine = createMachine({
@@ -591,9 +616,11 @@ describe("createMachine — stateful-обёртка", () => {
       let resolved: boolean | null = null;
 
       machine.addMiddleware((api) => {
-        api.condition((a) => a.type === "B").then((v) => {
-          resolved = v;
-        });
+        api
+          .condition((a) => a.type === "B")
+          .then((v) => {
+            resolved = v;
+          });
         return (next) => (action) => next(action);
       });
 
@@ -679,8 +706,8 @@ describe("createMachine — stateful-обёртка", () => {
         trace.push(`sub:${action.payload?.amount}:${String(action.payload?.tagged)}`);
       });
 
-      machine.addMiddleware(() => (next) => (action: Action) =>
-        next({ ...action, payload: { amount: 3, tagged: true } }),
+      machine.addMiddleware(
+        () => (next) => (action: Action) => next({ ...action, payload: { amount: 3, tagged: true } }),
       );
 
       const result = machine.transition({ type: "INC" });

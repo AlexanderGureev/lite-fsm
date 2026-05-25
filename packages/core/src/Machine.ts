@@ -15,15 +15,7 @@ import {
   Subscriber,
   TransitionNextState,
 } from "./types";
-import {
-  compose,
-  deepFreeze,
-  IS_DEV,
-  LiteFsmError,
-  supportsVoidReducer,
-  VOID_REDUCER_ERROR,
-  WILDCARD,
-} from "./utils";
+import { compose, deepFreeze, IS_DEV, LiteFsmError, supportsVoidReducer, VOID_REDUCER_ERROR, WILDCARD } from "./utils";
 
 type RuntimeOptions = {
   allowVoidReducer?: () => boolean;
@@ -47,6 +39,13 @@ export const CreateMachine = <
   cfg: MachineConfig<C, T, P, D, Snapshot>,
   runtimeOptions: RuntimeOptions = {},
 ) => {
+  if (cfg.storage !== undefined && cfg.storage !== "instance") {
+    throw new LiteFsmError(
+      "LITE_FSM_UNKNOWN_STORAGE_KIND",
+      `[lite-fsm] standalone Machine supports only storage kind 'instance'.`,
+    );
+  }
+
   const isActorTemplate = isActorTemplateConfig(cfg);
 
   return {

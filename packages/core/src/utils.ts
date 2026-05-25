@@ -42,11 +42,30 @@ export const supportsVoidReducer = (middleware: unknown): boolean =>
 
 export type LiteFsmErrorCode =
   | "LITE_FSM_ACTOR_DISPOSED"
+  | "LITE_FSM_DUPLICATE_MANAGER_EXTENSION_KEY"
+  | "LITE_FSM_DUPLICATE_PLUGIN"
+  | "LITE_FSM_DUPLICATE_ROUTE_META_KEY"
+  | "LITE_FSM_DUPLICATE_SCOPED_EXTENSION_KEY"
+  | "LITE_FSM_DUPLICATE_STORAGE_KIND"
   | "LITE_FSM_INVALID_ACTOR_CONFIG"
   | "LITE_FSM_INVALID_ACTOR_SLICE"
   | "LITE_FSM_INVALID_GENERATED_ID"
   | "LITE_FSM_INVALID_HYDRATION_ENVELOPE"
   | "LITE_FSM_INVALID_OPTIONS"
+  | "LITE_FSM_INVALID_ROUTE_RESOLVER_RESULT"
+  | "LITE_FSM_INVALID_SCOPED_EXTENSION"
+  | "LITE_FSM_INVALID_STORAGE_CONFIG"
+  | "LITE_FSM_INVALID_STORAGE_RUNTIME"
+  | "LITE_FSM_INVALID_STORAGE_SNAPSHOT"
+  | "LITE_FSM_MANAGER_EXTENSION_CORE_KEY"
+  | "LITE_FSM_MISSING_DEFAULT_STORAGE_KIND"
+  | "LITE_FSM_MISSING_ROUTE_META_RESOLVER"
+  | "LITE_FSM_PLUGIN_REGISTRY_CLOSED"
+  | "LITE_FSM_SCOPED_EXTENSION_CORE_KEY"
+  | "LITE_FSM_SCOPED_EXTENSION_OVERRIDE"
+  | "LITE_FSM_SCOPED_EXTENSION_UNOWNED_KEY"
+  | "LITE_FSM_UNSUPPORTED_STORAGE_SNAPSHOT"
+  | "LITE_FSM_UNKNOWN_STORAGE_KIND"
   | "LITE_FSM_STANDALONE_ACTOR_TEMPLATE";
 
 export class LiteFsmError extends Error {
@@ -69,7 +88,9 @@ export const validateGeneratedId = (id: unknown, kind: "actor" | "group"): strin
   return id;
 };
 
-export const isSystemAction = (action: { type?: unknown }): action is { type: `${typeof LITE_FSM_SYSTEM_ACTION_PREFIX}${string}` } =>
+export const isSystemAction = (action: {
+  type?: unknown;
+}): action is { type: `${typeof LITE_FSM_SYSTEM_ACTION_PREFIX}${string}` } =>
   typeof action.type === "string" && action.type.startsWith(LITE_FSM_SYSTEM_ACTION_PREFIX);
 
 /* v8 ignore next 2 */
