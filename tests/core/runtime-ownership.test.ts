@@ -7,7 +7,7 @@ import {
 import type { NormalizedPlugin } from "@lite-fsm/core/internal/plugin";
 import { instanceStorageRuntime } from "@lite-fsm/core/internal/runtime/instance/storage";
 import type { StorageRuntime } from "@lite-fsm/core/internal/runtime/kernel/storage";
-import type { FSMEvent, MachineConfig, ManagerAction, Middleware } from "@lite-fsm/core";
+import { LiteFsmError, type FSMEvent, type MachineConfig, type ManagerAction, type Middleware } from "@lite-fsm/core";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
@@ -293,7 +293,7 @@ describe("storage runtime ownership", () => {
     });
   });
 
-  it("nested dispatch из storage reaction не перетирает touched runtimes внешнего dispatch", () => {
+  it("nested dispatch из storage reaction запрещается до subscribers", () => {
     const effects: string[] = [];
     const runtimeA = createNestedRuntime(
       "a",
@@ -318,18 +318,19 @@ describe("storage runtime ownership", () => {
       b: createNestedMachine("b"),
     });
 
-    manager.transition({ type: "OUTER" });
+    let caught: unknown;
+    try {
+      manager.transition({ type: "OUTER" });
+    } catch (error) {
+      caught = error;
+    }
 
-    expect(effects).toEqual([
-      "reaction:a:OUTER",
-      "reaction:a:INNER",
-      "a:INNER",
-      "reaction:b:OUTER",
-      "a:OUTER",
-      "b:OUTER",
-    ]);
+    expect(caught).toBeInstanceOf(LiteFsmError);
+    expect((caught as LiteFsmError).code).toBe("LITE_FSM_REENTRANT_TRANSITION_FORBIDDEN");
+    expect((caught as LiteFsmError).message).toContain("storage.reactions");
+    expect(effects).toEqual(["reaction:a:OUTER"]);
     expect(manager.getState()).toEqual({
-      a: { state: "READY", context: { count: 2 } },
+      a: { state: "READY", context: { count: 1 } },
       b: { state: "READY", context: { count: 1 } },
     });
   });

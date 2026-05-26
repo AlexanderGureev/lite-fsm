@@ -129,6 +129,45 @@ type PluginRouteMetaContext<RouteMetaValues extends object, Events extends AnyEv
     : never;
 };
 
+type IsAny<Value> = 0 extends 1 & Value ? true : false;
+
+type UnknownIfUnannotated<Value> = IsAny<Value> extends true ? unknown : [Value] extends [never] ? unknown : Value;
+
+type RouteMetaValue<Resolver> = Resolver extends (value: infer Value, ...args: any[]) => unknown
+  ? UnknownIfUnannotated<Value>
+  : unknown;
+
+type UnionToIntersection<Union> = (Union extends unknown ? (value: Union) => void : never) extends (
+  value: infer Intersection,
+) => void
+  ? Intersection
+  : never;
+
+type StorageRouteMetaRequirements<Definition> = Definition extends {
+  readonly storage?: infer Storage extends readonly unknown[];
+}
+  ? UnionToIntersection<
+      Storage[number] extends LiteFsmStorageRuntimeDefinition<any, any, infer RouteMetaRequirements>
+        ? RouteMetaRequirements
+        : never
+    >
+  : {};
+
+type RequiredRouteMetaSection<
+  RouteMetaResolvers extends object,
+  RouteMetaRequirements extends object,
+> = keyof RouteMetaRequirements extends never
+  ? {}
+  : {
+      readonly routeMeta: {
+        readonly [Key in keyof RouteMetaRequirements & string]: Key extends keyof RouteMetaResolvers
+          ? RouteMetaValue<RouteMetaResolvers[Key]> extends RouteMetaRequirements[Key]
+            ? unknown
+            : never
+          : never;
+      };
+    };
+
 type PluginRouteMetaSection<
   RouteMetaValues extends object,
   RouteMetaResolvers extends object,
@@ -181,6 +220,7 @@ type PluginDefinitionInput<
   Definition extends PluginDefinitionBase<PluginEvents, HostEvents>,
 > = Definition &
   PluginRouteMetaSection<RouteMetaValues, RouteMetaResolvers, PluginObservedEvents<PluginEvents, HostEvents>> &
+  RequiredRouteMetaSection<RouteMetaResolvers, StorageRouteMetaRequirements<Definition>> &
   RejectUnknownKeys<
     Definition &
       PluginRouteMetaSection<RouteMetaValues, RouteMetaResolvers, PluginObservedEvents<PluginEvents, HostEvents>>

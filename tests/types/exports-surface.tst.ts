@@ -541,6 +541,8 @@ describe("canary поверхности экспорта core-типов", () =>
         keyof StorageRuntimeExtension,
         | "input"
         | "internalEvents"
+        | "observedEvents"
+        | "routeMeta"
         | "reducerContext"
         | "effectDeps"
         | "reactionDeps"
@@ -617,18 +619,14 @@ describe("canary поверхности экспорта core-типов", () =>
     type _EffectInvocation = Assert<
       Equal<StorageEffectInvocationContext<CacheStorageExtension>["invocation"], { readonly key: string }>
     >;
-    type _DehydrateState = Assert<
-      Equal<StorageDehydrateContext<CacheStorageExtension>["state"], { commits: number }>
-    >;
+    type _DehydrateState = Assert<Equal<StorageDehydrateContext<CacheStorageExtension>["state"], { commits: number }>>;
     type _HydrateSnapshot = Assert<
       Equal<StorageHydrateContext<CacheStorageExtension>["snapshot"], { readonly commits: number } | undefined>
     >;
     type _HydrateMachines = Assert<
       Equal<StorageHydrateContext<CacheStorageExtension>["machines"], Readonly<Record<string, unknown>>>
     >;
-    type _IdentityState = Assert<
-      Equal<StorageIdentityContext<CacheStorageExtension>["state"], { commits: number }>
-    >;
+    type _IdentityState = Assert<Equal<StorageIdentityContext<CacheStorageExtension>["state"], { commits: number }>>;
     type _ReactionState = Assert<Equal<StorageReactionContext<CacheStorageExtension>["state"], { commits: number }>>;
 
     const typedStorage = defineStorageRuntime<CacheStorageExtension>().create({
@@ -731,7 +729,7 @@ describe("canary поверхности экспорта core-типов", () =>
       Equal<
         Extract<
           keyof PluginMachineExtensions<typeof typedStoragePlugin>,
-          "runtimeState" | "templateData" | "snapshotData" | "invocation" | "identity"
+          "observedEvents" | "routeMeta" | "runtimeState" | "templateData" | "snapshotData" | "invocation" | "identity"
         >,
         never
       >

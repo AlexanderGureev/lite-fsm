@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { definePlugin, LiteFsmError, MachineManager } from "@lite-fsm/core";
-import type { FSMEvent, MachineConfig, ManagerAction } from "@lite-fsm/core";
+import type { FSMEvent, GenericMiddleware, MachineConfig, ManagerAction } from "@lite-fsm/core";
 import type { NormalizedPlugin } from "@lite-fsm/core/internal/plugin";
 import { createMachineManagerFactory } from "@lite-fsm/core/internal/runtime/kernel/createMachineManagerFactory";
 import { createPluginRegistry } from "@lite-fsm/core/internal/runtime/kernel/registry";
-import type { StorageRuntime } from "@lite-fsm/core/internal/runtime/kernel/storage";
+import type { StorageRouteMetaDependencyKeys, StorageRuntime } from "@lite-fsm/core/internal/runtime/kernel/storage";
 
 type CounterEvent =
   | FSMEvent<"INC">
@@ -22,6 +22,21 @@ type CounterConfig = {
 };
 type CounterContext = { readonly count: number };
 type CounterMachine = MachineConfig<CounterConfig, CounterContext, CounterEvent>;
+type EffectCounterConfig = {
+  readonly IDLE: {
+    readonly INC: "ACTIVE";
+    readonly STOPPED: "ACTIVE";
+    readonly APP_EVENT: "ACTIVE";
+    readonly PLUGIN_EVENT: "ACTIVE";
+  };
+  readonly ACTIVE: {
+    readonly INC: "ACTIVE";
+    readonly STOPPED: "ACTIVE";
+    readonly APP_EVENT: "ACTIVE";
+    readonly PLUGIN_EVENT: "ACTIVE";
+  };
+};
+type EffectCounterMachine = MachineConfig<EffectCounterConfig, CounterContext, CounterEvent>;
 
 type RoutedEvent = FSMEvent<"RAW"> | FSMEvent<"PREPARED"> | FSMEvent<"REPLACED">;
 type RoutedSlice = { readonly state: "IDLE"; readonly context: { readonly hits: number; readonly last: string | null } };
@@ -52,6 +67,32 @@ const createCounter = (effect: (deps: unknown) => void = () => {}): CounterMachi
   }),
   effects: {
     IDLE: effect,
+  },
+});
+
+const createEffectCounter = (effect: (deps: unknown) => void): EffectCounterMachine => ({
+  config: {
+    IDLE: {
+      INC: "ACTIVE",
+      STOPPED: "ACTIVE",
+      APP_EVENT: "ACTIVE",
+      PLUGIN_EVENT: "ACTIVE",
+    },
+    ACTIVE: {
+      INC: "ACTIVE",
+      STOPPED: "ACTIVE",
+      APP_EVENT: "ACTIVE",
+      PLUGIN_EVENT: "ACTIVE",
+    },
+  },
+  initialState: "IDLE",
+  initialContext: { count: 0 },
+  reducer: (slice, _action, { nextState }) => ({
+    state: nextState,
+    context: { count: slice.context.count + 1 },
+  }),
+  effects: {
+    ACTIVE: effect,
   },
 });
 
@@ -145,7 +186,7 @@ const createRouteRuntime = (log: string[]): StorageRuntime => ({
   },
 });
 
-const createMinimalStorageRuntime = (kind: string, routeMetaKeys?: readonly string[]): StorageRuntime => ({
+const createMinimalStorageRuntime = (kind: string, routeMetaKeys?: StorageRouteMetaDependencyKeys): StorageRuntime => ({
   kind,
   routeMetaKeys,
   validateTemplate() {},
@@ -167,18 +208,18 @@ const createMinimalStorageRuntime = (kind: string, routeMetaKeys?: readonly stri
   commit() {},
 });
 
-const expectLiteFsmError = (run: () => unknown, code: string) => {
-  expect(run).toThrow(LiteFsmError);
+const expectLiteFsmError = (run: () => unknown, code: string): LiteFsmError => {
+  let caught: unknown;
 
   try {
     run();
   } catch (error) {
-    expect(error).toBeInstanceOf(LiteFsmError);
-    expect((error as LiteFsmError).code).toBe(code);
-    return;
+    caught = error;
   }
 
-  throw new Error("Expected LiteFsmError.");
+  expect(caught).toBeInstanceOf(LiteFsmError);
+  expect((caught as LiteFsmError).code).toBe(code);
+  return caught as LiteFsmError;
 };
 
 describe("plugin system — этап 5 — intercept", () => {
@@ -457,14 +498,114 @@ describe("plugin system — этап 5 — hooks и ошибки", () => {
     });
     manager = MachineManager({ counter: createCounter() }, { plugins: [plugin] });
 
-    expect(() => manager.transition({ type: "INC" })).toThrow(
-      "[lite-fsm] transition cannot be called from a dispatch hook.",
-    );
+    expectLiteFsmError(() => manager.transition({ type: "INC" }), "LITE_FSM_REENTRANT_TRANSITION_FORBIDDEN");
     expect(manager.getState()).toEqual({ counter: { state: "IDLE", context: { count: 0 } } });
 
     manager.transition({ type: "INC" });
 
     expect(manager.getState()).toEqual({ counter: { state: "IDLE", context: { count: 1 } } });
+  });
+});
+
+describe("plugin system — этап 5 — guard interceptors", () => {
+  it("запрещает transition из interceptor до запуска вложенного dispatch и восстанавливает guard", () => {
+    const onError = vi.fn();
+    const subscriber = vi.fn();
+    const effect = vi.fn();
+    const firstInterceptor = vi.fn();
+    const secondInterceptor = vi.fn();
+    const reported = new Error("reported from interceptor");
+    const middlewareLog: string[] = [];
+    let shouldCallNestedTransition = true;
+    let manager!: {
+      transition(action: ManagerAction<CounterEvent>): ManagerAction<CounterEvent>;
+      getState(): {
+        readonly counter: { readonly state: "IDLE" | "ACTIVE"; readonly context: { readonly count: number } };
+      };
+      onTransition(
+        cb: (
+          prevState: {
+            readonly counter: { readonly state: "IDLE" | "ACTIVE"; readonly context: { readonly count: number } };
+          },
+          currentState: {
+            readonly counter: { readonly state: "IDLE" | "ACTIVE"; readonly context: { readonly count: number } };
+          },
+          action: ManagerAction<CounterEvent>,
+        ) => void,
+      ): () => void;
+    };
+    const middleware: GenericMiddleware = () => (next) => (action) => {
+      middlewareLog.push(`middleware:${action.type}`);
+      return next(action);
+    };
+    const firstPlugin = definePlugin().create({
+      name: "stage-five-interceptor-guard-first",
+      intercept(ctx) {
+        firstInterceptor(ctx.action.type);
+        if (!shouldCallNestedTransition) return;
+
+        shouldCallNestedTransition = false;
+        ctx.reportError(reported);
+        manager.transition({ type: "PLUGIN_EVENT", payload: { id: "nested" } });
+      },
+    });
+    const secondPlugin = definePlugin().create({
+      name: "stage-five-interceptor-guard-second",
+      intercept(ctx) {
+        secondInterceptor(ctx.action.type);
+      },
+    });
+    manager = MachineManager(
+      { counter: createEffectCounter(effect) },
+      { plugins: [firstPlugin, secondPlugin], middleware: [middleware], onError },
+    ) as typeof manager;
+    manager.onTransition(subscriber);
+
+    const error = expectLiteFsmError(
+      () => manager.transition({ type: "INC" }),
+      "LITE_FSM_REENTRANT_TRANSITION_FORBIDDEN",
+    );
+
+    expect(error.message).toContain("plugin.intercept");
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledWith(reported);
+    expect(middlewareLog).toEqual(["middleware:INC"]);
+    expect(firstInterceptor).toHaveBeenCalledTimes(1);
+    expect(firstInterceptor).toHaveBeenCalledWith("INC");
+    expect(secondInterceptor).not.toHaveBeenCalled();
+    expect(subscriber).not.toHaveBeenCalled();
+    expect(effect).not.toHaveBeenCalled();
+    expect(manager.getState()).toEqual({ counter: { state: "IDLE", context: { count: 0 } } });
+
+    manager.transition({ type: "INC" });
+
+    expect(middlewareLog).toEqual(["middleware:INC", "middleware:INC"]);
+    expect(firstInterceptor).toHaveBeenCalledTimes(2);
+    expect(secondInterceptor).toHaveBeenCalledTimes(1);
+    expect(subscriber).toHaveBeenCalledTimes(1);
+    expect(effect).toHaveBeenCalledTimes(1);
+    expect(manager.getState()).toEqual({ counter: { state: "ACTIVE", context: { count: 1 } } });
+  });
+
+  it("запрещает transition из interceptor через manager extension", () => {
+    let manager!: {
+      transition(action: ManagerAction<CounterEvent>): ManagerAction<CounterEvent>;
+      getState(): { readonly counter: { readonly state: "IDLE"; readonly context: { readonly count: number } } };
+      dispatchNested(): ManagerAction<CounterEvent>;
+    };
+    const plugin = definePlugin().create({
+      name: "stage-five-interceptor-manager-extension",
+      manager: {
+        dispatchNested: (ctx) => () => ctx.transition({ type: "PLUGIN_EVENT", payload: { id: "nested" } }),
+      },
+      intercept() {
+        manager.dispatchNested();
+      },
+    });
+    manager = MachineManager({ counter: createCounter() }, { plugins: [plugin] }) as typeof manager;
+
+    expectLiteFsmError(() => manager.transition({ type: "INC" }), "LITE_FSM_REENTRANT_TRANSITION_FORBIDDEN");
+    expect(manager.getState()).toEqual({ counter: { state: "IDLE", context: { count: 0 } } });
   });
 });
 

@@ -27,13 +27,15 @@ import type {
   StorageReduceResult,
   ValidateTemplateContext as KernelValidateTemplateContext,
 } from "./runtime/kernel/storage";
-import type { AnyEvent, MachineStore } from "./types";
+import type { AnyEvent, MachineStore, ManagerAction } from "./types";
 
 // === Storage runtime extension ===============================================
 
 export type StorageRuntimeExtension = {
   readonly input?: object;
   readonly internalEvents?: AnyEvent;
+  readonly observedEvents?: AnyEvent;
+  readonly routeMeta?: object;
   readonly reducerContext?: object;
   readonly effectDeps?: object;
   readonly reactionDeps?: object;
@@ -70,32 +72,83 @@ type StorageMachineFacingExtension<Extension extends StorageRuntimeExtension> = 
   Extract<keyof Extension, MachineFacingStorageExtensionKey>
 >;
 
-type ExtensionTemplateMachine<Extension extends StorageRuntimeExtension> =
-  Extension extends { readonly input?: infer Input extends object }
-    ? MachineStore[string] & Input
-    : MachineStore[string];
+type ExtensionTemplateMachine<Extension extends StorageRuntimeExtension> = Extension extends {
+  readonly input?: infer Input extends object;
+}
+  ? MachineStore[string] & Input
+  : MachineStore[string];
 
-type ExtensionTemplateData<Extension extends StorageRuntimeExtension> =
-  Extension extends { readonly templateData?: infer TemplateData } ? TemplateData : unknown;
+type ExtensionTemplateData<Extension extends StorageRuntimeExtension> = Extension extends {
+  readonly templateData?: infer TemplateData;
+}
+  ? TemplateData
+  : unknown;
 
-type ExtensionRuntimeState<Extension extends StorageRuntimeExtension> =
-  Extension extends { readonly runtimeState?: infer RuntimeState } ? RuntimeState : unknown;
+type ExtensionRuntimeState<Extension extends StorageRuntimeExtension> = Extension extends {
+  readonly runtimeState?: infer RuntimeState;
+}
+  ? RuntimeState
+  : unknown;
 
-type ExtensionPublicState<Extension extends StorageRuntimeExtension> =
-  Extension extends { readonly publicState?: infer PublicState } ? PublicState : unknown;
+type ExtensionPublicState<Extension extends StorageRuntimeExtension> = Extension extends {
+  readonly publicState?: infer PublicState;
+}
+  ? PublicState
+  : unknown;
 
-type ExtensionSnapshotData<Extension extends StorageRuntimeExtension> =
-  Extension extends { readonly snapshotData?: infer SnapshotData } ? SnapshotData : unknown;
+type ExtensionSnapshotData<Extension extends StorageRuntimeExtension> = Extension extends {
+  readonly snapshotData?: infer SnapshotData;
+}
+  ? SnapshotData
+  : unknown;
 
-type ExtensionInvocation<Extension extends StorageRuntimeExtension> =
-  Extension extends { readonly invocation?: infer Invocation } ? Invocation : unknown;
+type ExtensionInvocation<Extension extends StorageRuntimeExtension> = Extension extends {
+  readonly invocation?: infer Invocation;
+}
+  ? Invocation
+  : unknown;
 
-type ExtensionIdentity<Extension extends StorageRuntimeExtension> =
-  Extension extends { readonly identity?: infer Identity }
-    ? Identity extends Readonly<Record<string, unknown>>
-      ? Identity
-      : Readonly<Record<string, unknown>>
-    : Readonly<Record<string, unknown>>;
+type ExtensionIdentity<Extension extends StorageRuntimeExtension> = Extension extends {
+  readonly identity?: infer Identity;
+}
+  ? Identity extends Readonly<Record<string, unknown>>
+    ? Identity
+    : Readonly<Record<string, unknown>>
+  : Readonly<Record<string, unknown>>;
+
+type ExtensionObservedEvents<Extension extends StorageRuntimeExtension> = "observedEvents" extends keyof Extension
+  ? Extension extends { readonly observedEvents?: infer Events extends AnyEvent }
+    ? Events
+    : AnyEvent
+  : AnyEvent;
+
+type ExtensionRouteMeta<Extension extends StorageRuntimeExtension> = "routeMeta" extends keyof Extension
+  ? NonNullable<Extension["routeMeta"]> extends object
+    ? NonNullable<Extension["routeMeta"]>
+    : never
+  : never;
+
+export type StorageRouteMetaKeys<Extension extends StorageRuntimeExtension> = [ExtensionRouteMeta<Extension>] extends [
+  never,
+]
+  ? readonly string[]
+  : readonly (keyof ExtensionRouteMeta<Extension> & string)[];
+
+export type StorageRequiredRouteMetaForKeys<Extension extends StorageRuntimeExtension, RouteMetaKeys> = [
+  ExtensionRouteMeta<Extension>,
+] extends [never]
+  ? {}
+  : RouteMetaKeys extends readonly (keyof ExtensionRouteMeta<Extension> & string)[]
+    ? Pick<ExtensionRouteMeta<Extension>, RouteMetaKeys[number]>
+    : {};
+
+type WithObservedAction<Context, Extension extends StorageRuntimeExtension> = Omit<
+  Context,
+  "action" | "originalAction"
+> & {
+  readonly action: ManagerAction<ExtensionObservedEvents<Extension>>;
+  readonly originalAction: ManagerAction<ExtensionObservedEvents<Extension>>;
+};
 
 type WithRuntimeState<Context, Extension extends StorageRuntimeExtension> = Omit<Context, "state"> & {
   readonly state: ExtensionRuntimeState<Extension>;
@@ -111,18 +164,18 @@ type WithRuntimeTemplates<Context, Extension extends StorageRuntimeExtension> = 
   readonly state: ExtensionRuntimeState<Extension>;
 };
 
-export type StorageValidateTemplateContext<
-  Kind extends string,
-  Extension extends StorageRuntimeExtension,
-> = Omit<KernelValidateTemplateContext, "machine" | "storageKind"> & {
+export type StorageValidateTemplateContext<Kind extends string, Extension extends StorageRuntimeExtension> = Omit<
+  KernelValidateTemplateContext,
+  "machine" | "storageKind"
+> & {
   readonly storageKind: Kind;
   readonly machine: ExtensionTemplateMachine<Extension>;
 };
 
-export type StorageCompileTemplateContext<
-  Kind extends string,
-  Extension extends StorageRuntimeExtension,
-> = Omit<KernelCompileTemplateContext, "machine" | "storageKind"> & {
+export type StorageCompileTemplateContext<Kind extends string, Extension extends StorageRuntimeExtension> = Omit<
+  KernelCompileTemplateContext,
+  "machine" | "storageKind"
+> & {
   readonly storageKind: Kind;
   readonly machine: ExtensionTemplateMachine<Extension>;
 };
@@ -140,32 +193,32 @@ export type StorageCreatePublicInitialStateContext<Extension extends StorageRunt
 >;
 
 export type StoragePrepareActionContext<Extension extends StorageRuntimeExtension> = WithRuntimeState<
-  KernelStoragePrepareActionContext,
+  WithObservedAction<KernelStoragePrepareActionContext, Extension>,
   Extension
 >;
 
 export type StorageBeforeReduceContext<Extension extends StorageRuntimeExtension> = WithRuntimeState<
-  KernelStorageBeforeReduceContext,
+  WithObservedAction<KernelStorageBeforeReduceContext, Extension>,
   Extension
 >;
 
 export type StorageAcceptsEventContext<Extension extends StorageRuntimeExtension> = WithRuntimeTemplate<
-  KernelAcceptsEventContext,
+  WithObservedAction<KernelAcceptsEventContext, Extension>,
   Extension
 >;
 
 export type StorageReduceContext<Extension extends StorageRuntimeExtension> = WithRuntimeTemplate<
-  KernelStorageReduceContext,
+  WithObservedAction<KernelStorageReduceContext, Extension>,
   Extension
 >;
 
 export type StorageReduceBucketContext<Extension extends StorageRuntimeExtension> = WithRuntimeTemplates<
-  KernelStorageReduceBucketContext,
+  WithObservedAction<KernelStorageReduceBucketContext, Extension>,
   Extension
 >;
 
 export type StorageCommitContext<Extension extends StorageRuntimeExtension> = WithRuntimeState<
-  KernelStorageCommitContext,
+  WithObservedAction<KernelStorageCommitContext, Extension>,
   Extension
 >;
 
@@ -175,12 +228,12 @@ export type StorageConditionContext<Extension extends StorageRuntimeExtension> =
 >;
 
 export type StorageResolveEffectInvocationsContext<Extension extends StorageRuntimeExtension> = WithRuntimeState<
-  KernelResolveEffectInvocationsContext,
+  WithObservedAction<KernelResolveEffectInvocationsContext, Extension>,
   Extension
 >;
 
 export type StorageEffectInvocationContext<Extension extends StorageRuntimeExtension> = Omit<
-  WithRuntimeState<KernelStorageEffectInvocationContext, Extension>,
+  WithRuntimeState<WithObservedAction<KernelStorageEffectInvocationContext, Extension>, Extension>,
   "invocation"
 > & {
   readonly invocation: ExtensionInvocation<Extension>;
@@ -199,12 +252,12 @@ export type StorageHydrateContext<Extension extends StorageRuntimeExtension> = O
 };
 
 export type StorageIdentityContext<Extension extends StorageRuntimeExtension> = WithRuntimeState<
-  KernelResolveIdentityContext,
+  WithObservedAction<KernelResolveIdentityContext, Extension>,
   Extension
 >;
 
 export type StorageReactionContext<Extension extends StorageRuntimeExtension> = WithRuntimeState<
-  KernelStorageReactionContext,
+  WithObservedAction<KernelStorageReactionContext, Extension>,
   Extension
 >;
 
@@ -242,13 +295,17 @@ type PluginStorageReactionRuntime<Extension extends StorageRuntimeExtension> = {
   run(ctx: StorageReactionContext<Extension>): void;
 };
 
-type PluginStorageRuntimeBase<Kind extends string, Extension extends StorageRuntimeExtension> = {
+type PluginStorageRuntimeBase<
+  Kind extends string,
+  Extension extends StorageRuntimeExtension,
+  RouteMetaKeys extends StorageRouteMetaKeys<Extension> | undefined,
+> = {
   readonly kind: Kind;
-  readonly routeMetaKeys?: readonly string[];
+  readonly routeMetaKeys?: RouteMetaKeys;
   validateTemplate(ctx: StorageValidateTemplateContext<Kind, Extension>): void;
-  compileTemplate(ctx: StorageCompileTemplateContext<Kind, Extension>): StorageCompileTemplateResult<
-    ExtensionTemplateData<Extension>
-  >;
+  compileTemplate(
+    ctx: StorageCompileTemplateContext<Kind, Extension>,
+  ): StorageCompileTemplateResult<ExtensionTemplateData<Extension>>;
   createRuntimeState(ctx: StorageCreateRuntimeStateContext<Extension>): ExtensionRuntimeState<Extension>;
   createPublicInitialState(ctx: StorageCreatePublicInitialStateContext<Extension>): ExtensionPublicState<Extension>;
   prepareAction?(ctx: StoragePrepareActionContext<Extension>): StoragePrepareActionResult;
@@ -260,35 +317,51 @@ type PluginStorageRuntimeBase<Kind extends string, Extension extends StorageRunt
   readonly reactions?: PluginStorageReactionRuntime<Extension>;
 };
 
-type PluginTemplateStorageRuntime<Kind extends string, Extension extends StorageRuntimeExtension> =
-  PluginStorageRuntimeBase<Kind, Extension> & {
-    readonly reduceScope?: "template";
-    acceptsEvent(ctx: StorageAcceptsEventContext<Extension>): boolean;
-    reduce(ctx: StorageReduceContext<Extension>): StorageReduceResult;
-    readonly reduceBucket?: never;
-  };
+type PluginTemplateStorageRuntime<
+  Kind extends string,
+  Extension extends StorageRuntimeExtension,
+  RouteMetaKeys extends StorageRouteMetaKeys<Extension> | undefined,
+> = PluginStorageRuntimeBase<Kind, Extension, RouteMetaKeys> & {
+  readonly reduceScope?: "template";
+  acceptsEvent(ctx: StorageAcceptsEventContext<Extension>): boolean;
+  reduce(ctx: StorageReduceContext<Extension>): StorageReduceResult;
+  readonly reduceBucket?: never;
+};
 
-type PluginBucketStorageRuntime<Kind extends string, Extension extends StorageRuntimeExtension> =
-  PluginStorageRuntimeBase<Kind, Extension> & {
-    readonly reduceScope: "bucket";
-    reduceBucket(ctx: StorageReduceBucketContext<Extension>): StorageReduceResult;
-    readonly acceptsEvent?: never;
-    readonly reduce?: never;
-  };
+type PluginBucketStorageRuntime<
+  Kind extends string,
+  Extension extends StorageRuntimeExtension,
+  RouteMetaKeys extends StorageRouteMetaKeys<Extension> | undefined,
+> = PluginStorageRuntimeBase<Kind, Extension, RouteMetaKeys> & {
+  readonly reduceScope: "bucket";
+  reduceBucket(ctx: StorageReduceBucketContext<Extension>): StorageReduceResult;
+  readonly acceptsEvent?: never;
+  readonly reduce?: never;
+};
 
-export type PluginStorageRuntime<Kind extends string, Extension extends StorageRuntimeExtension> =
-  | PluginTemplateStorageRuntime<Kind, Extension>
-  | PluginBucketStorageRuntime<Kind, Extension>;
+export type PluginStorageRuntime<
+  Kind extends string,
+  Extension extends StorageRuntimeExtension,
+  RouteMetaKeys extends StorageRouteMetaKeys<Extension> | undefined = StorageRouteMetaKeys<Extension> | undefined,
+> =
+  | PluginTemplateStorageRuntime<Kind, Extension, RouteMetaKeys>
+  | PluginBucketStorageRuntime<Kind, Extension, RouteMetaKeys>;
 
 type Prettify<Value> = { [Key in keyof Value]: Value[Key] };
 
-export type StorageMachineExtension<
-  Kind extends string,
-  Extension extends StorageRuntimeExtension,
-> = Prettify<StorageMachineFacingExtension<Extension> & { readonly storage: Kind }>;
+export type StorageMachineExtension<Kind extends string, Extension extends StorageRuntimeExtension> = Prettify<
+  StorageMachineFacingExtension<Extension> & { readonly storage: Kind }
+>;
 
 export type StorageRuntimeBuilder<Extension extends StorageRuntimeExtension> = {
-  create<const Kind extends string>(
-    definition: PluginStorageRuntime<Kind, Extension> & RejectUnknownMachineExtensionKeys<Extension>,
-  ): LiteFsmStorageRuntimeDefinition<Kind, StorageMachineExtension<Kind, Extension>>;
+  create<
+    const Kind extends string,
+    const RouteMetaKeys extends StorageRouteMetaKeys<Extension> | undefined = undefined,
+  >(
+    definition: PluginStorageRuntime<Kind, Extension, RouteMetaKeys> & RejectUnknownMachineExtensionKeys<Extension>,
+  ): LiteFsmStorageRuntimeDefinition<
+    Kind,
+    StorageMachineExtension<Kind, Extension>,
+    StorageRequiredRouteMetaForKeys<Extension, RouteMetaKeys>
+  >;
 };

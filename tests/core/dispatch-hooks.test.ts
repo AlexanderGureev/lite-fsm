@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { definePlugin, defineStorageRuntime, MachineManager } from "@lite-fsm/core";
+import { definePlugin, defineStorageRuntime, LiteFsmError, MachineManager } from "@lite-fsm/core";
 import type { FSMEvent, IMachineManager, MachineConfig, Middleware } from "@lite-fsm/core";
 
 type CounterEvent = FSMEvent<"GO"> | FSMEvent<"ALT"> | FSMEvent<"RESET"> | FSMEvent<"NOOP">;
@@ -107,6 +107,20 @@ const createHookStorage = (
       }
     : {}),
   });
+
+const expectLiteFsmError = (run: () => unknown, code: LiteFsmError["code"], messagePart?: string) => {
+  let caught: unknown;
+
+  try {
+    run();
+  } catch (error) {
+    caught = error;
+  }
+
+  expect(caught).toBeInstanceOf(LiteFsmError);
+  expect((caught as LiteFsmError).code).toBe(code);
+  if (messagePart) expect((caught as LiteFsmError).message).toContain(messagePart);
+};
 
 describe("action interceptors и dispatch hooks", () => {
   it("no-op hooks не меняют state и выполняются в порядке регистрации фаз", () => {
@@ -439,21 +453,141 @@ describe("action interceptors и dispatch hooks", () => {
     expect(manager.getState()).toEqual({ counter: { state: "ACTIVE", context: { count: 1, last: "GO" } } });
   });
 
-  it("reentrant dispatch внутри hook запрещен", () => {
+  it("запрещает transition из beforeReduce hook до валидации action и сбрасывает guard", () => {
+    let shouldCallNestedTransition = true;
     let manager!: IMachineManager<{ counter: CounterMachine }, CounterEvent>;
     const plugin = definePlugin().create({
       name: "hooks/reentrant",
       hooks: {
         beforeReduce() {
-          manager.transition({ type: "GO" });
+          if (!shouldCallNestedTransition) return;
+
+          shouldCallNestedTransition = false;
+          manager.transition(null as never);
         },
       },
     });
     manager = MachineManager({ counter: createCounter() }, { plugins: [plugin] });
 
-    expect(() => manager.transition({ type: "GO" })).toThrow(
-      "[lite-fsm] transition cannot be called from a dispatch hook.",
+    expectLiteFsmError(
+      () => manager.transition({ type: "GO" }),
+      "LITE_FSM_REENTRANT_TRANSITION_FORBIDDEN",
+      "hook.beforeReduce",
     );
     expect(manager.getState()).toEqual({ counter: { state: "IDLE", context: { count: 0 } } });
+
+    manager.transition({ type: "GO" });
+
+    expect(manager.getState()).toEqual({ counter: { state: "ACTIVE", context: { count: 1, last: "GO" } } });
+  });
+
+  it("запрещает transition из beforeEffects hook и сбрасывает guard", () => {
+    let shouldCallNestedTransition = true;
+    let manager!: IMachineManager<{ counter: CounterMachine }, CounterEvent>;
+    const plugin = definePlugin().create({
+      name: "hooks/reentrant-before-effects",
+      hooks: {
+        beforeEffects() {
+          if (!shouldCallNestedTransition) return;
+
+          shouldCallNestedTransition = false;
+          manager.transition({ type: "RESET" });
+        },
+      },
+    });
+    manager = MachineManager({ counter: createCounter() }, { plugins: [plugin] });
+
+    expectLiteFsmError(
+      () => manager.transition({ type: "GO" }),
+      "LITE_FSM_REENTRANT_TRANSITION_FORBIDDEN",
+      "hook.beforeEffects",
+    );
+    expect(manager.getState()).toEqual({ counter: { state: "ACTIVE", context: { count: 1, last: "GO" } } });
+
+    manager.transition({ type: "RESET" });
+
+    expect(manager.getState()).toEqual({ counter: { state: "IDLE", context: { count: 2, last: "RESET" } } });
+  });
+
+  it("запрещает transition из afterEffects hook и сбрасывает guard", () => {
+    let shouldCallNestedTransition = true;
+    let manager!: IMachineManager<{ counter: CounterMachine }, CounterEvent>;
+    const plugin = definePlugin().create({
+      name: "hooks/reentrant-after-effects",
+      hooks: {
+        afterEffects() {
+          if (!shouldCallNestedTransition) return;
+
+          shouldCallNestedTransition = false;
+          manager.transition({ type: "RESET" });
+        },
+      },
+    });
+    manager = MachineManager({ counter: createCounter() }, { plugins: [plugin] });
+
+    expectLiteFsmError(
+      () => manager.transition({ type: "GO" }),
+      "LITE_FSM_REENTRANT_TRANSITION_FORBIDDEN",
+      "hook.afterEffects",
+    );
+    expect(manager.getState()).toEqual({ counter: { state: "ACTIVE", context: { count: 1, last: "GO" } } });
+
+    manager.transition({ type: "RESET" });
+
+    expect(manager.getState()).toEqual({ counter: { state: "IDLE", context: { count: 2, last: "RESET" } } });
+  });
+
+  it("без plugins сохраняет обычный reducer, subscribers и effects", () => {
+    const reducer = vi.fn();
+    const subscriber = vi.fn();
+    const effect = vi.fn();
+    const manager = MachineManager({ counter: createCounter({ reducer, effect }) });
+    manager.onTransition(subscriber);
+
+    const committed = manager.transition({ type: "GO" });
+
+    expect(committed).toEqual({ type: "GO" });
+    expect(reducer).toHaveBeenCalledWith({ type: "GO" });
+    expect(subscriber).toHaveBeenCalledOnce();
+    expect(subscriber.mock.calls[0][2]).toEqual({ type: "GO" });
+    expect(effect).toHaveBeenCalledWith({ type: "GO" });
+    expect(manager.getState()).toEqual({ counter: { state: "ACTIVE", context: { count: 1, last: "GO" } } });
+  });
+
+  it("без plugins разрешает transition из subscriber", () => {
+    let manager!: IMachineManager<{ counter: CounterMachine }, CounterEvent>;
+    let shouldResetFromSubscriber = true;
+
+    manager = MachineManager({ counter: createCounter() });
+    manager.onTransition((_prev, _current, action) => {
+      if (action.type !== "GO" || !shouldResetFromSubscriber) return;
+
+      shouldResetFromSubscriber = false;
+      manager.transition({ type: "RESET" });
+    });
+
+    manager.transition({ type: "GO" });
+
+    expect(manager.getState()).toEqual({ counter: { state: "IDLE", context: { count: 2, last: "RESET" } } });
+  });
+
+  it("без plugins разрешает transition из effect", () => {
+    let manager!: IMachineManager<{ counter: CounterMachine }, CounterEvent>;
+    let shouldResetFromEffect = true;
+
+    manager = MachineManager({
+      counter: createCounter({
+        effect(action) {
+          if (action.type !== "GO" || !shouldResetFromEffect) return;
+
+          shouldResetFromEffect = false;
+          manager.transition({ type: "RESET" });
+        },
+      }),
+    });
+
+    manager.transition({ type: "GO" });
+
+    expect(manager.getState()).toEqual({ counter: { state: "IDLE", context: { count: 2, last: "RESET" } } });
   });
 });

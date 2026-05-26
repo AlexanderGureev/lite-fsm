@@ -45,6 +45,24 @@ describe("регрессионная матрица public entry points", () => 
     >;
   });
 
+  test("LiteFsmError принимает public plugin validation codes", () => {
+    expect(new core.LiteFsmError("LITE_FSM_REENTRANT_TRANSITION_FORBIDDEN", "guarded")).type.toBe<
+      core.LiteFsmError
+    >();
+    expect(new core.LiteFsmError("LITE_FSM_INVALID_PLUGIN_CALLBACK_RESULT", "plugin")).type.toBe<
+      core.LiteFsmError
+    >();
+    expect(new core.LiteFsmError("LITE_FSM_INVALID_STORAGE_CALLBACK_RESULT", "storage")).type.toBe<
+      core.LiteFsmError
+    >();
+    expect(new core.LiteFsmError("LITE_FSM_INVALID_REPLACEMENT_ACTION", "replacement")).type.toBe<
+      core.LiteFsmError
+    >();
+
+    // @ts-expect-error!
+    new core.LiteFsmError("LITE_FSM_UNKNOWN_TEST_CODE", "unknown");
+  });
+
   test("react entry экспортирует ровно публичный runtime API", () => {
     type _ReactKeys = Assert<
       Equal<

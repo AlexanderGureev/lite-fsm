@@ -227,9 +227,11 @@ export type ManagerRuntimeContext = PublicManagerRuntimeContext & {
   createScopedDeps(baseDeps: Record<string, unknown>, ctx: ScopedInvocationContext): Record<string, unknown>;
 };
 
+export type StorageRouteMetaDependencyKeys = readonly string[];
+
 export type StorageRuntimeBase = {
   readonly kind: string;
-  readonly routeMetaKeys?: readonly string[];
+  readonly routeMetaKeys?: StorageRouteMetaDependencyKeys;
   validateTemplate(ctx: ValidateTemplateContext): void;
   compileTemplate(ctx: CompileTemplateContext): CompiledStorageTemplate;
   createRuntimeState(ctx: CreateRuntimeStateContext): StorageRuntimeState;

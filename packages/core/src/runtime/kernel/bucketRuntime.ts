@@ -3,29 +3,21 @@
 // в фабрике только pipeline-orchestration и lifecycle, а bucket-iteration жил в одном месте.
 
 import type { AnyEvent, MachinesState, MachineStore, ManagerAction } from "../../types";
-import { LiteFsmError } from "../../utils";
+import {
+  assertStorageAcceptsEventResult,
+  assertStorageActionStageResult,
+  assertStorageReduceResult,
+} from "./callbackValidation";
 import type { RuntimeBucket } from "./snapshot";
 import {
   type ManagerRuntimeContext,
   type StorageDispatchContext,
   type StorageDispatchLifecycleContext,
-  type StorageReduceResult,
 } from "./storage";
+import type { GuardedCallbackRunner } from "./transitionGuard";
 
 type Action = ManagerAction<AnyEvent>;
 type ActionStageOutcome = { readonly type: "continue"; readonly action: Action } | { readonly type: "drop" };
-
-const assertReduceResult = (runtimeKind: string, result: unknown): StorageReduceResult => {
-  if (result === undefined) return result;
-  if (typeof result === "object" && result !== null && (result as { readonly type?: unknown }).type === "skip") {
-    return result as StorageReduceResult;
-  }
-
-  throw new LiteFsmError(
-    "LITE_FSM_INVALID_STORAGE_RUNTIME",
-    `[lite-fsm] storage runtime '${runtimeKind}' returned invalid reduce result.`,
-  );
-};
 
 export type BucketRuntime<S extends MachineStore> = {
   prepareAction(action: Action, options: unknown, dispatch: StorageDispatchLifecycleContext): ActionStageOutcome;
@@ -42,19 +34,27 @@ export const createBucketRuntime = <S extends MachineStore>(
   managerContext: ManagerRuntimeContext,
   resolveRoute: (action: Action) => StorageDispatchContext["route"],
   defaultStorageKind: string,
+  runGuardedCallback: GuardedCallbackRunner,
 ): BucketRuntime<S> => ({
   prepareAction(action, options, dispatch) {
     let currentAction = action;
     for (const bucket of buckets) {
-      if (!bucket.runtime.prepareAction) continue;
-      const result = bucket.runtime.prepareAction({
-        action: currentAction,
-        originalAction: dispatch.originalAction,
-        options,
-        state: bucket.state,
-        manager: managerContext,
-        dispatch: dispatch.dispatch,
-      });
+      const prepareAction = bucket.runtime.prepareAction;
+      if (!prepareAction) continue;
+      const source = `storage runtime '${bucket.runtime.kind}' prepareAction`;
+      const result = assertStorageActionStageResult(
+        source,
+        runGuardedCallback("storage.prepareAction", () =>
+          prepareAction({
+            action: currentAction,
+            originalAction: dispatch.originalAction,
+            options,
+            state: bucket.state,
+            manager: managerContext,
+            dispatch: dispatch.dispatch,
+          }),
+        ),
+      );
       if (result?.type === "drop") return { type: "drop" };
       if (result?.type !== "replace") continue;
       currentAction = result.action;
@@ -66,14 +66,21 @@ export const createBucketRuntime = <S extends MachineStore>(
   beforeReduce(action, dispatch) {
     let currentAction = action;
     for (const bucket of buckets) {
-      if (!bucket.runtime.beforeReduce) continue;
-      const result = bucket.runtime.beforeReduce({
-        action: currentAction,
-        originalAction: dispatch.originalAction,
-        state: bucket.state,
-        manager: managerContext,
-        dispatch: dispatch.dispatch,
-      });
+      const beforeReduce = bucket.runtime.beforeReduce;
+      if (!beforeReduce) continue;
+      const source = `storage runtime '${bucket.runtime.kind}' beforeReduce`;
+      const result = assertStorageActionStageResult(
+        source,
+        runGuardedCallback("storage.beforeReduce", () =>
+          beforeReduce({
+            action: currentAction,
+            originalAction: dispatch.originalAction,
+            state: bucket.state,
+            manager: managerContext,
+            dispatch: dispatch.dispatch,
+          }),
+        ),
+      );
       if (result?.type === "drop") return { type: "drop" };
       if (result?.type !== "replace") continue;
       currentAction = result.action;
@@ -85,43 +92,55 @@ export const createBucketRuntime = <S extends MachineStore>(
   reduce(action, dispatch) {
     for (const bucket of buckets) {
       if (bucket.runtime.reduceScope === "bucket") {
-        const result = assertReduceResult(
-          bucket.runtime.kind,
-          bucket.runtime.reduceBucket({
-            templates: bucket.templates,
-            action,
-            originalAction: dispatch.originalAction,
-            state: bucket.state,
-            manager: managerContext,
-            dispatch: dispatch.dispatch,
-          }),
+        const reduceBucket = bucket.runtime.reduceBucket;
+        const result = assertStorageReduceResult(
+          `storage runtime '${bucket.runtime.kind}' reduceBucket`,
+          runGuardedCallback("storage.reduceBucket", () =>
+            reduceBucket({
+              templates: bucket.templates,
+              action,
+              originalAction: dispatch.originalAction,
+              state: bucket.state,
+              manager: managerContext,
+              dispatch: dispatch.dispatch,
+            }),
+          ),
         );
         if (result?.type !== "skip") dispatch.touched.add(bucket.runtime.kind);
         continue;
       }
 
+      const acceptsEvent = bucket.runtime.acceptsEvent;
+      const reduce = bucket.runtime.reduce;
       for (const template of bucket.templates) {
         if (
-          !bucket.runtime.acceptsEvent({
-            template,
-            action,
-            originalAction: dispatch.originalAction,
-            state: bucket.state,
-            dispatch: dispatch.dispatch,
-          })
+          !assertStorageAcceptsEventResult(
+            `storage runtime '${bucket.runtime.kind}' acceptsEvent`,
+            runGuardedCallback("storage.acceptsEvent", () =>
+              acceptsEvent({
+                template,
+                action,
+                originalAction: dispatch.originalAction,
+                state: bucket.state,
+                dispatch: dispatch.dispatch,
+              }),
+            ),
+          )
         ) {
           continue;
         }
-        const result = assertReduceResult(
-          bucket.runtime.kind,
-          bucket.runtime.reduce({
-            template,
-            action,
-            originalAction: dispatch.originalAction,
-            state: bucket.state,
-            manager: managerContext,
-            dispatch: dispatch.dispatch,
-          }),
+        const result = assertStorageReduceResult(
+          `storage runtime '${bucket.runtime.kind}' reduce`,
+          runGuardedCallback("storage.reduce", () =>
+            reduce({
+              template,
+              action,
+              originalAction: dispatch.originalAction,
+              state: bucket.state,
+              manager: managerContext,
+              dispatch: dispatch.dispatch,
+            }),
+          ),
         );
         if (result?.type !== "skip") dispatch.touched.add(bucket.runtime.kind);
       }
@@ -132,25 +151,30 @@ export const createBucketRuntime = <S extends MachineStore>(
   commit(dispatch) {
     for (const bucket of buckets) {
       if (!dispatch.touched.has(bucket.runtime.kind)) continue;
-      bucket.runtime.commit({
-        action: dispatch.action,
-        originalAction: dispatch.originalAction,
-        state: bucket.state,
-        manager: managerContext,
-        dispatch: dispatch.dispatch,
+      runGuardedCallback("storage.commit", () => {
+        bucket.runtime.commit({
+          action: dispatch.action,
+          originalAction: dispatch.originalAction,
+          state: bucket.state,
+          manager: managerContext,
+          dispatch: dispatch.dispatch,
+        });
       });
     }
   },
 
   runReactions(action, dispatch) {
     for (const bucket of buckets) {
-      if (!dispatch.touched.has(bucket.runtime.kind) || !bucket.runtime.reactions) continue;
-      bucket.runtime.reactions.run({
-        action,
-        originalAction: dispatch.originalAction,
-        state: bucket.state,
-        manager: managerContext,
-        dispatch: dispatch.dispatch,
+      const reactions = bucket.runtime.reactions;
+      if (!dispatch.touched.has(bucket.runtime.kind) || !reactions) continue;
+      runGuardedCallback("storage.reactions", () => {
+        reactions.run({
+          action,
+          originalAction: dispatch.originalAction,
+          state: bucket.state,
+          manager: managerContext,
+          dispatch: dispatch.dispatch,
+        });
       });
     }
   },

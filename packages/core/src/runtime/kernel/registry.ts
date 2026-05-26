@@ -16,6 +16,11 @@ import type { RuntimeStorageEntry, StorageRegistry, StorageRuntime } from "./sto
 
 export type { DispatchHookPhase };
 
+export type ActionInterceptorEntry = {
+  readonly owner: string;
+  readonly intercept: ActionInterceptor;
+};
+
 type PluginRegistryOptions = {
   readonly defaultStorageKind: string;
 };
@@ -137,7 +142,7 @@ export const createPluginRegistry = ({ defaultStorageKind }: PluginRegistryOptio
     { section: "scopedTransition", label: "transition" },
     CORE_SCOPED_TRANSITION_KEYS,
   );
-  const actionInterceptors: ActionInterceptor[] = [];
+  const actionInterceptors: ActionInterceptorEntry[] = [];
   const managerEntries: NormalizedManagerEntry[] = [];
   const managerOwners = new Map<string, string>();
   const dispatchHooks: Record<DispatchHookPhase, DispatchHook[]> = Object.fromEntries(
@@ -192,7 +197,7 @@ export const createPluginRegistry = ({ defaultStorageKind }: PluginRegistryOptio
     storage: storage.registry,
     routing: routingRuntime,
     listStorageRuntimes: storage.list,
-    listActionInterceptors: (): readonly ActionInterceptor[] => actionInterceptors,
+    listActionInterceptors: (): readonly ActionInterceptorEntry[] => actionInterceptors,
     listDispatchHooks: (phase: DispatchHookPhase): readonly DispatchHook[] => dispatchHooks[phase],
 
     createScopedDeps(baseDeps: Record<string, unknown>, ctx: ScopedInvocationContext): Record<string, unknown> {
@@ -237,7 +242,7 @@ export const createPluginRegistry = ({ defaultStorageKind }: PluginRegistryOptio
       for (const entry of plugin.scopedDeps) scopedDeps.add(entry);
       for (const entry of plugin.scopedTransition) scopedTransition.add(entry);
       for (const entry of plugin.manager) addManagerEntry(entry);
-      if (plugin.intercept) actionInterceptors.push(plugin.intercept);
+      if (plugin.intercept) actionInterceptors.push({ owner: plugin.name, intercept: plugin.intercept });
       for (const entry of Object.values(plugin.hooks)) {
         dispatchHooks[entry.phase].push(entry.hook);
       }

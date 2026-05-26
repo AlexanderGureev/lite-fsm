@@ -10,6 +10,7 @@ import type {
   StorageReduceBucketContext,
   StorageRuntime,
 } from "@lite-fsm/core/internal/runtime/kernel/storage";
+import type { TransitionGuardPhase } from "@lite-fsm/core/internal/runtime/kernel/transitionGuard";
 
 import { createLikeSync, createReplacingMiddleware, createSnapshotLikeSync } from "./MachineManager.actors.fixtures";
 
@@ -129,18 +130,23 @@ const createManager = (
   };
 };
 
-const expectLiteFsmError = (run: () => unknown, code: string) => {
-  expect(run).toThrow(LiteFsmError);
+const expectLiteFsmError = (run: () => unknown, code: string): LiteFsmError => {
+  let caught: unknown;
 
   try {
     run();
   } catch (error) {
-    expect(error).toBeInstanceOf(LiteFsmError);
-    expect((error as LiteFsmError).code).toBe(code);
-    return;
+    caught = error;
   }
 
-  throw new Error("Expected LiteFsmError.");
+  expect(caught).toBeInstanceOf(LiteFsmError);
+  expect((caught as LiteFsmError).code).toBe(code);
+  return caught as LiteFsmError;
+};
+
+const expectTransitionGuardError = (run: () => unknown, phase: TransitionGuardPhase) => {
+  const error = expectLiteFsmError(run, "LITE_FSM_REENTRANT_TRANSITION_FORBIDDEN");
+  expect(error.message).toContain(phase);
 };
 
 const createMiddleware = (
@@ -642,7 +648,7 @@ describe("storage runtime dispatch pipeline — этап 3 reduceScope", () => {
       });
       const manager = createManager([runtime]);
 
-      expectLiteFsmError(() => manager.transition({ type: "RAW" }), "LITE_FSM_INVALID_STORAGE_RUNTIME");
+      expectLiteFsmError(() => manager.transition({ type: "RAW" }), "LITE_FSM_INVALID_STORAGE_CALLBACK_RESULT");
     }
   });
 
@@ -659,7 +665,7 @@ describe("storage runtime dispatch pipeline — этап 3 reduceScope", () => {
       } as unknown as StorageRuntime;
       const manager = createManager([runtime]);
 
-      expectLiteFsmError(() => manager.transition({ type: "RAW" }), "LITE_FSM_INVALID_STORAGE_RUNTIME");
+      expectLiteFsmError(() => manager.transition({ type: "RAW" }), "LITE_FSM_INVALID_STORAGE_CALLBACK_RESULT");
     }
   });
 
@@ -699,6 +705,247 @@ describe("storage runtime dispatch pipeline — этап 3 reduceScope", () => {
     manager.transition({ type: "RAW" });
 
     await expect(conditionResult).resolves.toBe(false);
+  });
+});
+
+describe("storage runtime dispatch pipeline — этап 3 transition guard", () => {
+  const assertNestedTransitionIsGuarded = (
+    phase: TransitionGuardPhase,
+    createGuardedRuntime: (ctx: {
+      readonly log: string[];
+      readonly callNestedTransition: () => void;
+    }) => StorageRuntime,
+    expectedStateAfterRecovery: Record<string, TestSlice> = { item: { seen: ["RAW"] } },
+  ) => {
+    const log: string[] = [];
+    const subscriber = vi.fn();
+    let shouldCallNestedTransition = true;
+    let manager!: ReturnType<typeof createManager>;
+    const runtime = createGuardedRuntime({
+      log,
+      callNestedTransition() {
+        if (!shouldCallNestedTransition) return;
+
+        shouldCallNestedTransition = false;
+        manager.transition({ type: "FINAL" });
+      },
+    });
+    const middleware: Middleware<Record<string, TestSlice>, TestEvent> = () => (next) => (action) => {
+      log.push(`middleware:${action.type}`);
+      return next(action as TestAction);
+    };
+    manager = createManager([runtime], { middleware: [middleware] });
+    manager.onTransition(subscriber);
+
+    expectTransitionGuardError(() => manager.transition({ type: "RAW" }), phase);
+
+    expect(log.some((entry) => entry.endsWith(":FINAL"))).toBe(false);
+    expect(subscriber).not.toHaveBeenCalled();
+    if (phase !== "storage.reactions") {
+      expect(manager.getState()).toEqual({ item: { seen: [] } });
+    }
+
+    manager.transition({ type: "RAW" });
+
+    expect(manager.getState()).toEqual(expectedStateAfterRecovery);
+    expect(subscriber).toHaveBeenCalledTimes(1);
+  };
+
+  it("запрещает transition из prepareAction до запуска вложенного dispatch и сбрасывает guard", () => {
+    assertNestedTransitionIsGuarded("storage.prepareAction", ({ callNestedTransition }) =>
+      createRuntime("stage-three-guard-prepare", [], {
+        prepareAction() {
+          callNestedTransition();
+        },
+      }),
+    );
+  });
+
+  it("запрещает transition из beforeReduce без изменения state и сбрасывает guard", () => {
+    assertNestedTransitionIsGuarded("storage.beforeReduce", ({ callNestedTransition }) =>
+      createRuntime("stage-three-guard-before", [], {
+        beforeReduce() {
+          callNestedTransition();
+        },
+      }),
+    );
+  });
+
+  it("запрещает transition из acceptsEvent без изменения state и сбрасывает guard", () => {
+    assertNestedTransitionIsGuarded("storage.acceptsEvent", ({ callNestedTransition }) =>
+      createRuntime("stage-three-guard-accepts", [], {
+        acceptsEvent() {
+          callNestedTransition();
+          return true;
+        },
+      }),
+    );
+  });
+
+  it("запрещает transition из template reduce без изменения state и сбрасывает guard", () => {
+    assertNestedTransitionIsGuarded("storage.reduce", ({ callNestedTransition }) =>
+      createRuntime("stage-three-guard-reduce", [], {
+        acceptsEvent() {
+          return true;
+        },
+        reduce({ action, dispatch, template }) {
+          callNestedTransition();
+          const prev = dispatch.nextState[template.key] as TestSlice;
+          dispatch.nextState = {
+            ...dispatch.nextState,
+            [template.key]: { seen: [...prev.seen, action.type] } satisfies TestSlice,
+          };
+        },
+      }),
+    );
+  });
+
+  it("запрещает transition из reduceBucket без изменения state и сбрасывает guard", () => {
+    assertNestedTransitionIsGuarded("storage.reduceBucket", ({ callNestedTransition }) => {
+      const runtime = createRuntime("stage-three-guard-bucket", [], {
+        acceptsEvent: undefined,
+        reduce: undefined,
+      } as Partial<StorageRuntime> & { readonly reduceScope?: "template"; readonly reduceBucket?: never });
+      return {
+        ...runtime,
+        reduceScope: "bucket",
+        reduceBucket({ action, dispatch, templates }) {
+          callNestedTransition();
+          dispatch.nextState = {
+            ...dispatch.nextState,
+            ...Object.fromEntries(
+              templates.map((template) => [template.key, { seen: [action.type] } satisfies TestSlice]),
+            ),
+          };
+        },
+      } as StorageRuntime;
+    });
+  });
+
+  it("запрещает transition из commit до public commit boundary и сбрасывает guard", () => {
+    assertNestedTransitionIsGuarded("storage.commit", ({ callNestedTransition }) =>
+      createRuntime("stage-three-guard-commit", [], {
+        commit() {
+          callNestedTransition();
+        },
+      }),
+    );
+  });
+
+  it("запрещает transition из reactions.run и не вызывает subscribers внешнего action после guard error", () => {
+    assertNestedTransitionIsGuarded(
+      "storage.reactions",
+      ({ callNestedTransition }) =>
+        createRuntime("stage-three-guard-reactions", [], {
+          reactions: {
+            run() {
+              callNestedTransition();
+            },
+          },
+        }),
+      { item: { seen: ["RAW", "RAW"] } },
+    );
+  });
+
+  it("сохраняет prepareAction replacement до middleware", () => {
+    const log: string[] = [];
+    const runtime = createRuntime("stage-three-guard-prepare-regression", log, {
+      prepareAction({ action }) {
+        log.push(`prepare:${action.type}`);
+        if (action.type === "RAW") return { type: "replace", action: { type: "PREPARED" } };
+      },
+    });
+    const manager = createManager([runtime], { middleware: [createMiddleware(log)] });
+
+    manager.transition({ type: "RAW" });
+
+    expect(log.slice(0, 2)).toEqual(["prepare:RAW", "middleware:before:PREPARED"]);
+  });
+
+  it("сохраняет beforeReduce replacement после middleware", () => {
+    const log: string[] = [];
+    const runtime = createRuntime("stage-three-guard-before-regression", log, {
+      beforeReduce({ action }) {
+        log.push(`beforeReduce:${action.type}`);
+        if (action.type === "RAW") return { type: "replace", action: { type: "BEFORE" } };
+      },
+    });
+    const manager = createManager([runtime], { middleware: [createMiddleware(log)] });
+
+    manager.transition({ type: "RAW" });
+
+    expect(log.slice(0, 3)).toEqual(["middleware:before:RAW", "beforeReduce:RAW", "reduce:stage-three-guard-before-regression:BEFORE"]);
+  });
+
+  it("сохраняет { type: 'skip' } из reducers", () => {
+    const log: string[] = [];
+    const runtime = createRuntime("stage-three-guard-skip-regression", log, {
+      reduce() {
+        log.push("reduce");
+        return { type: "skip" };
+      },
+    });
+    const manager = createManager([runtime]);
+
+    manager.transition({ type: "RAW" });
+
+    expect(manager.getState()).toEqual({ item: { seen: [] } });
+    expect(log).toEqual(["reduce"]);
+  });
+
+  it("сохраняет порядок ordinary storage reactions до subscribers", () => {
+    const log: string[] = [];
+    const runtime = createRuntime("stage-three-guard-reaction-order", log, {
+      effects: undefined,
+      reactions: {
+        run({ action }) {
+          log.push(`reaction:${action.type}`);
+        },
+      },
+    });
+    const manager = createManager([runtime]);
+    manager.onTransition(() => log.push("subscriber"));
+
+    manager.transition({ type: "RAW" });
+
+    expect(log).toEqual([
+      "reduce:stage-three-guard-reaction-order:RAW",
+      "commit:stage-three-guard-reaction-order:RAW",
+      "reaction:RAW",
+      "subscriber",
+    ]);
+  });
+
+  it("разрешает transition из storage effects после commit через scoped manager", () => {
+    const log: string[] = [];
+    let shouldDispatchFromEffect = true;
+    let manager!: ReturnType<typeof createManager>;
+    const runtime = createRuntime("stage-three-guard-effect-transition", log, {
+      reactions: undefined,
+      effects: {
+        resolveInvocations({ action }) {
+          log.push(`resolve:${action.type}`);
+          return shouldDispatchFromEffect && action.type === "RAW" ? [action] : [];
+        },
+        invoke({ manager: scopedManager }) {
+          shouldDispatchFromEffect = false;
+          scopedManager.transition({ type: "FINAL" });
+        },
+      },
+    });
+    manager = createManager([runtime]);
+
+    manager.transition({ type: "RAW" });
+
+    expect(manager.getState()).toEqual({ item: { seen: ["RAW", "FINAL"] } });
+    expect(log).toEqual([
+      "reduce:stage-three-guard-effect-transition:RAW",
+      "commit:stage-three-guard-effect-transition:RAW",
+      "resolve:RAW",
+      "reduce:stage-three-guard-effect-transition:FINAL",
+      "commit:stage-three-guard-effect-transition:FINAL",
+      "resolve:FINAL",
+    ]);
   });
 });
 

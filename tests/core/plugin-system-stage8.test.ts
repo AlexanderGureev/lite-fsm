@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { definePlugin, defineStorageRuntime, LiteFsmError, MachineManager } from "@lite-fsm/core";
+import type { StorageRouteMetaDependencyKeys } from "@lite-fsm/core/internal/runtime/kernel/storage";
 
 const expectLiteFsmError = (run: () => unknown, code: LiteFsmError["code"], message?: string) => {
   expect(run).toThrow(LiteFsmError);
@@ -29,10 +30,17 @@ type CacheExtension = {
   readonly publicState: CacheState;
 };
 
+type TypedRoutedCacheExtension = CacheExtension & {
+  readonly observedEvents: { readonly type: "PING" };
+  readonly routeMeta: {
+    readonly cacheKey: string;
+  };
+};
+
 const createStorageRuntimeDefinition = (
   kind: string,
   options: {
-    readonly routeMetaKeys?: readonly string[];
+    readonly routeMetaKeys?: StorageRouteMetaDependencyKeys;
     readonly order?: string[];
   } = {},
 ) =>
@@ -284,5 +292,56 @@ describe("plugin system — этап 8 runtime storage section", () => {
 
     expect(resolvedKeys).toContain("cache");
     expect(manager.getState().cache).toEqual({ ready: true, value: 3 });
+  });
+
+  it("регистрирует typed storage runtime с routeMeta binding через общий registry path", () => {
+    const resolvedKeys: string[] = [];
+    const cacheStorage = defineStorageRuntime<TypedRoutedCacheExtension>().create({
+      kind: "stage-eight-typed-routed-cache",
+      routeMetaKeys: ["cacheKey"],
+      validateTemplate() {},
+      compileTemplate({ key, machine }) {
+        return { data: { value: (machine.initialContext as { readonly value: number }).value, key } };
+      },
+      createRuntimeState() {
+        return {};
+      },
+      createPublicInitialState({ template }) {
+        const data = template.data as { readonly value: number };
+        return { ready: true, value: data.value };
+      },
+      acceptsEvent({ action }) {
+        return action.type === "PING";
+      },
+      reduce({ template, dispatch }) {
+        const current = dispatch.nextState[template.key] as CacheState;
+        dispatch.nextState = {
+          ...dispatch.nextState,
+          [template.key]: { ready: true, value: current.value + 1 },
+        };
+      },
+      commit() {},
+    });
+    const plugin = definePlugin().create({
+      name: "stage-eight-typed-routed-cache-plugin",
+      routeMeta: {
+        cacheKey(value: string) {
+          resolvedKeys.push(value);
+          return value;
+        },
+      },
+      storage: [cacheStorage],
+    });
+    const manager = MachineManager(
+      {
+        cache: createCacheMachine("stage-eight-typed-routed-cache", 4),
+      },
+      { plugins: [plugin] as const },
+    );
+
+    manager.transition({ type: "PING", meta: { cacheKey: "cache" } });
+
+    expect(resolvedKeys).toContain("cache");
+    expect(manager.getState().cache).toEqual({ ready: true, value: 5 });
   });
 });

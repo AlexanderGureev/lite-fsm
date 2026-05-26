@@ -30,6 +30,7 @@ import { assertUserAction } from "../../managerNormalize";
 import { extractUserPlugins } from "../../pluginNormalize";
 import { compose, deepFreeze, HYDRATE_ACTION_TYPE, IS_DEV, LiteFsmError, VOID_REDUCER_ERROR } from "../../utils";
 import { createBucketRuntime, groupTemplatesByRuntime, initBucketState } from "./bucketRuntime";
+import { assertPluginInterceptorResult } from "./callbackValidation";
 import { createPluginRegistry, type DispatchHookPhase } from "./registry";
 import { createSnapshotRuntime } from "./snapshot";
 import {
@@ -37,6 +38,7 @@ import {
   type ManagerRuntimeContext,
   type StorageDispatchLifecycleContext,
 } from "./storage";
+import { throwTransitionGuardError, type GuardedCallbackRunner, type TransitionGuardPhase } from "./transitionGuard";
 
 export type RuntimePreset = {
   readonly name: string;
@@ -112,7 +114,17 @@ export const createMachineManagerFactory = (preset: RuntimePreset): MachineManag
     let subscribers: Array<TransitionSubscriber<S, RuntimeEvents, RuntimeMeta>> = [];
     let userDeps = {} as MachineDependencies<S, Plugins>;
     let activeDispatch: StorageDispatchLifecycleContext | null = null;
-    let runningDispatchHook = false;
+    let transitionGuardPhase: TransitionGuardPhase | null = null;
+
+    const withTransitionGuard: GuardedCallbackRunner = (phase, run) => {
+      const previousPhase = transitionGuardPhase;
+      transitionGuardPhase = phase;
+      try {
+        return run();
+      } finally {
+        transitionGuardPhase = previousPhase;
+      }
+    };
 
     const requireActiveDispatch = (): StorageDispatchLifecycleContext => {
       /* v8 ignore next 6 -- защитный invariant: вызывается только из reducer/coreTransition внутри активного transition(). */
@@ -162,6 +174,7 @@ export const createMachineManagerFactory = (preset: RuntimePreset): MachineManag
       managerContext,
       pluginRegistry.routing.resolveRoute,
       pluginRegistry.defaultStorageKind,
+      withTransitionGuard,
     );
 
     state = initBucketState<S>(buckets, bucketsByKind, templates, managerContext);
@@ -252,8 +265,12 @@ export const createMachineManagerFactory = (preset: RuntimePreset): MachineManag
 
     const runActionInterceptors = (dispatch: StorageDispatchLifecycleContext) => {
       const context = createPluginDispatchContext(dispatch);
-      for (const interceptor of pluginRegistry.listActionInterceptors()) {
-        const result = interceptor(context);
+      for (const { owner, intercept } of pluginRegistry.listActionInterceptors()) {
+        const source = `plugin '${owner}' intercept`;
+        const result = assertPluginInterceptorResult(
+          source,
+          withTransitionGuard("plugin.intercept", () => intercept(context)),
+        );
         if (result?.action !== undefined) setCurrentAction(dispatch, result.action);
         if (result?.skipDelivery === true) dispatch.skipDelivery = true;
         if (result?.stopInterceptors === true) return;
@@ -261,13 +278,11 @@ export const createMachineManagerFactory = (preset: RuntimePreset): MachineManag
     };
 
     const runDispatchHooks = (phase: DispatchHookPhase, dispatch: StorageDispatchLifecycleContext) => {
+      const guardPhase: TransitionGuardPhase = `hook.${phase}`;
       for (const hook of pluginRegistry.listDispatchHooks(phase)) {
-        runningDispatchHook = true;
-        try {
+        withTransitionGuard(guardPhase, () => {
           (hook as DispatchHook)(createPluginDispatchContext(dispatch));
-        } finally {
-          runningDispatchHook = false;
-        }
+        });
       }
     };
 
@@ -353,9 +368,7 @@ export const createMachineManagerFactory = (preset: RuntimePreset): MachineManag
     if (IS_DEV) deepFreeze(state);
 
     function transition(action: RuntimeAction, options?: unknown): RuntimeAction {
-      if (runningDispatchHook) {
-        throw new Error("[lite-fsm] transition cannot be called from a dispatch hook.");
-      }
+      if (transitionGuardPhase) throwTransitionGuardError(transitionGuardPhase);
 
       assertUserAction(action);
       const widened = widenAction(action);

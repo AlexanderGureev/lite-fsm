@@ -2,6 +2,7 @@
 // compileTemplate так, чтобы builder подставлял key/kind поверх user-возвращённого payload.
 
 import { assertFunction, assertNonEmptyString, hasOwn, invalidPluginDefinition, isPlainObject } from "./pluginNormalize";
+import { assertPublicCompileTemplateResult } from "./runtime/kernel/callbackValidation";
 import type { CompileTemplateContext, StorageRuntime } from "./runtime/kernel/storage";
 
 const REQUIRED_METHODS = [
@@ -147,7 +148,10 @@ export const normalizePublicStorageRuntime = <Kind extends string>(
     const compileTemplate = runtime.compileTemplate as unknown as (
       context: CompileTemplateContext,
     ) => PublicCompileTemplateResult;
-    const payload = compileTemplate(ctx);
+    const payload = assertPublicCompileTemplateResult(
+      `storage runtime '${kind}' compileTemplate`,
+      compileTemplate(ctx),
+    );
     if (payload === undefined) return { key: ctx.key, kind };
 
     return Object.assign({}, payload, { key: ctx.key, kind });

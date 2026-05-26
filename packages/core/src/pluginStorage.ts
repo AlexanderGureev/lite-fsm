@@ -8,6 +8,8 @@ import type {
   PluginStorageRuntime,
   RejectUnknownMachineExtensionKeys,
   StorageMachineExtension,
+  StorageRequiredRouteMetaForKeys,
+  StorageRouteMetaKeys,
   StorageRuntimeExtension,
   StorageRuntimeBuilder,
 } from "./pluginStorageTypes";
@@ -19,26 +21,37 @@ import type { MachineRuntimeExtension } from "./types";
 const liteFsmStorageRuntimeMarker: unique symbol = Symbol.for("lite-fsm.storage-runtime.value") as never;
 const liteFsmStorageRuntimePayload: unique symbol = Symbol.for("lite-fsm.storage-runtime.payload") as never;
 declare const liteFsmStorageRuntimeExtension: unique symbol;
+declare const liteFsmStorageRouteMetaRequirements: unique symbol;
 
 export type LiteFsmStorageRuntimeDefinition<
   Kind extends string = string,
   MachineExtension extends MachineRuntimeExtension = MachineRuntimeExtension,
+  RouteMetaRequirements extends object = object,
 > = {
   readonly kind: Kind;
   readonly [liteFsmStorageRuntimeMarker]: true;
   readonly [liteFsmStorageRuntimePayload]: StorageRuntime;
   readonly [liteFsmStorageRuntimeExtension]: MachineExtension;
+  readonly [liteFsmStorageRouteMetaRequirements]: RouteMetaRequirements;
 };
 
 // === Factory / accessors =====================================================
 
-const createStorageRuntimeValue = <const Kind extends string, Extension extends StorageRuntimeExtension>(
+const createStorageRuntimeValue = <
+  const Kind extends string,
+  Extension extends StorageRuntimeExtension,
+  RouteMetaRequirements extends object,
+>(
   definition: PluginStorageRuntime<Kind, Extension>,
-): LiteFsmStorageRuntimeDefinition<Kind, StorageMachineExtension<Kind, Extension>> => {
+): LiteFsmStorageRuntimeDefinition<Kind, StorageMachineExtension<Kind, Extension>, RouteMetaRequirements> => {
   const runtime = assertStorageRuntimeDefinition(definition);
   const kind = runtime.kind as Kind;
   const normalized = normalizePublicStorageRuntime(kind, runtime);
-  const value = { kind } as LiteFsmStorageRuntimeDefinition<Kind, StorageMachineExtension<Kind, Extension>>;
+  const value = { kind } as LiteFsmStorageRuntimeDefinition<
+    Kind,
+    StorageMachineExtension<Kind, Extension>,
+    RouteMetaRequirements
+  >;
 
   Object.defineProperties(value, {
     [liteFsmStorageRuntimeMarker]: { value: true },
@@ -64,10 +77,12 @@ export function defineStorageRuntime<
   }
 
   return {
-    create<const Kind extends string>(
-      definition: PluginStorageRuntime<Kind, Extension> & RejectUnknownMachineExtensionKeys<Extension>,
+    create<const Kind extends string, const RouteMetaKeys extends StorageRouteMetaKeys<Extension> | undefined>(
+      definition: PluginStorageRuntime<Kind, Extension, RouteMetaKeys> & RejectUnknownMachineExtensionKeys<Extension>,
     ) {
-      return createStorageRuntimeValue<Kind, Extension>(definition as unknown as PluginStorageRuntime<Kind, Extension>);
+      return createStorageRuntimeValue<Kind, Extension, StorageRequiredRouteMetaForKeys<Extension, RouteMetaKeys>>(
+        definition as unknown as PluginStorageRuntime<Kind, Extension>,
+      );
     },
   };
 }

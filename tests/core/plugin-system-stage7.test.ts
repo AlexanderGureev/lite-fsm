@@ -78,7 +78,7 @@ describe("plugin system — этап 7 storage builder", () => {
     });
   });
 
-  it("сохраняет builder-owned key и kind при обходе типов compileTemplate", () => {
+  it("отклоняет builder-owned key и kind в public compileTemplate result", () => {
     const storage = defineStorageRuntime().create({
       ...createStorageRuntimeDefinition("owned-kind"),
       compileTemplate() {
@@ -101,11 +101,11 @@ describe("plugin system — этап 7 storage builder", () => {
       initialContext: { count: 0 },
     };
 
-    expect(runtime.compileTemplate({ key: "counter", storageKind: "owned-kind", machine })).toEqual({
-      key: "counter",
-      kind: "owned-kind",
-      data: { ttl: 250 },
-    });
+    expectLiteFsmError(
+      () => runtime.compileTemplate({ key: "counter", storageKind: "owned-kind", machine }),
+      "LITE_FSM_INVALID_STORAGE_CALLBACK_RESULT",
+      "storage runtime 'owned-kind' compileTemplate",
+    );
   });
 
   it("валидирует локальную форму storage runtime definition", () => {
