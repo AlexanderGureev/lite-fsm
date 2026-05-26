@@ -1,6 +1,6 @@
 ---
 name: lite-fsm
-description: "Помогает проектировать и реализовывать бизнес-логику на lite-fsm в TypeScript/React apps: state machines, actors, async effects, persistence, SSR/hydration, tests и thin UI поверх @lite-fsm/core/@lite-fsm/react."
+description: "Для создания и доработки пользовательских TypeScript/React приложений, которые потребляют lite-fsm: app-level FSM-модели, actors, effects, persistence, SSR/hydration и thin UI. Не использовать для разработки исходников, типов, тестов, документации, graph/CLI или релизной инфраструктуры самого monorepo lite-fsm."
 ---
 
 # lite-fsm
