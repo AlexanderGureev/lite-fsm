@@ -1,10 +1,4 @@
-import type {
-  AnyEvent,
-  CoreActionMeta,
-  MachinesState,
-  MachineStore,
-  ManagerAction,
-} from "./types";
+import type { AnyEvent, CoreActionMeta, MachinesState, MachineStore, ManagerAction } from "./types";
 import type { LiteFsmStorageRuntimeDefinition } from "./pluginStorage";
 import { getStorageRuntimePayload, isLiteFsmStorageRuntimeDefinition } from "./pluginStorage";
 import { LiteFsmError } from "./utils";
@@ -47,13 +41,16 @@ export type ActionInterceptor = (ctx: ActionInterceptorContext) => ActionInterce
 
 export type DispatchHook = (ctx: DispatchContext) => void;
 
-export type DispatchHookPhase =
-  | "beforeReduce"
-  | "afterReduce"
-  | "beforeCommit"
-  | "beforeSubscribers"
-  | "beforeEffects"
-  | "afterEffects";
+const dispatchHookPhaseValues = [
+  "beforeReduce",
+  "afterReduce",
+  "beforeCommit",
+  "beforeSubscribers",
+  "beforeEffects",
+  "afterEffects",
+] as const;
+
+export type DispatchHookPhase = (typeof dispatchHookPhaseValues)[number];
 
 export type ScopedInvocationPhase = "effect" | "reaction";
 
@@ -186,10 +183,7 @@ type PluginRouteResolver<Key extends string, Events extends AnyEvent, Value = un
   bivarianceHack(value: Value, ctx: PluginRouteResolverContext<Key, Events>): RouteResolverResult;
 }["bivarianceHack"];
 
-export type PluginScopedInvocationContext<
-  Events extends AnyEvent,
-  TransitionEvents extends AnyEvent,
-> = Omit<
+export type PluginScopedInvocationContext<Events extends AnyEvent, TransitionEvents extends AnyEvent> = Omit<
   ScopedInvocationContext,
   "event" | "transition"
 > & {
@@ -198,7 +192,7 @@ export type PluginScopedInvocationContext<
 };
 
 type PluginScopedFactory<Events extends AnyEvent, TransitionEvents extends AnyEvent> = (
-  ctx: PluginScopedInvocationContext<Events, TransitionEvents>
+  ctx: PluginScopedInvocationContext<Events, TransitionEvents>,
 ) => unknown;
 
 type PluginRouteMetaContext<RouteMetaValues extends object, Events extends AnyEvent> = {
@@ -223,25 +217,25 @@ type PluginDefinitionBase<
 > = {
   readonly name: Name;
   readonly manager?: Record<string, ManagerExtensionFactory>;
-  readonly storage?: readonly [
-    LiteFsmStorageRuntimeDefinition,
-    ...LiteFsmStorageRuntimeDefinition[],
-  ];
+  readonly storage?: readonly [LiteFsmStorageRuntimeDefinition, ...LiteFsmStorageRuntimeDefinition[]];
   readonly scopedDeps?: Record<string, PluginScopedFactory<Events, PluginEvents>>;
   readonly scopedTransition?: Record<string, PluginScopedFactory<Events, PluginEvents>>;
   readonly intercept?: PluginActionInterceptor<Events>;
   readonly hooks?: Partial<Record<DispatchHookPhase, PluginDispatchHook<Events>>>;
 };
 
-type PluginDefinitionKey =
-  | "name"
-  | "routeMeta"
-  | "manager"
-  | "storage"
-  | "scopedDeps"
-  | "scopedTransition"
-  | "intercept"
-  | "hooks";
+const pluginDefinitionKeys = [
+  "name",
+  "routeMeta",
+  "manager",
+  "storage",
+  "scopedDeps",
+  "scopedTransition",
+  "intercept",
+  "hooks",
+] as const;
+
+type PluginDefinitionKey = (typeof pluginDefinitionKeys)[number];
 
 type RejectUnknownKeys<Definition extends object> = {
   readonly [Key in Exclude<keyof Definition, PluginDefinitionKey>]: never;
@@ -254,46 +248,39 @@ type PluginDefinitionOutput<Definition extends object, RouteMetaResolvers extend
   readonly routeMeta?: RouteMetaResolvers;
 };
 
+type PluginDefinitionInput<
+  PluginEvents extends AnyEvent,
+  HostEvents extends AnyEvent,
+  RouteMetaValues extends object,
+  RouteMetaResolvers extends object,
+  Definition extends PluginDefinitionBase<PluginEvents, HostEvents>,
+> = Definition &
+  PluginRouteMetaSection<RouteMetaValues, RouteMetaResolvers, ObserverEvents<PluginEvents, HostEvents>> &
+  RejectUnknownKeys<
+    Definition & PluginRouteMetaSection<RouteMetaValues, RouteMetaResolvers, ObserverEvents<PluginEvents, HostEvents>>
+  >;
+
+type PluginCreate<PluginEvents extends AnyEvent, HostEvents extends AnyEvent> = <
+  const RouteMetaValues extends object = {},
+  const RouteMetaResolvers extends object = {},
+  const Definition extends PluginDefinitionBase<PluginEvents, HostEvents> = PluginDefinitionBase<
+    PluginEvents,
+    HostEvents
+  >,
+>(
+  definition: PluginDefinitionInput<PluginEvents, HostEvents, RouteMetaValues, RouteMetaResolvers, Definition>,
+) => LiteFsmPlugin<Definition["name"], PluginEvents, PluginDefinitionOutput<Definition, RouteMetaResolvers>>;
+
 export type PluginBuilder<PluginEvents extends AnyEvent, HostEvents extends AnyEvent> = {
-  create<
-    const RouteMetaValues extends object = {},
-    const RouteMetaResolvers extends object = {},
-    const Definition extends PluginDefinitionBase<PluginEvents, HostEvents> = PluginDefinitionBase<
-      PluginEvents,
-      HostEvents
-    >,
-  >(
-    definition: Definition &
-      PluginRouteMetaSection<RouteMetaValues, RouteMetaResolvers, ObserverEvents<PluginEvents, HostEvents>> &
-      RejectUnknownKeys<
-        Definition &
-          PluginRouteMetaSection<RouteMetaValues, RouteMetaResolvers, ObserverEvents<PluginEvents, HostEvents>>
-      >,
-  ): LiteFsmPlugin<Definition["name"], PluginEvents, PluginDefinitionOutput<Definition, RouteMetaResolvers>>;
+  create: PluginCreate<PluginEvents, HostEvents>;
 };
 
 type PlainRecord = Record<string, unknown>;
 type UnknownFunction = (...args: never[]) => unknown;
 
-const topLevelSections = new Set([
-  "name",
-  "routeMeta",
-  "manager",
-  "storage",
-  "scopedDeps",
-  "scopedTransition",
-  "intercept",
-  "hooks",
-]);
+const topLevelSections = new Set<string>(pluginDefinitionKeys);
 
-const dispatchHookPhases = new Set<DispatchHookPhase>([
-  "beforeReduce",
-  "afterReduce",
-  "beforeCommit",
-  "beforeSubscribers",
-  "beforeEffects",
-  "afterEffects",
-]);
+const dispatchHookPhases = new Set<string>(dispatchHookPhaseValues);
 
 const hasOwn = (value: object, key: string): boolean => Object.prototype.hasOwnProperty.call(value, key);
 
@@ -306,6 +293,12 @@ const isPlainObject = (value: unknown): value is PlainRecord => {
 
 const invalidPluginDefinition = (message: string): never => {
   throw new LiteFsmError("LITE_FSM_INVALID_PLUGIN_DEFINITION", `[lite-fsm] invalid plugin definition: ${message}`);
+};
+
+const assertDispatchHookPhase = (value: string): DispatchHookPhase => {
+  if (dispatchHookPhases.has(value as DispatchHookPhase)) return value as DispatchHookPhase;
+
+  return invalidPluginDefinition(`unknown dispatch hook phase '${value}'.`);
 };
 
 const assertPluginName = (value: unknown): string => {
@@ -392,29 +385,37 @@ const normalizeManager = (owner: string, value: unknown): readonly NormalizedMan
   }));
 };
 
-const normalizeScopedFactories = (
+function normalizeScopedFactories(
+  section: "scopedDeps",
+  owner: string,
+  value: unknown,
+): readonly NormalizedScopedDepsEntry[];
+function normalizeScopedFactories(
+  section: "scopedTransition",
+  owner: string,
+  value: unknown,
+): readonly NormalizedScopedTransitionEntry[];
+function normalizeScopedFactories(
   section: "scopedDeps" | "scopedTransition",
   owner: string,
   value: unknown,
-): readonly (NormalizedScopedDepsEntry | NormalizedScopedTransitionEntry)[] => {
+): readonly (NormalizedScopedDepsEntry | NormalizedScopedTransitionEntry)[] {
   return assertObjectSection(section, value).map(([key, factory]) => ({
     owner,
     key,
     factory: assertFunctionEntry(section, key, factory) as PluginScopedFactory<AnyEvent, AnyEvent>,
   }));
-};
+}
 
 const normalizeHooks = (owner: string, value: unknown): Partial<Record<DispatchHookPhase, NormalizedDispatchHook>> => {
   const hooks: Partial<Record<DispatchHookPhase, NormalizedDispatchHook>> = {};
 
   for (const [phase, hook] of assertObjectSection("hooks", value)) {
-    if (!dispatchHookPhases.has(phase as DispatchHookPhase)) {
-      invalidPluginDefinition(`unknown dispatch hook phase '${phase}'.`);
-    }
+    const hookPhase = assertDispatchHookPhase(phase);
 
-    hooks[phase as DispatchHookPhase] = {
+    hooks[hookPhase] = {
       owner,
-      phase: phase as DispatchHookPhase,
+      phase: hookPhase,
       hook: assertFunctionEntry("hooks", phase, hook) as DispatchHook,
     };
   }
@@ -435,15 +436,9 @@ const normalizePluginDefinition = (value: unknown): NormalizedPlugin => {
     name,
     storage: hasOwn(value, "storage") ? normalizeStorage(name, value.storage) : [],
     routeMeta: hasOwn(value, "routeMeta") ? normalizeRouteMeta(name, value.routeMeta) : [],
-    scopedDeps: hasOwn(value, "scopedDeps")
-      ? (normalizeScopedFactories("scopedDeps", name, value.scopedDeps) as readonly NormalizedScopedDepsEntry[])
-      : [],
+    scopedDeps: hasOwn(value, "scopedDeps") ? normalizeScopedFactories("scopedDeps", name, value.scopedDeps) : [],
     scopedTransition: hasOwn(value, "scopedTransition")
-      ? (normalizeScopedFactories(
-          "scopedTransition",
-          name,
-          value.scopedTransition,
-        ) as readonly NormalizedScopedTransitionEntry[])
+      ? normalizeScopedFactories("scopedTransition", name, value.scopedTransition)
       : [],
     manager: hasOwn(value, "manager") ? normalizeManager(name, value.manager) : [],
     hooks: hasOwn(value, "hooks") ? normalizeHooks(name, value.hooks) : {},
@@ -486,27 +481,22 @@ export function definePlugin<
     invalidPluginDefinition("definePlugin must be called without arguments; use definePlugin().create(...).");
   }
 
-  return {
-    create<
-      const RouteMetaValues extends object = {},
-      const RouteMetaResolvers extends object = {},
-      const Definition extends PluginDefinitionBase<PluginEvents, HostEvents> = PluginDefinitionBase<
-        PluginEvents,
-        HostEvents
-      >,
-    >(
-      definition: Definition &
-        PluginRouteMetaSection<RouteMetaValues, RouteMetaResolvers, ObserverEvents<PluginEvents, HostEvents>> &
-        RejectUnknownKeys<
-          Definition &
-            PluginRouteMetaSection<RouteMetaValues, RouteMetaResolvers, ObserverEvents<PluginEvents, HostEvents>>
-        >,
-    ) {
-      return createPluginValue<PluginDefinitionOutput<Definition, RouteMetaResolvers>, PluginEvents>(
-        definition as unknown as PluginDefinitionOutput<Definition, RouteMetaResolvers>,
-      );
-    },
-  };
+  function create<
+    const RouteMetaValues extends object = {},
+    const RouteMetaResolvers extends object = {},
+    const Definition extends PluginDefinitionBase<PluginEvents, HostEvents> = PluginDefinitionBase<
+      PluginEvents,
+      HostEvents
+    >,
+  >(
+    definition: PluginDefinitionInput<PluginEvents, HostEvents, RouteMetaValues, RouteMetaResolvers, Definition>,
+  ): LiteFsmPlugin<Definition["name"], PluginEvents, PluginDefinitionOutput<Definition, RouteMetaResolvers>> {
+    return createPluginValue<PluginDefinitionOutput<Definition, RouteMetaResolvers>, PluginEvents>(
+      definition as unknown as PluginDefinitionOutput<Definition, RouteMetaResolvers>,
+    );
+  }
+
+  return { create };
 }
 
 export const isLiteFsmPluginValue = (value: unknown): value is LiteFsmPlugin => {

@@ -1,7 +1,6 @@
 import { describe, expect, test } from "tstyche";
 import { definePlugin, MachineManager } from "@lite-fsm/core";
-import type { FSMEvent, MachineConfig } from "@lite-fsm/core";
-import type { LiteFsmPlugin } from "@lite-fsm/core/internal/plugin";
+import type { FSMEvent, LiteFsmPlugin, MachineConfig } from "@lite-fsm/core";
 
 type AppEvent = FSMEvent<"APP_EVENT", { readonly id: string }>;
 type PluginEvent = FSMEvent<"PLUGIN_EVENT", { readonly id: string }>;

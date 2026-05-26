@@ -23,6 +23,7 @@ import type {
   DefaultDeps,
   DefaultActorSnapshot,
   DehydrateOptions,
+  DispatchContext,
   DomainTransitionTarget,
   EffectDeps,
   EffectStateName,
@@ -66,13 +67,17 @@ import type {
   ManagerAction,
   ManagerCommitAction,
   ManagerFromPlugins,
+  ManagerRuntimeContext,
   Middleware,
   MiddlewareApi,
   PluginMachineExtensions,
+  LiteFsmPlugin,
+  LiteFsmStorageRuntimeDefinition,
   PluginManagerEvents,
   PluginManagerExtensions,
   PluginRouteMeta,
   PluginScopedDeps,
+  PluginScopedInvocationContext,
   PluginScopedTransition,
   PublicActorSlice,
   Reducer,
@@ -456,6 +461,10 @@ describe("canary поверхности экспорта core-типов", () =>
     const plugin = definePlugin().create({ name: "exported-plugin" });
 
     expect(plugin.name).type.toBe<"exported-plugin">();
+    expect(plugin).type.toBeAssignableTo<LiteFsmPlugin<"exported-plugin">>();
+    expect<DispatchContext["runtime"]>().type.toBe<Map<string, unknown>>();
+    expect<ManagerRuntimeContext["schemaVersion"]>().type.toBe<number | undefined>();
+    expect<PluginScopedInvocationContext<AnyEvent, AnyEvent>["phase"]>().type.toBe<"effect" | "reaction">();
   });
 
   test("экспортирует defineStorageRuntime как public runtime helper", () => {
@@ -477,6 +486,7 @@ describe("canary поверхности экспорта core-типов", () =>
     });
 
     expect(storage.kind).type.toBe<"exported-storage">();
+    expect(storage).type.toBeAssignableTo<LiteFsmStorageRuntimeDefinition<"exported-storage">>();
   });
 
   test("экспортирует все публичные core type-алиасы из interfaces.ts", () => {

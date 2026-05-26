@@ -184,6 +184,19 @@ const assertStorageRuntimeDefinitionName = (value: unknown): string => {
   return invalidPluginDefinition("storage runtime kind must be a non-empty string.");
 };
 
+const assertOptionalRouteMetaKeys = (definition: PlainRecord) => {
+  if (!hasOwn(definition, "routeMetaKeys") || definition.routeMetaKeys === undefined) return;
+
+  if (
+    Array.isArray(definition.routeMetaKeys) &&
+    definition.routeMetaKeys.every((key) => typeof key === "string")
+  ) {
+    return;
+  }
+
+  invalidPluginDefinition("storage runtime 'routeMetaKeys' must be an array of strings.");
+};
+
 const assertKnownStorageRuntimeDefinitionKeys = (definition: PlainRecord) => {
   for (const key of Object.keys(definition)) {
     if (storageRuntimeTopLevelKeys.has(key as StorageRuntimeDefinitionKey)) continue;
@@ -238,6 +251,7 @@ const assertStorageRuntimeDefinition = (value: unknown): StorageRuntime => {
   }
 
   assertKnownStorageRuntimeDefinitionKeys(value);
+  assertOptionalRouteMetaKeys(value);
   assertStorageRuntimeDefinitionName(value.kind);
 
   for (const method of [
@@ -267,6 +281,7 @@ const normalizePublicStorageRuntime = <Kind extends string>(
   runtime: StorageRuntime,
 ): StorageRuntime => ({
   ...runtime,
+  ...(runtime.routeMetaKeys === undefined ? {} : { routeMetaKeys: [...runtime.routeMetaKeys] }),
   kind,
   compileTemplate(ctx) {
     const compileTemplate = runtime.compileTemplate as unknown as (
@@ -286,7 +301,7 @@ const createStorageRuntimeValue = <
   definition: PluginStorageRuntime<Kind, Extension>,
 ): LiteFsmStorageRuntimeDefinition<Kind, NormalizedStorageMachineExtension<Kind, Extension>> => {
   const runtime = assertStorageRuntimeDefinition(definition);
-  const kind = assertStorageRuntimeDefinitionName(definition.kind) as Kind;
+  const kind = runtime.kind as Kind;
   const normalized = normalizePublicStorageRuntime(kind, runtime);
   const value = { kind } as LiteFsmStorageRuntimeDefinition<Kind, NormalizedStorageMachineExtension<Kind, Extension>>;
 

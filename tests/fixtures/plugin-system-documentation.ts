@@ -10,19 +10,13 @@ import type {
   TypedCreateMachineFn,
 } from "@lite-fsm/core";
 
-export type LoadDocument = FSMEvent<
-  "LOAD_DOCUMENT",
-  { readonly documentId: string; readonly tenantId: string }
->;
+export type LoadDocument = FSMEvent<"LOAD_DOCUMENT", { readonly documentId: string; readonly tenantId: string }>;
 export type ResetDocument = FSMEvent<"RESET_DOCUMENT">;
 export type StartWorkflow = FSMEvent<"START_WORKFLOW">;
 export type HostEvents = LoadDocument | ResetDocument | StartWorkflow;
 
 export type CachePluginEvent = FSMEvent<"CACHE_REFRESH", { readonly cacheKey: string }>;
-export type DocumentCacheInternalEvent = FSMEvent<
-  "DOCUMENT_CACHE_INTERNAL",
-  { readonly cacheKey: string }
->;
+export type DocumentCacheInternalEvent = FSMEvent<"DOCUMENT_CACHE_INTERNAL", { readonly cacheKey: string }>;
 
 export type DocumentCacheContext = {
   readonly value: string;
@@ -87,7 +81,11 @@ const readRuntimeState = (state: unknown): DocumentCacheRuntimeState => {
 };
 
 const isDocumentAction = (
-  action: HostEvents | CachePluginEvent | DocumentCacheInternalEvent | { readonly type: string; readonly payload?: unknown },
+  action:
+    | HostEvents
+    | CachePluginEvent
+    | DocumentCacheInternalEvent
+    | { readonly type: string; readonly payload?: unknown },
 ): action is LoadDocument | ResetDocument | CachePluginEvent | DocumentCacheInternalEvent => {
   return (
     action.type === "LOAD_DOCUMENT" ||
@@ -269,10 +267,9 @@ export type DocumentationState = {
 };
 
 export type DocumentationManager = {
-  transition(action: ManagerAction<AppEvents, Partial<PluginRouteMeta<AppPlugins>>>): ManagerAction<
-    AppEvents,
-    Partial<PluginRouteMeta<AppPlugins>>
-  >;
+  transition(
+    action: ManagerAction<AppEvents, Partial<PluginRouteMeta<AppPlugins>>>,
+  ): ManagerAction<AppEvents, Partial<PluginRouteMeta<AppPlugins>>>;
   getState(): DocumentationState;
   getSnapshot(): unknown;
   dehydrate(): { readonly storage?: Record<string, unknown> };

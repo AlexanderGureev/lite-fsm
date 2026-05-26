@@ -116,6 +116,7 @@ describe("plugin system — этап 7 storage builder", () => {
         typeof createStorageRuntimeDefinition
       >,
     );
+    create({ ...createStorageRuntimeDefinition("route-meta-keys"), routeMetaKeys: ["entityId"] });
     expectLiteFsmError(
       () => (defineStorageRuntime as unknown as (arg: unknown) => unknown)({}),
       "LITE_FSM_INVALID_PLUGIN_DEFINITION",
@@ -130,16 +131,21 @@ describe("plugin system — этап 7 storage builder", () => {
       "LITE_FSM_INVALID_PLUGIN_DEFINITION",
     );
     expectLiteFsmError(
-      () => create({ ...createStorageRuntimeDefinition(), validateTemplate: "bad" } as never),
+      () => create({ ...createStorageRuntimeDefinition(), routeMetaKeys: "entityId" } as never),
       "LITE_FSM_INVALID_PLUGIN_DEFINITION",
     );
     expectLiteFsmError(
-      () => {
-        const { commit: _commit, ...definition } = createStorageRuntimeDefinition();
-        return create(definition as never);
-      },
+      () => create({ ...createStorageRuntimeDefinition(), routeMetaKeys: ["entityId", 1] } as never),
       "LITE_FSM_INVALID_PLUGIN_DEFINITION",
     );
+    expectLiteFsmError(
+      () => create({ ...createStorageRuntimeDefinition(), validateTemplate: "bad" } as never),
+      "LITE_FSM_INVALID_PLUGIN_DEFINITION",
+    );
+    expectLiteFsmError(() => {
+      const { commit: _commit, ...definition } = createStorageRuntimeDefinition();
+      return create(definition as never);
+    }, "LITE_FSM_INVALID_PLUGIN_DEFINITION");
     expectLiteFsmError(
       () => create({ ...createStorageRuntimeDefinition(), prepareAction: false } as never),
       "LITE_FSM_INVALID_PLUGIN_DEFINITION",

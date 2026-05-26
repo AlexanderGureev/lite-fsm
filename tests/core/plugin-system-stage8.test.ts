@@ -230,6 +230,35 @@ describe("plugin system — этап 8 runtime storage section", () => {
     );
   });
 
+  it("фиксирует routeMetaKeys при создании storage definition", () => {
+    const routeMetaKeys = ["cacheKey"];
+    const cacheStorage = createStorageRuntimeDefinition("stage-eight-stable-route-keys", {
+      routeMetaKeys,
+    });
+    const plugin = definePlugin().create({
+      name: "stage-eight-stable-route-keys-plugin",
+      storage: [cacheStorage],
+      routeMeta: {
+        cacheKey(value) {
+          return String(value);
+        },
+      },
+    });
+
+    routeMetaKeys.push("lateKey");
+
+    const manager = MachineManager(
+      {
+        cache: createCacheMachine("stage-eight-stable-route-keys"),
+      },
+      { plugins: [plugin] as const },
+    );
+
+    manager.transition({ type: "PING", meta: { cacheKey: "cache" } });
+
+    expect(manager.getState().cache).toEqual({ ready: true, value: 1 });
+  });
+
   it("использует routeMeta resolver вместе с routeMetaKeys storage definition", () => {
     const resolvedKeys: string[] = [];
     const cacheStorage = createStorageRuntimeDefinition("stage-eight-routed-cache", {

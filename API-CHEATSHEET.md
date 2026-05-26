@@ -281,6 +281,8 @@ State effect приоритетнее `"*"`. Wildcard срабатывает и 
 
 Публичный plugin объявляется только через `definePlugin<PluginEvents, HostEvents>().create({ name, ...sections })`. Публичного callback `install` нет. `MachineManager(..., { plugins })` принимает только marked values из builder API; structural objects отклоняются runtime validation.
 
+Типы возвращаемых values доступны из root entrypoint как `LiteFsmPlugin` и `LiteFsmStorageRuntimeDefinition`. Context-типы `DispatchContext`, `ManagerRuntimeContext` и `PluginScopedInvocationContext` тоже экспортируются для portable inferred types exported plugin factories. Создавать structural plugin/storage values по этим типам нельзя.
+
 `PluginEvents` добавляются к manager-level `transition` для текущего plugin tuple, но не становятся событиями машин автоматически. Если машина обрабатывает plugin event, включите его явно: `type AppEvents = HostEvents | PluginManagerEvents<AppPlugins>`. `HostEvents` используются только для contextual typing внутри plugin definition и не входят в `PluginManagerEvents<Plugins>`.
 
 `routeMeta` объявляет routing contract, а не пользовательские данные. Ключ section становится action meta key; используйте scalar keys вроде `entityId`, `cacheKey`, `documentId`, `tenantId`. Reserved route/sender keys запрещены. Resolver возвращает `string | readonly string[]`; runtime не проверяет тип входного `value`, но проверяет результат resolver. `PluginRouteMeta<PluginUnion>` возвращает raw map значений, а optional semantics относятся к `manager.transition(...).meta`.

@@ -20,14 +20,19 @@ export { MachineManager } from "./MachineManager";
 export { definePlugin } from "./plugin";
 export { defineStorageRuntime } from "./pluginStorage";
 export type {
+  DispatchContext,
   EffectDeps,
+  LiteFsmPlugin,
+  ManagerRuntimeContext,
   PluginMachineExtensions,
   PluginManagerEvents,
   PluginManagerExtensions,
   PluginRouteMeta,
+  PluginScopedInvocationContext,
   PluginScopedDeps,
   PluginScopedTransition,
 } from "./plugin";
+export type { LiteFsmStorageRuntimeDefinition } from "./pluginStorage";
 export * from "./types";
 export { createMachine, type TypedCreateMachineFn } from "./createMachine";
 export { HYDRATE_ACTION_TYPE, LiteFsmError, VOID_REDUCER_MIDDLEWARE_MARKER } from "./utils";
@@ -82,13 +87,10 @@ const take = <
       return !slot.cancel?.();
     };
 
-    const guardedTransition = Object.assign(
-      (action: ManagerAction<P>) => {
-        if (!canTransition()) return action;
-        return opts.transition(action);
-      },
-      opts.transition,
-    ) as ActorTransition<P>;
+    const guardedTransition = Object.assign((action: ManagerAction<P>) => {
+      if (!canTransition()) return action;
+      return opts.transition(action);
+    }, opts.transition) as ActorTransition<P>;
 
     // У actor effect-а opts.transition — ActorTransition с sugar; оборачиваем canTransition guard'ом.
     if (deps.self) {
