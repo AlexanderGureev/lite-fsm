@@ -1,7 +1,7 @@
 // Public type contracts for plugin system. Используются и в plugin DSL, и в kernel runtime,
 // и при типизации plugin definition пользователем.
 
-import type { AnyEvent, MachinesState, MachineStore, ManagerAction } from "./types";
+import type { AnyEvent, MachinesState, MachineStore, ManagerAction, ReadonlyManagerAction } from "./types";
 
 // === Routing =================================================================
 
@@ -9,7 +9,7 @@ export type RouteResolverResult = string | readonly string[];
 
 export type RouteResolverContext<Key extends string = string> = {
   readonly key: Key;
-  readonly action: ManagerAction<AnyEvent>;
+  readonly action: ReadonlyManagerAction<AnyEvent>;
   readonly meta: Readonly<Record<string, unknown>>;
 };
 
@@ -27,8 +27,8 @@ export type RoutingRegistry = {
 export type DispatchContext = {
   readonly options: unknown;
   readonly runtime: Map<string, unknown>;
-  readonly originalAction: ManagerAction<AnyEvent>;
-  readonly action: ManagerAction<AnyEvent>;
+  readonly originalAction: ReadonlyManagerAction<AnyEvent>;
+  readonly action: ReadonlyManagerAction<AnyEvent>;
   readonly skipDelivery: boolean;
   reportError(error: unknown): void;
 };
@@ -67,7 +67,7 @@ export type ScopedInvocationIndices = Readonly<Record<string, unknown>>;
 
 export type ScopedInvocationContext = {
   readonly source: ScopedInvocationSource;
-  readonly event: ManagerAction<AnyEvent>;
+  readonly event: ReadonlyManagerAction<AnyEvent>;
   readonly indices: ScopedInvocationIndices;
   readonly phase: ScopedInvocationPhase;
   readonly transition: (action: ManagerAction<AnyEvent>) => ManagerAction<AnyEvent>;
@@ -75,23 +75,25 @@ export type ScopedInvocationContext = {
 
 // === Manager extension =======================================================
 
-export type ManagerRuntimeContext = {
+export type ManagerRuntimeContext<Events extends AnyEvent = AnyEvent> = {
   readonly config: MachineStore;
   readonly options: unknown;
   readonly schemaVersion: number | undefined;
   getState(): MachinesState<MachineStore>;
-  transition(action: ManagerAction<AnyEvent>, options?: unknown): ManagerAction<AnyEvent>;
+  transition(action: ManagerAction<Events>, options?: unknown): ManagerAction<Events>;
   onTransition(
     cb: (
       prevState: MachinesState<MachineStore>,
       currentState: MachinesState<MachineStore>,
-      action: ManagerAction<AnyEvent> | { type: string; payload?: unknown },
+      action: ReadonlyManagerAction<Events> | { readonly type: string; readonly payload?: unknown },
     ) => void,
   ): () => void;
   getDependencies(): Record<string, unknown>;
 };
 
-export type ManagerExtensionFactory<Value = unknown> = (ctx: ManagerRuntimeContext) => Value;
+export type ManagerExtensionFactory<Events extends AnyEvent = AnyEvent, Value = unknown> = (
+  ctx: ManagerRuntimeContext<Events>,
+) => Value;
 
 // === Normalized plugin payload ===============================================
 // Internal representation, в которое plugin DSL приводит входное plugin definition.

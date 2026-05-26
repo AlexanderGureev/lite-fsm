@@ -1,6 +1,5 @@
 import { createMachine, definePlugin, defineStorageRuntime, MachineManager } from "@lite-fsm/core";
 import type {
-  AnyEvent,
   EffectDeps,
   FSMEvent,
   ManagerAction,
@@ -270,7 +269,7 @@ export type DocumentationManager = {
   getSnapshot(): unknown;
   dehydrate(): { readonly storage?: Record<string, unknown> };
   setDependencies(deps: { readonly workflowLog: { push(entry: string): void } }): void;
-  readonly cache: { readonly refresh: (cacheKey: string) => ManagerAction<AnyEvent> };
+  readonly cache: { readonly refresh: (cacheKey: string) => ManagerAction<CachePluginEvent> };
 };
 
 export const createAppMachine: TypedCreateMachineFn<

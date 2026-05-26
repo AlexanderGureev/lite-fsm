@@ -1,6 +1,6 @@
 import { describe, expect, test } from "tstyche";
 import { defineStorageRuntime } from "@lite-fsm/core";
-import type { AnyEvent, ManagerAction } from "@lite-fsm/core";
+import type { AnyEvent, ReadonlyManagerAction } from "@lite-fsm/core";
 import type {
   StorageAcceptsEventContext,
   StorageConditionContext,
@@ -58,19 +58,19 @@ const typedStorage = defineStorageRuntime<TypedStorageExtension>().create({
   },
   prepareAction(ctx) {
     expect(ctx.state).type.toBe<RuntimeState>();
-    expect(ctx.action).type.toBe<ManagerAction<AnyEvent>>();
-    expect(ctx.originalAction).type.toBe<ManagerAction<AnyEvent>>();
+    expect(ctx.action).type.toBe<ReadonlyManagerAction<AnyEvent>>();
+    expect(ctx.originalAction).type.toBe<ReadonlyManagerAction<AnyEvent>>();
   },
   beforeReduce(ctx) {
     expect(ctx.state).type.toBe<RuntimeState>();
-    expect(ctx.action).type.toBe<ManagerAction<AnyEvent>>();
-    expect(ctx.originalAction).type.toBe<ManagerAction<AnyEvent>>();
+    expect(ctx.action).type.toBe<ReadonlyManagerAction<AnyEvent>>();
+    expect(ctx.originalAction).type.toBe<ReadonlyManagerAction<AnyEvent>>();
   },
   acceptsEvent(ctx) {
     expect(ctx.template.data).type.toBe<TemplateData | undefined>();
     expect(ctx.state).type.toBe<RuntimeState>();
-    expect(ctx.action).type.toBe<ManagerAction<AnyEvent>>();
-    expect(ctx.originalAction).type.toBe<ManagerAction<AnyEvent>>();
+    expect(ctx.action).type.toBe<ReadonlyManagerAction<AnyEvent>>();
+    expect(ctx.originalAction).type.toBe<ReadonlyManagerAction<AnyEvent>>();
     return false;
   },
   reduce(ctx) {
@@ -84,7 +84,7 @@ const typedStorage = defineStorageRuntime<TypedStorageExtension>().create({
   effects: {
     condition(ctx) {
       expect(ctx.state).type.toBe<RuntimeState>();
-      expect(ctx.predicate).type.toBe<(action: ManagerAction<AnyEvent>) => boolean>();
+      expect(ctx.predicate).type.toBe<(action: ReadonlyManagerAction<AnyEvent>) => boolean>();
       return Promise.resolve(ctx.predicate({ type: "CHECK" }));
     },
     resolveInvocations(ctx) {
@@ -121,8 +121,8 @@ const typedStorage = defineStorageRuntime<TypedStorageExtension>().create({
   reactions: {
     run(ctx) {
       expect(ctx.state).type.toBe<RuntimeState>();
-      expect(ctx.action).type.toBe<ManagerAction<AnyEvent>>();
-      expect(ctx.originalAction).type.toBe<ManagerAction<AnyEvent>>();
+      expect(ctx.action).type.toBe<ReadonlyManagerAction<AnyEvent>>();
+      expect(ctx.originalAction).type.toBe<ReadonlyManagerAction<AnyEvent>>();
     },
   },
 });
@@ -145,8 +145,8 @@ const typedBucketStorage = defineStorageRuntime<TypedStorageExtension>().create(
     expect(ctx.templates).type.toBe<readonly StorageTemplate<TemplateData>[]>();
     expect(ctx.templates[0]?.data).type.toBe<TemplateData | undefined>();
     expect(ctx.state).type.toBe<RuntimeState>();
-    expect(ctx.action).type.toBe<ManagerAction<AnyEvent>>();
-    expect(ctx.originalAction).type.toBe<ManagerAction<AnyEvent>>();
+    expect(ctx.action).type.toBe<ReadonlyManagerAction<AnyEvent>>();
+    expect(ctx.originalAction).type.toBe<ReadonlyManagerAction<AnyEvent>>();
     return { type: "skip" };
   },
   commit(ctx) {
@@ -309,7 +309,7 @@ describe("plugin system — этап 4 storage context types", () => {
     type _AcceptsTemplate = Assert<Equal<AcceptsContext["template"]["data"], TemplateData | undefined>>;
     type _ConditionState = Assert<Equal<ConditionContext["state"], RuntimeState>>;
     type _ConditionPredicate = Assert<
-      Equal<ConditionContext["predicate"], (action: ManagerAction<AnyEvent>) => boolean>
+      Equal<ConditionContext["predicate"], (action: ReadonlyManagerAction<AnyEvent>) => boolean>
     >;
     type _FallbackState = Assert<IsUnknown<FallbackAcceptsContext["state"]>>;
   });

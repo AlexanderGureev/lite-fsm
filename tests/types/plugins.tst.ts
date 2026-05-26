@@ -1,7 +1,6 @@
 import { describe, expect, test } from "tstyche";
 import { definePlugin, defineStorageRuntime, MachineManager } from "@lite-fsm/core";
 import type {
-  AnyEvent,
   EffectDeps,
   FSMEvent,
   IMachineManager,
@@ -17,6 +16,7 @@ import type {
   PluginRouteMeta,
   PluginScopedDeps,
   PluginScopedTransition,
+  ReadonlyManagerAction,
 } from "@lite-fsm/core";
 
 import type { Assert, Equal } from "./_helpers";
@@ -75,7 +75,7 @@ const plugin = definePlugin<PluginEvent, HostEvent>().create({
   routeMeta: {
     entityId(value: string, ctx) {
       expect(ctx.key).type.toBe<"entityId">();
-      expect(ctx.action).type.toBe<ManagerAction<PluginEvent | HostEvent>>();
+      expect(ctx.action).type.toBe<ReadonlyManagerAction<PluginEvent | HostEvent>>();
 
       return value;
     },
@@ -83,7 +83,7 @@ const plugin = definePlugin<PluginEvent, HostEvent>().create({
   manager: {
     tools(ctx) {
       expect(ctx.transition({ type: "PLUGIN_EVENT", payload: { source: "plugin" } })).type.toBe<
-        ManagerAction<AnyEvent>
+        ManagerAction<PluginEvent>
       >();
 
       return {
@@ -94,7 +94,7 @@ const plugin = definePlugin<PluginEvent, HostEvent>().create({
   },
   scopedDeps: {
     current(scope) {
-      expect(scope.event).type.toBe<ManagerAction<PluginEvent | HostEvent>>();
+      expect(scope.event).type.toBe<ReadonlyManagerAction<PluginEvent | HostEvent>>();
 
       return { template: scope.source.template } as const;
     },
@@ -109,7 +109,7 @@ const plugin = definePlugin<PluginEvent, HostEvent>().create({
     },
   },
   intercept(ctx) {
-    expect(ctx.action).type.toBe<ManagerAction<PluginEvent | HostEvent>>();
+    expect(ctx.action).type.toBe<ReadonlyManagerAction<PluginEvent | HostEvent>>();
 
     return { skipDelivery: false };
   },
@@ -146,7 +146,7 @@ describe("definePlugin().create(...)", () => {
     type _Manager = Assert<
       Equal<
         PluginManagerExtensions<typeof plugin>,
-        { readonly tools: { readonly ready: true; readonly emit: () => ManagerAction<AnyEvent> } }
+        { readonly tools: { readonly ready: true; readonly emit: () => ManagerAction<PluginEvent> } }
       >
     >;
     type _ScopedDeps = Assert<Equal<PluginScopedDeps<typeof plugin>, { readonly current: { readonly template: string } }>>;

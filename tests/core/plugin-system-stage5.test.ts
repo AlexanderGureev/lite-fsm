@@ -12,6 +12,7 @@ type CounterEvent =
   | FSMEvent<"STOPPED">
   | FSMEvent<"APP_EVENT">
   | FSMEvent<"PLUGIN_EVENT", { readonly id: string }>;
+type CounterPluginEvent = FSMEvent<"PLUGIN_EVENT", { readonly id: string }>;
 type CounterConfig = {
   readonly IDLE: {
     readonly INC: "IDLE";
@@ -235,7 +236,7 @@ describe("plugin system — этап 5 — intercept", () => {
       name: "stage-five-intercept-first",
       intercept(ctx) {
         log.push(`intercept:first:${ctx.action.type}:${ctx.originalAction.type}`);
-        expect(ctx.originalAction).toBe(originalAction);
+        expect(ctx.originalAction).toEqual(originalAction);
         expect(ctx.action).toEqual({ type: "PREPARED", meta: { entityId: "first" } });
 
         return { action: { type: "REPLACED", meta: { entityId: "second" } } as never };
@@ -593,7 +594,7 @@ describe("plugin system — этап 5 — guard interceptors", () => {
       getState(): { readonly counter: { readonly state: "IDLE"; readonly context: { readonly count: number } } };
       dispatchNested(): ManagerAction<CounterEvent>;
     };
-    const plugin = definePlugin().create({
+    const plugin = definePlugin<CounterPluginEvent>().create({
       name: "stage-five-interceptor-manager-extension",
       manager: {
         dispatchNested: (ctx) => () => ctx.transition({ type: "PLUGIN_EVENT", payload: { id: "nested" } }),

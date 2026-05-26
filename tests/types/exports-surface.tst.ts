@@ -68,6 +68,7 @@ import type {
   ManagerCommitAction,
   ManagerFromPlugins,
   ManagerRuntimeContext,
+  ReadonlyManagerAction,
   Middleware,
   MiddlewareApi,
   PluginMachineExtensions,
@@ -101,6 +102,7 @@ import type {
   StorageEffectInvocationContext,
   StorageHydrateContext,
   StorageIdentityContext,
+  StorageManagerContext,
   StoragePrepareActionContext,
   StorageReactionContext,
   StorageReduceBucketContext,
@@ -202,6 +204,16 @@ describe("canary поверхности экспорта core-типов", () =>
     type _ManagerAction = Assert<Equal<ManagerAction<Ping>, Ping & { meta?: FSMEventMeta }>>;
     type _CustomManagerAction = Assert<
       Equal<ManagerAction<Ping, { readonly route?: string }>, Ping & { meta?: { readonly route?: string } }>
+    >;
+    type _ReadonlyManagerAction = Assert<
+      Equal<
+        ReadonlyManagerAction<Ping, { readonly routeIds?: string[] }>,
+        {
+          readonly type: "PING";
+          readonly payload: { readonly id: string };
+          readonly meta?: { readonly routeIds?: readonly string[] };
+        }
+      >
     >;
     type _ActorMeta = Assert<Equal<ActorMeta, Self>>;
     type _Terminal = Assert<Equal<ActorTerminalState, "__RESOLVED" | "__REJECTED" | "__CANCELLED">>;
@@ -509,8 +521,17 @@ describe("canary поверхности экспорта core-типов", () =>
     expect(plugin.name).type.toBe<"exported-plugin">();
     expect(plugin).type.toBeAssignableTo<LiteFsmPlugin<"exported-plugin">>();
     expect<DispatchContext["runtime"]>().type.toBe<Map<string, unknown>>();
+    expect<DispatchContext["action"]>().type.toBe<ReadonlyManagerAction<AnyEvent>>();
+    expect<DispatchContext["originalAction"]>().type.toBe<ReadonlyManagerAction<AnyEvent>>();
     expect<ManagerRuntimeContext["schemaVersion"]>().type.toBe<number | undefined>();
+    expect<ManagerRuntimeContext<Ping>["transition"]>().type.toBe<
+      (action: ManagerAction<Ping>, options?: unknown) => ManagerAction<Ping>
+    >();
+    expect<Parameters<Parameters<ManagerRuntimeContext<Ping>["onTransition"]>[0]>[2]>().type.toBe<
+      ReadonlyManagerAction<Ping> | { readonly type: string; readonly payload?: unknown }
+    >();
     expect<PluginScopedInvocationContext<AnyEvent, AnyEvent>["phase"]>().type.toBe<"effect" | "reaction">();
+    expect<PluginScopedInvocationContext<Ping, AnyEvent>["event"]>().type.toBe<ReadonlyManagerAction<Ping>>();
   });
 
   test("экспортирует defineStorageRuntime как public runtime helper", () => {
@@ -565,6 +586,9 @@ describe("canary поверхности экспорта core-типов", () =>
         }
       >
     >;
+    type _StorageManagerContextKeys = Assert<
+      Equal<keyof StorageManagerContext, "getState" | "transition" | "onTransition" | "getDependencies">
+    >;
     type _CacheExtensionContract = Assert<CacheStorageExtension extends StorageRuntimeExtension ? true : false>;
     type _ValidateKind = Assert<
       Equal<StorageValidateTemplateContext<"typed-storage", CacheStorageExtension>["storageKind"], "typed-storage">
@@ -584,6 +608,9 @@ describe("canary поверхности экспорта core-типов", () =>
         StorageTemplate<{ readonly initialValue: string }>
       >
     >;
+    type _CreateRuntimeManager = Assert<
+      Equal<StorageCreateRuntimeStateContext<CacheStorageExtension>["manager"], StorageManagerContext<AnyEvent>>
+    >;
     type _CreatePublicTemplate = Assert<
       Equal<
         StorageCreatePublicInitialStateContext<CacheStorageExtension>["template"],
@@ -591,7 +618,7 @@ describe("canary поверхности экспорта core-типов", () =>
       >
     >;
     type _PrepareAction = Assert<
-      Equal<StoragePrepareActionContext<CacheStorageExtension>["action"], ManagerAction<AnyEvent>>
+      Equal<StoragePrepareActionContext<CacheStorageExtension>["action"], ReadonlyManagerAction<AnyEvent>>
     >;
     type _BeforeReduceState = Assert<
       Equal<StorageBeforeReduceContext<CacheStorageExtension>["state"], { commits: number }>
@@ -613,6 +640,12 @@ describe("canary поверхности экспорта core-типов", () =>
     >;
     type _CommitState = Assert<Equal<StorageCommitContext<CacheStorageExtension>["state"], { commits: number }>>;
     type _ConditionState = Assert<Equal<StorageConditionContext<CacheStorageExtension>["state"], { commits: number }>>;
+    type _ConditionPredicate = Assert<
+      Equal<
+        Parameters<StorageConditionContext<CacheStorageExtension>["predicate"]>[0],
+        ReadonlyManagerAction<AnyEvent>
+      >
+    >;
     type _ResolveEffectsState = Assert<
       Equal<StorageResolveEffectInvocationsContext<CacheStorageExtension>["state"], { commits: number }>
     >;

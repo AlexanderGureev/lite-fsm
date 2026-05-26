@@ -1,13 +1,13 @@
 import { describe, expect, test } from "tstyche";
 import { createMachine, definePlugin, MachineManager } from "@lite-fsm/core";
 import type {
-  AnyEvent,
   FSMEvent,
   MachineStore,
   ManagerAction,
   MachinesState,
   PluginManagerExtensions,
   PluginRouteMeta,
+  ReadonlyManagerAction,
 } from "@lite-fsm/core";
 
 import type { Assert, Equal } from "./_helpers";
@@ -34,7 +34,7 @@ const stageFourPlugin = definePlugin<PluginEvent, HostEvent>().create({
   routeMeta: {
     entityId(value: string, ctx) {
       expect(ctx.key).type.toBe<"entityId">();
-      expect(ctx.action).type.toBe<ManagerAction<HostEvent | PluginEvent>>();
+      expect(ctx.action).type.toBe<ReadonlyManagerAction<HostEvent | PluginEvent>>();
 
       return value;
     },
@@ -48,7 +48,13 @@ const stageFourPlugin = definePlugin<PluginEvent, HostEvent>().create({
   manager: {
     audit(ctx) {
       expect(ctx.getState()).type.toBe<MachinesState<MachineStore>>();
-      expect(ctx.transition({ type: "UNDECLARED_EVENT" })).type.toBe<ManagerAction<AnyEvent>>();
+      expect(ctx.transition({ type: "PLUGIN_EVENT", payload: { id: "plugin" } })).type.toBe<
+        ManagerAction<PluginEvent>
+      >();
+      // @ts-expect-error!
+      ctx.transition({ type: "HOST_EVENT", payload: { id: "host" } });
+      // @ts-expect-error!
+      ctx.transition({ type: "UNDECLARED_EVENT" });
 
       return {
         enabled: true,
@@ -105,7 +111,7 @@ describe("plugin system — этап 4 types", () => {
     type _ManagerExtensions = Assert<
       Equal<
         PluginManagerExtensions<typeof stageFourPlugin>,
-        { readonly audit: { readonly enabled: true; readonly ping: () => ManagerAction<AnyEvent> } }
+        { readonly audit: { readonly enabled: true; readonly ping: () => ManagerAction<PluginEvent> } }
       >
     >;
     type _TupleRouteMeta = Assert<
@@ -124,7 +130,7 @@ describe("plugin system — этап 4 types", () => {
     const withoutPlugin = MachineManager(machines);
 
     expect(withPlugin.audit.enabled).type.toBe<true>();
-    expect(withPlugin.audit.ping()).type.toBe<ManagerAction<AnyEvent>>();
+    expect(withPlugin.audit.ping()).type.toBe<ManagerAction<PluginEvent>>();
 
     // @ts-expect-error!
     withoutPlugin.audit;

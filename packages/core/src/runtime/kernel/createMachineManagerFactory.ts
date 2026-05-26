@@ -29,6 +29,7 @@ import type {
 import { assertUserAction } from "../../managerNormalize";
 import { extractUserPlugins } from "../../pluginNormalize";
 import { compose, deepFreeze, HYDRATE_ACTION_TYPE, IS_DEV, LiteFsmError, VOID_REDUCER_ERROR } from "../../utils";
+import { createReadonlyActionView } from "./actionView";
 import { createBucketRuntime, groupTemplatesByRuntime, initBucketState } from "./bucketRuntime";
 import { assertPluginInterceptorResult } from "./callbackValidation";
 import { createPluginRegistry, type DispatchHookPhase } from "./registry";
@@ -166,7 +167,11 @@ export const createMachineManagerFactory = (preset: RuntimePreset): MachineManag
       transition: (action, options) => widenAction(transition(narrowAction(action), options)),
       onTransition: (cb) => onTransition(cb as TransitionSubscriber<S, RuntimeEvents, RuntimeMeta>),
       getDependencies: () => userDeps as Record<string, unknown>,
-      createScopedDeps: (baseDeps, ctx) => pluginRegistry.createScopedDeps(baseDeps, ctx),
+      createScopedDeps: (baseDeps, ctx) =>
+        pluginRegistry.createScopedDeps(baseDeps, {
+          ...ctx,
+          event: createReadonlyActionView(ctx.event as Action),
+        }),
     };
 
     const bucketRuntime = createBucketRuntime<S>(
@@ -242,31 +247,32 @@ export const createMachineManagerFactory = (preset: RuntimePreset): MachineManag
       dispatch.route = pluginRegistry.routing.resolveRoute(action);
     };
 
-    const createPluginDispatchContext = (dispatch: StorageDispatchLifecycleContext): DispatchContext => ({
-      get options() {
-        return dispatch.dispatch.options;
-      },
-      get runtime() {
-        return dispatch.dispatch.runtime;
-      },
-      get originalAction() {
-        return dispatch.originalAction;
-      },
-      get action() {
-        return dispatch.action;
-      },
-      get skipDelivery() {
-        return dispatch.skipDelivery;
-      },
-      reportError(error) {
-        dispatch.dispatch.reportError(error);
-      },
-    });
+    const createPluginDispatchContext = (dispatch: StorageDispatchLifecycleContext): DispatchContext => {
+      const originalAction = createReadonlyActionView(dispatch.originalAction);
+      const action = createReadonlyActionView(dispatch.action);
+
+      return {
+        get options() {
+          return dispatch.dispatch.options;
+        },
+        get runtime() {
+          return dispatch.dispatch.runtime;
+        },
+        originalAction,
+        action,
+        get skipDelivery() {
+          return dispatch.skipDelivery;
+        },
+        reportError(error) {
+          dispatch.dispatch.reportError(error);
+        },
+      };
+    };
 
     const runActionInterceptors = (dispatch: StorageDispatchLifecycleContext) => {
-      const context = createPluginDispatchContext(dispatch);
       for (const { owner, intercept } of pluginRegistry.listActionInterceptors()) {
         const source = `plugin '${owner}' intercept`;
+        const context = createPluginDispatchContext(dispatch);
         const result = assertPluginInterceptorResult(
           source,
           withTransitionGuard("plugin.intercept", () => intercept(context)),

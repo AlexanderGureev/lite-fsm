@@ -5,6 +5,7 @@ import type {
   FSMEvent,
   ManagerAction,
   PluginManagerEvents,
+  ReadonlyManagerAction,
   TypedCreateMachineFn,
 } from "@lite-fsm/core";
 
@@ -20,7 +21,7 @@ const scopedPlugin = definePlugin<PluginEvent, HostEvent>().create({
   name: "stage-six-scoped",
   scopedDeps: {
     currentUser(scope) {
-      expect(scope.event).type.toBe<ManagerAction<HostEvent | PluginEvent>>();
+      expect(scope.event).type.toBe<ReadonlyManagerAction<HostEvent | PluginEvent>>();
       expect(scope.transition).type.toBe<(action: ManagerAction<PluginEvent>) => ManagerAction<PluginEvent>>();
 
       scope.transition({ type: "PLUGIN_EVENT", payload: { id: "plugin" } });
@@ -39,7 +40,7 @@ const scopedPlugin = definePlugin<PluginEvent, HostEvent>().create({
   },
   scopedTransition: {
     notify(scope) {
-      expect(scope.event).type.toBe<ManagerAction<HostEvent | PluginEvent>>();
+      expect(scope.event).type.toBe<ReadonlyManagerAction<HostEvent | PluginEvent>>();
 
       return (id: string) => scope.transition({ type: "PLUGIN_EVENT", payload: { id } });
     },

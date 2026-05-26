@@ -4,30 +4,14 @@
 
 import type { LiteFsmStorageRuntimeDefinition } from "./pluginStorage";
 import type {
-  AcceptsEventContext as KernelAcceptsEventContext,
-  CompileTemplateContext as KernelCompileTemplateContext,
-  CreatePublicInitialStateContext as KernelCreatePublicInitialStateContext,
-  CreateRuntimeStateContext as KernelCreateRuntimeStateContext,
-  ResolveEffectInvocationsContext as KernelResolveEffectInvocationsContext,
-  ResolveIdentityContext as KernelResolveIdentityContext,
-  StorageActionStageResult,
-  StorageBeforeReduceContext as KernelStorageBeforeReduceContext,
-  StorageCommitContext as KernelStorageCommitContext,
-  StorageConditionContext as KernelStorageConditionContext,
-  StorageDehydrateContext as KernelStorageDehydrateContext,
-  StorageDehydrateResult as KernelStorageDehydrateResult,
-  StorageEffectInvocationContext as KernelStorageEffectInvocationContext,
-  StorageHydrateContext as KernelStorageHydrateContext,
-  StorageHydrateResult,
-  StoragePrepareActionContext as KernelStoragePrepareActionContext,
-  StoragePrepareActionResult,
-  StorageReduceBucketContext as KernelStorageReduceBucketContext,
-  StorageReactionContext as KernelStorageReactionContext,
-  StorageReduceContext as KernelStorageReduceContext,
-  StorageReduceResult,
-  ValidateTemplateContext as KernelValidateTemplateContext,
-} from "./runtime/kernel/storage";
-import type { AnyEvent, MachineStore, ManagerAction } from "./types";
+  AnyEvent,
+  DehydrateOptions,
+  HydrateStrategy,
+  MachinesState,
+  MachineStore,
+  ManagerAction,
+  ReadonlyManagerAction,
+} from "./types";
 
 // === Storage runtime extension ===============================================
 
@@ -52,6 +36,152 @@ export type StorageTemplate<TemplateData = unknown> = {
   readonly key: string;
   readonly kind: string;
   readonly data?: TemplateData;
+};
+
+export type StorageManagerContext<Events extends AnyEvent = AnyEvent> = {
+  getState(): MachinesState<MachineStore>;
+  transition(action: ManagerAction<Events>, options?: unknown): ManagerAction<Events>;
+  onTransition(
+    cb: (
+      prevState: MachinesState<MachineStore>,
+      currentState: MachinesState<MachineStore>,
+      action: ReadonlyManagerAction<Events> | { readonly type: string; readonly payload?: unknown },
+    ) => void,
+  ): () => void;
+  getDependencies(): Record<string, unknown>;
+};
+
+type StorageRuntimeState = unknown;
+type StorageEffectInvocation = unknown;
+
+export type StorageActionStageResult =
+  | void
+  | { readonly type: "replace"; readonly action: ManagerAction<AnyEvent> }
+  | { readonly type: "drop" };
+
+export type StoragePrepareActionResult = StorageActionStageResult;
+export type StorageReduceResult = void | { readonly type: "skip" };
+
+export type StorageHydrateResult = {
+  readonly nextState: Record<string, unknown>;
+  readonly changed: boolean;
+};
+
+type StorageDispatchRoute =
+  | { readonly scope: "actor"; readonly key: "actorId"; readonly targetSet: string[] }
+  | { readonly scope: "plugin"; readonly key: string; readonly targetSet: string[] }
+  | { readonly scope: "group"; readonly key: "groupId"; readonly targetSet: string[] }
+  | { readonly scope: "tag"; readonly key: "groupTag"; readonly targetSet: string[] }
+  | { readonly scope: "unscoped"; readonly key: undefined; readonly targetSet: [] };
+
+type StorageDispatchContext = {
+  readonly options: unknown;
+  readonly runtime: Map<string, unknown>;
+  readonly route: StorageDispatchRoute;
+  readonly prevState: Record<string, unknown>;
+  nextState: Record<string, unknown>;
+  readonly skipDelivery: boolean;
+  reportError(error: unknown): void;
+};
+
+type ValidateTemplateContext = {
+  readonly key: string;
+  readonly machine: MachineStore[string];
+  readonly storageKind: string;
+};
+
+type CompileTemplateContext = ValidateTemplateContext;
+
+type CreateRuntimeStateContext = {
+  readonly templates: readonly StorageTemplate[];
+  readonly manager: StorageManagerContext;
+};
+
+type CreatePublicInitialStateContext = {
+  readonly template: StorageTemplate;
+  readonly state: StorageRuntimeState;
+};
+
+type ActionAwareStorageContext = {
+  readonly action: ReadonlyManagerAction<AnyEvent>;
+  readonly originalAction: ReadonlyManagerAction<AnyEvent>;
+  readonly state: StorageRuntimeState;
+  readonly dispatch: StorageDispatchContext;
+};
+
+type StoragePrepareActionContextBase = ActionAwareStorageContext & {
+  readonly options: unknown;
+  readonly manager: StorageManagerContext;
+};
+
+type StorageBeforeReduceContextBase = ActionAwareStorageContext & {
+  readonly manager: StorageManagerContext;
+};
+
+type AcceptsEventContext = ActionAwareStorageContext & {
+  readonly template: StorageTemplate;
+};
+
+type StorageReduceContextBase = ActionAwareStorageContext & {
+  readonly template: StorageTemplate;
+  readonly manager: StorageManagerContext;
+};
+
+type StorageReduceBucketContextBase = ActionAwareStorageContext & {
+  readonly templates: readonly StorageTemplate[];
+  readonly manager: StorageManagerContext;
+};
+
+type StorageCommitContextBase = ActionAwareStorageContext & {
+  readonly manager: StorageManagerContext;
+};
+
+type StorageConditionContextBase = {
+  readonly predicate: (action: ReadonlyManagerAction<AnyEvent>) => boolean;
+  readonly state: StorageRuntimeState;
+  readonly manager: StorageManagerContext;
+};
+
+type ResolveEffectInvocationsContext = ActionAwareStorageContext & {
+  readonly manager: StorageManagerContext;
+};
+
+type StorageEffectInvocationContextBase = ActionAwareStorageContext & {
+  readonly invocation: StorageEffectInvocation;
+  readonly manager: StorageManagerContext;
+};
+
+type StorageDehydrateContextBase = {
+  readonly state: StorageRuntimeState;
+  readonly manager: StorageManagerContext;
+  readonly rootState: Record<string, unknown>;
+  readonly options: DehydrateOptions<MachineStore> | undefined;
+};
+
+type StorageDehydrateResultBase = {
+  readonly machines?: Record<string, unknown>;
+  readonly snapshot?: unknown;
+};
+
+type StorageHydrateContextBase = {
+  readonly state: StorageRuntimeState;
+  readonly manager: StorageManagerContext;
+  readonly machines: Readonly<Record<string, unknown>>;
+  readonly snapshot: unknown | undefined;
+  readonly baseState: Record<string, unknown>;
+  readonly strategy: HydrateStrategy;
+  readonly source: "hydrate" | "opts.snapshot";
+  readonly mode: "preview" | "commit" | "init";
+};
+
+type ResolveIdentityContext = {
+  readonly state: StorageRuntimeState;
+  readonly action: ReadonlyManagerAction<AnyEvent>;
+  readonly originalAction: ReadonlyManagerAction<AnyEvent>;
+};
+
+type StorageReactionContextBase = ActionAwareStorageContext & {
+  readonly manager: StorageManagerContext;
 };
 
 type MachineFacingStorageExtensionKey =
@@ -146,8 +276,16 @@ type WithObservedAction<Context, Extension extends StorageRuntimeExtension> = Om
   Context,
   "action" | "originalAction"
 > & {
-  readonly action: ManagerAction<ExtensionObservedEvents<Extension>>;
-  readonly originalAction: ManagerAction<ExtensionObservedEvents<Extension>>;
+  readonly action: ReadonlyManagerAction<ExtensionObservedEvents<Extension>>;
+  readonly originalAction: ReadonlyManagerAction<ExtensionObservedEvents<Extension>>;
+};
+
+type WithObservedManager<Context, Extension extends StorageRuntimeExtension> = Omit<Context, "manager"> & {
+  readonly manager: StorageManagerContext<ExtensionObservedEvents<Extension>>;
+};
+
+type WithObservedPredicate<Context, Extension extends StorageRuntimeExtension> = Omit<Context, "predicate"> & {
+  readonly predicate: (action: ReadonlyManagerAction<ExtensionObservedEvents<Extension>>) => boolean;
 };
 
 type WithRuntimeState<Context, Extension extends StorageRuntimeExtension> = Omit<Context, "state"> & {
@@ -165,7 +303,7 @@ type WithRuntimeTemplates<Context, Extension extends StorageRuntimeExtension> = 
 };
 
 export type StorageValidateTemplateContext<Kind extends string, Extension extends StorageRuntimeExtension> = Omit<
-  KernelValidateTemplateContext,
+  ValidateTemplateContext,
   "machine" | "storageKind"
 > & {
   readonly storageKind: Kind;
@@ -173,7 +311,7 @@ export type StorageValidateTemplateContext<Kind extends string, Extension extend
 };
 
 export type StorageCompileTemplateContext<Kind extends string, Extension extends StorageRuntimeExtension> = Omit<
-  KernelCompileTemplateContext,
+  CompileTemplateContext,
   "machine" | "storageKind"
 > & {
   readonly storageKind: Kind;
@@ -181,94 +319,97 @@ export type StorageCompileTemplateContext<Kind extends string, Extension extends
 };
 
 export type StorageCreateRuntimeStateContext<Extension extends StorageRuntimeExtension> = Omit<
-  KernelCreateRuntimeStateContext,
+  WithObservedManager<CreateRuntimeStateContext, Extension>,
   "templates"
 > & {
   readonly templates: readonly StorageTemplate<ExtensionTemplateData<Extension>>[];
 };
 
 export type StorageCreatePublicInitialStateContext<Extension extends StorageRuntimeExtension> = WithRuntimeTemplate<
-  KernelCreatePublicInitialStateContext,
+  CreatePublicInitialStateContext,
   Extension
 >;
 
 export type StoragePrepareActionContext<Extension extends StorageRuntimeExtension> = WithRuntimeState<
-  WithObservedAction<KernelStoragePrepareActionContext, Extension>,
+  WithObservedManager<WithObservedAction<StoragePrepareActionContextBase, Extension>, Extension>,
   Extension
 >;
 
 export type StorageBeforeReduceContext<Extension extends StorageRuntimeExtension> = WithRuntimeState<
-  WithObservedAction<KernelStorageBeforeReduceContext, Extension>,
+  WithObservedManager<WithObservedAction<StorageBeforeReduceContextBase, Extension>, Extension>,
   Extension
 >;
 
 export type StorageAcceptsEventContext<Extension extends StorageRuntimeExtension> = WithRuntimeTemplate<
-  WithObservedAction<KernelAcceptsEventContext, Extension>,
+  WithObservedAction<AcceptsEventContext, Extension>,
   Extension
 >;
 
 export type StorageReduceContext<Extension extends StorageRuntimeExtension> = WithRuntimeTemplate<
-  WithObservedAction<KernelStorageReduceContext, Extension>,
+  WithObservedManager<WithObservedAction<StorageReduceContextBase, Extension>, Extension>,
   Extension
 >;
 
 export type StorageReduceBucketContext<Extension extends StorageRuntimeExtension> = WithRuntimeTemplates<
-  WithObservedAction<KernelStorageReduceBucketContext, Extension>,
+  WithObservedManager<WithObservedAction<StorageReduceBucketContextBase, Extension>, Extension>,
   Extension
 >;
 
 export type StorageCommitContext<Extension extends StorageRuntimeExtension> = WithRuntimeState<
-  WithObservedAction<KernelStorageCommitContext, Extension>,
+  WithObservedManager<WithObservedAction<StorageCommitContextBase, Extension>, Extension>,
   Extension
 >;
 
 export type StorageConditionContext<Extension extends StorageRuntimeExtension> = WithRuntimeState<
-  KernelStorageConditionContext,
+  WithObservedManager<WithObservedPredicate<StorageConditionContextBase, Extension>, Extension>,
   Extension
 >;
 
 export type StorageResolveEffectInvocationsContext<Extension extends StorageRuntimeExtension> = WithRuntimeState<
-  WithObservedAction<KernelResolveEffectInvocationsContext, Extension>,
+  WithObservedManager<WithObservedAction<ResolveEffectInvocationsContext, Extension>, Extension>,
   Extension
 >;
 
 export type StorageEffectInvocationContext<Extension extends StorageRuntimeExtension> = Omit<
-  WithRuntimeState<WithObservedAction<KernelStorageEffectInvocationContext, Extension>, Extension>,
+  WithRuntimeState<
+    WithObservedManager<WithObservedAction<StorageEffectInvocationContextBase, Extension>, Extension>,
+    Extension
+  >,
   "invocation"
 > & {
   readonly invocation: ExtensionInvocation<Extension>;
 };
 
 export type StorageDehydrateContext<Extension extends StorageRuntimeExtension> = WithRuntimeState<
-  KernelStorageDehydrateContext,
+  WithObservedManager<StorageDehydrateContextBase, Extension>,
   Extension
 >;
 
 export type StorageHydrateContext<Extension extends StorageRuntimeExtension> = Omit<
-  WithRuntimeState<KernelStorageHydrateContext, Extension>,
+  WithRuntimeState<WithObservedManager<StorageHydrateContextBase, Extension>, Extension>,
   "snapshot"
 > & {
   readonly snapshot: ExtensionSnapshotData<Extension> | undefined;
 };
 
 export type StorageIdentityContext<Extension extends StorageRuntimeExtension> = WithRuntimeState<
-  WithObservedAction<KernelResolveIdentityContext, Extension>,
+  WithObservedAction<ResolveIdentityContext, Extension>,
   Extension
 >;
 
 export type StorageReactionContext<Extension extends StorageRuntimeExtension> = WithRuntimeState<
-  WithObservedAction<KernelStorageReactionContext, Extension>,
+  WithObservedManager<WithObservedAction<StorageReactionContextBase, Extension>, Extension>,
   Extension
 >;
 
-type StorageCompileTemplateResult<TemplateData = unknown> = void | {
+export type StorageCompileTemplateResult<TemplateData = unknown> = void | {
   readonly data?: TemplateData;
   readonly key?: never;
   readonly kind?: never;
 };
 
-type StorageDehydrateResult<Extension extends StorageRuntimeExtension> = Omit<
-  KernelStorageDehydrateResult,
+export type StorageDehydrateResult<Extension extends StorageRuntimeExtension> = Omit<
+  StorageDehydrateResultBase,
   "snapshot"
 > & {
   readonly snapshot?: ExtensionSnapshotData<Extension>;

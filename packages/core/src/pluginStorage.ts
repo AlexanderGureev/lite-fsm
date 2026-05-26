@@ -13,15 +13,19 @@ import type {
   StorageRuntimeExtension,
   StorageRuntimeBuilder,
 } from "./pluginStorageTypes";
-import type { StorageRuntime } from "./runtime/kernel/storage";
 import type { MachineRuntimeExtension } from "./types";
 
 // === Storage runtime value marker ============================================
 
 const liteFsmStorageRuntimeMarker: unique symbol = Symbol.for("lite-fsm.storage-runtime.value") as never;
 const liteFsmStorageRuntimePayload: unique symbol = Symbol.for("lite-fsm.storage-runtime.payload") as never;
+declare const liteFsmStorageRuntimeOpaquePayload: unique symbol;
 declare const liteFsmStorageRuntimeExtension: unique symbol;
 declare const liteFsmStorageRouteMetaRequirements: unique symbol;
+
+type LiteFsmStorageRuntimePayload = {
+  readonly [liteFsmStorageRuntimeOpaquePayload]: never;
+};
 
 export type LiteFsmStorageRuntimeDefinition<
   Kind extends string = string,
@@ -30,7 +34,7 @@ export type LiteFsmStorageRuntimeDefinition<
 > = {
   readonly kind: Kind;
   readonly [liteFsmStorageRuntimeMarker]: true;
-  readonly [liteFsmStorageRuntimePayload]: StorageRuntime;
+  readonly [liteFsmStorageRuntimePayload]: LiteFsmStorageRuntimePayload;
   readonly [liteFsmStorageRuntimeExtension]: MachineExtension;
   readonly [liteFsmStorageRouteMetaRequirements]: RouteMetaRequirements;
 };
@@ -64,8 +68,8 @@ const createStorageRuntimeValue = <
 export const isLiteFsmStorageRuntimeDefinition = (value: unknown): value is LiteFsmStorageRuntimeDefinition =>
   isPlainObject(value) && Reflect.get(value, liteFsmStorageRuntimeMarker) === true;
 
-export const getStorageRuntimePayload = (definition: LiteFsmStorageRuntimeDefinition): StorageRuntime =>
-  Reflect.get(definition, liteFsmStorageRuntimePayload) as StorageRuntime;
+export const getStorageRuntimePayload = (definition: LiteFsmStorageRuntimeDefinition): unknown =>
+  Reflect.get(definition, liteFsmStorageRuntimePayload);
 
 export function defineStorageRuntime<
   Extension extends StorageRuntimeExtension = {},

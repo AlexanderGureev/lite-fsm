@@ -1,6 +1,6 @@
 import { describe, expect, test } from "tstyche";
 import { definePlugin } from "@lite-fsm/core";
-import type { FSMEvent, ManagerAction } from "@lite-fsm/core";
+import type { FSMEvent, ManagerAction, ReadonlyManagerAction } from "@lite-fsm/core";
 
 type PluginEvent = FSMEvent<"PLUGIN_EVENT", { readonly id: string }>;
 type HostEvent = FSMEvent<"HOST_EVENT", { readonly id: string }>;
@@ -11,8 +11,8 @@ describe("plugin system — этап 5 types", () => {
     definePlugin<PluginEvent, HostEvent>().create({
       name: "stage-five-observers",
       intercept(ctx) {
-        expect(ctx.action).type.toBe<ManagerAction<HostEvent | PluginEvent>>();
-        expect(ctx.originalAction).type.toBe<ManagerAction<HostEvent | PluginEvent>>();
+        expect(ctx.action).type.toBe<ReadonlyManagerAction<HostEvent | PluginEvent>>();
+        expect(ctx.originalAction).type.toBe<ReadonlyManagerAction<HostEvent | PluginEvent>>();
         expect(ctx.skipDelivery).type.toBe<boolean>();
         expect(ctx.options).type.toBe<unknown>();
         expect(ctx.runtime).type.toBe<Map<string, unknown>>();
@@ -29,8 +29,8 @@ describe("plugin system — этап 5 types", () => {
       },
       hooks: {
         beforeReduce(ctx) {
-          expect(ctx.action).type.toBe<ManagerAction<HostEvent | PluginEvent>>();
-          expect(ctx.originalAction).type.toBe<ManagerAction<HostEvent | PluginEvent>>();
+          expect(ctx.action).type.toBe<ReadonlyManagerAction<HostEvent | PluginEvent>>();
+          expect(ctx.originalAction).type.toBe<ReadonlyManagerAction<HostEvent | PluginEvent>>();
           expect(ctx.skipDelivery).type.toBe<boolean>();
           expect(ctx.options).type.toBe<unknown>();
           expect(ctx.runtime).type.toBe<Map<string, unknown>>();

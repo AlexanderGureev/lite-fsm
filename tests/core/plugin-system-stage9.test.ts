@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { definePlugin, defineStorageRuntime, LiteFsmError, MachineManager } from "@lite-fsm/core";
-import type { FSMEvent, MachineConfig } from "@lite-fsm/core";
+import type { FSMEvent, MachineConfig, StorageDehydrateContext, StorageHydrateContext } from "@lite-fsm/core";
 import type { NormalizedPlugin } from "@lite-fsm/core/internal/plugin";
 import {
   getStorageRuntimePayload,
@@ -14,8 +14,6 @@ import {
 import { createRoutingRuntime } from "@lite-fsm/core/internal/runtime/kernel/routing";
 import type {
   CompiledStorageTemplate,
-  StorageDehydrateContext,
-  StorageHydrateContext,
 } from "@lite-fsm/core/internal/runtime/kernel/storage";
 
 type IncEvent = FSMEvent<"INC">;
@@ -38,14 +36,16 @@ const createStorageMachine = (kind: string) =>
 
 type StoragePayload = { value: number };
 type StageStorageDefinition = LiteFsmStorageRuntimeDefinition<string>;
+type SnapshotDehydrateContext = StorageDehydrateContext<{}>;
+type SnapshotHydrateContext = StorageHydrateContext<{}>;
 
 type SnapshotStorageOptions = {
   readonly initialValue?: number;
-  readonly hydrate?: ReturnType<typeof vi.fn<(ctx: StorageHydrateContext) => void>>;
-  readonly dehydrate?: ReturnType<typeof vi.fn<(ctx: StorageDehydrateContext) => void>>;
+  readonly hydrate?: ReturnType<typeof vi.fn<(ctx: SnapshotHydrateContext) => void>>;
+  readonly dehydrate?: ReturnType<typeof vi.fn<(ctx: SnapshotDehydrateContext) => void>>;
 };
 
-const readStoragePayload = (kind: string, ctx: StorageHydrateContext): StoragePayload => {
+const readStoragePayload = (kind: string, ctx: SnapshotHydrateContext): StoragePayload => {
   const payload = ctx.snapshot;
   if (!payload || typeof payload !== "object" || typeof (payload as StoragePayload).value !== "number") {
     throw new LiteFsmError(
@@ -61,8 +61,8 @@ const createSnapshotStorage = (kind: string, options: SnapshotStorageOptions = {
     value: options.initialValue ?? 0,
     templates: [] as readonly CompiledStorageTemplate[],
   };
-  const hydrate = options.hydrate ?? vi.fn<(ctx: StorageHydrateContext) => void>();
-  const dehydrate = options.dehydrate ?? vi.fn<(ctx: StorageDehydrateContext) => void>();
+  const hydrate = options.hydrate ?? vi.fn<(ctx: SnapshotHydrateContext) => void>();
+  const dehydrate = options.dehydrate ?? vi.fn<(ctx: SnapshotDehydrateContext) => void>();
 
   const storage = defineStorageRuntime().create({
     kind,
@@ -142,7 +142,7 @@ const createNoSnapshotStorage = (kind: string) =>
 
 const createPassthroughSnapshotStorage = (
   kind: string,
-  hydrate = vi.fn<(ctx: StorageHydrateContext) => void>(),
+  hydrate = vi.fn<(ctx: SnapshotHydrateContext) => void>(),
 ): StageStorageDefinition =>
   defineStorageRuntime().create({
     kind,
@@ -488,7 +488,7 @@ describe("storage snapshot extension points у MachineManager", () => {
   });
 
   it("unknown machine hydrate использует первый snapshot runtime, если default runtime не поддерживает snapshot", () => {
-    const hydrate = vi.fn<(ctx: StorageHydrateContext) => void>();
+    const hydrate = vi.fn<(ctx: SnapshotHydrateContext) => void>();
     const manager = createPresetManager(
       [createNoSnapshotStorage("plain"), createPassthroughSnapshotStorage("snapshot", hydrate)],
       "plain",

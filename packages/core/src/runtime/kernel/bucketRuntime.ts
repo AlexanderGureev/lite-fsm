@@ -3,6 +3,7 @@
 // в фабрике только pipeline-orchestration и lifecycle, а bucket-iteration жил в одном месте.
 
 import type { AnyEvent, MachinesState, MachineStore, ManagerAction } from "../../types";
+import { createReadonlyActionView } from "./actionView";
 import {
   assertStorageAcceptsEventResult,
   assertStorageActionStageResult,
@@ -18,6 +19,11 @@ import type { GuardedCallbackRunner } from "./transitionGuard";
 
 type Action = ManagerAction<AnyEvent>;
 type ActionStageOutcome = { readonly type: "continue"; readonly action: Action } | { readonly type: "drop" };
+
+const createStorageActionViews = (action: Action, dispatch: StorageDispatchLifecycleContext) => ({
+  action: createReadonlyActionView(action),
+  originalAction: createReadonlyActionView(dispatch.originalAction),
+});
 
 export type BucketRuntime<S extends MachineStore> = {
   prepareAction(action: Action, options: unknown, dispatch: StorageDispatchLifecycleContext): ActionStageOutcome;
@@ -46,8 +52,7 @@ export const createBucketRuntime = <S extends MachineStore>(
         source,
         runGuardedCallback("storage.prepareAction", () =>
           prepareAction({
-            action: currentAction,
-            originalAction: dispatch.originalAction,
+            ...createStorageActionViews(currentAction, dispatch),
             options,
             state: bucket.state,
             manager: managerContext,
@@ -73,8 +78,7 @@ export const createBucketRuntime = <S extends MachineStore>(
         source,
         runGuardedCallback("storage.beforeReduce", () =>
           beforeReduce({
-            action: currentAction,
-            originalAction: dispatch.originalAction,
+            ...createStorageActionViews(currentAction, dispatch),
             state: bucket.state,
             manager: managerContext,
             dispatch: dispatch.dispatch,
@@ -98,8 +102,7 @@ export const createBucketRuntime = <S extends MachineStore>(
           runGuardedCallback("storage.reduceBucket", () =>
             reduceBucket({
               templates: bucket.templates,
-              action,
-              originalAction: dispatch.originalAction,
+              ...createStorageActionViews(action, dispatch),
               state: bucket.state,
               manager: managerContext,
               dispatch: dispatch.dispatch,
@@ -119,8 +122,7 @@ export const createBucketRuntime = <S extends MachineStore>(
             runGuardedCallback("storage.acceptsEvent", () =>
               acceptsEvent({
                 template,
-                action,
-                originalAction: dispatch.originalAction,
+                ...createStorageActionViews(action, dispatch),
                 state: bucket.state,
                 dispatch: dispatch.dispatch,
               }),
@@ -134,8 +136,7 @@ export const createBucketRuntime = <S extends MachineStore>(
           runGuardedCallback("storage.reduce", () =>
             reduce({
               template,
-              action,
-              originalAction: dispatch.originalAction,
+              ...createStorageActionViews(action, dispatch),
               state: bucket.state,
               manager: managerContext,
               dispatch: dispatch.dispatch,
@@ -153,8 +154,7 @@ export const createBucketRuntime = <S extends MachineStore>(
       if (!dispatch.touched.has(bucket.runtime.kind)) continue;
       runGuardedCallback("storage.commit", () => {
         bucket.runtime.commit({
-          action: dispatch.action,
-          originalAction: dispatch.originalAction,
+          ...createStorageActionViews(dispatch.action, dispatch),
           state: bucket.state,
           manager: managerContext,
           dispatch: dispatch.dispatch,
@@ -169,8 +169,7 @@ export const createBucketRuntime = <S extends MachineStore>(
       if (!dispatch.touched.has(bucket.runtime.kind) || !reactions) continue;
       runGuardedCallback("storage.reactions", () => {
         reactions.run({
-          action,
-          originalAction: dispatch.originalAction,
+          ...createStorageActionViews(action, dispatch),
           state: bucket.state,
           manager: managerContext,
           dispatch: dispatch.dispatch,
@@ -183,16 +182,14 @@ export const createBucketRuntime = <S extends MachineStore>(
     for (const bucket of buckets) {
       if (!dispatch.touched.has(bucket.runtime.kind) || !bucket.runtime.effects) continue;
       for (const invocation of bucket.runtime.effects.resolveInvocations({
-        action: dispatch.action,
-        originalAction: dispatch.originalAction,
+        ...createStorageActionViews(dispatch.action, dispatch),
         state: bucket.state,
         manager: managerContext,
         dispatch: dispatch.dispatch,
       })) {
         bucket.runtime.effects.invoke({
           invocation,
-          action: dispatch.action,
-          originalAction: dispatch.originalAction,
+          ...createStorageActionViews(dispatch.action, dispatch),
           state: bucket.state,
           manager: managerContext,
           dispatch: dispatch.dispatch,
@@ -208,7 +205,7 @@ export const createBucketRuntime = <S extends MachineStore>(
     const bucket = buckets.find((entry) => entry.runtime.kind === defaultStorageKind);
     if (!bucket?.runtime.effects?.condition) return Promise.resolve(false);
     return bucket.runtime.effects.condition({
-      predicate,
+      predicate: (action) => predicate(createReadonlyActionView(action as Action) as Action),
       state: bucket.state,
       manager: managerContext,
     });

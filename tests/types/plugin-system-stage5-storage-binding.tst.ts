@@ -7,6 +7,7 @@ import type {
   PluginMachineExtensions,
   PluginManagerEvents,
   PluginRouteMeta,
+  ReadonlyManagerAction,
 } from "@lite-fsm/core";
 
 import type { Assert, Equal } from "./_helpers";
@@ -68,41 +69,41 @@ const cacheStorage = defineStorageRuntime<CacheStorageExtension>().create({
     return { ready: true };
   },
   prepareAction(ctx) {
-    expect(ctx.action).type.toBe<ManagerAction<ObservedEvent>>();
-    expect(ctx.originalAction).type.toBe<ManagerAction<ObservedEvent>>();
+    expect(ctx.action).type.toBe<ReadonlyManagerAction<ObservedEvent>>();
+    expect(ctx.originalAction).type.toBe<ReadonlyManagerAction<ObservedEvent>>();
   },
   beforeReduce(ctx) {
-    expect(ctx.action).type.toBe<ManagerAction<ObservedEvent>>();
-    expect(ctx.originalAction).type.toBe<ManagerAction<ObservedEvent>>();
+    expect(ctx.action).type.toBe<ReadonlyManagerAction<ObservedEvent>>();
+    expect(ctx.originalAction).type.toBe<ReadonlyManagerAction<ObservedEvent>>();
   },
   acceptsEvent(ctx) {
-    expect(ctx.action).type.toBe<ManagerAction<ObservedEvent>>();
-    expect(ctx.originalAction).type.toBe<ManagerAction<ObservedEvent>>();
+    expect(ctx.action).type.toBe<ReadonlyManagerAction<ObservedEvent>>();
+    expect(ctx.originalAction).type.toBe<ReadonlyManagerAction<ObservedEvent>>();
     return ctx.action.type === "CACHE_REFRESH";
   },
   reduce(ctx) {
-    expect(ctx.action).type.toBe<ManagerAction<ObservedEvent>>();
-    expect(ctx.originalAction).type.toBe<ManagerAction<ObservedEvent>>();
+    expect(ctx.action).type.toBe<ReadonlyManagerAction<ObservedEvent>>();
+    expect(ctx.originalAction).type.toBe<ReadonlyManagerAction<ObservedEvent>>();
     expect(ctx.template.data?.cacheKey).type.toBe<string | undefined>();
   },
   commit(ctx) {
-    expect(ctx.action).type.toBe<ManagerAction<ObservedEvent>>();
-    expect(ctx.originalAction).type.toBe<ManagerAction<ObservedEvent>>();
+    expect(ctx.action).type.toBe<ReadonlyManagerAction<ObservedEvent>>();
+    expect(ctx.originalAction).type.toBe<ReadonlyManagerAction<ObservedEvent>>();
     ctx.state.commits += 1;
   },
   effects: {
     condition(ctx) {
-      expect(ctx.predicate).type.toBe<(action: ManagerAction<AnyEvent>) => boolean>();
+      expect(ctx.predicate).type.toBe<(action: ReadonlyManagerAction<ObservedEvent>) => boolean>();
       return Promise.resolve(ctx.predicate({ type: "LOAD" }));
     },
     resolveInvocations(ctx) {
-      expect(ctx.action).type.toBe<ManagerAction<ObservedEvent>>();
-      expect(ctx.originalAction).type.toBe<ManagerAction<ObservedEvent>>();
+      expect(ctx.action).type.toBe<ReadonlyManagerAction<ObservedEvent>>();
+      expect(ctx.originalAction).type.toBe<ReadonlyManagerAction<ObservedEvent>>();
       return [{ key: "cache" }];
     },
     invoke(ctx) {
-      expect(ctx.action).type.toBe<ManagerAction<ObservedEvent>>();
-      expect(ctx.originalAction).type.toBe<ManagerAction<ObservedEvent>>();
+      expect(ctx.action).type.toBe<ReadonlyManagerAction<ObservedEvent>>();
+      expect(ctx.originalAction).type.toBe<ReadonlyManagerAction<ObservedEvent>>();
       expect(ctx.invocation.key).type.toBe<string>();
     },
   },
@@ -116,15 +117,15 @@ const cacheStorage = defineStorageRuntime<CacheStorageExtension>().create({
   },
   identity: {
     resolve(ctx) {
-      expect(ctx.action).type.toBe<ManagerAction<ObservedEvent>>();
-      expect(ctx.originalAction).type.toBe<ManagerAction<ObservedEvent>>();
+      expect(ctx.action).type.toBe<ReadonlyManagerAction<ObservedEvent>>();
+      expect(ctx.originalAction).type.toBe<ReadonlyManagerAction<ObservedEvent>>();
       return { cacheKey: ctx.action.type };
     },
   },
   reactions: {
     run(ctx) {
-      expect(ctx.action).type.toBe<ManagerAction<ObservedEvent>>();
-      expect(ctx.originalAction).type.toBe<ManagerAction<ObservedEvent>>();
+      expect(ctx.action).type.toBe<ReadonlyManagerAction<ObservedEvent>>();
+      expect(ctx.originalAction).type.toBe<ReadonlyManagerAction<ObservedEvent>>();
     },
   },
 });
@@ -141,7 +142,7 @@ const unknownRouteMetaStorage = defineStorageRuntime<UnknownRouteMetaStorageExte
     return {};
   },
   acceptsEvent(ctx) {
-    expect(ctx.action).type.toBe<ManagerAction<HostEvent>>();
+    expect(ctx.action).type.toBe<ReadonlyManagerAction<HostEvent>>();
     return false;
   },
   reduce() {},
@@ -152,7 +153,7 @@ const cachePlugin = definePlugin<CacheEvent, HostEvent>().create({
   name: "cache-plugin",
   routeMeta: {
     cacheKey(value: string, ctx) {
-      expect(ctx.action).type.toBe<ManagerAction<CacheEvent | HostEvent>>();
+      expect(ctx.action).type.toBe<ReadonlyManagerAction<CacheEvent | HostEvent>>();
       return value;
     },
   },
@@ -174,7 +175,7 @@ const createCacheStorage = <ObservedEvents extends AnyEvent>() =>
       return { ready: true };
     },
     acceptsEvent(ctx) {
-      expect(ctx.action).type.toBe<ManagerAction<ObservedEvents>>();
+      expect(ctx.action).type.toBe<ReadonlyManagerAction<ObservedEvents>>();
       return false;
     },
     reduce() {},

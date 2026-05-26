@@ -19,6 +19,7 @@ import type {
   NormalizedStorageEntry,
   RouteResolver,
 } from "./pluginTypes";
+import type { StorageRuntime } from "./runtime/kernel/storage";
 import { DISPATCH_HOOK_PHASES } from "./pluginTypes";
 import { LiteFsmError } from "./utils";
 
@@ -139,6 +140,14 @@ const normalizeStorage = (owner: string, value: unknown): readonly NormalizedSto
     };
   });
 };
+
+type NormalizedStorageRuntimeEntry = NormalizedStorageEntry & {
+  readonly value: StorageRuntime;
+};
+
+export const getNormalizedStorageRuntimeEntries = (
+  plugin: NormalizedPlugin,
+): readonly NormalizedStorageRuntimeEntry[] => plugin.storage as readonly NormalizedStorageRuntimeEntry[];
 
 const normalizeRouteMeta = (owner: string, value: unknown): readonly NormalizedRouteMetaEntry[] =>
   assertObjectSection("routeMeta", value).map(([key, resolver]) => ({

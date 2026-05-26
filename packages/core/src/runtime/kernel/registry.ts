@@ -9,6 +9,7 @@ import type {
   NormalizedScopedTransitionEntry,
   ScopedInvocationContext,
 } from "../../plugin";
+import { getNormalizedStorageRuntimeEntries } from "../../pluginNormalize";
 import { DISPATCH_HOOK_PHASES } from "../../pluginTypes";
 import { LiteFsmError } from "../../utils";
 import { createRoutingRuntime } from "./routing";
@@ -233,8 +234,8 @@ export const createPluginRegistry = ({ defaultStorageKind }: PluginRegistryOptio
       }
 
       installedNames.add(plugin.name);
-      for (const entry of plugin.storage) {
-        storage.registry.register(entry.kind, entry.value as StorageRuntime, entry.owner);
+      for (const entry of getNormalizedStorageRuntimeEntries(plugin)) {
+        storage.registry.register(entry.kind, entry.value, entry.owner);
       }
       for (const entry of plugin.routeMeta) {
         routingRuntime.registry.registerRouteMeta(entry.key, entry.resolver, entry.owner);

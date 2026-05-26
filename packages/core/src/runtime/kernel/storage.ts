@@ -1,12 +1,21 @@
 import type { MachineManagerOptions } from "../../interfaces";
 import type { ManagerRuntimeContext as PublicManagerRuntimeContext, ScopedInvocationContext } from "../../plugin";
 import type {
+  StorageActionStageResult as PublicStorageActionStageResult,
+  StorageDehydrateResult as PublicStorageDehydrateResult,
+  StorageHydrateResult as PublicStorageHydrateResult,
+  StoragePrepareActionResult as PublicStoragePrepareActionResult,
+  StorageReduceResult as PublicStorageReduceResult,
+  StorageRuntimeExtension as PublicStorageRuntimeExtension,
+} from "../../pluginStorageTypes";
+import type {
   AnyEvent,
   DehydrateOptions,
   HydrateStrategy,
   MachinesState,
   MachineStore,
   ManagerAction,
+  ReadonlyManagerAction,
 } from "../../types";
 import { LiteFsmError } from "../../utils";
 import type { RouteConstraint, RoutingRuntime } from "./routing";
@@ -15,12 +24,8 @@ export type StorageRuntimeState = unknown;
 export type RuntimeIdentity = Readonly<Record<string, unknown>>;
 export type StorageEffectInvocation = unknown;
 
-export type StorageActionStageResult =
-  | void
-  | { readonly type: "replace"; readonly action: ManagerAction<AnyEvent> }
-  | { readonly type: "drop" };
-
-export type StorageReduceResult = void | { readonly type: "skip" };
+export type StorageActionStageResult = PublicStorageActionStageResult;
+export type StorageReduceResult = PublicStorageReduceResult;
 
 export type ValidateTemplateContext = {
   readonly key: string;
@@ -48,24 +53,24 @@ export type CreatePublicInitialStateContext = {
 
 export type AcceptsEventContext = {
   readonly template: CompiledStorageTemplate;
-  readonly action: ManagerAction<AnyEvent>;
-  readonly originalAction: ManagerAction<AnyEvent>;
+  readonly action: ReadonlyManagerAction<AnyEvent>;
+  readonly originalAction: ReadonlyManagerAction<AnyEvent>;
   readonly state: StorageRuntimeState;
   readonly dispatch: StorageDispatchContext;
 };
 
 export type StorageReduceContext = {
   readonly template: CompiledStorageTemplate;
-  readonly action: ManagerAction<AnyEvent>;
-  readonly originalAction: ManagerAction<AnyEvent>;
+  readonly action: ReadonlyManagerAction<AnyEvent>;
+  readonly originalAction: ReadonlyManagerAction<AnyEvent>;
   readonly state: StorageRuntimeState;
   readonly manager: ManagerRuntimeContext;
   readonly dispatch: StorageDispatchContext;
 };
 
 export type StorageBeforeReduceContext = {
-  readonly action: ManagerAction<AnyEvent>;
-  readonly originalAction: ManagerAction<AnyEvent>;
+  readonly action: ReadonlyManagerAction<AnyEvent>;
+  readonly originalAction: ReadonlyManagerAction<AnyEvent>;
   readonly state: StorageRuntimeState;
   readonly manager: ManagerRuntimeContext;
   readonly dispatch: StorageDispatchContext;
@@ -73,24 +78,24 @@ export type StorageBeforeReduceContext = {
 
 export type StorageReduceBucketContext = {
   readonly templates: readonly CompiledStorageTemplate[];
-  readonly action: ManagerAction<AnyEvent>;
-  readonly originalAction: ManagerAction<AnyEvent>;
+  readonly action: ReadonlyManagerAction<AnyEvent>;
+  readonly originalAction: ReadonlyManagerAction<AnyEvent>;
   readonly state: StorageRuntimeState;
   readonly manager: ManagerRuntimeContext;
   readonly dispatch: StorageDispatchContext;
 };
 
 export type StorageCommitContext = {
-  readonly action: ManagerAction<AnyEvent>;
-  readonly originalAction: ManagerAction<AnyEvent>;
+  readonly action: ReadonlyManagerAction<AnyEvent>;
+  readonly originalAction: ReadonlyManagerAction<AnyEvent>;
   readonly state: StorageRuntimeState;
   readonly manager: ManagerRuntimeContext;
   readonly dispatch: StorageDispatchContext;
 };
 
 export type ResolveEffectInvocationsContext = {
-  readonly action: ManagerAction<AnyEvent>;
-  readonly originalAction: ManagerAction<AnyEvent>;
+  readonly action: ReadonlyManagerAction<AnyEvent>;
+  readonly originalAction: ReadonlyManagerAction<AnyEvent>;
   readonly state: StorageRuntimeState;
   readonly manager: ManagerRuntimeContext;
   readonly dispatch: StorageDispatchContext;
@@ -98,15 +103,15 @@ export type ResolveEffectInvocationsContext = {
 
 export type StorageEffectInvocationContext = {
   readonly invocation: StorageEffectInvocation;
-  readonly action: ManagerAction<AnyEvent>;
-  readonly originalAction: ManagerAction<AnyEvent>;
+  readonly action: ReadonlyManagerAction<AnyEvent>;
+  readonly originalAction: ReadonlyManagerAction<AnyEvent>;
   readonly state: StorageRuntimeState;
   readonly manager: ManagerRuntimeContext;
   readonly dispatch: StorageDispatchContext;
 };
 
 export type StorageConditionContext = {
-  readonly predicate: (action: ManagerAction<AnyEvent>) => boolean;
+  readonly predicate: (action: ReadonlyManagerAction<AnyEvent>) => boolean;
   readonly state: StorageRuntimeState;
   readonly manager: ManagerRuntimeContext;
 };
@@ -131,38 +136,32 @@ export type StorageHydrateContext = {
 
 export type ResolveIdentityContext = {
   readonly state: StorageRuntimeState;
-  readonly action: ManagerAction<AnyEvent>;
-  readonly originalAction: ManagerAction<AnyEvent>;
+  readonly action: ReadonlyManagerAction<AnyEvent>;
+  readonly originalAction: ReadonlyManagerAction<AnyEvent>;
 };
 
 export type StorageReactionContext = {
-  readonly action: ManagerAction<AnyEvent>;
-  readonly originalAction: ManagerAction<AnyEvent>;
+  readonly action: ReadonlyManagerAction<AnyEvent>;
+  readonly originalAction: ReadonlyManagerAction<AnyEvent>;
   readonly state: StorageRuntimeState;
   readonly manager: ManagerRuntimeContext;
   readonly dispatch: StorageDispatchContext;
 };
 
 export type StoragePrepareActionContext = {
-  readonly action: ManagerAction<AnyEvent>;
-  readonly originalAction: ManagerAction<AnyEvent>;
+  readonly action: ReadonlyManagerAction<AnyEvent>;
+  readonly originalAction: ReadonlyManagerAction<AnyEvent>;
   readonly options: unknown;
   readonly state: StorageRuntimeState;
   readonly manager: ManagerRuntimeContext;
   readonly dispatch: StorageDispatchContext;
 };
 
-export type StoragePrepareActionResult = StorageActionStageResult;
+export type StoragePrepareActionResult = PublicStoragePrepareActionResult;
 
-export type StorageHydrateResult = {
-  readonly nextState: Record<string, unknown>;
-  readonly changed: boolean;
-};
+export type StorageHydrateResult = PublicStorageHydrateResult;
 
-export type StorageDehydrateResult = {
-  readonly machines?: Record<string, unknown>;
-  readonly snapshot?: unknown;
-};
+export type StorageDehydrateResult = PublicStorageDehydrateResult<PublicStorageRuntimeExtension>;
 
 export type StorageDispatchContext = {
   readonly options: unknown;
@@ -220,7 +219,7 @@ export type ManagerRuntimeContext = PublicManagerRuntimeContext & {
     cb: (
       prevState: MachinesState<MachineStore>,
       currentState: MachinesState<MachineStore>,
-      action: ManagerAction<AnyEvent> | { type: string; payload?: unknown },
+      action: ReadonlyManagerAction<AnyEvent> | { readonly type: string; readonly payload?: unknown },
     ) => void,
   ): () => void;
   getDependencies(): Record<string, unknown>;

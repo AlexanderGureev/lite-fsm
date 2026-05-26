@@ -1,7 +1,6 @@
 import { describe, expect, test } from "tstyche";
 import { createMachine, defineStorageRuntime, MachineManager } from "@lite-fsm/core";
 import type {
-  AnyEvent,
   EffectDeps,
   ManagerAction,
   PluginMachineExtensions,
@@ -39,7 +38,7 @@ describe("plugin system documentation fixture", () => {
     type _Manager = Assert<
       Equal<
         PluginManagerExtensions<AppPlugins>,
-        { readonly cache: { refresh(cacheKey: string): ManagerAction<AnyEvent> } }
+        { readonly cache: { refresh(cacheKey: string): ManagerAction<CachePluginEvent> } }
       >
     >;
     type _ScopedDeps = Assert<Equal<PluginScopedDeps<AppPlugins>, { readonly cacheScope: { describe(): string } }>>;
@@ -130,7 +129,7 @@ describe("plugin system documentation fixture", () => {
       payload: { documentId: "42", tenantId: "acme" },
       meta: { cacheKey: "document" },
     });
-    expect(manager.cache.refresh("typed")).type.toBe<ManagerAction<AnyEvent>>();
+    expect(manager.cache.refresh("typed")).type.toBe<ManagerAction<CachePluginEvent>>();
 
     // @ts-expect-error!
     manager.transition({ type: "UNKNOWN" });

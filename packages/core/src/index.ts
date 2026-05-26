@@ -45,6 +45,7 @@ export type {
   StorageEffectInvocationContext,
   StorageHydrateContext,
   StorageIdentityContext,
+  StorageManagerContext,
   StoragePrepareActionContext,
   StorageReactionContext,
   StorageReduceBucketContext,

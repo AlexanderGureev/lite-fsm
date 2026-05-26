@@ -13,7 +13,7 @@ import type {
   ScopedInvocationContext,
 } from "./pluginTypes";
 import type { LiteFsmStorageRuntimeDefinition } from "./pluginStorage";
-import type { AnyEvent, ManagerAction } from "./types";
+import type { AnyEvent, ManagerAction, ReadonlyManagerAction } from "./types";
 
 // Re-exports keep public API stable: tests и runtime importят эти типы из ./plugin.
 export type {
@@ -83,8 +83,8 @@ type PluginObservedEvents<PluginEvents extends AnyEvent, HostEvents extends AnyE
   : HostEvents | PluginEvents;
 
 type PluginDispatchContext<Events extends AnyEvent> = Omit<DispatchContext, "action" | "originalAction"> & {
-  readonly originalAction: ManagerAction<Events>;
-  readonly action: ManagerAction<Events>;
+  readonly originalAction: ReadonlyManagerAction<Events>;
+  readonly action: ReadonlyManagerAction<Events>;
 };
 
 type PluginActionInterceptorResult<Events extends AnyEvent> = void | {
@@ -103,7 +103,7 @@ type PluginRouteResolverContext<Key extends string, Events extends AnyEvent> = O
   RouteResolverContext<Key>,
   "action"
 > & {
-  readonly action: ManagerAction<Events>;
+  readonly action: ReadonlyManagerAction<Events>;
 };
 
 // bivarianceHack нужен, чтобы resolver value/ctx инферились bivariantly через intersection-typing.
@@ -115,7 +115,7 @@ export type PluginScopedInvocationContext<Events extends AnyEvent, TransitionEve
   ScopedInvocationContext,
   "event" | "transition"
 > & {
-  readonly event: ManagerAction<Events>;
+  readonly event: ReadonlyManagerAction<Events>;
   readonly transition: (action: ManagerAction<TransitionEvents>) => ManagerAction<TransitionEvents>;
 };
 
@@ -183,7 +183,7 @@ type PluginDefinitionBase<
   Events extends AnyEvent = PluginObservedEvents<PluginEvents, HostEvents>,
 > = {
   readonly name: Name;
-  readonly manager?: Record<string, ManagerExtensionFactory>;
+  readonly manager?: Record<string, ManagerExtensionFactory<PluginEvents>>;
   readonly storage?: readonly [LiteFsmStorageRuntimeDefinition, ...LiteFsmStorageRuntimeDefinition[]];
   readonly scopedDeps?: Record<string, PluginScopedFactory<Events, PluginEvents>>;
   readonly scopedTransition?: Record<string, PluginScopedFactory<Events, PluginEvents>>;

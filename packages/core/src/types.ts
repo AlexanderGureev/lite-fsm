@@ -20,6 +20,16 @@ export type CoreActionMeta = FSMEventMeta;
 
 export type ManagerAction<P extends AnyEvent, Meta extends object = CoreActionMeta> = P & { meta?: Meta };
 
+type DeepReadonly<Value> = Value extends (...args: any[]) => unknown
+  ? Value
+  : Value extends object
+    ? { readonly [Key in keyof Value]: DeepReadonly<Value[Key]> }
+    : Value;
+
+export type ReadonlyManagerAction<Events extends AnyEvent, Meta extends object = CoreActionMeta> = DeepReadonly<
+  ManagerAction<Events, Meta>
+>;
+
 export type MachineRuntimeExtension = {
   readonly storage?: string;
   readonly input?: object;

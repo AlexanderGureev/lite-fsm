@@ -12,6 +12,7 @@ import type {
   PluginRouteMeta,
   PluginScopedDeps,
   PluginScopedTransition,
+  ReadonlyManagerAction,
 } from "@lite-fsm/core";
 
 import type { Assert, Equal } from "./_helpers";
@@ -27,7 +28,7 @@ const observingPlugin = definePlugin<PluginEvent, HostEvent>().create({
   name: "observing-plugin",
   routeMeta: {
     entityId(value: string, ctx) {
-      expect(ctx.action).type.toBe<ManagerAction<HostEvent | PluginEvent>>();
+      expect(ctx.action).type.toBe<ReadonlyManagerAction<HostEvent | PluginEvent>>();
 
       return value;
     },
@@ -48,7 +49,7 @@ const effectPlugin = definePlugin<PluginEvent>().create({
   name: "effect-plugin",
   scopedDeps: {
     currentUser(scope) {
-      expect(scope.event).type.toBe<ManagerAction<AnyEvent>>();
+      expect(scope.event).type.toBe<ReadonlyManagerAction<AnyEvent>>();
 
       return { id: scope.source.template } as const;
     },

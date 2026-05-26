@@ -23,7 +23,7 @@ type AppEvents = HostEvents | PluginManagerEvents<AppPlugins>;
 
 Второй generic `HostEvents` описывает события host manager, которые plugin типизированно наблюдает в callbacks. `routeMeta`, `intercept`, `hooks`, `scopedDeps` и `scopedTransition` видят `HostEvents | PluginEvents`, но `HostEvents` не входят в `PluginManagerEvents<Plugins>`.
 
-Если `HostEvents` не передан явно, observer contexts используют `AnyEvent`: `ctx.action`, `ctx.originalAction`, `routeMeta` `ctx.action` и `scope.event` типизируются как `ManagerAction<AnyEvent>`. При `definePlugin<PluginEvents>()` это не расширяет `PluginManagerEvents<Plugins>`; `scope.transition(...)` остается ограничен `PluginEvents`.
+Если `HostEvents` не передан явно, поля action в callbacks наблюдения (`ctx.action`, `ctx.originalAction`, `routeMeta` `ctx.action`, `scope.event`) типизируются как `ReadonlyManagerAction<AnyEvent>`. При `definePlugin<PluginEvents>()` это не расширяет `PluginManagerEvents<Plugins>`; `scope.transition(...)` остается ограничен `PluginEvents`.
 
 ## Sections
 
@@ -32,7 +32,7 @@ type AppEvents = HostEvents | PluginManagerEvents<AppPlugins>;
 | `routeMeta` | Объявляет routing resolver для action `meta`. Это служебный routing contract, не место для пользовательских данных. Используйте scalar keys вроде `entityId`, `cacheKey`, `documentId`, `tenantId`. Reserved keys `actorId`, `groupId`, `groupTag`, `senderActorId`, `senderGroupId`, `senderGroupTag` запрещены. |
 | `manager` | Добавляет поля на returned manager. Factory вызывается один раз при создании manager после compile templates, runtime state и initial public state. |
 | `intercept` | Выполняется после storage `prepareAction` и до reducer delivery. Может вернуть `{}`, заменить committed action, выставить `skipDelivery` или остановить следующие interceptors. Replacement пересчитывает route. |
-| `hooks` | Выполняются по фазам `beforeReduce`, `afterReduce`, `beforeCommit`, `beforeSubscribers`, `beforeEffects`, `afterEffects`. Context read-only для action; return value игнорируется. `manager.transition(...)` внутри hook запрещен и бросает `LITE_FSM_REENTRANT_TRANSITION_FORBIDDEN`. |
+| `hooks` | Выполняются по фазам `beforeReduce`, `afterReduce`, `beforeCommit`, `beforeSubscribers`, `beforeEffects`, `afterEffects`. Контекст содержит action только для чтения; возвращаемое значение игнорируется. `manager.transition(...)` внутри hook запрещен и бросает `LITE_FSM_REENTRANT_TRANSITION_FORBIDDEN`. |
 | `scopedDeps` | Добавляет deps только на время effect/reaction invocation. Ключ section становится ключом deps. |
 | `scopedTransition` | Добавляет методы к invocation `deps.transition` и сохраняет callable core `transition(action)`. Методы не появляются на `manager.transition`. |
 | `storage` | Advanced section: регистрирует storage runtime definitions из `defineStorageRuntime().create(...)`. Inline runtime objects не принимаются. |
@@ -86,6 +86,20 @@ const managerPlugin = definePlugin<PluginEvent>().create({
 ```
 
 Ключ `cache` становится полем returned manager. Дубликаты между plugins диагностируются как `LITE_FSM_DUPLICATE_MANAGER_EXTENSION_KEY` с владельцами конфликта; попытка занять core method — как `LITE_FSM_MANAGER_EXTENSION_CORE_KEY`.
+
+Factory в section `manager` получает `ManagerRuntimeContext<PluginEvents>`. `ctx.transition(...)` принимает только события, объявленные первым generic plugin, и возвращает `ManagerAction<PluginEvents>`. `HostEvents` используются в callbacks, которые наблюдают action, но не становятся допустимыми событиями для `ctx.transition(...)` внутри manager extension.
+
+## Контракт action в callbacks
+
+`ReadonlyManagerAction<Events>` — public type alias для action, доступного только для наблюдения в callbacks. Его используют `ctx.action`, `ctx.originalAction`, `routeMeta` `ctx.action`, `scope.event` и storage callbacks, которые получают action. На уровне типов нельзя присваивать новый action в context, менять `type`, `meta` или вложенные поля `payload`.
+
+Текущий action заменяется только через return protocol фазы:
+
+- plugin `intercept(ctx)` возвращает `{ action }`;
+- storage `prepareAction(ctx)` возвращает `{ type: "replace", action }`;
+- storage `beforeReduce(ctx)` возвращает `{ type: "replace", action }`.
+
+Replacement action задается как обычный `ManagerAction<Events>`, проходит runtime validation и после замены пересчитывает route. Мутация `ctx.action` или `ctx.originalAction` на месте не является публичным контрактом. Runtime не обещает глубокую заморозку action или `payload`.
 
 ## Dispatch Pipeline
 
@@ -154,7 +168,7 @@ const scopedPlugin = definePlugin<PluginEvent, HostEvent>().create({
 });
 ```
 
-При явном `HostEvents` `scope.event` типизируется как `ManagerAction<HostEvents | PluginEvents>`; без второго generic — как `ManagerAction<AnyEvent>`. `scope.transition(...)` принимает только `ManagerAction<PluginEvents>`.
+При явном `HostEvents` `scope.event` типизируется как `ReadonlyManagerAction<HostEvents | PluginEvents>`; без второго generic — как `ReadonlyManagerAction<AnyEvent>`. `scope.transition(...)` принимает только `ManagerAction<PluginEvents>`.
 
 Для effects используйте `EffectDeps<AppDeps, Plugins>`:
 
@@ -265,11 +279,15 @@ const cachePlugin = definePlugin<CacheEvent, HostEvents>().create({
 
 `routeMetaKeys` — runtime dependency storage runtime от action meta keys. Без `Extension["routeMeta"]` сохраняется совместимый список строковых ключей. Если `Extension["routeMeta"]` задан, `routeMetaKeys` принимает только его строковые ключи, а обычный `definePlugin().create(...)` требует совместимый resolver в plugin `routeMeta`. Тип raw value берется из первого параметра resolver; неаннотированный `value` считается `unknown` и совместим только с требованием `unknown`. Runtime валидирует shape definition и результаты route resolvers, но не проверяет raw value type.
 
-`observedEvents` задает поток событий, который видят action-aware storage callbacks: `prepareAction`, `beforeReduce`, `acceptsEvent`, `reduce`, `reduceBucket`, `commit`, `effects.resolveInvocations`, `effects.invoke`, `identity.resolve`, `reactions.run`. Без `observedEvents` эти callbacks сохраняют `ManagerAction<AnyEvent>`.
+`observedEvents` задает поток событий, который видят action-aware storage callbacks: `prepareAction`, `beforeReduce`, `acceptsEvent`, `reduce`, `reduceBucket`, `commit`, `effects.resolveInvocations`, `effects.invoke`, `identity.resolve`, `reactions.run`. Без `observedEvents` эти callbacks сохраняют `ReadonlyManagerAction<AnyEvent>`.
+
+`ctx.manager` в storage callbacks имеет public тип `StorageManagerContext<Extension["observedEvents"]>`. Он содержит только `getState`, `transition`, `onTransition` и `getDependencies`; internal `routing`, `createScopedDeps`, `config`, `options`, `schemaVersion` и registry/kernel objects не входят в public contract.
 
 `prepareAction(ctx)` выполняется до middleware и может вернуть `{ type: "replace", action }` или `{ type: "drop" }`. `beforeReduce(ctx)` выполняется после middleware и до public interceptors с тем же result protocol. `{ type: "drop" }` завершает dispatch без доставки, а `{ type: "replace" }` пересчитывает route для следующих фаз после validation replacement action. Неверный storage result бросает `LITE_FSM_INVALID_STORAGE_CALLBACK_RESULT`; replacement action должен быть object с `type: string` и не может использовать `@@lite-fsm/*`.
 
 `reduceScope` по умолчанию равен `"template"`: runtime объявляет `acceptsEvent(ctx)` и `reduce(ctx)`, а core вызывает reducer для каждого matching template. Для batch-обработки укажите `reduceScope: "bucket"` и объявите `reduceBucket(ctx)`: callback вызывается один раз на storage bucket и получает `ctx.templates`. В bucket scope нельзя объявлять `acceptsEvent` или `reduce`; в template scope нельзя объявлять `reduceBucket`. `reduce(ctx)` и `reduceBucket(ctx)` возвращают только `void | { type: "skip" }`; `drop` и `replace` разрешены только в `prepareAction` и `beforeReduce`.
+
+`StorageDispatchContext` не экспортируется из root API. `ctx.dispatch` доступен через public callback context types, например `StorageReduceContext<Ext>["dispatch"]`, и содержит только public dispatch fields: `nextState`, `runtime`, `route`, `prevState`, `skipDelivery`, `options` и `reportError`.
 
 `effectDeps` и `reactionDeps` внутри `CacheExtension` — type contract для machines этого storage kind. Runtime сам решает, какие deps передать при invocation.
 
@@ -317,5 +335,7 @@ const createCachePlugin = (options: { readonly namespace: string }) =>
 | `PluginScopedTransition<Plugins>` | Методы invocation `transition` из `scopedTransition`. |
 | `PluginMachineExtensions<Plugins>` | Union machine extensions из storage definitions. |
 | `EffectDeps<AppDeps, Plugins>` | App deps плюс scoped deps и scoped transition methods. |
+| `ReadonlyManagerAction<Events>` | Action для чтения в callbacks наблюдения; результаты replacement используют `ManagerAction<Events>`. |
+| `StorageManagerContext<Events>` | Публичное подмножество manager для storage callbacks: `getState`, `transition`, `onTransition`, `getDependencies`. |
 
 Все helpers принимают plugin union и runtime tuple.

@@ -1,7 +1,6 @@
 import { describe, expect, test } from "tstyche";
 import { createMachine, definePlugin, defineStorageRuntime, MachineManager } from "@lite-fsm/core";
 import type {
-  AnyEvent,
   FSMEvent,
   ManagerAction,
   PluginMachineExtensions,
@@ -103,7 +102,7 @@ describe("plugin system — этап 8 storage types", () => {
     const manager = MachineManager(machines, { plugins: [cachePlugin] as const });
 
     expect(manager.getState().cache).type.toBe<{ readonly ready: boolean; readonly value: string }>();
-    expect(manager.cacheTools.refresh("user")).type.toBe<ManagerAction<AnyEvent>>();
+    expect(manager.cacheTools.refresh("user")).type.toBe<ManagerAction<CacheEvent>>();
     expect(manager.transition({ type: "CACHE_REFRESH", payload: { key: "user" } })).type.toBeAssignableTo<
       ManagerAction<AppEvent | CacheEvent>
     >();

@@ -4,6 +4,7 @@ import type {
   FSMEvent,
   ManagerAction,
   PluginMachineExtensions,
+  ReadonlyManagerAction,
   TypedCreateMachineFn,
 } from "@lite-fsm/core";
 
@@ -55,8 +56,8 @@ const cacheStorage = defineStorageRuntime<CacheExtension>().create({
     return { ready: true };
   },
   acceptsEvent(ctx) {
-    expect(ctx.action).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
-    expect(ctx.originalAction).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
+    expect(ctx.action).type.toBe<ReadonlyManagerAction<{ type: string; payload?: unknown }>>();
+    expect(ctx.originalAction).type.toBe<ReadonlyManagerAction<{ type: string; payload?: unknown }>>();
     return false;
   },
   reduce(ctx) {
@@ -237,8 +238,8 @@ describe("plugin system — этап 7 storage types", () => {
       },
       prepareAction(ctx) {
         expect(ctx.state).type.toBe<unknown>();
-        expect(ctx.action).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
-        expect(ctx.originalAction).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
+        expect(ctx.action).type.toBe<ReadonlyManagerAction<{ type: string; payload?: unknown }>>();
+        expect(ctx.originalAction).type.toBe<ReadonlyManagerAction<{ type: string; payload?: unknown }>>();
         // @ts-expect-error!
         ctx.dispatch.originalAction;
         // @ts-expect-error!
@@ -249,23 +250,23 @@ describe("plugin system — этап 7 storage types", () => {
         ctx.dispatch.committedAction;
         // @ts-expect-error!
         ctx.dispatch.dropped;
-        return { type: "replace", action: ctx.action };
+        return { type: "replace", action: { type: ctx.action.type } };
       },
       beforeReduce(ctx) {
         expect(ctx.state).type.toBe<unknown>();
-        expect(ctx.action).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
-        expect(ctx.originalAction).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
+        expect(ctx.action).type.toBe<ReadonlyManagerAction<{ type: string; payload?: unknown }>>();
+        expect(ctx.originalAction).type.toBe<ReadonlyManagerAction<{ type: string; payload?: unknown }>>();
         return { type: "drop" };
       },
       acceptsEvent(ctx) {
-        expect(ctx.action).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
-        expect(ctx.originalAction).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
+        expect(ctx.action).type.toBe<ReadonlyManagerAction<{ type: string; payload?: unknown }>>();
+        expect(ctx.originalAction).type.toBe<ReadonlyManagerAction<{ type: string; payload?: unknown }>>();
         return true;
       },
       reduce(ctx) {
         expect(ctx.template.data).type.toBe<unknown>();
-        expect(ctx.action).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
-        expect(ctx.originalAction).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
+        expect(ctx.action).type.toBe<ReadonlyManagerAction<{ type: string; payload?: unknown }>>();
+        expect(ctx.originalAction).type.toBe<ReadonlyManagerAction<{ type: string; payload?: unknown }>>();
         // @ts-expect-error!
         ctx.dispatch.route = ctx.dispatch.route;
         // @ts-expect-error!
@@ -278,8 +279,8 @@ describe("plugin system — этап 7 storage types", () => {
       },
       commit(ctx) {
         expect(ctx.state).type.toBe<unknown>();
-        expect(ctx.action).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
-        expect(ctx.originalAction).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
+        expect(ctx.action).type.toBe<ReadonlyManagerAction<{ type: string; payload?: unknown }>>();
+        expect(ctx.originalAction).type.toBe<ReadonlyManagerAction<{ type: string; payload?: unknown }>>();
       },
       effects: {
         condition(ctx) {
@@ -288,14 +289,14 @@ describe("plugin system — этап 7 storage types", () => {
         },
         resolveInvocations(ctx) {
           expect(ctx.state).type.toBe<unknown>();
-          expect(ctx.action).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
-          expect(ctx.originalAction).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
+          expect(ctx.action).type.toBe<ReadonlyManagerAction<{ type: string; payload?: unknown }>>();
+          expect(ctx.originalAction).type.toBe<ReadonlyManagerAction<{ type: string; payload?: unknown }>>();
           return [{ id: "invoke" }];
         },
         invoke(ctx) {
           expect(ctx.invocation).type.toBe<unknown>();
-          expect(ctx.action).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
-          expect(ctx.originalAction).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
+          expect(ctx.action).type.toBe<ReadonlyManagerAction<{ type: string; payload?: unknown }>>();
+          expect(ctx.originalAction).type.toBe<ReadonlyManagerAction<{ type: string; payload?: unknown }>>();
         },
       },
       snapshot: {
@@ -312,15 +313,15 @@ describe("plugin system — этап 7 storage types", () => {
       identity: {
         resolve(ctx) {
           expect(ctx.state).type.toBe<unknown>();
-          expect(ctx.originalAction).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
+          expect(ctx.originalAction).type.toBe<ReadonlyManagerAction<{ type: string; payload?: unknown }>>();
           return { type: ctx.action.type };
         },
       },
       reactions: {
         run(ctx) {
           expect(ctx.state).type.toBe<unknown>();
-          expect(ctx.action).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
-          expect(ctx.originalAction).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
+          expect(ctx.action).type.toBe<ReadonlyManagerAction<{ type: string; payload?: unknown }>>();
+          expect(ctx.originalAction).type.toBe<ReadonlyManagerAction<{ type: string; payload?: unknown }>>();
         },
       },
     });
@@ -380,8 +381,8 @@ describe("plugin system — этап 7 storage types", () => {
       },
       reduceBucket(ctx) {
         expect(ctx.templates).type.toBe<readonly { readonly key: string; readonly kind: string; readonly data?: unknown }[]>();
-        expect(ctx.action).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
-        expect(ctx.originalAction).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
+        expect(ctx.action).type.toBe<ReadonlyManagerAction<{ type: string; payload?: unknown }>>();
+        expect(ctx.originalAction).type.toBe<ReadonlyManagerAction<{ type: string; payload?: unknown }>>();
         expect(ctx.state).type.toBe<unknown>();
         return { type: "skip" };
       },

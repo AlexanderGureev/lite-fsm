@@ -1,6 +1,7 @@
 import type { RouteResolver, RouteResolverResult, RoutingRegistry } from "../../plugin";
 import type { AnyEvent, FSMEventMeta, ManagerAction } from "../../types";
 import { LiteFsmError } from "../../utils";
+import { createReadonlyActionView } from "./actionView";
 
 const ROUTING_KEYS = ["actorId", "groupId", "groupTag"] as const;
 const SENDER_KEYS = ["senderActorId", "senderGroupId", "senderGroupTag"] as const;
@@ -85,7 +86,7 @@ export const createRoutingRuntime = (): RoutingRuntime => {
       return {
         scope: "plugin",
         key,
-        targetSet: toPluginTargetSet(key, entry.resolver(value, { key, action, meta })),
+        targetSet: toPluginTargetSet(key, entry.resolver(value, { key, action: createReadonlyActionView(action), meta })),
       };
     }
 
