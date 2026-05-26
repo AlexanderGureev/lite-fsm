@@ -624,7 +624,8 @@ const logger: Middleware<AppState, AppEvent> = (api) => (next) => (action) => {
 - effects запускаются после возврата всей middleware-цепочки;
 - чтобы заблокировать action — не вызывать `next(action)`;
 - чтобы изменить — вызвать `next(modifiedAction)`;
-- `transition` возвращает action, дошедший до reducer-а.
+- `transition` возвращает action, дошедший до reducer-а;
+- `condition(predicate)` обслуживается дефолтным storage (`"instance"`); plugin storage может объявить собственный `effects.condition`, но публичный `MiddlewareApi.condition` его не вызывает.
 
 ### `immerMiddleware`
 

@@ -154,6 +154,24 @@ export type StorageDispatchContext = {
   reportError(error: unknown): void;
 };
 
+// Типизированный slot для StorageDispatchContext.runtime: storage runtime владеет ключом
+// и типом своего per-dispatch state, locale cast'а runtime.get → T сосредоточен в одном месте.
+export type DispatchSlot<T> = {
+  readonly key: string;
+  get(dispatch: StorageDispatchContext): T | undefined;
+  set(dispatch: StorageDispatchContext, value: T): void;
+};
+
+export const createDispatchSlot = <T>(key: string): DispatchSlot<T> => ({
+  key,
+  get(dispatch) {
+    return dispatch.runtime.get(key) as T | undefined;
+  },
+  set(dispatch, value) {
+    dispatch.runtime.set(key, value);
+  },
+});
+
 export type ManagerRuntimeContext = PublicManagerRuntimeContext & {
   readonly config: MachineStore;
   readonly options: MachineManagerOptions<any, any, any> | undefined;

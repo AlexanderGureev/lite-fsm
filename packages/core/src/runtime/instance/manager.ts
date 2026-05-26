@@ -22,7 +22,7 @@ import {
 } from "../../dispatchContext";
 import { applySnapshot as applySnapshotPure, type ApplySnapshotDeps, buildDehydratedEnvelope } from "../../hydration";
 import { buildManagerIndexes, type ConfigHelpers, createConfigHelpers } from "../../managerIndexes";
-import { createNormalizer, NORMALIZE_DROP } from "../../managerNormalize";
+import { createNormalizer } from "../../managerNormalize";
 import { createRoutingResolver } from "../../managerRouting";
 import {
   buildReplacementReconcilePlan,
@@ -52,6 +52,8 @@ import {
   supportsVoidReducer,
 } from "../../utils";
 import {
+  createDispatchSlot,
+  type DispatchSlot,
   STORAGE_ACTION_DROP,
   type CompiledStorageTemplate,
   type CreateRuntimeStateContext,
@@ -124,18 +126,36 @@ const toNormalizeOptions = (value: unknown): NormalizeOptions =>
   value && typeof value === "object" ? (value as NormalizeOptions) : {};
 
 const getInstanceDispatch = <S extends MachineStore, P extends AnyEvent>(
+  slot: DispatchSlot<InstanceDispatchState<S, P>>,
   dispatch: StorageDispatchContext,
   sidecarCounters: Parameters<typeof createDispatchContext<S, P>>[1],
 ): InstanceDispatchState<S, P> => {
-  const existing = dispatch.runtime.get(INSTANCE_DISPATCH_KEY) as InstanceDispatchState<S, P> | undefined;
+  const existing = slot.get(dispatch);
   if (existing) return existing;
 
   const created: InstanceDispatchState<S, P> = {
     ctx: createDispatchContext<S, P>(toNormalizeOptions(dispatch.options), sidecarCounters),
     reduced: false,
   };
-  dispatch.runtime.set(INSTANCE_DISPATCH_KEY, created);
+  slot.set(dispatch, created);
   return created;
+};
+
+// Двусторонняя синхронизация committed action между storage dispatch и instance ctx.
+// Между beginReduce и reduce action interceptor мог перезаписать dispatch.committedAction —
+// в этом случае instance ctx подхватывает значение из dispatch. Возвращает false, если
+// applyPostNormalize ещё не выставил committed (sender disposed) и dispatch нужно дропнуть.
+const syncCommittedAction = <S extends MachineStore, P extends AnyEvent>(
+  dispatch: StorageDispatchContext,
+  instanceCtx: DispatchContext<S, P>,
+): boolean => {
+  if (!instanceCtx.committed) return false;
+  const committed = (dispatch.committedAction ?? instanceCtx.committed) as Action<P>;
+  instanceCtx.committed = committed;
+  instanceCtx.committedPrevState = dispatch.prevState as RootState<S>;
+  dispatch.committedAction = committed as ManagerAction<AnyEvent>;
+  dispatch.committedPrevState = dispatch.prevState;
+  return true;
 };
 
 const isInstanceRuntimeState = <S extends MachineStore, P extends AnyEvent>(
@@ -363,12 +383,20 @@ export const createInstanceRuntimeState = <
     return next;
   };
 
-  const toInstanceRoute = (route: RouteConstraint): { scope: RoutingScope; targetSet: string[] } => {
-    if (route.scope === "actor" || route.scope === "group" || route.scope === "tag" || route.scope === "unscoped") {
-      return route;
+  // Instance actor pipeline маршрутизирует по actor/group/tag/unscoped. Plugin scope
+  // обрабатывается в reduceRoot до этого хелпера: actor-логика для него не запускается,
+  // и здесь plugin-route — индикатор внутренней регрессии, поэтому явный throw.
+  const toInstanceRoute = (
+    route: Exclude<RouteConstraint, { scope: "plugin" }>,
+  ): { scope: RoutingScope; targetSet: string[] } => {
+    /* v8 ignore next 6 -- защитный invariant: plugin scope отсеивается в reduceRoot до вызова. */
+    if ((route as RouteConstraint).scope === "plugin") {
+      throw new LiteFsmError(
+        "LITE_FSM_UNROUTABLE_PLUGIN_ROUTE",
+        `[lite-fsm] instance storage cannot deliver action routed via plugin meta key '${(route as { key: string }).key}'.`,
+      );
     }
-
-    return { scope: "actor", targetSet: [] };
+    return route;
   };
 
   const reduceRoot = (
@@ -377,8 +405,12 @@ export const createInstanceRuntimeState = <
     committed: Action<P>,
     route: RouteConstraint,
   ): RootState<S> => {
-    const { scope, targetSet } = toInstanceRoute(route);
     let next = reduceDomainMachines(prev, committed);
+    // Plugin route принадлежит plugin storage: domain машины принимают action независимо
+    // от scope, actor-логика instance не подхватывает plugin-routed события.
+    if (route.scope === "plugin") return next;
+
+    const { scope, targetSet } = toInstanceRoute(route);
 
     if (scope !== "actor") {
       next = spawnActors(ctx, next, committed, scope, targetSet);
@@ -466,62 +498,53 @@ export const createInstanceRuntimeState = <
     onUnknownMachineKey: opts?.onUnknownMachineKey,
   };
 
+  const instanceSlot = createDispatchSlot<InstanceDispatchState<S, P>>(INSTANCE_DISPATCH_KEY);
+
   const runtime: InstanceRuntimeState<S, P> = {
     initialState,
     prepareAction({ action, options, dispatch }) {
       const normalizeOptions = toNormalizeOptions(options);
       const ctx = createDispatchContext<S, P>(normalizeOptions, sidecar.counters);
-      dispatch.runtime.set(INSTANCE_DISPATCH_KEY, { ctx, reduced: false } satisfies InstanceDispatchState<S, P>);
+      instanceSlot.set(dispatch, { ctx, reduced: false });
       const preNormalized = normalizeAction(action as Action<P>, normalizeOptions);
-      if (preNormalized === NORMALIZE_DROP) return STORAGE_ACTION_DROP;
+      if (preNormalized === STORAGE_ACTION_DROP) return STORAGE_ACTION_DROP;
       return preNormalized as Action<P>;
     },
     beginReduce({ action, dispatch }) {
-      const instanceDispatch = getInstanceDispatch<S, P>(dispatch, sidecar.counters);
+      const instanceDispatch = getInstanceDispatch<S, P>(instanceSlot, dispatch, sidecar.counters);
       if (!instanceDispatch.ctx.committed) {
         applyPostNormalize(instanceDispatch.ctx, action as Action<P>);
       }
-      if (!instanceDispatch.ctx.committed) {
+      if (!syncCommittedAction(dispatch, instanceDispatch.ctx)) {
         dispatch.dropped = true;
         return false;
       }
-
-      instanceDispatch.ctx.committedPrevState = dispatch.prevState as RootState<S>;
-      dispatch.committedAction = instanceDispatch.ctx.committed as ManagerAction<AnyEvent>;
-      dispatch.committedPrevState = dispatch.prevState;
     },
     acceptsEvent() {
       return true;
     },
     reduce(ctx) {
       const { dispatch } = ctx;
-      const instanceDispatch = getInstanceDispatch<S, P>(dispatch, sidecar.counters);
+      const instanceDispatch = getInstanceDispatch<S, P>(instanceSlot, dispatch, sidecar.counters);
       if (instanceDispatch.reduced) return false;
       instanceDispatch.reduced = true;
 
       if (!instanceDispatch.ctx.committed) {
         applyPostNormalize(instanceDispatch.ctx, ctx.action as Action<P>);
       }
-      if (!instanceDispatch.ctx.committed) {
+      if (!syncCommittedAction(dispatch, instanceDispatch.ctx)) {
         dispatch.dropped = true;
         return false;
       }
-      const committed = (dispatch.committedAction ?? instanceDispatch.ctx.committed) as Action<P>;
-      instanceDispatch.ctx.committed = committed;
-      instanceDispatch.ctx.committedPrevState = dispatch.prevState as RootState<S>;
-      dispatch.committedAction = committed as ManagerAction<AnyEvent>;
-      dispatch.committedPrevState = dispatch.prevState;
       dispatch.nextState = reduceRoot(
         instanceDispatch.ctx,
         dispatch.nextState as RootState<S>,
-        committed,
+        instanceDispatch.ctx.committed as Action<P>,
         dispatch.route,
       ) as Record<string, unknown>;
     },
     commit({ dispatch }) {
-      const instanceDispatch = dispatch.runtime.get(INSTANCE_DISPATCH_KEY) as
-        | InstanceDispatchState<S, P>
-        | undefined;
+      const instanceDispatch = instanceSlot.get(dispatch);
       if (!instanceDispatch?.ctx.committed) return;
 
       dispatch.nextState = commitReducedState(
@@ -535,9 +558,7 @@ export const createInstanceRuntimeState = <
       return condition(predicate);
     },
     resolveEffectInvocations({ manager, dispatch }) {
-      const instanceDispatch = dispatch.runtime.get(INSTANCE_DISPATCH_KEY) as
-        | InstanceDispatchState<S, P>
-        | undefined;
+      const instanceDispatch = instanceSlot.get(dispatch);
       if (!hasAnyEffects || dispatch.skipDelivery || !instanceDispatch?.ctx.committed) return [];
 
       return [

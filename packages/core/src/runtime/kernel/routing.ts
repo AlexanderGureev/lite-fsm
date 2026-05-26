@@ -2,9 +2,9 @@ import type { RouteResolver, RouteResolverResult, RoutingRegistry } from "../../
 import type { AnyEvent, FSMEventMeta, ManagerAction } from "../../types";
 import { LiteFsmError } from "../../utils";
 
-const CORE_ROUTE_KEYS = ["actorId", "groupId", "groupTag"] as const;
+const ROUTING_KEYS = ["actorId", "groupId", "groupTag"] as const;
 const SENDER_KEYS = ["senderActorId", "senderGroupId", "senderGroupTag"] as const;
-const RESERVED_META_KEYS = new Set<string>([...CORE_ROUTE_KEYS, ...SENDER_KEYS]);
+const RESERVED_META_KEYS = new Set<string>([...ROUTING_KEYS, ...SENDER_KEYS]);
 
 type MetaRecord = FSMEventMeta & Record<string, unknown>;
 
@@ -27,15 +27,15 @@ export type RoutingRuntime = {
 
 const unscopedRoute: RouteConstraint = { scope: "unscoped", key: undefined, targetSet: [] };
 
-const arrayify = <T>(value: T | T[]): T[] => (Array.isArray(value) ? value : [value]);
-const dedupe = <T>(values: T[]): T[] => [...new Set(values)];
-
-const toBuiltInTargetSet = (value: unknown): string[] => dedupe(arrayify(value as string | string[]));
+const toBuiltInTargetSet = (value: unknown): string[] => {
+  const items = Array.isArray(value) ? (value as string[]) : [value as string];
+  return [...new Set(items)];
+};
 
 const toPluginTargetSet = (key: string, result: RouteResolverResult): string[] => {
   if (typeof result === "string") return [result];
   if (Array.isArray(result) && result.every((item) => typeof item === "string")) {
-    return dedupe([...result]);
+    return [...new Set(result)];
   }
 
   throw new LiteFsmError(
@@ -47,29 +47,19 @@ const toPluginTargetSet = (key: string, result: RouteResolverResult): string[] =
 export const createRoutingRuntime = (): RoutingRuntime => {
   const resolvers = new Map<string, RouteResolver<string>>();
 
-  const stripMeta = (
-    meta: FSMEventMeta | undefined,
-    options: { readonly routing: "keep" | "drop"; readonly sender: "keep" | "drop" },
-  ): FSMEventMeta => {
+  const copyDefinedKeys = (source: MetaRecord, target: MetaRecord, keys: readonly string[]) => {
+    for (const key of keys) {
+      if (source[key] !== undefined) target[key] = source[key];
+    }
+  };
+
+  const stripExcept = (meta: FSMEventMeta | undefined, kept: readonly string[]): FSMEventMeta => {
     const source = meta as MetaRecord | undefined;
     const next: MetaRecord = {};
     if (!source) return next;
 
-    if (options.routing === "keep") {
-      if (source.actorId !== undefined) next.actorId = source.actorId;
-      if (source.groupId !== undefined) next.groupId = source.groupId;
-      if (source.groupTag !== undefined) next.groupTag = source.groupTag;
-    }
-    if (options.sender === "keep") {
-      if (source.senderActorId !== undefined) next.senderActorId = source.senderActorId;
-      if (source.senderGroupId !== undefined) next.senderGroupId = source.senderGroupId;
-      if (source.senderGroupTag !== undefined) next.senderGroupTag = source.senderGroupTag;
-    }
-
-    for (const key of resolvers.keys()) {
-      if (source[key] !== undefined) next[key] = source[key];
-    }
-
+    copyDefinedKeys(source, next, kept);
+    copyDefinedKeys(source, next, [...resolvers.keys()]);
     return next;
   };
 
@@ -85,8 +75,7 @@ export const createRoutingRuntime = (): RoutingRuntime => {
       const value = meta[key];
       if (value === undefined) continue;
 
-      const result = resolver(value, { key, action, meta });
-      return { scope: "plugin", key, targetSet: toPluginTargetSet(key, result) };
+      return { scope: "plugin", key, targetSet: toPluginTargetSet(key, resolver(value, { key, action, meta })) };
     }
 
     if (meta.groupId !== undefined) {
@@ -117,19 +106,19 @@ export const createRoutingRuntime = (): RoutingRuntime => {
       return resolvers.has(key);
     },
     stripSenderFields(meta) {
-      return stripMeta(meta, { routing: "keep", sender: "drop" });
+      return stripExcept(meta, ROUTING_KEYS);
     },
     stripRouting(meta) {
-      return stripMeta(meta, { routing: "drop", sender: "keep" });
+      return stripExcept(meta, SENDER_KEYS);
     },
     hasRoute(meta) {
       const source = meta as MetaRecord | undefined;
       if (!source) return false;
-      if (source.actorId !== undefined) return true;
+      if (source.actorId !== undefined || source.groupId !== undefined || source.groupTag !== undefined) return true;
       for (const key of resolvers.keys()) {
         if (source[key] !== undefined) return true;
       }
-      return source.groupId !== undefined || source.groupTag !== undefined;
+      return false;
     },
     resolveRoute,
   };

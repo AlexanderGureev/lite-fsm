@@ -3,92 +3,94 @@ import type {
   DispatchHook,
   DispatchHookPhase,
   ManagerRuntimeContext,
+  NormalizedManagerEntry,
+  NormalizedPlugin,
   NormalizedScopedDepsEntry,
   NormalizedScopedTransitionEntry,
-  NormalizedPlugin,
-  NormalizedStorageEntry,
   ScopedInvocationContext,
 } from "../../plugin";
+import { DISPATCH_HOOK_PHASES } from "../../pluginTypes";
 import { LiteFsmError } from "../../utils";
-import { createManagerExtensionRuntime, registerRouteMetaEntry } from "./pluginSections";
 import { createRoutingRuntime } from "./routing";
 import type { RuntimeStorageEntry, StorageRegistry, StorageRuntime } from "./storage";
+
+export type { DispatchHookPhase };
 
 type PluginRegistryOptions = {
   readonly defaultStorageKind: string;
 };
 
-export type { DispatchHookPhase };
+// === Conflict-prevention key sets ============================================
 
-type ScopedExtensionKind = "dep" | "transition";
-type RuntimeScopedTransition = ScopedInvocationContext["transition"] & Record<string, unknown>;
+const CORE_MANAGER_KEYS = new Set([
+  "getState",
+  "getSnapshot",
+  "getHydratedState",
+  "hydrate",
+  "dehydrate",
+  "transition",
+  "setDependencies",
+  "onTransition",
+  "replaceReducer",
+]);
 
-const coreScopedDepKeys = new Set(["action", "condition", "self", "transition"]);
-const coreScopedTransitionKeys = new Set(["actor", "group", "tag", "transition", "unscoped"]);
+const CORE_SCOPED_DEP_KEYS = new Set(["action", "condition", "self", "transition"]);
+const CORE_SCOPED_TRANSITION_KEYS = new Set(["actor", "group", "tag", "transition", "unscoped"]);
 
-const hasKey = (value: object, key: string): boolean => key in value;
+// === Scoped registry =========================================================
+// Дедуплицирует регистрацию scoped deps и scoped transition: одинаковая валидация
+// per-extension key, разные core-key наборы и kind в сообщении ошибки.
 
-const assertScopedEntryKey = (
-  kind: ScopedExtensionKind,
-  { owner, key }: { readonly owner: string; readonly key: string },
-  owners: Map<string, string>,
-  coreKeys: ReadonlySet<string>,
-) => {
-  if (key.length === 0) {
-    throw new LiteFsmError(
-      "LITE_FSM_INVALID_SCOPED_EXTENSION",
-      `[lite-fsm] plugin '${owner}' registered invalid ${kind} extension key.`,
-    );
-  }
-  if (owners.has(key)) {
-    throw new LiteFsmError(
-      "LITE_FSM_DUPLICATE_SCOPED_EXTENSION_KEY",
-      `[lite-fsm] duplicate scoped ${kind} extension key '${key}'.`,
-    );
-  }
-  if (coreKeys.has(key)) {
-    throw new LiteFsmError(
-      "LITE_FSM_SCOPED_EXTENSION_CORE_KEY",
-      `[lite-fsm] plugin '${owner}' cannot override core scoped ${kind} key '${key}'.`,
-    );
-  }
-};
+type ScopedKind = "dep" | "transition";
+type ScopedEntry = NormalizedScopedDepsEntry | NormalizedScopedTransitionEntry;
 
-const assertNoScopedOverride = (
-  kind: ScopedExtensionKind,
-  { owner, key }: { readonly owner: string; readonly key: string },
-  base: Record<string, unknown>,
-) => {
-  if (!hasKey(base, key)) return;
+const createScopedRegistry = <Entry extends ScopedEntry>(kind: ScopedKind, coreKeys: ReadonlySet<string>) => {
+  const entries: Entry[] = [];
+  const owners = new Map<string, string>();
 
-  throw new LiteFsmError(
-    "LITE_FSM_SCOPED_EXTENSION_OVERRIDE",
-    `[lite-fsm] plugin '${owner}' cannot override existing scoped ${kind} key '${key}'.`,
-  );
-};
+  const add = (entry: Entry) => {
+    if (entry.key.length === 0) {
+      throw new LiteFsmError(
+        "LITE_FSM_INVALID_SCOPED_EXTENSION",
+        `[lite-fsm] plugin '${entry.owner}' registered invalid ${kind} extension key.`,
+      );
+    }
+    if (owners.has(entry.key)) {
+      throw new LiteFsmError(
+        "LITE_FSM_DUPLICATE_SCOPED_EXTENSION_KEY",
+        `[lite-fsm] duplicate scoped ${kind} extension key '${entry.key}'.`,
+      );
+    }
+    if (coreKeys.has(entry.key)) {
+      throw new LiteFsmError(
+        "LITE_FSM_SCOPED_EXTENSION_CORE_KEY",
+        `[lite-fsm] plugin '${entry.owner}' cannot override core scoped ${kind} key '${entry.key}'.`,
+      );
+    }
 
-export const createPluginRegistry = ({ defaultStorageKind }: PluginRegistryOptions) => {
-  const installedNames = new Set<string>();
-  const storageRuntimes = new Map<string, StorageRuntime>();
-  const actionInterceptors: ActionInterceptor[] = [];
-  const scopedDeps: NormalizedScopedDepsEntry[] = [];
-  const scopedTransition: NormalizedScopedTransitionEntry[] = [];
-  const scopedDepOwners = new Map<string, string>();
-  const scopedTransitionOwners = new Map<string, string>();
-  const managerExtensions = createManagerExtensionRuntime();
-  const dispatchHooks: { [Phase in DispatchHookPhase]: DispatchHook[] } = {
-    beforeReduce: [],
-    afterReduce: [],
-    beforeCommit: [],
-    beforeSubscribers: [],
-    beforeEffects: [],
-    afterEffects: [],
+    owners.set(entry.key, entry.owner);
+    entries.push(entry);
   };
-  const routingRuntime = createRoutingRuntime();
 
-  const storage = Object.freeze({
-    register(kind: string, runtime: StorageRuntime) {
-      if (storageRuntimes.has(kind)) {
+  const assertNoOverride = (entry: Entry, base: Record<string, unknown>) => {
+    if (!(entry.key in base)) return;
+    throw new LiteFsmError(
+      "LITE_FSM_SCOPED_EXTENSION_OVERRIDE",
+      `[lite-fsm] plugin '${entry.owner}' cannot override existing scoped ${kind} key '${entry.key}'.`,
+    );
+  };
+
+  return { add, assertNoOverride, entries };
+};
+
+// === Storage registry ========================================================
+
+const createStorageRegistry = () => {
+  const runtimes = new Map<string, StorageRuntime>();
+
+  const registry: StorageRegistry = Object.freeze({
+    register(kind, runtime) {
+      if (runtimes.has(kind)) {
         throw new LiteFsmError("LITE_FSM_DUPLICATE_STORAGE_KIND", `[lite-fsm] duplicate storage kind '${kind}'.`);
       }
       if (runtime.kind !== kind) {
@@ -97,37 +99,64 @@ export const createPluginRegistry = ({ defaultStorageKind }: PluginRegistryOptio
           `[lite-fsm] storage runtime registered for kind '${kind}' declared kind '${runtime.kind}'.`,
         );
       }
-
-      storageRuntimes.set(kind, runtime);
+      runtimes.set(kind, runtime);
     },
-    get(kind: string) {
-      return storageRuntimes.get(kind);
+    get(kind) {
+      return runtimes.get(kind);
     },
-  } satisfies StorageRegistry);
+  });
 
-  const addStorageEntry = (entry: NormalizedStorageEntry) => {
-    storage.register(entry.kind, entry.value as StorageRuntime);
+  return {
+    registry,
+    list: (): RuntimeStorageEntry[] => [...runtimes].map(([kind, runtime]) => ({ kind, runtime })),
+    values: () => runtimes.values(),
+  };
+};
+
+// === Plugin registry =========================================================
+
+export const createPluginRegistry = ({ defaultStorageKind }: PluginRegistryOptions) => {
+  const installedNames = new Set<string>();
+  const storage = createStorageRegistry();
+  const scopedDeps = createScopedRegistry<NormalizedScopedDepsEntry>("dep", CORE_SCOPED_DEP_KEYS);
+  const scopedTransition = createScopedRegistry<NormalizedScopedTransitionEntry>(
+    "transition",
+    CORE_SCOPED_TRANSITION_KEYS,
+  );
+  const actionInterceptors: ActionInterceptor[] = [];
+  const managerEntries: NormalizedManagerEntry[] = [];
+  const managerKeys = new Set<string>();
+  const dispatchHooks: Record<DispatchHookPhase, DispatchHook[]> = Object.fromEntries(
+    DISPATCH_HOOK_PHASES.map((phase) => [phase, [] as DispatchHook[]]),
+  ) as Record<DispatchHookPhase, DispatchHook[]>;
+  const routingRuntime = createRoutingRuntime();
+
+  const addManagerEntry = (entry: NormalizedManagerEntry) => {
+    if (CORE_MANAGER_KEYS.has(entry.key)) {
+      throw new LiteFsmError(
+        "LITE_FSM_MANAGER_EXTENSION_CORE_KEY",
+        `[lite-fsm] plugin '${entry.owner}' cannot register manager extension '${entry.key}' because it is a core manager key.`,
+      );
+    }
+    if (managerKeys.has(entry.key)) {
+      throw new LiteFsmError(
+        "LITE_FSM_DUPLICATE_MANAGER_EXTENSION_KEY",
+        `[lite-fsm] duplicate manager extension key '${entry.key}'.`,
+      );
+    }
+
+    managerKeys.add(entry.key);
+    managerEntries.push(entry);
   };
 
-  const addScopedDepsEntry = (entry: NormalizedScopedDepsEntry) => {
-    assertScopedEntryKey("dep", entry, scopedDepOwners, coreScopedDepKeys);
-
-    scopedDepOwners.set(entry.key, entry.owner);
-    scopedDeps.push(entry);
-  };
-
-  const addScopedTransitionEntry = (entry: NormalizedScopedTransitionEntry) => {
-    assertScopedEntryKey("transition", entry, scopedTransitionOwners, coreScopedTransitionKeys);
-
-    scopedTransitionOwners.set(entry.key, entry.owner);
-    scopedTransition.push(entry);
-  };
-
+  // Scoped transition factories дают ctx.transition с дополнительными методами;
+  // base remains callable, чтобы plugin-методы могли проксировать вызов core transition.
+  type RuntimeScopedTransition = ScopedInvocationContext["transition"] & Record<string, unknown>;
   const createScopedTransition = (
     baseTransition: ScopedInvocationContext["transition"],
     ctx: ScopedInvocationContext,
   ): ScopedInvocationContext["transition"] => {
-    if (scopedTransition.length === 0) return baseTransition;
+    if (scopedTransition.entries.length === 0) return baseTransition;
 
     const transition = Object.assign(
       ((action) => ctx.transition(action)) as ScopedInvocationContext["transition"],
@@ -135,8 +164,8 @@ export const createPluginRegistry = ({ defaultStorageKind }: PluginRegistryOptio
     ) as RuntimeScopedTransition;
     const scopedCtx = { ...ctx, transition };
 
-    for (const entry of scopedTransition) {
-      assertNoScopedOverride("transition", entry, transition);
+    for (const entry of scopedTransition.entries) {
+      scopedTransition.assertNoOverride(entry, transition);
       transition[entry.key] = entry.factory(scopedCtx);
     }
 
@@ -145,60 +174,67 @@ export const createPluginRegistry = ({ defaultStorageKind }: PluginRegistryOptio
 
   return {
     defaultStorageKind,
-    storage,
+    storage: storage.registry,
     routing: routingRuntime,
-    createScopedDeps(
-      baseDeps: Record<string, unknown>,
-      ctx: ScopedInvocationContext,
-    ): Record<string, unknown> {
-      if (scopedDeps.length === 0 && scopedTransition.length === 0) return baseDeps;
+    listStorageRuntimes: storage.list,
+    listActionInterceptors: (): readonly ActionInterceptor[] => actionInterceptors,
+    listDispatchHooks: (phase: DispatchHookPhase): readonly DispatchHook[] => dispatchHooks[phase],
+
+    createScopedDeps(baseDeps: Record<string, unknown>, ctx: ScopedInvocationContext): Record<string, unknown> {
+      if (scopedDeps.entries.length === 0 && scopedTransition.entries.length === 0) return baseDeps;
 
       const transition = createScopedTransition(ctx.transition, ctx);
       const extended: Record<string, unknown> = { ...baseDeps, transition };
       const scopedCtx = { ...ctx, transition };
 
-      for (const entry of scopedDeps) {
-        assertNoScopedOverride("dep", entry, extended);
+      for (const entry of scopedDeps.entries) {
+        scopedDeps.assertNoOverride(entry, extended);
         extended[entry.key] = entry.factory(scopedCtx);
       }
 
       return extended;
     },
+
     attachManagerExtensions<T extends Record<string, unknown>>(target: T, ctx: ManagerRuntimeContext): T {
-      return managerExtensions.attach(target, ctx);
+      for (const { key, factory } of managerEntries) {
+        Object.defineProperty(target, key, {
+          value: factory(ctx),
+          enumerable: true,
+          configurable: true,
+          writable: true,
+        });
+      }
+      return target;
     },
-    listActionInterceptors(): readonly ActionInterceptor[] {
-      return actionInterceptors;
-    },
-    listDispatchHooks(phase: DispatchHookPhase): readonly DispatchHook[] {
-      return dispatchHooks[phase];
-    },
+
     addPlugin(plugin: NormalizedPlugin) {
       if (installedNames.has(plugin.name)) {
         throw new LiteFsmError("LITE_FSM_DUPLICATE_PLUGIN", `[lite-fsm] duplicate plugin name '${plugin.name}'.`);
       }
 
       installedNames.add(plugin.name);
-      for (const entry of plugin.storage) addStorageEntry(entry);
-      for (const entry of plugin.routeMeta) registerRouteMetaEntry(routingRuntime.registry, entry);
-      for (const entry of plugin.scopedDeps) addScopedDepsEntry(entry);
-      for (const entry of plugin.scopedTransition) addScopedTransitionEntry(entry);
-      for (const entry of plugin.manager) managerExtensions.add(entry);
+      for (const entry of plugin.storage) storage.registry.register(entry.kind, entry.value as StorageRuntime);
+      for (const entry of plugin.routeMeta) routingRuntime.registry.registerRouteMeta(entry.key, entry.resolver);
+      for (const entry of plugin.scopedDeps) scopedDeps.add(entry);
+      for (const entry of plugin.scopedTransition) scopedTransition.add(entry);
+      for (const entry of plugin.manager) addManagerEntry(entry);
       if (plugin.intercept) actionInterceptors.push(plugin.intercept);
       for (const entry of Object.values(plugin.hooks)) {
         dispatchHooks[entry.phase].push(entry.hook);
       }
     },
+
     assertDefaultStorageRegistered() {
-      if (storage.get(defaultStorageKind)) return;
+      if (storage.registry.get(defaultStorageKind)) return;
 
       throw new LiteFsmError(
         "LITE_FSM_MISSING_DEFAULT_STORAGE_KIND",
         `[lite-fsm] default storage kind '${defaultStorageKind}' is not registered.`,
       );
     },
+
     assertStorageRouteResolversRegistered() {
-      for (const runtime of storageRuntimes.values()) {
+      for (const runtime of storage.values()) {
         for (const key of runtime.routeMetaKeys ?? []) {
           if (routingRuntime.hasMetaKey(key)) continue;
 
@@ -208,9 +244,6 @@ export const createPluginRegistry = ({ defaultStorageKind }: PluginRegistryOptio
           );
         }
       }
-    },
-    listStorageRuntimes(): RuntimeStorageEntry[] {
-      return [...storageRuntimes].map(([kind, runtime]) => ({ kind, runtime }));
     },
   };
 };

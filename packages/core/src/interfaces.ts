@@ -41,6 +41,7 @@ type MachineRuntimeOwnedDependencyKeys<E> =
   | (MachineRuntimeMetadata<E> extends { readonly effectDeps: infer Deps extends object } ? keyof Deps : never)
   | (MachineRuntimeMetadata<E> extends { readonly reactionDeps: infer Deps extends object } ? keyof Deps : never);
 
+// Phantom marker: см. контракт «Phantom type-only keys» в types.ts.
 type MachineDeclaredDependencies<E> = E extends { readonly __liteFsmDependencies?: infer D extends AnyRecord }
   ? D
   : never;

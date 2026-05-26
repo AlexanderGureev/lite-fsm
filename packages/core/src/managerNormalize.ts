@@ -3,17 +3,14 @@
 
 import { attachMeta, type NormalizeOptions } from "./actor";
 import type { DispatchContext } from "./dispatchContext";
+import { STORAGE_ACTION_DROP } from "./runtime/kernel/storage";
 import type { RoutingRuntime } from "./runtime/kernel/routing";
 import type { SidecarState } from "./sidecar";
 import type { AnyEvent, ManagerAction, MachineStore } from "./types";
 import { isSystemAction } from "./utils";
 
-// Sentinel: normalize дропает dispatch (sender disposed) — вызывающая сторона делает full no-op.
-// Локализован здесь, чтобы не утекать как coordination symbol через internal.ts.
-export const NORMALIZE_DROP = Symbol.for("lite-fsm.normalize-drop");
-
 export type Normalizer<S extends MachineStore, P extends AnyEvent> = {
-  normalizeAction: (raw: ManagerAction<P>, opts?: NormalizeOptions) => ManagerAction<P> | typeof NORMALIZE_DROP;
+  normalizeAction: (raw: ManagerAction<P>, opts?: NormalizeOptions) => ManagerAction<P> | typeof STORAGE_ACTION_DROP;
   applyPostNormalize: (ctx: DispatchContext<S, P>, action: ManagerAction<P>) => void;
 };
 
@@ -33,12 +30,12 @@ export const createNormalizer = <S extends MachineStore, P extends AnyEvent>(dep
   const normalizeAction = (
     raw: ManagerAction<P>,
     { sender, routingMode = "default" }: NormalizeOptions = {},
-  ): ManagerAction<P> | typeof NORMALIZE_DROP => {
+  ): ManagerAction<P> | typeof STORAGE_ACTION_DROP => {
     // Обычный external action без meta не требует копирования.
     if (!sender && routingMode === "default" && !("meta" in raw)) return raw;
 
     // Sender уже disposed → full no-op.
-    if (sender && !sidecar.actorById.has(sender.actorId)) return NORMALIZE_DROP;
+    if (sender && !sidecar.actorById.has(sender.actorId)) return STORAGE_ACTION_DROP;
 
     // Срезаем sender-поля и переписываем настоящими — middleware не подделает sender.
     const meta = routing.stripSenderFields(raw.meta);
@@ -68,7 +65,7 @@ export const createNormalizer = <S extends MachineStore, P extends AnyEvent>(dep
   // ФАЗА 2: post-normalize после middleware. Пишет clean action в ctx.committed.
   const applyPostNormalize = (ctx: DispatchContext<S, P>, action: ManagerAction<P>): void => {
     const normalized = normalizeAction(action, ctx.normalizeOpts);
-    if (normalized !== NORMALIZE_DROP) ctx.committed = normalized;
+    if (normalized !== STORAGE_ACTION_DROP) ctx.committed = normalized;
   };
 
   return { normalizeAction, applyPostNormalize };

@@ -302,6 +302,14 @@ export type IsActorTemplate<M> = M extends { config: infer C extends object } ? 
 
 type ActorRuntimeRecord<C extends object, T extends AnyRecord> = Record<string, PublicActorSlice<C, T>>;
 
+// === Phantom type-only keys =================================================
+//
+// `__liteFsmRuntime`, `__liteFsmDependencies` и `__liteFsmNoPayload` существуют
+// только на уровне типов: они хранят inference payload (runtime metadata, user
+// dependencies, NoPayload-маркер) и никогда не присутствуют в runtime value.
+// Не использовать через property access — это сломает structural matching в
+// conditional types. Имена ключей — часть type API, изменение breaking.
+
 export type MachineRuntimeMetadata<M> = M extends { readonly __liteFsmRuntime?: infer Metadata }
   ? NonNullable<Metadata>
   : {};
@@ -453,6 +461,7 @@ export type TransitionSubscriber<
 ) => void;
 
 type IsAny<T> = 0 extends 1 & T ? true : false;
+// Phantom marker: см. контракт «Phantom type-only keys» выше.
 type NoPayload = { readonly __liteFsmNoPayload: never };
 
 export type FSMEvent<Name extends string, Payload = NoPayload> = Name extends string
