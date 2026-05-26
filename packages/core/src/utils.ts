@@ -42,6 +42,7 @@ export const supportsVoidReducer = (middleware: unknown): boolean =>
 
 export type LiteFsmErrorCode =
   | "LITE_FSM_ACTOR_DISPOSED"
+  | "LITE_FSM_AMBIGUOUS_ROUTE_META"
   | "LITE_FSM_DUPLICATE_MANAGER_EXTENSION_KEY"
   | "LITE_FSM_DUPLICATE_PLUGIN"
   | "LITE_FSM_DUPLICATE_ROUTE_META_KEY"

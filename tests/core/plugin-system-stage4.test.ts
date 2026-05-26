@@ -148,7 +148,7 @@ describe("plugin system — этап 4 — routeMeta", () => {
     });
     const manager = RouteManager({ entity: createRouteMachine("entity/a") }, { plugins: [plugin] });
 
-    manager.transition({ type: "HIT", meta: { entityId: 42, groupId: "ignored-group" } } as never);
+    manager.transition({ type: "HIT", meta: { entityId: 42, unknown: "ignored" } } as never);
 
     expect(resolver).toHaveBeenCalled();
     expect(resolver.mock.calls.every(([value]) => value === 42)).toBe(true);

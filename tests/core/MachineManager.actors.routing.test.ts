@@ -520,23 +520,28 @@ describe("MachineManager actors — маршрутизация", () => {
       expect(manager.getState().gamma["gamma/2"].context.count).toBe(2);
     });
 
-    it("priority actorId > groupId > groupTag", () => {
+    it("несколько core route keys бросают ambiguity error без изменения actor state", () => {
       const manager = MachineManager({ likeSync: createLikeSync() });
 
       manager.transition({ type: "LIKE", payload: { id: "a" } });
       manager.transition({ type: "LIKE", payload: { id: "b" }, meta: { groupId: "likeSync/0" } });
       manager.transition({ type: "LIKE", payload: { id: "c" } });
+      const before = manager.getState();
 
-      manager.transition({
-        type: "BUMP",
-        meta: { actorId: "likeSync/2", groupId: "likeSync/0", groupTag: "likeSync" },
-      });
-      manager.transition({ type: "BUMP", meta: { groupId: "likeSync/0", groupTag: "likeSync" } });
-      manager.transition({ type: "BUMP", meta: { actorId: [], groupTag: "likeSync" } });
+      expect(() =>
+        manager.transition({
+          type: "BUMP",
+          meta: { actorId: "likeSync/2", groupId: "likeSync/0", groupTag: "likeSync" },
+        }),
+      ).toThrow(expect.objectContaining({ code: "LITE_FSM_AMBIGUOUS_ROUTE_META" }));
+      expect(() => manager.transition({ type: "BUMP", meta: { groupId: "likeSync/0", groupTag: "likeSync" } })).toThrow(
+        expect.objectContaining({ code: "LITE_FSM_AMBIGUOUS_ROUTE_META" }),
+      );
+      expect(() => manager.transition({ type: "BUMP", meta: { actorId: [], groupTag: "likeSync" } })).toThrow(
+        expect.objectContaining({ code: "LITE_FSM_AMBIGUOUS_ROUTE_META" }),
+      );
 
-      expect(manager.getState().likeSync["likeSync/0"].context.count).toBe(2);
-      expect(manager.getState().likeSync["likeSync/1"].context.count).toBe(2);
-      expect(manager.getState().likeSync["likeSync/2"].context.count).toBe(2);
+      expect(manager.getState()).toBe(before);
     });
 
     it("unknown actor/group/tag — scoped no-op для actor runtime, domain видит committed action", () => {

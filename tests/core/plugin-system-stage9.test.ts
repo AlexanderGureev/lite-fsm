@@ -553,7 +553,7 @@ describe("storage snapshot extension points у MachineManager", () => {
 });
 
 describe("routing runtime cleanup coverage", () => {
-  it("сохраняет route meta registration, stripping helpers и priority", () => {
+  it("сохраняет route meta registration, stripping helpers и single-route resolution", () => {
     const routing = createRoutingRuntime();
 
     expect(routing.registeredMetaKeys).toEqual([]);

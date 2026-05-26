@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { definePlugin, defineStorageRuntime, MachineManager } from "@lite-fsm/core";
+import { definePlugin, defineStorageRuntime, LiteFsmError, MachineManager } from "@lite-fsm/core";
 import type { FSMEvent, MachineConfig, Middleware } from "@lite-fsm/core";
 import { createRoutingRuntime } from "@lite-fsm/core/internal/runtime/kernel/routing";
 
@@ -95,6 +95,21 @@ const entityRoutingPlugin = (
     },
   });
 
+const expectLiteFsmError = (run: () => unknown, code: LiteFsmError["code"], messagePart?: string): LiteFsmError => {
+  let caught: unknown;
+
+  try {
+    run();
+  } catch (error) {
+    caught = error;
+  }
+
+  expect(caught).toBeInstanceOf(LiteFsmError);
+  expect((caught as LiteFsmError).code).toBe(code);
+  if (messagePart) expect((caught as LiteFsmError).message).toContain(messagePart);
+  return caught as LiteFsmError;
+};
+
 describe("routing meta registry", () => {
   it("route resolver обрабатывает plugin meta key", () => {
     const { storage, runtimeState } = createRouteStorage();
@@ -166,13 +181,109 @@ describe("routing meta registry", () => {
     expect(committed).toEqual([{ type: "HIT" }]);
   });
 
+  it("core route keys actorId и groupId вместе бросают ambiguity error", () => {
+    const { storage, runtimeState } = createRouteStorage();
+    const manager = MachineManager(
+      {
+        entity: createRouteMachine({ routeId: "entity/a" }) as never,
+      },
+      {
+        plugins: [routeStoragePlugin(storage)],
+      },
+    );
+
+    expectLiteFsmError(
+      () => manager.transition({ type: "HIT", meta: { actorId: "actor/1", groupId: "group/1" } } as never),
+      "LITE_FSM_AMBIGUOUS_ROUTE_META",
+      "actorId, groupId",
+    );
+
+    expect(runtimeState.routes).toEqual([]);
+    expect(manager.getState()).toMatchObject({ entity: { context: { hits: 0 } } });
+  });
+
+  it("actorId и registered plugin route key вместе бросают ambiguity error без resolver", () => {
+    const { storage, runtimeState } = createRouteStorage();
+    const resolver = vi.fn((value: unknown) => String(value));
+    const manager = MachineManager(
+      {
+        entity: createRouteMachine({ routeId: "entity/a" }) as never,
+      },
+      {
+        plugins: [routeStoragePlugin(storage), entityRoutingPlugin(resolver)],
+      },
+    );
+
+    expectLiteFsmError(
+      () => manager.transition({ type: "HIT", meta: { actorId: "actor/1", entityId: "entity/a" } } as never),
+      "LITE_FSM_AMBIGUOUS_ROUTE_META",
+      "actorId, entityId",
+    );
+
+    expect(resolver).not.toHaveBeenCalled();
+    expect(runtimeState.routes).toEqual([]);
+    expect(manager.getState()).toMatchObject({ entity: { context: { hits: 0 } } });
+  });
+
+  it("sender keys и unknown meta fields не участвуют в ambiguity detection", () => {
+    const { storage, runtimeState } = createRouteStorage();
+    const resolver = vi.fn((value: unknown) => String(value));
+    const manager = MachineManager(
+      {
+        entity: createRouteMachine({ routeId: "entity/a" }) as never,
+      },
+      {
+        plugins: [routeStoragePlugin(storage), entityRoutingPlugin(resolver)],
+      },
+    );
+
+    expect(() =>
+      manager.transition({
+        type: "HIT",
+        meta: {
+          entityId: "entity/a",
+          senderActorId: "actor/sender",
+          senderGroupId: "group/sender",
+          senderGroupTag: "sender",
+          unknown: "ignored",
+        },
+      } as never),
+    ).not.toThrow();
+
+    expect(resolver).toHaveBeenCalled();
+    expect(resolver.mock.calls.every(([value]) => value === "entity/a")).toBe(true);
+    expect(runtimeState.routes).toEqual([{ key: "entityId", targetSet: ["entity/a"] }]);
+    expect(manager.getState()).toMatchObject({ entity: { context: { hits: 1 } } });
+  });
+
+  it("route key со значением undefined не считается active", () => {
+    const { storage, runtimeState } = createRouteStorage();
+    const resolver = vi.fn((value: unknown) => String(value));
+    const manager = MachineManager(
+      {
+        tagged: createRouteMachine({ groupTag: "workers" }) as never,
+      },
+      {
+        plugins: [routeStoragePlugin(storage), entityRoutingPlugin(resolver)],
+      },
+    );
+
+    expect(() =>
+      manager.transition({ type: "HIT", meta: { entityId: undefined, groupTag: "workers" } } as never),
+    ).not.toThrow();
+
+    expect(resolver).not.toHaveBeenCalled();
+    expect(runtimeState.routes).toEqual([{ key: "groupTag", targetSet: ["workers"] }]);
+    expect(manager.getState()).toMatchObject({ tagged: { context: { hits: 1 } } });
+  });
+
   it("meta.entityId не теряется при middleware rewrite и post-normalization", () => {
     const { storage } = createRouteStorage();
     const committed: unknown[] = [];
     const rewrite: Middleware<any, RouteEvent> = () => (next) => (action) =>
       next({
         ...action,
-        meta: { ...action.meta, entityId: "a", groupId: "wrong-group", unknown: "drop" },
+        meta: { ...action.meta, entityId: "a", senderGroupId: "sender", unknown: "drop" },
       } as never);
     const manager = MachineManager(
       {
@@ -188,31 +299,42 @@ describe("routing meta registry", () => {
     manager.transition({ type: "HIT", meta: { entityId: "a" } } as never);
 
     expect(manager.getState()).toMatchObject({ entity: { context: { hits: 1 } } });
-    expect(committed).toEqual([{ type: "HIT", meta: { groupId: "wrong-group", entityId: "a" } }]);
+    expect(committed).toEqual([{ type: "HIT", meta: { entityId: "a" } }]);
   });
 
-  it("registered plugin route key имеет priority между actorId и groupId", () => {
+  it("несколько route keys между actorId, plugin key и groupId бросают ambiguity error", () => {
     const { storage, runtimeState } = createRouteStorage();
+    const resolver = vi.fn((value: unknown) => String(value));
     const manager = MachineManager(
       {
         entity: createRouteMachine({ routeId: "entity/a" }) as never,
       },
       {
-        plugins: [routeStoragePlugin(storage), entityRoutingPlugin()],
+        plugins: [routeStoragePlugin(storage), entityRoutingPlugin(resolver)],
       },
     );
 
-    manager.transition({ type: "HIT", meta: { actorId: "actor/1", entityId: "entity/a", groupId: "group/1" } } as never);
-    manager.transition({ type: "HIT", meta: { entityId: "entity/a", groupId: "group/1" } } as never);
+    expectLiteFsmError(
+      () =>
+        manager.transition({
+          type: "HIT",
+          meta: { actorId: "actor/1", entityId: "entity/a", groupId: "group/1" },
+        } as never),
+      "LITE_FSM_AMBIGUOUS_ROUTE_META",
+      "actorId, entityId, groupId",
+    );
+    expectLiteFsmError(
+      () => manager.transition({ type: "HIT", meta: { entityId: "entity/a", groupId: "group/1" } } as never),
+      "LITE_FSM_AMBIGUOUS_ROUTE_META",
+      "entityId, groupId",
+    );
 
-    expect(runtimeState.routes).toEqual([
-      { key: "actorId", targetSet: ["actor/1"] },
-      { key: "entityId", targetSet: ["entity/a"] },
-    ]);
-    expect(manager.getState()).toMatchObject({ entity: { context: { hits: 1 } } });
+    expect(resolver).not.toHaveBeenCalled();
+    expect(runtimeState.routes).toEqual([]);
+    expect(manager.getState()).toMatchObject({ entity: { context: { hits: 0 } } });
   });
 
-  it("несколько registered plugin route keys применяются по priority-first в порядке регистрации", () => {
+  it("несколько registered plugin route keys бросают ambiguity error без вызова resolvers", () => {
     const { storage, runtimeState } = createRouteStorage();
     const entityResolver = vi.fn((value: unknown) => String(value));
     const tenantResolver = vi.fn((value: unknown) => String(value));
@@ -232,13 +354,16 @@ describe("routing meta registry", () => {
       },
     );
 
-    manager.transition({ type: "HIT", meta: { entityId: "entity/a", tenantId: "tenant/a" } } as never);
+    expectLiteFsmError(
+      () => manager.transition({ type: "HIT", meta: { entityId: "entity/a", tenantId: "tenant/a" } } as never),
+      "LITE_FSM_AMBIGUOUS_ROUTE_META",
+      "tenantId, entityId",
+    );
 
-    expect(runtimeState.routes).toEqual([{ key: "tenantId", targetSet: ["tenant/a"] }]);
-    expect(tenantResolver).toHaveBeenCalled();
-    expect(tenantResolver.mock.calls.every(([value]) => value === "tenant/a")).toBe(true);
+    expect(runtimeState.routes).toEqual([]);
+    expect(tenantResolver).not.toHaveBeenCalled();
     expect(entityResolver).not.toHaveBeenCalled();
-    expect(manager.getState()).toMatchObject({ entity: { context: { hits: 1 } } });
+    expect(manager.getState()).toMatchObject({ entity: { context: { hits: 0 } } });
   });
 
   it("groupTag остается доступным нескольким storage runtimes", () => {
@@ -356,17 +481,40 @@ describe("routing runtime helpers", () => {
     expect(routing.stripRouting({ entityId: "entity/a" } as never)).toEqual({ entityId: "entity/a" });
     expect(routing.stripSenderFields({ actorId: "actor/a" } as never)).toEqual({ actorId: "actor/a" });
     expect(routing.hasRoute({ groupTag: "group" })).toBe(true);
-    expect(routing.resolveRoute({ type: "HIT", meta: { groupId: ["group/a", "group/a"], groupTag: "group" } })).toEqual(
-      {
-        scope: "group",
-        key: "groupId",
-        targetSet: ["group/a"],
-      },
+    expect(routing.resolveRoute({ type: "HIT", meta: { groupId: ["group/a", "group/a"] } })).toEqual({
+      scope: "group",
+      key: "groupId",
+      targetSet: ["group/a"],
+    });
+    expectLiteFsmError(
+      () => routing.resolveRoute({ type: "HIT", meta: { groupId: "group/a", groupTag: "group" } }),
+      "LITE_FSM_AMBIGUOUS_ROUTE_META",
+      "groupId, groupTag",
     );
     expect(routing.resolveRoute({ type: "HIT", meta: { entityId: "entity/a" } } as never)).toEqual({
       scope: "plugin",
       key: "entityId",
       targetSet: ["entity/a"],
+    });
+  });
+
+  it("возвращает unscoped, если active route key исчезает во время resolution", () => {
+    const routing = createRoutingRuntime();
+    const meta = {};
+    let actorId: string | undefined = "actor/a";
+
+    Object.defineProperty(meta, "actorId", {
+      get() {
+        const current = actorId;
+        actorId = undefined;
+        return current;
+      },
+    });
+
+    expect(routing.resolveRoute({ type: "HIT", meta: meta as never })).toEqual({
+      scope: "unscoped",
+      key: undefined,
+      targetSet: [],
     });
   });
 });

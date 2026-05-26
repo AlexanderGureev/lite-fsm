@@ -130,7 +130,6 @@ describe("MachineManager actors — effects + sugar для transition", () => {
         type: "BUMP",
         meta: {
           groupId: "likeSync/0",
-          groupTag: "likeSync",
           senderActorId: "likeSync/0",
           senderGroupId: "likeSync/0",
           senderGroupTag: "likeSync",
@@ -198,7 +197,6 @@ describe("MachineManager actors — effects + sugar для transition", () => {
         type: "BUMP",
         meta: {
           groupId: "likeSync/8",
-          groupTag: "likeSync",
           senderActorId: "likeSync/8",
           senderGroupId: "likeSync/8",
           senderGroupTag: "likeSync",

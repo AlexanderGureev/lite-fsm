@@ -58,7 +58,6 @@ export const createNormalizer = <S extends MachineStore, P extends AnyEvent>(dep
     // Default routing: actor-dispatch без явного routing → в свою группу.
     if (sender && !routing.hasRoute(meta)) {
       meta.groupId = sender.groupId;
-      meta.groupTag = sender.groupTag;
     }
     const normalized = attachMeta(raw, meta);
     routing.resolveRoute(normalized as ManagerAction<AnyEvent>);

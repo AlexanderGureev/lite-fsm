@@ -55,6 +55,17 @@ const ownerLabel = (owner: string | undefined): string =>
 export const createRoutingRuntime = (): RoutingRuntime => {
   const resolvers = new Map<string, RouteResolverEntry>();
 
+  const getActiveRoutingKeys = (meta: MetaRecord): string[] => {
+    const keys: string[] = [];
+    if (meta.actorId !== undefined) keys.push("actorId");
+    for (const key of resolvers.keys()) {
+      if (meta[key] !== undefined) keys.push(key);
+    }
+    if (meta.groupId !== undefined) keys.push("groupId");
+    if (meta.groupTag !== undefined) keys.push("groupTag");
+    return keys;
+  };
+
   const copyDefinedKeys = (source: MetaRecord, target: MetaRecord, keys: readonly string[]) => {
     for (const key of keys) {
       if (source[key] !== undefined) target[key] = source[key];
@@ -74,6 +85,15 @@ export const createRoutingRuntime = (): RoutingRuntime => {
   const resolveRoute = (action: ManagerAction<AnyEvent>): RouteConstraint => {
     const meta = action.meta as MetaRecord | undefined;
     if (!meta) return unscopedRoute;
+
+    const activeKeys = getActiveRoutingKeys(meta);
+    if (activeKeys.length === 0) return unscopedRoute;
+    if (activeKeys.length > 1) {
+      throw new LiteFsmError(
+        "LITE_FSM_AMBIGUOUS_ROUTE_META",
+        `[lite-fsm] action meta contains multiple route keys: ${activeKeys.join(", ")}. Use one route key per transition or dispatch separate actions.`,
+      );
+    }
 
     if (meta.actorId !== undefined) {
       return { scope: "actor", key: "actorId", targetSet: toBuiltInTargetSet(meta.actorId) };
@@ -137,11 +157,7 @@ export const createRoutingRuntime = (): RoutingRuntime => {
     hasRoute(meta) {
       const source = meta as MetaRecord | undefined;
       if (!source) return false;
-      if (source.actorId !== undefined || source.groupId !== undefined || source.groupTag !== undefined) return true;
-      for (const key of resolvers.keys()) {
-        if (source[key] !== undefined) return true;
-      }
-      return false;
+      return getActiveRoutingKeys(source).length > 0;
     },
     resolveRoute,
   };

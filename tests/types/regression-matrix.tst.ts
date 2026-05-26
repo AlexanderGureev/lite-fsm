@@ -58,6 +58,7 @@ describe("регрессионная матрица public entry points", () => 
     expect(new core.LiteFsmError("LITE_FSM_INVALID_REPLACEMENT_ACTION", "replacement")).type.toBe<
       core.LiteFsmError
     >();
+    expect(new core.LiteFsmError("LITE_FSM_AMBIGUOUS_ROUTE_META", "route")).type.toBe<core.LiteFsmError>();
 
     // @ts-expect-error!
     new core.LiteFsmError("LITE_FSM_UNKNOWN_TEST_CODE", "unknown");

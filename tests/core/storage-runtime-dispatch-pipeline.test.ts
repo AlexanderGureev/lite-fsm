@@ -100,6 +100,7 @@ const createManager = (
     readonly plugins?: readonly unknown[];
     readonly middleware?: readonly Middleware<Record<string, TestSlice>, TestEvent>[];
     readonly config?: Record<string, unknown>;
+    readonly onError?: (error: unknown) => void;
   } = {},
 ) => {
   const factory = createMachineManagerFactory({
@@ -471,6 +472,146 @@ describe("storage runtime dispatch pipeline — этап 2 action lifecycle", ()
       dropped: false,
       touched: false,
     });
+  });
+});
+
+describe("storage runtime dispatch pipeline — route ambiguity", () => {
+  const createRouteMetaPlugin = (
+    resolver: (value: unknown) => string | readonly string[] = (value) => String(value),
+  ) =>
+    definePlugin().create({
+      name: "route-ambiguity-meta",
+      routeMeta: {
+        cacheKey: resolver,
+      },
+    });
+
+  const expectFailedDispatch = (
+    manager: ReturnType<typeof createManager>,
+    log: readonly string[],
+    expectedLog: readonly string[],
+  ) => {
+    expect(manager.getState()).toEqual({ item: { seen: [] } });
+    expect(log).toEqual(expectedLog);
+  };
+
+  it("initial action ambiguity завершает dispatch до prepareAction без onError", () => {
+    const log: string[] = [];
+    const onError = vi.fn();
+    const subscriber = vi.fn();
+    const resolver = vi.fn((value: unknown) => String(value));
+    const runtime = createRuntime("route-ambiguity-initial", log);
+    const manager = createManager([runtime], { plugins: [createRouteMetaPlugin(resolver)], onError });
+    manager.onTransition(subscriber);
+
+    const error = expectLiteFsmError(
+      () => manager.transition({ type: "RAW", meta: { actorId: "actor/1", cacheKey: "cache/a" } } as never),
+      "LITE_FSM_AMBIGUOUS_ROUTE_META",
+    );
+
+    expect(error.message).toContain("actorId, cacheKey");
+    expectFailedDispatch(manager, log, []);
+    expect(resolver).not.toHaveBeenCalled();
+    expect(subscriber).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("prepareAction replacement ambiguity завершает dispatch до middleware и reducer", () => {
+    const log: string[] = [];
+    const onError = vi.fn();
+    const subscriber = vi.fn();
+    const resolver = vi.fn((value: unknown) => String(value));
+    const runtime = createRuntime("route-ambiguity-prepare", log, {
+      prepareAction() {
+        log.push("prepare");
+        return { type: "replace", action: { type: "RAW", meta: { actorId: "actor/1", cacheKey: "cache/a" } } };
+      },
+    });
+    const manager = createManager([runtime], {
+      plugins: [createRouteMetaPlugin(resolver)],
+      middleware: [createMiddleware(log)],
+      onError,
+    });
+    manager.onTransition(subscriber);
+
+    const error = expectLiteFsmError(() => manager.transition({ type: "RAW" }), "LITE_FSM_AMBIGUOUS_ROUTE_META");
+
+    expect(error.message).toContain("actorId, cacheKey");
+    expectFailedDispatch(manager, log, ["prepare"]);
+    expect(resolver).not.toHaveBeenCalled();
+    expect(subscriber).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("beforeReduce replacement ambiguity завершает dispatch до interceptors и reducer", () => {
+    const log: string[] = [];
+    const onError = vi.fn();
+    const subscriber = vi.fn();
+    const resolver = vi.fn((value: unknown) => String(value));
+    const runtime = createRuntime("route-ambiguity-before", log, {
+      beforeReduce({ action }) {
+        log.push(`beforeReduce:${action.type}`);
+        return { type: "replace", action: { type: "RAW", meta: { cacheKey: "cache/a", groupId: "group/a" } } };
+      },
+    });
+    const interceptor = definePlugin().create({
+      name: "route-ambiguity-before-interceptor",
+      intercept() {
+        log.push("intercept");
+      },
+    });
+    const manager = createManager([runtime], {
+      plugins: [createRouteMetaPlugin(resolver), interceptor],
+      onError,
+    });
+    manager.onTransition(subscriber);
+
+    const error = expectLiteFsmError(() => manager.transition({ type: "RAW" }), "LITE_FSM_AMBIGUOUS_ROUTE_META");
+
+    expect(error.message).toContain("cacheKey, groupId");
+    expectFailedDispatch(manager, log, ["beforeReduce:RAW"]);
+    expect(resolver).not.toHaveBeenCalled();
+    expect(subscriber).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("intercept replacement ambiguity останавливает следующие interceptors, hooks и delivery", () => {
+    const log: string[] = [];
+    const onError = vi.fn();
+    const subscriber = vi.fn();
+    const resolver = vi.fn((value: unknown) => String(value));
+    const first = definePlugin().create({
+      name: "route-ambiguity-intercept-first",
+      routeMeta: {
+        cacheKey: resolver,
+      },
+      intercept() {
+        log.push("intercept:first");
+        return { action: { type: "RAW", meta: { actorId: "actor/1", cacheKey: "cache/a" } } };
+      },
+      hooks: {
+        beforeReduce() {
+          log.push("hook:first");
+        },
+      },
+    });
+    const second = definePlugin().create({
+      name: "route-ambiguity-intercept-second",
+      intercept() {
+        log.push("intercept:second");
+      },
+    });
+    const runtime = createRuntime("route-ambiguity-intercept", log);
+    const manager = createManager([runtime], { plugins: [first, second], onError });
+    manager.onTransition(subscriber);
+
+    const error = expectLiteFsmError(() => manager.transition({ type: "RAW" }), "LITE_FSM_AMBIGUOUS_ROUTE_META");
+
+    expect(error.message).toContain("actorId, cacheKey");
+    expectFailedDispatch(manager, log, ["intercept:first"]);
+    expect(resolver).not.toHaveBeenCalled();
+    expect(subscriber).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
   });
 });
 

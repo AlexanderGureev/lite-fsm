@@ -189,22 +189,6 @@ export const attachMeta = <P extends AnyEvent>(
   return { ...action, meta } as ManagerAction<P>;
 };
 
-// === Резолвер routing scope =================================================
-// Приоритет: actorId > groupId > groupTag > unscoped. Более точное вытесняет менее точное.
-
-export const arrayify = <T>(value: T | T[]): T[] => (Array.isArray(value) ? value : [value]);
-export const dedupe = <T>(values: T[]): T[] => [...new Set(values)];
-
-export const resolveRouting = (
-  meta?: FSMEventMeta,
-): { scope: RoutingScope; targetSet: string[] } => {
-  if (!meta) return { scope: "unscoped", targetSet: [] };
-  if (meta.actorId !== undefined) return { scope: "actor", targetSet: dedupe(arrayify(meta.actorId)) };
-  if (meta.groupId !== undefined) return { scope: "group", targetSet: dedupe(arrayify(meta.groupId)) };
-  if (meta.groupTag !== undefined) return { scope: "tag", targetSet: dedupe(arrayify(meta.groupTag)) };
-  return { scope: "unscoped", targetSet: [] };
-};
-
 // === Counters / id parsing ====================================================
 // SSR-safe monotonic counters: только инкремент, никаких Math.random/Date.now. Старт с 0.
 

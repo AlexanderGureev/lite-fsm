@@ -77,7 +77,7 @@ describe("plugin system documentation fixture", () => {
     manager.transition({
       type: "LOAD_DOCUMENT",
       payload: { documentId: "42", tenantId: "acme" },
-      meta: { cacheKey: "document", tenantId: "acme" },
+      meta: { cacheKey: "document" },
     });
     expect(manager.getState().document).type.toBe<DocumentCachePublicState>();
   });

@@ -5,47 +5,12 @@ import {
   createActorMeta,
   isActorStateContextSlice,
   isTerminal,
-  resolveRouting,
   resolveTransitionTarget,
   stripRouting,
   stripSenderFields,
 } from "@lite-fsm/core/internal/actor";
 import { assertSnapshotEnvelope } from "@lite-fsm/core/internal/hydration";
 import { LiteFsmError } from "@lite-fsm/core/internal/utils";
-
-describe("resolveRouting — приоритет actor > group > tag > unscoped", () => {
-  it("без meta → unscoped scope с пустым targetSet", () => {
-    expect(resolveRouting()).toEqual({ scope: "unscoped", targetSet: [] });
-    expect(resolveRouting({})).toEqual({ scope: "unscoped", targetSet: [] });
-  });
-
-  it("actorId вытесняет groupId и groupTag", () => {
-    expect(resolveRouting({ actorId: "a/1", groupId: "g/1", groupTag: "t" })).toEqual({
-      scope: "actor",
-      targetSet: ["a/1"],
-    });
-  });
-
-  it("groupId вытесняет groupTag, когда actorId отсутствует", () => {
-    expect(resolveRouting({ groupId: "g/1", groupTag: "t" })).toEqual({
-      scope: "group",
-      targetSet: ["g/1"],
-    });
-  });
-
-  it("groupTag используется, когда выше нет точечной адресации", () => {
-    expect(resolveRouting({ groupTag: "t" })).toEqual({ scope: "tag", targetSet: ["t"] });
-  });
-
-  it("array-форма дедуплицируется", () => {
-    expect(resolveRouting({ actorId: ["a", "b", "a", "b"] })).toEqual({
-      scope: "actor",
-      targetSet: ["a", "b"],
-    });
-    expect(resolveRouting({ groupId: ["g", "g"] })).toEqual({ scope: "group", targetSet: ["g"] });
-    expect(resolveRouting({ groupTag: ["x", "y", "x"] })).toEqual({ scope: "tag", targetSet: ["x", "y"] });
-  });
-});
 
 describe("resolveTransitionTarget — приоритет source over wildcard", () => {
   const graph = {
