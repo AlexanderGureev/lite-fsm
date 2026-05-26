@@ -33,6 +33,27 @@ export type {
   PluginScopedTransition,
 } from "./plugin";
 export type { LiteFsmStorageRuntimeDefinition } from "./pluginStorage";
+export type {
+  StorageAcceptsEventContext,
+  StorageBeforeReduceContext,
+  StorageCommitContext,
+  StorageCompileTemplateContext,
+  StorageConditionContext,
+  StorageCreatePublicInitialStateContext,
+  StorageCreateRuntimeStateContext,
+  StorageDehydrateContext,
+  StorageEffectInvocationContext,
+  StorageHydrateContext,
+  StorageIdentityContext,
+  StoragePrepareActionContext,
+  StorageReactionContext,
+  StorageReduceBucketContext,
+  StorageReduceContext,
+  StorageResolveEffectInvocationsContext,
+  StorageRuntimeExtension,
+  StorageTemplate,
+  StorageValidateTemplateContext,
+} from "./pluginStorageTypes";
 export * from "./types";
 export { createMachine, type TypedCreateMachineFn } from "./createMachine";
 export { HYDRATE_ACTION_TYPE, LiteFsmError, VOID_REDUCER_MIDDLEWARE_MARKER } from "./utils";

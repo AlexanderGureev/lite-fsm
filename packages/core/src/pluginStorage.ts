@@ -5,10 +5,10 @@
 import { invalidPluginDefinition, isPlainObject } from "./pluginNormalize";
 import { assertStorageRuntimeDefinition, normalizePublicStorageRuntime } from "./pluginStorageNormalize";
 import type {
-  NormalizedStorageMachineExtension,
-  PluginMachineExtensionInput,
   PluginStorageRuntime,
   RejectUnknownMachineExtensionKeys,
+  StorageMachineExtension,
+  StorageRuntimeExtension,
   StorageRuntimeBuilder,
 } from "./pluginStorageTypes";
 import type { StorageRuntime } from "./runtime/kernel/storage";
@@ -32,13 +32,13 @@ export type LiteFsmStorageRuntimeDefinition<
 
 // === Factory / accessors =====================================================
 
-const createStorageRuntimeValue = <const Kind extends string, Extension extends PluginMachineExtensionInput>(
+const createStorageRuntimeValue = <const Kind extends string, Extension extends StorageRuntimeExtension>(
   definition: PluginStorageRuntime<Kind, Extension>,
-): LiteFsmStorageRuntimeDefinition<Kind, NormalizedStorageMachineExtension<Kind, Extension>> => {
+): LiteFsmStorageRuntimeDefinition<Kind, StorageMachineExtension<Kind, Extension>> => {
   const runtime = assertStorageRuntimeDefinition(definition);
   const kind = runtime.kind as Kind;
   const normalized = normalizePublicStorageRuntime(kind, runtime);
-  const value = { kind } as LiteFsmStorageRuntimeDefinition<Kind, NormalizedStorageMachineExtension<Kind, Extension>>;
+  const value = { kind } as LiteFsmStorageRuntimeDefinition<Kind, StorageMachineExtension<Kind, Extension>>;
 
   Object.defineProperties(value, {
     [liteFsmStorageRuntimeMarker]: { value: true },
@@ -55,7 +55,7 @@ export const getStorageRuntimePayload = (definition: LiteFsmStorageRuntimeDefini
   Reflect.get(definition, liteFsmStorageRuntimePayload) as StorageRuntime;
 
 export function defineStorageRuntime<
-  Extension extends PluginMachineExtensionInput = {},
+  Extension extends StorageRuntimeExtension = {},
 >(): StorageRuntimeBuilder<Extension> {
   if (arguments.length > 0) {
     invalidPluginDefinition(

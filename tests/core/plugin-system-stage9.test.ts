@@ -46,8 +46,7 @@ type SnapshotStorageOptions = {
 };
 
 const readStoragePayload = (kind: string, ctx: StorageHydrateContext): StoragePayload => {
-  const envelope = ctx.snapshot as { storage?: Record<string, unknown> };
-  const payload = envelope.storage?.[kind];
+  const payload = ctx.snapshot;
   if (!payload || typeof payload !== "object" || typeof (payload as StoragePayload).value !== "number") {
     throw new LiteFsmError(
       "LITE_FSM_INVALID_STORAGE_SNAPSHOT",
@@ -96,7 +95,7 @@ const createSnapshotStorage = (kind: string, options: SnapshotStorageOptions = {
       dehydrate(ctx) {
         dehydrate(ctx);
         expect(ctx.state).toBe(runtimeState);
-        return { storage: { value: runtimeState.value } };
+        return { snapshot: { value: runtimeState.value } };
       },
       hydrate(ctx) {
         hydrate(ctx);
@@ -171,6 +170,32 @@ const createPassthroughSnapshotStorage = (
     },
   });
 
+const createInvalidSnapshotResultStorage = (kind: string, result: unknown): StageStorageDefinition =>
+  defineStorageRuntime().create({
+    kind,
+    validateTemplate() {},
+    compileTemplate() {},
+    createRuntimeState() {
+      return {};
+    },
+    createPublicInitialState() {
+      return { state: "READY", context: { value: 0 } };
+    },
+    acceptsEvent() {
+      return false;
+    },
+    reduce() {},
+    commit() {},
+    snapshot: {
+      dehydrate() {
+        return result as never;
+      },
+      hydrate(ctx) {
+        return { nextState: ctx.baseState, changed: false };
+      },
+    },
+  });
+
 const createPresetPlugin = (name: string, storages: readonly StageStorageDefinition[]): NormalizedPlugin => ({
   name,
   storage: storages.map((storage) => ({
@@ -194,6 +219,20 @@ const createPresetManager = (storages: readonly StageStorageDefinition[], defaul
   };
 
   return createMachineManagerFactory(preset)({ custom: createStorageMachine(defaultStorageKind) });
+};
+
+const expectLiteFsmError = (run: () => unknown, code: LiteFsmError["code"], message: string) => {
+  expect(run).toThrow(LiteFsmError);
+  expect(run).toThrow(message);
+  try {
+    run();
+  } catch (error) {
+    expect(error).toBeInstanceOf(LiteFsmError);
+    expect((error as LiteFsmError).code).toBe(code);
+    return;
+  }
+
+  throw new Error("Expected LiteFsmError.");
 };
 
 describe("storage snapshot extension points у MachineManager", () => {
@@ -225,6 +264,7 @@ describe("storage snapshot extension points у MachineManager", () => {
     );
 
     expect(restoredStorage.hydrate).toHaveBeenCalledOnce();
+    expect(restoredStorage.hydrate.mock.calls[0]?.[0].snapshot).toEqual({ value: 1 });
     expect(restored.getState().custom).toEqual({ state: "READY", context: { value: 1 } });
   });
 
@@ -401,6 +441,38 @@ describe("storage snapshot extension points у MachineManager", () => {
     expect(beta.hydrate).not.toHaveBeenCalled();
   });
 
+  it("hydrate передает runtime только snapshot payload и machine snapshots своего kind", () => {
+    const alpha = createSnapshotStorage("alpha");
+    const beta = createSnapshotStorage("beta");
+    const alphaSnapshot = { state: "READY", context: { value: 101 } };
+    const betaSnapshot = { state: "READY", context: { value: 202 } };
+    const manager = MachineManager(
+      {
+        alphaDoc: createStorageMachine("alpha"),
+        betaDoc: createStorageMachine("beta"),
+      },
+      { plugins: [createPluginWithStorage(alpha.storage), createPluginWithStorage(beta.storage)] },
+    );
+
+    manager.hydrate({
+      machines: {
+        alphaDoc: alphaSnapshot,
+        betaDoc: betaSnapshot,
+      },
+      storage: {
+        alpha: { value: 10 },
+        beta: { value: 20 },
+      },
+    } as never);
+
+    expect(alpha.hydrate).toHaveBeenCalledOnce();
+    expect(alpha.hydrate.mock.calls[0]?.[0].snapshot).toEqual({ value: 10 });
+    expect(alpha.hydrate.mock.calls[0]?.[0].machines).toEqual({ alphaDoc: alphaSnapshot });
+    expect(beta.hydrate).toHaveBeenCalledOnce();
+    expect(beta.hydrate.mock.calls[0]?.[0].snapshot).toEqual({ value: 20 });
+    expect(beta.hydrate.mock.calls[0]?.[0].machines).toEqual({ betaDoc: betaSnapshot });
+  });
+
   it("getHydratedState со storage payload не мутирует runtime state", () => {
     const custom = createSnapshotStorage("stage9");
     const manager = MachineManager(
@@ -433,6 +505,50 @@ describe("storage snapshot extension points у MachineManager", () => {
     expect(() =>
       manager.hydrate({ machines: { missing: { state: "READY", context: { value: 1 } } } } as never),
     ).toThrow("[lite-fsm] snapshot is not supported by the configured storage runtimes.");
+  });
+
+  it("legacy storage field в dehydrate result бросает invalid storage runtime", () => {
+    const legacy = createInvalidSnapshotResultStorage("legacy", { storage: { value: 1 } });
+    const manager = MachineManager({ counter: counterMachine }, { plugins: [createPluginWithStorage(legacy)] });
+
+    expectLiteFsmError(
+      () => manager.dehydrate(),
+      "LITE_FSM_INVALID_STORAGE_RUNTIME",
+      "[lite-fsm] dehydrate: storage runtime 'legacy' returned unknown snapshot field 'storage'.",
+    );
+  });
+
+  it("unknown top-level field в dehydrate result бросает invalid storage runtime", () => {
+    const invalid = createInvalidSnapshotResultStorage("invalid", { snapshot: { value: 1 }, extra: true });
+    const manager = MachineManager({ counter: counterMachine }, { plugins: [createPluginWithStorage(invalid)] });
+
+    expectLiteFsmError(
+      () => manager.dehydrate(),
+      "LITE_FSM_INVALID_STORAGE_RUNTIME",
+      "[lite-fsm] dehydrate: storage runtime 'invalid' returned unknown snapshot field 'extra'.",
+    );
+  });
+
+  it("non-object dehydrate result бросает invalid storage runtime", () => {
+    const invalid = createInvalidSnapshotResultStorage("invalid-result", null);
+    const manager = MachineManager({ counter: counterMachine }, { plugins: [createPluginWithStorage(invalid)] });
+
+    expectLiteFsmError(
+      () => manager.dehydrate(),
+      "LITE_FSM_INVALID_STORAGE_RUNTIME",
+      "[lite-fsm] dehydrate: storage runtime 'invalid-result' snapshot.dehydrate() must return an object.",
+    );
+  });
+
+  it("invalid machines field в dehydrate result бросает invalid storage runtime", () => {
+    const invalid = createInvalidSnapshotResultStorage("invalid-machines", { machines: [] });
+    const manager = MachineManager({ counter: counterMachine }, { plugins: [createPluginWithStorage(invalid)] });
+
+    expectLiteFsmError(
+      () => manager.dehydrate(),
+      "LITE_FSM_INVALID_STORAGE_RUNTIME",
+      "[lite-fsm] dehydrate: storage runtime 'invalid-machines' returned invalid machines snapshot.",
+    );
   });
 });
 

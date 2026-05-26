@@ -1,7 +1,10 @@
 import { describe, expect, test } from "tstyche";
 import { definePlugin } from "@lite-fsm/core";
-import type { AnyEvent, FSMEvent, ManagerAction } from "@lite-fsm/core";
+import type { AnyEvent, FSMEvent, ManagerAction, PluginManagerEvents } from "@lite-fsm/core";
 
+import type { Assert, Equal } from "./_helpers";
+
+type AppEvent = FSMEvent<"APP_EVENT", { readonly id: string }>;
 type PluginEvent = FSMEvent<"PLUGIN_EVENT", { readonly source: "plugin" }>;
 type HostEvent = FSMEvent<"HOST_EVENT", { readonly id: string }>;
 
@@ -13,8 +16,15 @@ describe("definePlugin().create(...) — этап 1", () => {
   });
 
   test("дает observer context ManagerAction<AnyEvent> без PluginEvents", () => {
-    definePlugin().create({
+    const plugin = definePlugin().create({
       name: "any-observer",
+      routeMeta: {
+        entityId(value: string, ctx) {
+          expect(ctx.action).type.toBe<ManagerAction<AnyEvent>>();
+
+          return value;
+        },
+      },
       intercept(ctx) {
         expect(ctx.action).type.toBe<ManagerAction<AnyEvent>>();
         expect(ctx.originalAction).type.toBe<ManagerAction<AnyEvent>>();
@@ -39,40 +49,74 @@ describe("definePlugin().create(...) — этап 1", () => {
         },
       },
     });
+
+    type _Events = Assert<Equal<PluginManagerEvents<typeof plugin>, never>>;
   });
 
-  test("дает observer context ManagerAction<PluginEvents> при одном generic", () => {
-    definePlugin<PluginEvent>().create({
+  test("дает observer context ManagerAction<AnyEvent> при одном generic", () => {
+    const plugin = definePlugin<PluginEvent>().create({
       name: "plugin-observer",
+      routeMeta: {
+        pluginId(value: string, ctx) {
+          expect(ctx.action).type.toBe<ManagerAction<AnyEvent>>();
+
+          return value;
+        },
+      },
       intercept(ctx) {
-        expect(ctx.action).type.toBe<ManagerAction<PluginEvent>>();
+        expect(ctx.action).type.toBe<ManagerAction<AnyEvent>>();
 
         return {
-          action: { type: "PLUGIN_EVENT", payload: { source: "plugin" } },
+          action: { type: "ANY_EVENT" },
         };
       },
       hooks: {
         afterEffects(ctx) {
-          expect(ctx.originalAction).type.toBe<ManagerAction<PluginEvent>>();
+          expect(ctx.originalAction).type.toBe<ManagerAction<AnyEvent>>();
         },
       },
       scopedDeps: {
         pluginOnly(ctx) {
+          expect(ctx.event).type.toBe<ManagerAction<AnyEvent>>();
           expect(ctx.transition).type.toBe<(action: ManagerAction<PluginEvent>) => ManagerAction<PluginEvent>>();
+
+          ctx.transition({ type: "PLUGIN_EVENT", payload: { source: "plugin" } });
+          // @ts-expect-error!
+          ctx.transition({ type: "HOST_EVENT", payload: { id: "host" } } satisfies ManagerAction<HostEvent>);
+          // @ts-expect-error!
+          ctx.transition({ type: "APP_EVENT", payload: { id: "app" } } satisfies ManagerAction<AppEvent>);
+
           return {
             emit: () => ctx.transition({ type: "PLUGIN_EVENT", payload: { source: "plugin" } }),
           };
         },
       },
+      scopedTransition: {
+        pluginRoute(ctx) {
+          expect(ctx.event).type.toBe<ManagerAction<AnyEvent>>();
+
+          return () => ctx.transition({ type: "PLUGIN_EVENT", payload: { source: "plugin" } });
+        },
+      },
     });
+
+    type _Events = Assert<Equal<PluginManagerEvents<typeof plugin>, PluginEvent>>;
   });
 
   test("дает observer context ManagerAction<HostEvents | PluginEvents> при двух generic", () => {
-    definePlugin<PluginEvent, HostEvent>().create({
+    const plugin = definePlugin<PluginEvent, HostEvent>().create({
       name: "host-and-plugin-observer",
+      routeMeta: {
+        ownerId(value: string, ctx) {
+          expect(ctx.action).type.toBe<ManagerAction<HostEvent | PluginEvent>>();
+
+          return value;
+        },
+      },
       hooks: {
         beforeEffects(ctx) {
           expect(ctx.action).type.toBe<ManagerAction<HostEvent | PluginEvent>>();
+          expect(ctx.originalAction).type.toBe<ManagerAction<HostEvent | PluginEvent>>();
         },
       },
       scopedTransition: {
@@ -85,6 +129,8 @@ describe("definePlugin().create(...) — этап 1", () => {
         },
       },
     });
+
+    type _Events = Assert<Equal<PluginManagerEvents<typeof plugin>, PluginEvent>>;
   });
 
   test("direct-call overload и неизвестные top-level callbacks недоступны", () => {

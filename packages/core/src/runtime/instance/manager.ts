@@ -573,10 +573,10 @@ export const createInstanceRuntimeState = <
         options as DehydrateOptions<S> | undefined,
       );
     },
-    hydrate({ snapshot, baseState, strategy, source, mode }) {
+    hydrate({ machines, baseState, strategy, source, mode }) {
       const result = applySnapshotPure(
         baseState as RootState<S>,
-        snapshot as MachineManagerSnapshot<S>,
+        { schemaVersion, machines: machines as MachineManagerSnapshot<S>["machines"] },
         strategy,
         source,
         hydrationDeps,

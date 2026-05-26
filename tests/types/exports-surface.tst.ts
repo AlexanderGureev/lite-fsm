@@ -90,6 +90,25 @@ import type {
   State,
   StateName,
   StateType,
+  StorageAcceptsEventContext,
+  StorageBeforeReduceContext,
+  StorageCommitContext,
+  StorageCompileTemplateContext,
+  StorageConditionContext,
+  StorageCreatePublicInitialStateContext,
+  StorageCreateRuntimeStateContext,
+  StorageDehydrateContext,
+  StorageEffectInvocationContext,
+  StorageHydrateContext,
+  StorageIdentityContext,
+  StoragePrepareActionContext,
+  StorageReactionContext,
+  StorageReduceBucketContext,
+  StorageReduceContext,
+  StorageResolveEffectInvocationsContext,
+  StorageRuntimeExtension,
+  StorageTemplate,
+  StorageValidateTemplateContext,
   Subscriber,
   TransitionNextState,
   TransitionSubscriber,
@@ -106,17 +125,9 @@ import type {
 import type { Assert, Equal } from "./_helpers";
 
 // Storage authoring relies on contextual typing from defineStorageRuntime().create(...).
-// Root exports intentionally do not expose named storage callback context/result types.
+// Root exports expose public callback context types, but not internal dispatch/result helpers.
 // @ts-expect-error!
 type _NoStorageDispatchContext = import("@lite-fsm/core").StorageDispatchContext;
-// @ts-expect-error!
-type _NoStoragePrepareActionContext = import("@lite-fsm/core").StoragePrepareActionContext;
-// @ts-expect-error!
-type _NoStorageBeforeReduceContext = import("@lite-fsm/core").StorageBeforeReduceContext;
-// @ts-expect-error!
-type _NoStorageReduceContext = import("@lite-fsm/core").StorageReduceContext;
-// @ts-expect-error!
-type _NoStorageReduceBucketContext = import("@lite-fsm/core").StorageReduceBucketContext;
 // @ts-expect-error!
 type _NoStorageActionStageResult = import("@lite-fsm/core").StorageActionStageResult;
 // @ts-expect-error!
@@ -124,6 +135,7 @@ type _NoStorageReduceResult = import("@lite-fsm/core").StorageReduceResult;
 
 type Ping = FSMEvent<"PING", { id: string }>;
 type Done = FSMEvent<"DONE">;
+type StorageInternal = FSMEvent<"STORAGE_INTERNAL">;
 type Event = Ping | Done;
 type DomainCfg = { idle: { PING: "busy" }; busy: { DONE: "idle" }; "*": { DONE: "idle" } };
 type ActorCfg = { __INIT: { PING: "pending" }; pending: { DONE: "__RESOLVED" } };
@@ -131,6 +143,23 @@ type Ctx = { id: string };
 type Deps = { clock: () => number };
 type DomainMachine = MachineConfig<DomainCfg, Ctx, Event, Deps>;
 type ActorMachine = MachineConfig<ActorCfg, Ctx, Event, Deps>;
+type CacheStorageExtension = {
+  readonly input: {
+    readonly ttlMs: number;
+    readonly initialContext: { readonly value: string };
+  };
+  readonly internalEvents: StorageInternal;
+  readonly reducerContext: { readonly cache: Map<string, string> };
+  readonly effectDeps: { readonly cacheReader: { read(key: string): string } };
+  readonly reactionDeps: { readonly cacheLog: { record(entry: string): void } };
+  readonly resultMetadata: { readonly source: string };
+  readonly publicState: { readonly ready: boolean };
+  runtimeState: { commits: number };
+  readonly templateData: { readonly initialValue: string };
+  readonly snapshotData: { readonly commits: number };
+  readonly invocation: { readonly key: string };
+  readonly identity: { readonly owner: string };
+};
 const domainMachine = {
   config: { idle: { PING: "busy" }, busy: { DONE: "idle" }, "*": { DONE: "idle" } },
   initialState: "idle",
@@ -504,6 +533,209 @@ describe("canary поверхности экспорта core-типов", () =>
 
     expect(storage.kind).type.toBe<"exported-storage">();
     expect(storage).type.toBeAssignableTo<LiteFsmStorageRuntimeDefinition<"exported-storage">>();
+  });
+
+  test("экспортирует public storage runtime types", () => {
+    type _StorageExtensionShape = Assert<
+      Equal<
+        keyof StorageRuntimeExtension,
+        | "input"
+        | "internalEvents"
+        | "reducerContext"
+        | "effectDeps"
+        | "reactionDeps"
+        | "resultMetadata"
+        | "publicState"
+        | "runtimeState"
+        | "templateData"
+        | "snapshotData"
+        | "invocation"
+        | "identity"
+      >
+    >;
+    type _StorageTemplate = Assert<
+      Equal<
+        StorageTemplate<{ readonly initialValue: string }>,
+        {
+          readonly key: string;
+          readonly kind: string;
+          readonly data?: { readonly initialValue: string };
+        }
+      >
+    >;
+    type _CacheExtensionContract = Assert<CacheStorageExtension extends StorageRuntimeExtension ? true : false>;
+    type _ValidateKind = Assert<
+      Equal<StorageValidateTemplateContext<"typed-storage", CacheStorageExtension>["storageKind"], "typed-storage">
+    >;
+    type _ValidateMachineInput = Assert<
+      Equal<StorageValidateTemplateContext<"typed-storage", CacheStorageExtension>["machine"]["ttlMs"], number>
+    >;
+    type _CompileMachineInput = Assert<
+      Equal<
+        StorageCompileTemplateContext<"typed-storage", CacheStorageExtension>["machine"]["initialContext"]["value"],
+        string
+      >
+    >;
+    type _CreateRuntimeTemplates = Assert<
+      Equal<
+        StorageCreateRuntimeStateContext<CacheStorageExtension>["templates"][number],
+        StorageTemplate<{ readonly initialValue: string }>
+      >
+    >;
+    type _CreatePublicTemplate = Assert<
+      Equal<
+        StorageCreatePublicInitialStateContext<CacheStorageExtension>["template"],
+        StorageTemplate<{ readonly initialValue: string }>
+      >
+    >;
+    type _PrepareAction = Assert<
+      Equal<StoragePrepareActionContext<CacheStorageExtension>["action"], ManagerAction<AnyEvent>>
+    >;
+    type _BeforeReduceState = Assert<
+      Equal<StorageBeforeReduceContext<CacheStorageExtension>["state"], { commits: number }>
+    >;
+    type _AcceptsEventTemplate = Assert<
+      Equal<
+        StorageAcceptsEventContext<CacheStorageExtension>["template"],
+        StorageTemplate<{ readonly initialValue: string }>
+      >
+    >;
+    type _ReduceTemplate = Assert<
+      Equal<StorageReduceContext<CacheStorageExtension>["template"], StorageTemplate<{ readonly initialValue: string }>>
+    >;
+    type _ReduceBucketTemplates = Assert<
+      Equal<
+        StorageReduceBucketContext<CacheStorageExtension>["templates"][number],
+        StorageTemplate<{ readonly initialValue: string }>
+      >
+    >;
+    type _CommitState = Assert<Equal<StorageCommitContext<CacheStorageExtension>["state"], { commits: number }>>;
+    type _ConditionState = Assert<Equal<StorageConditionContext<CacheStorageExtension>["state"], { commits: number }>>;
+    type _ResolveEffectsState = Assert<
+      Equal<StorageResolveEffectInvocationsContext<CacheStorageExtension>["state"], { commits: number }>
+    >;
+    type _EffectInvocation = Assert<
+      Equal<StorageEffectInvocationContext<CacheStorageExtension>["invocation"], { readonly key: string }>
+    >;
+    type _DehydrateState = Assert<
+      Equal<StorageDehydrateContext<CacheStorageExtension>["state"], { commits: number }>
+    >;
+    type _HydrateSnapshot = Assert<
+      Equal<StorageHydrateContext<CacheStorageExtension>["snapshot"], { readonly commits: number } | undefined>
+    >;
+    type _HydrateMachines = Assert<
+      Equal<StorageHydrateContext<CacheStorageExtension>["machines"], Readonly<Record<string, unknown>>>
+    >;
+    type _IdentityState = Assert<
+      Equal<StorageIdentityContext<CacheStorageExtension>["state"], { commits: number }>
+    >;
+    type _ReactionState = Assert<Equal<StorageReactionContext<CacheStorageExtension>["state"], { commits: number }>>;
+
+    const typedStorage = defineStorageRuntime<CacheStorageExtension>().create({
+      kind: "typed-storage",
+      routeMetaKeys: ["cacheKey"],
+      validateTemplate(ctx) {
+        expect(ctx).type.toBe<StorageValidateTemplateContext<"typed-storage", CacheStorageExtension>>();
+      },
+      compileTemplate(ctx) {
+        expect(ctx).type.toBe<StorageCompileTemplateContext<"typed-storage", CacheStorageExtension>>();
+        return { data: { initialValue: ctx.machine.initialContext.value } };
+      },
+      createRuntimeState(ctx) {
+        expect(ctx).type.toBe<StorageCreateRuntimeStateContext<CacheStorageExtension>>();
+        return { commits: ctx.templates.length };
+      },
+      createPublicInitialState(ctx) {
+        expect(ctx).type.toBe<StorageCreatePublicInitialStateContext<CacheStorageExtension>>();
+        return { ready: Boolean(ctx.template.data?.initialValue) };
+      },
+      prepareAction(ctx) {
+        expect(ctx).type.toBe<StoragePrepareActionContext<CacheStorageExtension>>();
+      },
+      beforeReduce(ctx) {
+        expect(ctx).type.toBe<StorageBeforeReduceContext<CacheStorageExtension>>();
+      },
+      acceptsEvent(ctx) {
+        expect(ctx).type.toBe<StorageAcceptsEventContext<CacheStorageExtension>>();
+        return ctx.action.type === "PING";
+      },
+      reduce(ctx) {
+        expect(ctx).type.toBe<StorageReduceContext<CacheStorageExtension>>();
+        return { type: "skip" };
+      },
+      commit(ctx) {
+        expect(ctx).type.toBe<StorageCommitContext<CacheStorageExtension>>();
+        ctx.state.commits += 1;
+      },
+      effects: {
+        condition(ctx) {
+          expect(ctx).type.toBe<StorageConditionContext<CacheStorageExtension>>();
+          return Promise.resolve(ctx.predicate({ type: "PING", payload: { id: "p" } }));
+        },
+        resolveInvocations(ctx) {
+          expect(ctx).type.toBe<StorageResolveEffectInvocationsContext<CacheStorageExtension>>();
+          return [{ key: String(ctx.state.commits) }];
+        },
+        invoke(ctx) {
+          expect(ctx).type.toBe<StorageEffectInvocationContext<CacheStorageExtension>>();
+          expect(ctx.invocation.key).type.toBe<string>();
+        },
+      },
+      snapshot: {
+        dehydrate(ctx) {
+          expect(ctx).type.toBe<StorageDehydrateContext<CacheStorageExtension>>();
+          return {
+            machines: {},
+            snapshot: { commits: ctx.state.commits },
+          };
+        },
+        hydrate(ctx) {
+          expect(ctx).type.toBe<StorageHydrateContext<CacheStorageExtension>>();
+          return { nextState: ctx.baseState, changed: false };
+        },
+      },
+      identity: {
+        resolve(ctx) {
+          expect(ctx).type.toBe<StorageIdentityContext<CacheStorageExtension>>();
+          return { owner: "export-surface" };
+        },
+      },
+      reactions: {
+        run(ctx) {
+          expect(ctx).type.toBe<StorageReactionContext<CacheStorageExtension>>();
+        },
+      },
+    });
+
+    const typedStoragePlugin = definePlugin().create({
+      name: "typed-storage-plugin",
+      storage: [typedStorage],
+    });
+
+    type _TypedStorageMachineExtension = Assert<
+      Equal<
+        PluginMachineExtensions<typeof typedStoragePlugin>,
+        {
+          readonly storage: "typed-storage";
+          readonly input: CacheStorageExtension["input"];
+          readonly internalEvents: StorageInternal;
+          readonly reducerContext: CacheStorageExtension["reducerContext"];
+          readonly effectDeps: CacheStorageExtension["effectDeps"];
+          readonly reactionDeps: CacheStorageExtension["reactionDeps"];
+          readonly resultMetadata: CacheStorageExtension["resultMetadata"];
+          readonly publicState: CacheStorageExtension["publicState"];
+        }
+      >
+    >;
+    type _NoRuntimeOnlyMachineFields = Assert<
+      Equal<
+        Extract<
+          keyof PluginMachineExtensions<typeof typedStoragePlugin>,
+          "runtimeState" | "templateData" | "snapshotData" | "invocation" | "identity"
+        >,
+        never
+      >
+    >;
   });
 
   test("экспортирует все публичные core type-алиасы из interfaces.ts", () => {

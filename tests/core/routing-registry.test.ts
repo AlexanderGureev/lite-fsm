@@ -135,10 +135,14 @@ describe("routing meta registry", () => {
 
     expect(() =>
       MachineManager({ entity: createRouteMachine({ routeId: "entity/a" }) as never }, { plugins: [first, second] }),
-    ).toThrow("[lite-fsm] duplicate route meta key 'entityId'.");
+    ).toThrow(
+      "[lite-fsm] duplicate routeMeta key 'entityId': plugin 'entity-routing' conflicts with plugin 'entity-routing-duplicate'.",
+    );
     expect(() =>
       MachineManager({ entity: createRouteMachine({ routeId: "entity/a" }) as never }, { plugins: [coreDuplicate] }),
-    ).toThrow("[lite-fsm] duplicate route meta key 'actorId'.");
+    ).toThrow(
+      "[lite-fsm] duplicate routeMeta key 'actorId': plugin 'actor-routing-duplicate' conflicts with core reserved routeMeta key 'actorId'.",
+    );
   });
 
   it("unregistered action.meta key срезается без ошибки", () => {

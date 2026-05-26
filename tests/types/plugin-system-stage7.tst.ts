@@ -301,9 +301,10 @@ describe("plugin system — этап 7 storage types", () => {
       snapshot: {
         dehydrate(ctx) {
           expect(ctx.rootState).type.toBe<Record<string, unknown>>();
-          return { storage: { ready: true } };
+          return { snapshot: { ready: true } };
         },
         hydrate(ctx) {
+          expect(ctx.machines).type.toBe<Readonly<Record<string, unknown>>>();
           expect(ctx.snapshot).type.toBe<unknown>();
           return { nextState: ctx.baseState, changed: false };
         },

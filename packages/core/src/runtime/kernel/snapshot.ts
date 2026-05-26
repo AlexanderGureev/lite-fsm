@@ -7,7 +7,7 @@ import type {
   MachineStore,
 } from "../../types";
 import { LiteFsmError } from "../../utils";
-import type { CompiledStorageTemplate, ManagerRuntimeContext, StorageRuntime } from "./storage";
+import type { CompiledStorageTemplate, ManagerRuntimeContext, StorageDehydrateResult, StorageRuntime } from "./storage";
 
 export type RuntimeBucket = {
   readonly runtime: StorageRuntime;
@@ -38,6 +38,8 @@ type HydratePlan = {
 type SnapshotContext = "dehydrate" | "hydrate";
 
 const hasOwn = (value: object, key: string): boolean => Object.prototype.hasOwnProperty.call(value, key);
+const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
 
 const unsupportedSnapshot = (): never => {
   throw new Error("[lite-fsm] snapshot is not supported by the configured storage runtimes.");
@@ -65,6 +67,32 @@ const assertSnapshotCapable = (
     "LITE_FSM_UNSUPPORTED_STORAGE_SNAPSHOT",
     `[lite-fsm] ${context}: storage runtime '${kind}' does not support snapshots.`,
   );
+};
+
+const assertStorageDehydrateResult = (kind: string, result: unknown): StorageDehydrateResult => {
+  if (!isObjectRecord(result)) {
+    throw new LiteFsmError(
+      "LITE_FSM_INVALID_STORAGE_RUNTIME",
+      `[lite-fsm] dehydrate: storage runtime '${kind}' snapshot.dehydrate() must return an object.`,
+    );
+  }
+
+  for (const key of Object.keys(result)) {
+    if (key === "machines" || key === "snapshot") continue;
+    throw new LiteFsmError(
+      "LITE_FSM_INVALID_STORAGE_RUNTIME",
+      `[lite-fsm] dehydrate: storage runtime '${kind}' returned unknown snapshot field '${key}'.`,
+    );
+  }
+
+  if (hasOwn(result, "machines") && result.machines !== undefined && !isObjectRecord(result.machines)) {
+    throw new LiteFsmError(
+      "LITE_FSM_INVALID_STORAGE_RUNTIME",
+      `[lite-fsm] dehydrate: storage runtime '${kind}' returned invalid machines snapshot.`,
+    );
+  }
+
+  return result as StorageDehydrateResult;
 };
 
 export const createSnapshotRuntime = <S extends MachineStore>(deps: SnapshotRuntimeDeps<S>) => {
@@ -145,18 +173,21 @@ export const createSnapshotRuntime = <S extends MachineStore>(deps: SnapshotRunt
       const kind = bucket.runtime.kind;
       if (!callKinds.has(kind)) continue;
       const snapshotRuntime = assertSnapshotCapable(kind, bucket, "dehydrate");
-      const result = snapshotRuntime.dehydrate({
-        state: bucket.state,
-        manager: managerContext,
-        rootState: getState() as RootState,
-        options: narrowDehydrateOptions(options, keysByKind.get(kind)),
-      });
+      const result = assertStorageDehydrateResult(
+        kind,
+        snapshotRuntime.dehydrate({
+          state: bucket.state,
+          manager: managerContext,
+          rootState: getState() as RootState,
+          options: narrowDehydrateOptions(options, keysByKind.get(kind)),
+        }),
+      );
 
       if (result.machines !== undefined) {
         Object.assign(machinesEnvelope, result.machines);
       }
-      if (storageKinds.has(kind) && hasOwn(result, "storage") && result.storage !== undefined) {
-        storageEnvelope[kind] = result.storage;
+      if (storageKinds.has(kind) && hasOwn(result, "snapshot") && result.snapshot !== undefined) {
+        storageEnvelope[kind] = result.snapshot;
       }
     }
 
@@ -227,22 +258,21 @@ export const createSnapshotRuntime = <S extends MachineStore>(deps: SnapshotRunt
     if (plans.length === 0 && !buckets.some((bucket) => bucket.runtime.snapshot)) {
       return unsupportedSnapshot();
     }
+    if (mode !== "preview" && Object.keys(envelope.machines).length > 0) {
+      const schemaVersion = getSchemaVersion();
+      if (envelope.schemaVersion !== schemaVersion) {
+        managerContext.options?.onSchemaVersionMismatch?.(envelope.schemaVersion, schemaVersion);
+      }
+    }
 
     let nextState = baseState as RootState;
     let changed = false;
     for (const plan of plans) {
-      const storageSnapshot = plan.hasStorageSnapshot
-        ? { [plan.bucket.runtime.kind]: plan.storageSnapshot }
-        : undefined;
-      const runtimeSnapshot: MachineManagerSnapshot<S> = {
-        schemaVersion: envelope.schemaVersion,
-        machines: plan.machines as MachineManagerSnapshot<S>["machines"],
-        ...(storageSnapshot ? { storage: storageSnapshot } : {}),
-      };
       const result = plan.bucket.runtime.snapshot!.hydrate({
         state: plan.bucket.state,
         manager: managerContext,
-        snapshot: runtimeSnapshot,
+        machines: plan.machines,
+        snapshot: plan.hasStorageSnapshot ? plan.storageSnapshot : undefined,
         baseState: nextState,
         strategy,
         source,

@@ -10,18 +10,20 @@ const plugin = definePlugin<PluginEvents, HostEvents>().create({
 
 Публичного callback `install` нет. `MachineManager(..., { plugins })` принимает только values, возвращенные `definePlugin().create(...)`; structural objects отклоняются с `LITE_FSM_INVALID_PLUGIN_DEFINITION`.
 
+Все public keys находятся в плоском namespace. Core не добавляет prefix и не переписывает ключи: `routeMeta.cacheKey` становится `action.meta.cacheKey`, `manager.cache` — `manager.cache`, `scopedDeps.trace` — `deps.trace`, `scopedTransition.refresh` — `deps.transition.refresh`. Plugin author и integrator отвечают за уникальность keys; конфликт является hard error.
+
 ## Events
 
-`PluginEvents` добавляются к manager-level `transition` только для manager, созданного с текущим plugin tuple. Они не становятся событиями машин автоматически. Если машина должна обрабатывать событие plugin, включите его явно:
+Первый generic `definePlugin<PluginEvents, HostEvents>()` описывает события, которые plugin добавляет в manager-level `transition` и может эмитить через `scope.transition(...)`. Они не становятся событиями машин автоматически. Если машина должна обрабатывать событие plugin, включите его явно:
 
 ```ts
 type AppPlugins = typeof cachePlugin;
 type AppEvents = HostEvents | PluginManagerEvents<AppPlugins>;
 ```
 
-`HostEvents` нужны только для contextual typing внутри plugin definition: `routeMeta`, `intercept`, `hooks`, `scopedDeps` и `scopedTransition` видят `HostEvents | PluginEvents`. `HostEvents` не входят в `PluginManagerEvents<Plugins>`.
+Второй generic `HostEvents` описывает события host manager, которые plugin типизированно наблюдает в callbacks. `routeMeta`, `intercept`, `hooks`, `scopedDeps` и `scopedTransition` видят `HostEvents | PluginEvents`, но `HostEvents` не входят в `PluginManagerEvents<Plugins>`.
 
-Если `PluginEvents` не переданы, `HostEvents` по умолчанию равны `AnyEvent`. Если `PluginEvents` переданы, `HostEvents` по умолчанию равны `never`; передайте второй generic явно, когда plugin должен типизированно наблюдать события приложения.
+Если `HostEvents` не передан явно, observer contexts используют `AnyEvent`: `ctx.action`, `ctx.originalAction`, `routeMeta` `ctx.action` и `scope.event` типизируются как `ManagerAction<AnyEvent>`. При `definePlugin<PluginEvents>()` это не расширяет `PluginManagerEvents<Plugins>`; `scope.transition(...)` остается ограничен `PluginEvents`.
 
 ## Sections
 
@@ -64,6 +66,8 @@ type Meta = PluginRouteMeta<typeof routingPlugin>;
 
 Optional semantics относятся к `manager.transition(...).meta`: для manager с подключенным plugin tuple эти поля доступны как optional route meta текущего tuple.
 
+Дубликат route meta key диагностируется с section, key и владельцами, например plugin, который первым занял `cacheKey`, и plugin, который конфликтует с ним. Reserved route keys считаются занятыми core.
+
 ## Manager Extensions
 
 ```ts
@@ -81,7 +85,7 @@ const managerPlugin = definePlugin<PluginEvent>().create({
 });
 ```
 
-Ключ `cache` становится полем returned manager. Дубликаты между plugins диагностируются как `LITE_FSM_DUPLICATE_MANAGER_EXTENSION_KEY`; попытка занять core method — как `LITE_FSM_MANAGER_EXTENSION_CORE_KEY`.
+Ключ `cache` становится полем returned manager. Дубликаты между plugins диагностируются как `LITE_FSM_DUPLICATE_MANAGER_EXTENSION_KEY` с владельцами конфликта; попытка занять core method — как `LITE_FSM_MANAGER_EXTENSION_CORE_KEY`.
 
 ## Dispatch Pipeline
 
@@ -129,7 +133,7 @@ const scopedPlugin = definePlugin<PluginEvent, HostEvent>().create({
 });
 ```
 
-`scope.event` типизируется как `ManagerAction<HostEvents | PluginEvents>`. `scope.transition(...)` принимает только `ManagerAction<PluginEvents>`.
+При явном `HostEvents` `scope.event` типизируется как `ManagerAction<HostEvents | PluginEvents>`; без второго generic — как `ManagerAction<AnyEvent>`. `scope.transition(...)` принимает только `ManagerAction<PluginEvents>`.
 
 Для effects используйте `EffectDeps<AppDeps, Plugins>`:
 
@@ -152,6 +156,11 @@ type CacheExtension = {
   readonly effectDeps: { readonly cacheReader: { read(key: string): string } };
   readonly reactionDeps: { readonly cacheLog: { record(entry: string): void } };
   readonly publicState: { readonly ready: boolean; readonly value: string };
+  runtimeState: { commits: number };
+  readonly templateData: { readonly initialValue: string };
+  readonly snapshotData: { readonly commits: number };
+  readonly invocation: { readonly cacheKey: string };
+  readonly identity: { readonly cacheKey: string };
 };
 
 const cacheStorage = defineStorageRuntime<CacheExtension>().create({
@@ -164,10 +173,11 @@ const cacheStorage = defineStorageRuntime<CacheExtension>().create({
     return { data: { initialValue: ctx.machine.initialContext.value } };
   },
   createRuntimeState(ctx) {
-    return { templates: ctx.templates };
+    void ctx.templates;
+    return { commits: 0 };
   },
   createPublicInitialState(ctx) {
-    return { ready: false, value: String(ctx.template.data) };
+    return { ready: false, value: ctx.template.data?.initialValue ?? "" };
   },
   acceptsEvent(ctx) {
     return ctx.action.type === "CACHE_REFRESH";
@@ -183,16 +193,22 @@ const cacheStorage = defineStorageRuntime<CacheExtension>().create({
     condition(ctx) {
       return Promise.resolve(ctx.predicate({ type: "CACHE_REFRESH", payload: { cacheKey: "probe" } }));
     },
-    resolveInvocations() {
-      return [];
+    resolveInvocations(ctx) {
+      return [{ cacheKey: ctx.action.type }];
     },
-    invoke() {},
+    invoke(ctx) {
+      void ctx.invocation.cacheKey;
+    },
   },
   snapshot: {
-    dehydrate() {
-      return { storage: {} };
+    dehydrate(ctx) {
+      return {
+        snapshot: { commits: ctx.state.commits },
+      };
     },
     hydrate(ctx) {
+      void ctx.machines;
+      void ctx.snapshot;
       return { nextState: ctx.baseState, changed: false };
     },
   },
@@ -212,13 +228,19 @@ const cachePlugin = definePlugin().create({
 });
 ```
 
-`compileTemplate(ctx)` возвращает только `void | { data?: unknown }`. `key` и `kind` подставляет builder. Методы storage runtime используют contextual typing inline; отдельные named context types не нужны.
+`Extension` содержит machine-facing поля и runtime-only поля. В `PluginMachineExtensions<Plugins>` попадают только `input`, `internalEvents`, `reducerContext`, `effectDeps`, `reactionDeps`, `resultMetadata`, `publicState` и `storage`, который builder выводит из literal `kind`. Поля `runtimeState`, `templateData`, `snapshotData`, `invocation` и `identity` доступны storage runtime, но не добавляются в machine extension.
+
+`compileTemplate(ctx)` возвращает только `void | { data?: TemplateData }`. `key` и `kind` подставляет builder. Методы storage runtime используют contextual typing inline; при необходимости root entrypoint экспортирует `StorageRuntimeExtension`, `StorageTemplate` и public context types `Storage*Context`.
+
+`routeMetaKeys` — runtime dependency storage runtime от action meta keys. Это `readonly string[]`; TypeScript не связывает эти строки с `routeMeta`, а runtime валидирует shape definition и результаты route resolvers.
 
 `prepareAction(ctx)` выполняется до middleware и может вернуть `{ type: "replace", action }` или `{ type: "drop" }`. `beforeReduce(ctx)` выполняется после middleware и до public interceptors с тем же result protocol. `{ type: "drop" }` является silent no-op, а `{ type: "replace" }` пересчитывает route для следующих фаз.
 
 `reduceScope` по умолчанию равен `"template"`: runtime объявляет `acceptsEvent(ctx)` и `reduce(ctx)`, а core вызывает reducer для каждого matching template. Для batch-обработки укажите `reduceScope: "bucket"` и объявите `reduceBucket(ctx)`: callback вызывается один раз на storage bucket и получает `ctx.templates`. В bucket scope нельзя объявлять `acceptsEvent` или `reduce`; в template scope нельзя объявлять `reduceBucket`. `reduce(ctx)` и `reduceBucket(ctx)` возвращают только `void | { type: "skip" }`; `drop` и `replace` разрешены только в `prepareAction` и `beforeReduce`.
 
 `effectDeps` и `reactionDeps` внутри `CacheExtension` — type contract для machines этого storage kind. Runtime сам решает, какие deps передать при invocation.
+
+`snapshot.dehydrate(ctx)` возвращает только `{ machines?, snapshot? }`: `machines` — machine snapshots текущего storage kind, `snapshot` — payload текущего storage kind для top-level `MachineManagerSnapshot.storage[kind]`. `snapshot.hydrate(ctx)` получает `ctx.machines` и `ctx.snapshot`, а не полный manager envelope.
 
 `PluginMachineExtensions<typeof cachePlugin>` возвращает extension с `storage: "document-cache"`. Передайте его в app wrapper:
 
@@ -242,14 +264,14 @@ const createCachePlugin = (options: { readonly namespace: string }) =>
   definePlugin<PluginEvent, HostEvent>().create({
     name: `cache:${options.namespace}`,
     routeMeta: {
-      cacheKey(value: string) {
+      [`${options.namespace}CacheKey`](value: string) {
         return `${options.namespace}:${value}`;
       },
     },
   });
 ```
 
-Каждый вызов factory должен вернуть plugin с уникальным `name`. Дубликаты names диагностируются как `LITE_FSM_DUPLICATE_PLUGIN`.
+Каждый вызов factory должен вернуть plugin с уникальным `name` и уникальными exposed keys. Multi-instance factory должна параметризовать не только `name`, но и keys в `routeMeta`, `manager`, `scopedDeps`, `scopedTransition` и storage `kind`, если несколько экземпляров могут быть установлены в один manager. Дубликаты names диагностируются как `LITE_FSM_DUPLICATE_PLUGIN`; дубликаты exposed keys показывают section, key и обоих владельцев.
 
 ## Helper Types
 

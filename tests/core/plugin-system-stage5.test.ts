@@ -475,14 +475,17 @@ describe("plugin system — этап 5 — registry coverage", () => {
 
     expectLiteFsmError(() => registry.assertDefaultStorageRegistered(), "LITE_FSM_MISSING_DEFAULT_STORAGE_KIND");
 
-    registry.storage.register("instance", runtime);
+    registry.storage.register("instance", runtime, "stage-five-registry");
     registry.assertDefaultStorageRegistered();
 
     expect(registry.storage.get("instance")).toBe(runtime);
     expect(registry.listStorageRuntimes()).toEqual([{ kind: "instance", runtime }]);
-    expectLiteFsmError(() => registry.storage.register("instance", runtime), "LITE_FSM_DUPLICATE_STORAGE_KIND");
     expectLiteFsmError(
-      () => registry.storage.register("declared", createMinimalStorageRuntime("actual")),
+      () => registry.storage.register("instance", runtime, "stage-five-conflict"),
+      "LITE_FSM_DUPLICATE_STORAGE_KIND",
+    );
+    expectLiteFsmError(
+      () => registry.storage.register("declared", createMinimalStorageRuntime("actual"), "stage-five-mismatch"),
       "LITE_FSM_INVALID_STORAGE_RUNTIME",
     );
   });
@@ -490,7 +493,7 @@ describe("plugin system — этап 5 — registry coverage", () => {
   it("диагностирует storage route resolver, отсутствующий в plugin tuple", () => {
     const registry = createPluginRegistry({ defaultStorageKind: "custom" });
 
-    registry.storage.register("custom", createMinimalStorageRuntime("custom", ["entityId"]));
+    registry.storage.register("custom", createMinimalStorageRuntime("custom", ["entityId"]), "stage-five-routed");
 
     expectLiteFsmError(
       () => registry.assertStorageRouteResolversRegistered(),

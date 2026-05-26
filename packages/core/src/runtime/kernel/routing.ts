@@ -7,6 +7,10 @@ const SENDER_KEYS = ["senderActorId", "senderGroupId", "senderGroupTag"] as cons
 const RESERVED_META_KEYS = new Set<string>([...ROUTING_KEYS, ...SENDER_KEYS]);
 
 type MetaRecord = FSMEventMeta & Record<string, unknown>;
+type RouteResolverEntry = {
+  readonly owner: string | undefined;
+  readonly resolver: RouteResolver<string>;
+};
 
 export type RouteConstraint =
   | { readonly scope: "actor"; readonly key: "actorId"; readonly targetSet: string[] }
@@ -44,8 +48,11 @@ const toPluginTargetSet = (key: string, result: RouteResolverResult): string[] =
   );
 };
 
+const ownerLabel = (owner: string | undefined): string =>
+  owner === undefined ? "unowned registration" : `plugin '${owner}'`;
+
 export const createRoutingRuntime = (): RoutingRuntime => {
-  const resolvers = new Map<string, RouteResolver<string>>();
+  const resolvers = new Map<string, RouteResolverEntry>();
 
   const copyDefinedKeys = (source: MetaRecord, target: MetaRecord, keys: readonly string[]) => {
     for (const key of keys) {
@@ -71,11 +78,15 @@ export const createRoutingRuntime = (): RoutingRuntime => {
       return { scope: "actor", key: "actorId", targetSet: toBuiltInTargetSet(meta.actorId) };
     }
 
-    for (const [key, resolver] of resolvers) {
+    for (const [key, entry] of resolvers) {
       const value = meta[key];
       if (value === undefined) continue;
 
-      return { scope: "plugin", key, targetSet: toPluginTargetSet(key, resolver(value, { key, action, meta })) };
+      return {
+        scope: "plugin",
+        key,
+        targetSet: toPluginTargetSet(key, entry.resolver(value, { key, action, meta })),
+      };
     }
 
     if (meta.groupId !== undefined) {
@@ -89,11 +100,22 @@ export const createRoutingRuntime = (): RoutingRuntime => {
   };
 
   const registry: RoutingRegistry = Object.freeze({
-    registerRouteMeta(key, resolver) {
-      if (RESERVED_META_KEYS.has(key) || resolvers.has(key)) {
-        throw new LiteFsmError("LITE_FSM_DUPLICATE_ROUTE_META_KEY", `[lite-fsm] duplicate route meta key '${key}'.`);
+    registerRouteMeta(key, resolver, owner) {
+      if (RESERVED_META_KEYS.has(key)) {
+        throw new LiteFsmError(
+          "LITE_FSM_DUPLICATE_ROUTE_META_KEY",
+          `[lite-fsm] duplicate routeMeta key '${key}': ${ownerLabel(owner)} conflicts with core reserved routeMeta key '${key}'.`,
+        );
       }
-      resolvers.set(key, resolver as RouteResolver<string>);
+
+      const registered = resolvers.get(key);
+      if (registered) {
+        throw new LiteFsmError(
+          "LITE_FSM_DUPLICATE_ROUTE_META_KEY",
+          `[lite-fsm] duplicate routeMeta key '${key}': ${ownerLabel(registered.owner)} conflicts with ${ownerLabel(owner)}.`,
+        );
+      }
+      resolvers.set(key, { owner, resolver: resolver as RouteResolver<string> });
     },
   });
 

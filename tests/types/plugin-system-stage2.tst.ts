@@ -1,6 +1,7 @@
 import { describe, expect, test } from "tstyche";
 import { createMachine, definePlugin } from "@lite-fsm/core";
 import type {
+  AnyEvent,
   EffectDeps,
   FSMEvent,
   ManagerAction,
@@ -47,7 +48,7 @@ const effectPlugin = definePlugin<PluginEvent>().create({
   name: "effect-plugin",
   scopedDeps: {
     currentUser(scope) {
-      expect(scope.event).type.toBe<ManagerAction<PluginEvent>>();
+      expect(scope.event).type.toBe<ManagerAction<AnyEvent>>();
 
       return { id: scope.source.template } as const;
     },

@@ -164,7 +164,7 @@ export const documentCacheStorage = defineStorageRuntime<DocumentCacheExtension>
   snapshot: {
     dehydrate(ctx) {
       const state = readRuntimeState(ctx.state);
-      return { storage: { commits: state.commits, lastAction: state.lastAction } };
+      return { snapshot: { commits: state.commits, lastAction: state.lastAction } };
     },
     hydrate(ctx) {
       return { nextState: ctx.baseState, changed: false };

@@ -119,7 +119,7 @@ describe("runtime preset MachineManager", () => {
     const second = definePlugin().create({ name: "second-storage", storage: [testStorageDefinition("custom")] });
 
     expect(() => MachineManager({ counter: createCounter() }, { plugins: [first, second] })).toThrow(
-      "[lite-fsm] duplicate storage kind 'custom'.",
+      "[lite-fsm] duplicate storage kind 'custom': plugin 'first-storage' conflicts with plugin 'second-storage'.",
     );
   });
 
@@ -211,7 +211,7 @@ describe("runtime preset MachineManager", () => {
     });
 
     expect(() => MachineManager({ counter: createCounter() }, { plugins: [plugin] })).toThrow(
-      "[lite-fsm] duplicate storage kind 'instance'.",
+      "[lite-fsm] duplicate storage kind 'instance': plugin '@lite-fsm/core/instance-runtime' conflicts with plugin 'duplicate-instance-storage'.",
     );
   });
 

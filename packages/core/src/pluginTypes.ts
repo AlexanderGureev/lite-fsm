@@ -19,7 +19,7 @@ export type RouteResolver<Key extends string = string> = (
 ) => RouteResolverResult;
 
 export type RoutingRegistry = {
-  registerRouteMeta<Key extends string>(key: Key, resolver: RouteResolver<Key>): void;
+  registerRouteMeta<Key extends string>(key: Key, resolver: RouteResolver<Key>, owner?: string): void;
 };
 
 // === Dispatch ================================================================

@@ -475,7 +475,9 @@ describe("storage diagnostics", () => {
       createMachineManagerFactory({ name: "preset/duplicate", defaultStorageKind: "custom", plugins: [duplicate] })({
         counter: createCounter("custom"),
       }),
-    ).toThrow("[lite-fsm] duplicate storage kind 'custom'.");
+    ).toThrow(
+      "[lite-fsm] duplicate storage kind 'custom': plugin 'duplicate-storage' conflicts with plugin 'duplicate-storage'.",
+    );
 
     expect(() =>
       createMachineManagerFactory({ name: "preset/unknown", defaultStorageKind: "custom", plugins: [] })({

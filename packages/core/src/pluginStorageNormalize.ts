@@ -2,7 +2,6 @@
 // compileTemplate так, чтобы builder подставлял key/kind поверх user-возвращённого payload.
 
 import { assertFunction, assertNonEmptyString, hasOwn, invalidPluginDefinition, isPlainObject } from "./pluginNormalize";
-import type { StorageTemplatePayload } from "./pluginStorageTypes";
 import type { CompileTemplateContext, StorageRuntime } from "./runtime/kernel/storage";
 
 const REQUIRED_METHODS = [
@@ -30,6 +29,11 @@ const BLOCKS = {
 } as const satisfies Record<string, BlockSpec>;
 
 type BlockKey = keyof typeof BLOCKS;
+type PublicCompileTemplateResult = void | {
+  readonly data?: unknown;
+  readonly key?: never;
+  readonly kind?: never;
+};
 
 const KNOWN_KEYS = new Set<string>([
   "kind",
@@ -142,7 +146,7 @@ export const normalizePublicStorageRuntime = <Kind extends string>(
   compileTemplate(ctx) {
     const compileTemplate = runtime.compileTemplate as unknown as (
       context: CompileTemplateContext,
-    ) => StorageTemplatePayload;
+    ) => PublicCompileTemplateResult;
     const payload = compileTemplate(ctx);
     if (payload === undefined) return { key: ctx.key, kind };
 

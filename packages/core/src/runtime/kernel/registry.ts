@@ -39,10 +39,16 @@ const CORE_SCOPED_TRANSITION_KEYS = new Set(["actor", "group", "tag", "transitio
 
 // === Scoped registry =========================================================
 // Дедуплицирует регистрацию scoped deps и scoped transition: одинаковая валидация
-// per-extension key, разные core-key наборы и kind в сообщении ошибки.
+// per-extension key, разные core-key наборы и section в duplicate diagnostics.
 
-type ScopedKind = "dep" | "transition";
+type ScopedKind = {
+  readonly section: "scopedDeps" | "scopedTransition";
+  readonly label: "dep" | "transition";
+};
 type ScopedEntry = NormalizedScopedDepsEntry | NormalizedScopedTransitionEntry;
+
+const formatDuplicatePluginKey = (section: string, key: string, owner: string, conflictingOwner: string): string =>
+  `[lite-fsm] duplicate ${section} key '${key}': plugin '${owner}' conflicts with plugin '${conflictingOwner}'.`;
 
 const createScopedRegistry = <Entry extends ScopedEntry>(kind: ScopedKind, coreKeys: ReadonlySet<string>) => {
   const entries: Entry[] = [];
@@ -52,19 +58,20 @@ const createScopedRegistry = <Entry extends ScopedEntry>(kind: ScopedKind, coreK
     if (entry.key.length === 0) {
       throw new LiteFsmError(
         "LITE_FSM_INVALID_SCOPED_EXTENSION",
-        `[lite-fsm] plugin '${entry.owner}' registered invalid ${kind} extension key.`,
+        `[lite-fsm] plugin '${entry.owner}' registered invalid ${kind.label} extension key.`,
       );
     }
-    if (owners.has(entry.key)) {
+    const registeredOwner = owners.get(entry.key);
+    if (registeredOwner !== undefined) {
       throw new LiteFsmError(
         "LITE_FSM_DUPLICATE_SCOPED_EXTENSION_KEY",
-        `[lite-fsm] duplicate scoped ${kind} extension key '${entry.key}'.`,
+        formatDuplicatePluginKey(kind.section, entry.key, registeredOwner, entry.owner),
       );
     }
     if (coreKeys.has(entry.key)) {
       throw new LiteFsmError(
         "LITE_FSM_SCOPED_EXTENSION_CORE_KEY",
-        `[lite-fsm] plugin '${entry.owner}' cannot override core scoped ${kind} key '${entry.key}'.`,
+        `[lite-fsm] plugin '${entry.owner}' cannot override core scoped ${kind.label} key '${entry.key}'.`,
       );
     }
 
@@ -76,7 +83,7 @@ const createScopedRegistry = <Entry extends ScopedEntry>(kind: ScopedKind, coreK
     if (!(entry.key in base)) return;
     throw new LiteFsmError(
       "LITE_FSM_SCOPED_EXTENSION_OVERRIDE",
-      `[lite-fsm] plugin '${entry.owner}' cannot override existing scoped ${kind} key '${entry.key}'.`,
+      `[lite-fsm] plugin '${entry.owner}' cannot override existing scoped ${kind.label} key '${entry.key}'.`,
     );
   };
 
@@ -86,12 +93,16 @@ const createScopedRegistry = <Entry extends ScopedEntry>(kind: ScopedKind, coreK
 // === Storage registry ========================================================
 
 const createStorageRegistry = () => {
-  const runtimes = new Map<string, StorageRuntime>();
+  const runtimes = new Map<string, { readonly owner: string; readonly runtime: StorageRuntime }>();
 
   const registry: StorageRegistry = Object.freeze({
-    register(kind, runtime) {
-      if (runtimes.has(kind)) {
-        throw new LiteFsmError("LITE_FSM_DUPLICATE_STORAGE_KIND", `[lite-fsm] duplicate storage kind '${kind}'.`);
+    register(kind, runtime, owner) {
+      const registered = runtimes.get(kind);
+      if (registered) {
+        throw new LiteFsmError(
+          "LITE_FSM_DUPLICATE_STORAGE_KIND",
+          `[lite-fsm] duplicate storage kind '${kind}': plugin '${registered.owner}' conflicts with plugin '${owner}'.`,
+        );
       }
       if (runtime.kind !== kind) {
         throw new LiteFsmError(
@@ -99,17 +110,17 @@ const createStorageRegistry = () => {
           `[lite-fsm] storage runtime registered for kind '${kind}' declared kind '${runtime.kind}'.`,
         );
       }
-      runtimes.set(kind, runtime);
+      runtimes.set(kind, { owner, runtime });
     },
     get(kind) {
-      return runtimes.get(kind);
+      return runtimes.get(kind)?.runtime;
     },
   });
 
   return {
     registry,
-    list: (): RuntimeStorageEntry[] => [...runtimes].map(([kind, runtime]) => ({ kind, runtime })),
-    values: () => runtimes.values(),
+    list: (): RuntimeStorageEntry[] => [...runtimes].map(([kind, entry]) => ({ kind, runtime: entry.runtime })),
+    values: () => [...runtimes.values()].map((entry) => entry.runtime),
   };
 };
 
@@ -118,14 +129,17 @@ const createStorageRegistry = () => {
 export const createPluginRegistry = ({ defaultStorageKind }: PluginRegistryOptions) => {
   const installedNames = new Set<string>();
   const storage = createStorageRegistry();
-  const scopedDeps = createScopedRegistry<NormalizedScopedDepsEntry>("dep", CORE_SCOPED_DEP_KEYS);
+  const scopedDeps = createScopedRegistry<NormalizedScopedDepsEntry>(
+    { section: "scopedDeps", label: "dep" },
+    CORE_SCOPED_DEP_KEYS,
+  );
   const scopedTransition = createScopedRegistry<NormalizedScopedTransitionEntry>(
-    "transition",
+    { section: "scopedTransition", label: "transition" },
     CORE_SCOPED_TRANSITION_KEYS,
   );
   const actionInterceptors: ActionInterceptor[] = [];
   const managerEntries: NormalizedManagerEntry[] = [];
-  const managerKeys = new Set<string>();
+  const managerOwners = new Map<string, string>();
   const dispatchHooks: Record<DispatchHookPhase, DispatchHook[]> = Object.fromEntries(
     DISPATCH_HOOK_PHASES.map((phase) => [phase, [] as DispatchHook[]]),
   ) as Record<DispatchHookPhase, DispatchHook[]>;
@@ -138,14 +152,15 @@ export const createPluginRegistry = ({ defaultStorageKind }: PluginRegistryOptio
         `[lite-fsm] plugin '${entry.owner}' cannot register manager extension '${entry.key}' because it is a core manager key.`,
       );
     }
-    if (managerKeys.has(entry.key)) {
+    const registeredOwner = managerOwners.get(entry.key);
+    if (registeredOwner !== undefined) {
       throw new LiteFsmError(
         "LITE_FSM_DUPLICATE_MANAGER_EXTENSION_KEY",
-        `[lite-fsm] duplicate manager extension key '${entry.key}'.`,
+        formatDuplicatePluginKey("manager", entry.key, registeredOwner, entry.owner),
       );
     }
 
-    managerKeys.add(entry.key);
+    managerOwners.set(entry.key, entry.owner);
     managerEntries.push(entry);
   };
 
@@ -213,8 +228,12 @@ export const createPluginRegistry = ({ defaultStorageKind }: PluginRegistryOptio
       }
 
       installedNames.add(plugin.name);
-      for (const entry of plugin.storage) storage.registry.register(entry.kind, entry.value as StorageRuntime);
-      for (const entry of plugin.routeMeta) routingRuntime.registry.registerRouteMeta(entry.key, entry.resolver);
+      for (const entry of plugin.storage) {
+        storage.registry.register(entry.kind, entry.value as StorageRuntime, entry.owner);
+      }
+      for (const entry of plugin.routeMeta) {
+        routingRuntime.registry.registerRouteMeta(entry.key, entry.resolver, entry.owner);
+      }
       for (const entry of plugin.scopedDeps) scopedDeps.add(entry);
       for (const entry of plugin.scopedTransition) scopedTransition.add(entry);
       for (const entry of plugin.manager) addManagerEntry(entry);

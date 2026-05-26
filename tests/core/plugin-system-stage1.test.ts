@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { definePlugin, LiteFsmError, MachineManager } from "@lite-fsm/core";
+import type { FSMEvent } from "@lite-fsm/core";
 import { getNormalizedPlugin, isLiteFsmPluginValue } from "@lite-fsm/core/internal/plugin";
 
 const expectInvalidPluginDefinition = (create: () => unknown) => {
@@ -93,6 +94,43 @@ describe("definePlugin().create(...) — этап 1", () => {
 
     manager.transition({ type: "INC" });
 
+    expect(manager.getState().counter).toEqual({ state: "IDLE", context: { count: 1 } });
+  });
+
+  it("не фильтрует runtime callbacks по PluginEvents", () => {
+    type PluginEvent = FSMEvent<"PLUGIN_EVENT", { readonly id: string }>;
+
+    const observer = vi.fn();
+    const plugin = definePlugin<PluginEvent>().create({
+      name: "stage-one-plugin-events-observer",
+      intercept(ctx) {
+        observer(`intercept:${ctx.action.type}`);
+      },
+      hooks: {
+        beforeReduce(ctx) {
+          observer(`hook:${ctx.action.type}`);
+        },
+      },
+    });
+    const manager = MachineManager(
+      {
+        counter: {
+          config: { IDLE: { APP_EVENT: "IDLE" } },
+          initialState: "IDLE",
+          initialContext: { count: 0 },
+          reducer: (slice: { readonly context: { readonly count: number } }) => ({
+            state: "IDLE" as const,
+            context: { count: slice.context.count + 1 },
+          }),
+        },
+      },
+      { plugins: [plugin] },
+    );
+
+    manager.transition({ type: "APP_EVENT" });
+
+    expect(observer).toHaveBeenCalledWith("intercept:APP_EVENT");
+    expect(observer).toHaveBeenCalledWith("hook:APP_EVENT");
     expect(manager.getState().counter).toEqual({ state: "IDLE", context: { count: 1 } });
   });
 

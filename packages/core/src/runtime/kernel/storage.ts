@@ -121,7 +121,8 @@ export type StorageDehydrateContext = {
 export type StorageHydrateContext = {
   readonly state: StorageRuntimeState;
   readonly manager: ManagerRuntimeContext;
-  readonly snapshot: unknown;
+  readonly machines: Readonly<Record<string, unknown>>;
+  readonly snapshot: unknown | undefined;
   readonly baseState: Record<string, unknown>;
   readonly strategy: HydrateStrategy;
   readonly source: "hydrate" | "opts.snapshot";
@@ -160,7 +161,7 @@ export type StorageHydrateResult = {
 
 export type StorageDehydrateResult = {
   readonly machines?: Record<string, unknown>;
-  readonly storage?: unknown;
+  readonly snapshot?: unknown;
 };
 
 export type StorageDispatchContext = {
@@ -254,7 +255,7 @@ export type BucketStorageRuntime = StorageRuntimeBase & {
 
 export type StorageEffectsRuntime = {
   condition?(ctx: StorageConditionContext): Promise<boolean>;
-  resolveInvocations(ctx: ResolveEffectInvocationsContext): StorageEffectInvocation[];
+  resolveInvocations(ctx: ResolveEffectInvocationsContext): readonly StorageEffectInvocation[];
   invoke(ctx: StorageEffectInvocationContext): void;
 };
 
@@ -279,7 +280,7 @@ export type StorageRuntime = (TemplateStorageRuntime | BucketStorageRuntime) & {
 };
 
 export type StorageRegistry = {
-  register(kind: string, runtime: StorageRuntime): void;
+  register(kind: string, runtime: StorageRuntime, owner: string): void;
   get(kind: string): StorageRuntime | undefined;
 };
 

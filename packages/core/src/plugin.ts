@@ -76,11 +76,11 @@ export type LiteFsmPlugin<
 
 // === Plugin definition typing ================================================
 
-type ObserverEvents<PluginEvents extends AnyEvent, HostEvents extends AnyEvent> = [HostEvents] extends [never]
-  ? PluginEvents
+// Observer callbacks получают общий поток host manager-а; scoped transition остается
+// ограничен событиями, которые plugin сам добавляет в manager.transition.
+type PluginObservedEvents<PluginEvents extends AnyEvent, HostEvents extends AnyEvent> = [AnyEvent] extends [HostEvents]
+  ? AnyEvent
   : HostEvents | PluginEvents;
-
-// Reshape публичных context types: action/event/transition сужаются до plugin/host events.
 
 type PluginDispatchContext<Events extends AnyEvent> = Omit<DispatchContext, "action" | "originalAction"> & {
   readonly originalAction: ManagerAction<Events>;
@@ -141,7 +141,7 @@ type PluginDefinitionBase<
   PluginEvents extends AnyEvent,
   HostEvents extends AnyEvent,
   Name extends string = string,
-  Events extends AnyEvent = ObserverEvents<PluginEvents, HostEvents>,
+  Events extends AnyEvent = PluginObservedEvents<PluginEvents, HostEvents>,
 > = {
   readonly name: Name;
   readonly manager?: Record<string, ManagerExtensionFactory>;
@@ -180,9 +180,10 @@ type PluginDefinitionInput<
   RouteMetaResolvers extends object,
   Definition extends PluginDefinitionBase<PluginEvents, HostEvents>,
 > = Definition &
-  PluginRouteMetaSection<RouteMetaValues, RouteMetaResolvers, ObserverEvents<PluginEvents, HostEvents>> &
+  PluginRouteMetaSection<RouteMetaValues, RouteMetaResolvers, PluginObservedEvents<PluginEvents, HostEvents>> &
   RejectUnknownKeys<
-    Definition & PluginRouteMetaSection<RouteMetaValues, RouteMetaResolvers, ObserverEvents<PluginEvents, HostEvents>>
+    Definition &
+      PluginRouteMetaSection<RouteMetaValues, RouteMetaResolvers, PluginObservedEvents<PluginEvents, HostEvents>>
   >;
 
 type PluginCreate<PluginEvents extends AnyEvent, HostEvents extends AnyEvent> = <
@@ -218,7 +219,7 @@ const createPluginValue = <const Definition extends { readonly name: string }, P
 
 export function definePlugin<
   PluginEvents extends AnyEvent = never,
-  HostEvents extends AnyEvent = [PluginEvents] extends [never] ? AnyEvent : never,
+  HostEvents extends AnyEvent = AnyEvent,
 >(): PluginBuilder<PluginEvents, HostEvents> {
   if (arguments.length > 0) {
     invalidPluginDefinition("definePlugin must be called without arguments; use definePlugin().create(...).");
