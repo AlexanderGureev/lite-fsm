@@ -32,7 +32,11 @@ import { compose, deepFreeze, HYDRATE_ACTION_TYPE, IS_DEV, LiteFsmError, VOID_RE
 import { createBucketRuntime, groupTemplatesByRuntime, initBucketState } from "./bucketRuntime";
 import { createPluginRegistry, type DispatchHookPhase } from "./registry";
 import { createSnapshotRuntime } from "./snapshot";
-import { compileStorageTemplates, type ManagerRuntimeContext, STORAGE_ACTION_DROP, type StorageDispatchContext } from "./storage";
+import {
+  compileStorageTemplates,
+  type ManagerRuntimeContext,
+  type StorageDispatchLifecycleContext,
+} from "./storage";
 
 export type RuntimePreset = {
   readonly name: string;
@@ -107,10 +111,10 @@ export const createMachineManagerFactory = (preset: RuntimePreset): MachineManag
     let state = {} as MachinesState<S>;
     let subscribers: Array<TransitionSubscriber<S, RuntimeEvents, RuntimeMeta>> = [];
     let userDeps = {} as MachineDependencies<S, Plugins>;
-    let activeDispatch: StorageDispatchContext | null = null;
+    let activeDispatch: StorageDispatchLifecycleContext | null = null;
     let runningDispatchHook = false;
 
-    const requireActiveDispatch = (): StorageDispatchContext => {
+    const requireActiveDispatch = (): StorageDispatchLifecycleContext => {
       /* v8 ignore next 6 -- защитный invariant: вызывается только из reducer/coreTransition внутри активного transition(). */
       if (!activeDispatch) {
         throw new LiteFsmError(
@@ -175,45 +179,92 @@ export const createMachineManagerFactory = (preset: RuntimePreset): MachineManag
 
     // === Dispatch context helpers ============================================
 
-    const createDispatch = (action: Action, options: unknown): StorageDispatchContext => ({
-      options,
-      runtime: new Map(),
-      originalAction: action,
-      preparedAction: action,
-      action,
-      skipDelivery: false,
-      route: pluginRegistry.routing.resolveRoute(action),
-      prevState: state as RootState,
-      nextState: state as RootState,
-      nextCalled: false,
-      dropped: false,
-      touched: new Set<string>(),
+    const createDispatch = (action: Action, options: unknown): StorageDispatchLifecycleContext => {
+      const runtime = new Map<string, unknown>();
+      let lifecycle: StorageDispatchLifecycleContext;
+      const publicDispatch = {
+        get options() {
+          return options;
+        },
+        get runtime() {
+          return runtime;
+        },
+        get route() {
+          return lifecycle.route;
+        },
+        get prevState() {
+          return lifecycle.prevState;
+        },
+        get nextState() {
+          return lifecycle.nextState;
+        },
+        set nextState(nextState: RootState) {
+          lifecycle.nextState = nextState;
+        },
+        get skipDelivery() {
+          return lifecycle.skipDelivery;
+        },
+        reportError(error: unknown) {
+          opts?.onError?.(error);
+        },
+      };
+
+      lifecycle = {
+        originalAction: action,
+        action,
+        skipDelivery: false,
+        route: pluginRegistry.routing.resolveRoute(action),
+        prevState: state as RootState,
+        nextState: state as RootState,
+        nextCalled: false,
+        outcome: { type: "active" },
+        touched: new Set<string>(),
+        dispatch: publicDispatch,
+      };
+      return lifecycle;
+    };
+
+    const setCurrentAction = (dispatch: StorageDispatchLifecycleContext, action: Action) => {
+      dispatch.action = action;
+      dispatch.route = pluginRegistry.routing.resolveRoute(action);
+    };
+
+    const createPluginDispatchContext = (dispatch: StorageDispatchLifecycleContext): DispatchContext => ({
+      get options() {
+        return dispatch.dispatch.options;
+      },
+      get runtime() {
+        return dispatch.dispatch.runtime;
+      },
+      get originalAction() {
+        return dispatch.originalAction;
+      },
+      get action() {
+        return dispatch.action;
+      },
+      get skipDelivery() {
+        return dispatch.skipDelivery;
+      },
       reportError(error) {
-        opts?.onError?.(error);
+        dispatch.dispatch.reportError(error);
       },
     });
 
-    const setCommittedAction = (dispatch: StorageDispatchContext, action: Action, committedPrevState?: RootState) => {
-      dispatch.action = action;
-      dispatch.committedAction = action;
-      dispatch.route = pluginRegistry.routing.resolveRoute(action);
-      if (committedPrevState && !dispatch.committedPrevState) dispatch.committedPrevState = committedPrevState;
-    };
-
-    const runActionInterceptors = (dispatch: StorageDispatchContext) => {
+    const runActionInterceptors = (dispatch: StorageDispatchLifecycleContext) => {
+      const context = createPluginDispatchContext(dispatch);
       for (const interceptor of pluginRegistry.listActionInterceptors()) {
-        const result = interceptor(dispatch as DispatchContext);
-        if (result?.action !== undefined) setCommittedAction(dispatch, result.action);
+        const result = interceptor(context);
+        if (result?.action !== undefined) setCurrentAction(dispatch, result.action);
         if (result?.skipDelivery === true) dispatch.skipDelivery = true;
         if (result?.stopInterceptors === true) return;
       }
     };
 
-    const runDispatchHooks = (phase: DispatchHookPhase, dispatch: StorageDispatchContext) => {
+    const runDispatchHooks = (phase: DispatchHookPhase, dispatch: StorageDispatchLifecycleContext) => {
       for (const hook of pluginRegistry.listDispatchHooks(phase)) {
         runningDispatchHook = true;
         try {
-          (hook as DispatchHook)(dispatch as DispatchContext);
+          (hook as DispatchHook)(createPluginDispatchContext(dispatch));
         } finally {
           runningDispatchHook = false;
         }
@@ -243,10 +294,14 @@ export const createMachineManagerFactory = (preset: RuntimePreset): MachineManag
       const prevState = state;
       dispatch.prevState = prevState as RootState;
       dispatch.nextState = prevState as RootState;
-      bucketRuntime.beginReduce(widenAction(action), dispatch);
-      if (dispatch.dropped) return action;
+      setCurrentAction(dispatch, widenAction(action));
+      const beforeReduce = bucketRuntime.beforeReduce(widenAction(action), dispatch);
+      if (beforeReduce.type === "drop") {
+        dispatch.outcome = { type: "drop", action: dispatch.originalAction };
+        return narrowAction(dispatch.originalAction);
+      }
 
-      setCommittedAction(dispatch, dispatch.committedAction ?? widenAction(action), prevState as RootState);
+      setCurrentAction(dispatch, beforeReduce.action);
       runActionInterceptors(dispatch);
       runDispatchHooks("beforeReduce", dispatch);
 
@@ -255,6 +310,11 @@ export const createMachineManagerFactory = (preset: RuntimePreset): MachineManag
       } else {
         const nextState = rootReducer(prevState, narrowAction(dispatch.action));
         if (nextState === undefined) throw new Error(VOID_REDUCER_ERROR);
+        // replaceReducer может заменить root state без вызова storage reducer.
+        // Такой replacement все равно должен пройти commit владельца default state.
+        if (nextState !== prevState && dispatch.touched.size === 0) {
+          dispatch.touched.add(pluginRegistry.defaultStorageKind);
+        }
         dispatch.nextState = nextState as RootState;
       }
 
@@ -300,19 +360,21 @@ export const createMachineManagerFactory = (preset: RuntimePreset): MachineManag
       assertUserAction(action);
       const widened = widenAction(action);
       const dispatch = createDispatch(widened, options);
-      const prepared = bucketRuntime.prepareAction(widened, options, dispatch);
-      if (prepared === STORAGE_ACTION_DROP) return action;
+      const prepareOutcome = bucketRuntime.prepareAction(widened, options, dispatch);
+      if (prepareOutcome.type === "drop") return action;
+      setCurrentAction(dispatch, prepareOutcome.action);
 
       const parentDispatch = activeDispatch;
       activeDispatch = dispatch;
       let committed: RuntimeAction;
       try {
-        committed = wrappedTransition(narrowAction(prepared));
+        committed = wrappedTransition(narrowAction(prepareOutcome.action));
       } finally {
         activeDispatch = parentDispatch;
       }
 
-      if (!dispatch.committedAction) return committed;
+      if (dispatch.outcome.type === "drop") return narrowAction(dispatch.outcome.action);
+      if (!dispatch.nextCalled) return committed;
 
       runDispatchHooks("beforeEffects", dispatch);
       bucketRuntime.runEffects(dispatch);

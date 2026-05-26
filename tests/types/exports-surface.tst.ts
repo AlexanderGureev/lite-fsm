@@ -105,6 +105,23 @@ import type {
 
 import type { Assert, Equal } from "./_helpers";
 
+// Storage authoring relies on contextual typing from defineStorageRuntime().create(...).
+// Root exports intentionally do not expose named storage callback context/result types.
+// @ts-expect-error!
+type _NoStorageDispatchContext = import("@lite-fsm/core").StorageDispatchContext;
+// @ts-expect-error!
+type _NoStoragePrepareActionContext = import("@lite-fsm/core").StoragePrepareActionContext;
+// @ts-expect-error!
+type _NoStorageBeforeReduceContext = import("@lite-fsm/core").StorageBeforeReduceContext;
+// @ts-expect-error!
+type _NoStorageReduceContext = import("@lite-fsm/core").StorageReduceContext;
+// @ts-expect-error!
+type _NoStorageReduceBucketContext = import("@lite-fsm/core").StorageReduceBucketContext;
+// @ts-expect-error!
+type _NoStorageActionStageResult = import("@lite-fsm/core").StorageActionStageResult;
+// @ts-expect-error!
+type _NoStorageReduceResult = import("@lite-fsm/core").StorageReduceResult;
+
 type Ping = FSMEvent<"PING", { id: string }>;
 type Done = FSMEvent<"DONE">;
 type Event = Ping | Done;

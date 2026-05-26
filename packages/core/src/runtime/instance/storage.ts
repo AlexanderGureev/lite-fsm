@@ -10,6 +10,7 @@ export const INSTANCE_STORAGE_KIND = "instance";
 
 export const instanceStorageRuntime: StorageRuntime = {
   kind: INSTANCE_STORAGE_KIND,
+  reduceScope: "bucket",
   validateTemplate(ctx) {
     validateInstanceTemplate(ctx);
   },
@@ -25,14 +26,11 @@ export const instanceStorageRuntime: StorageRuntime = {
   prepareAction(ctx) {
     return asInstanceRuntimeState(ctx.state).prepareAction(ctx);
   },
-  beginReduce(ctx) {
-    return asInstanceRuntimeState(ctx.state).beginReduce(ctx);
+  beforeReduce(ctx) {
+    return asInstanceRuntimeState(ctx.state).beforeReduce(ctx);
   },
-  acceptsEvent({ state }) {
-    return asInstanceRuntimeState(state).acceptsEvent();
-  },
-  reduce(ctx) {
-    return asInstanceRuntimeState(ctx.state).reduce(ctx);
+  reduceBucket(ctx) {
+    return asInstanceRuntimeState(ctx.state).reduceBucket(ctx);
   },
   commit(ctx) {
     asInstanceRuntimeState(ctx.state).commit(ctx);

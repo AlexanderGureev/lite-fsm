@@ -14,7 +14,13 @@ import type { RouteConstraint, RoutingRuntime } from "./routing";
 export type StorageRuntimeState = unknown;
 export type RuntimeIdentity = Readonly<Record<string, unknown>>;
 export type StorageEffectInvocation = unknown;
-export const STORAGE_ACTION_DROP = Symbol.for("lite-fsm.storage-action-drop");
+
+export type StorageActionStageResult =
+  | void
+  | { readonly type: "replace"; readonly action: ManagerAction<AnyEvent> }
+  | { readonly type: "drop" };
+
+export type StorageReduceResult = void | { readonly type: "skip" };
 
 export type ValidateTemplateContext = {
   readonly key: string;
@@ -43,6 +49,7 @@ export type CreatePublicInitialStateContext = {
 export type AcceptsEventContext = {
   readonly template: CompiledStorageTemplate;
   readonly action: ManagerAction<AnyEvent>;
+  readonly originalAction: ManagerAction<AnyEvent>;
   readonly state: StorageRuntimeState;
   readonly dispatch: StorageDispatchContext;
 };
@@ -50,25 +57,40 @@ export type AcceptsEventContext = {
 export type StorageReduceContext = {
   readonly template: CompiledStorageTemplate;
   readonly action: ManagerAction<AnyEvent>;
+  readonly originalAction: ManagerAction<AnyEvent>;
   readonly state: StorageRuntimeState;
   readonly manager: ManagerRuntimeContext;
   readonly dispatch: StorageDispatchContext;
 };
 
-export type StorageBeginReduceContext = {
+export type StorageBeforeReduceContext = {
   readonly action: ManagerAction<AnyEvent>;
+  readonly originalAction: ManagerAction<AnyEvent>;
+  readonly state: StorageRuntimeState;
+  readonly manager: ManagerRuntimeContext;
+  readonly dispatch: StorageDispatchContext;
+};
+
+export type StorageReduceBucketContext = {
+  readonly templates: readonly CompiledStorageTemplate[];
+  readonly action: ManagerAction<AnyEvent>;
+  readonly originalAction: ManagerAction<AnyEvent>;
   readonly state: StorageRuntimeState;
   readonly manager: ManagerRuntimeContext;
   readonly dispatch: StorageDispatchContext;
 };
 
 export type StorageCommitContext = {
+  readonly action: ManagerAction<AnyEvent>;
+  readonly originalAction: ManagerAction<AnyEvent>;
   readonly state: StorageRuntimeState;
   readonly manager: ManagerRuntimeContext;
   readonly dispatch: StorageDispatchContext;
 };
 
 export type ResolveEffectInvocationsContext = {
+  readonly action: ManagerAction<AnyEvent>;
+  readonly originalAction: ManagerAction<AnyEvent>;
   readonly state: StorageRuntimeState;
   readonly manager: ManagerRuntimeContext;
   readonly dispatch: StorageDispatchContext;
@@ -76,6 +98,8 @@ export type ResolveEffectInvocationsContext = {
 
 export type StorageEffectInvocationContext = {
   readonly invocation: StorageEffectInvocation;
+  readonly action: ManagerAction<AnyEvent>;
+  readonly originalAction: ManagerAction<AnyEvent>;
   readonly state: StorageRuntimeState;
   readonly manager: ManagerRuntimeContext;
   readonly dispatch: StorageDispatchContext;
@@ -107,10 +131,12 @@ export type StorageHydrateContext = {
 export type ResolveIdentityContext = {
   readonly state: StorageRuntimeState;
   readonly action: ManagerAction<AnyEvent>;
+  readonly originalAction: ManagerAction<AnyEvent>;
 };
 
 export type StorageReactionContext = {
   readonly action: ManagerAction<AnyEvent>;
+  readonly originalAction: ManagerAction<AnyEvent>;
   readonly state: StorageRuntimeState;
   readonly manager: ManagerRuntimeContext;
   readonly dispatch: StorageDispatchContext;
@@ -118,13 +144,14 @@ export type StorageReactionContext = {
 
 export type StoragePrepareActionContext = {
   readonly action: ManagerAction<AnyEvent>;
+  readonly originalAction: ManagerAction<AnyEvent>;
   readonly options: unknown;
   readonly state: StorageRuntimeState;
   readonly manager: ManagerRuntimeContext;
   readonly dispatch: StorageDispatchContext;
 };
 
-export type StoragePrepareActionResult = ManagerAction<AnyEvent> | typeof STORAGE_ACTION_DROP;
+export type StoragePrepareActionResult = StorageActionStageResult;
 
 export type StorageHydrateResult = {
   readonly nextState: Record<string, unknown>;
@@ -139,19 +166,28 @@ export type StorageDehydrateResult = {
 export type StorageDispatchContext = {
   readonly options: unknown;
   readonly runtime: Map<string, unknown>;
+  readonly route: RouteConstraint;
+  readonly prevState: Record<string, unknown>;
+  nextState: Record<string, unknown>;
+  readonly skipDelivery: boolean;
+  reportError(error: unknown): void;
+};
+
+export type StorageDispatchOutcome =
+  | { readonly type: "active" }
+  | { readonly type: "drop"; readonly action: ManagerAction<AnyEvent> };
+
+export type StorageDispatchLifecycleContext = {
   readonly originalAction: ManagerAction<AnyEvent>;
-  preparedAction: ManagerAction<AnyEvent>;
   action: ManagerAction<AnyEvent>;
   skipDelivery: boolean;
   route: RouteConstraint;
   prevState: Record<string, unknown>;
   nextState: Record<string, unknown>;
   nextCalled: boolean;
-  dropped: boolean;
+  outcome: StorageDispatchOutcome;
   touched: Set<string>;
-  committedAction?: ManagerAction<AnyEvent>;
-  committedPrevState?: Record<string, unknown>;
-  reportError(error: unknown): void;
+  readonly dispatch: StorageDispatchContext;
 };
 
 // Типизированный slot для StorageDispatchContext.runtime: storage runtime владеет ключом
@@ -198,10 +234,22 @@ export type StorageRuntimeBase = {
   createRuntimeState(ctx: CreateRuntimeStateContext): StorageRuntimeState;
   createPublicInitialState(ctx: CreatePublicInitialStateContext): unknown;
   prepareAction?(ctx: StoragePrepareActionContext): StoragePrepareActionResult;
-  beginReduce?(ctx: StorageBeginReduceContext): void | false;
-  acceptsEvent(ctx: AcceptsEventContext): boolean;
-  reduce(ctx: StorageReduceContext): void | false;
+  beforeReduce?(ctx: StorageBeforeReduceContext): StorageActionStageResult;
   commit(ctx: StorageCommitContext): void;
+};
+
+export type TemplateStorageRuntime = StorageRuntimeBase & {
+  readonly reduceScope?: "template";
+  acceptsEvent(ctx: AcceptsEventContext): boolean;
+  reduce(ctx: StorageReduceContext): StorageReduceResult;
+  readonly reduceBucket?: never;
+};
+
+export type BucketStorageRuntime = StorageRuntimeBase & {
+  readonly reduceScope: "bucket";
+  reduceBucket(ctx: StorageReduceBucketContext): StorageReduceResult;
+  readonly acceptsEvent?: never;
+  readonly reduce?: never;
 };
 
 export type StorageEffectsRuntime = {
@@ -223,7 +271,7 @@ export type StorageReactionRuntime = {
   run(ctx: StorageReactionContext): void;
 };
 
-export type StorageRuntime = StorageRuntimeBase & {
+export type StorageRuntime = (TemplateStorageRuntime | BucketStorageRuntime) & {
   readonly effects?: StorageEffectsRuntime;
   readonly snapshot?: StorageSnapshotRuntime;
   readonly identity?: StorageIdentityRuntime;

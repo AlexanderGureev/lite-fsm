@@ -56,6 +56,7 @@ const cacheStorage = defineStorageRuntime<CacheExtension>().create({
   },
   acceptsEvent(ctx) {
     expect(ctx.action).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
+    expect(ctx.originalAction).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
     return false;
   },
   reduce(ctx) {
@@ -236,21 +237,49 @@ describe("plugin system — этап 7 storage types", () => {
       },
       prepareAction(ctx) {
         expect(ctx.state).type.toBe<unknown>();
-        return ctx.action;
+        expect(ctx.action).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
+        expect(ctx.originalAction).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
+        // @ts-expect-error!
+        ctx.dispatch.originalAction;
+        // @ts-expect-error!
+        ctx.dispatch.preparedAction;
+        // @ts-expect-error!
+        ctx.dispatch.action;
+        // @ts-expect-error!
+        ctx.dispatch.committedAction;
+        // @ts-expect-error!
+        ctx.dispatch.dropped;
+        return { type: "replace", action: ctx.action };
       },
-      beginReduce(ctx) {
+      beforeReduce(ctx) {
         expect(ctx.state).type.toBe<unknown>();
-        return false;
+        expect(ctx.action).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
+        expect(ctx.originalAction).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
+        return { type: "drop" };
       },
-      acceptsEvent() {
+      acceptsEvent(ctx) {
+        expect(ctx.action).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
+        expect(ctx.originalAction).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
         return true;
       },
       reduce(ctx) {
         expect(ctx.template.data).type.toBe<unknown>();
-        return false;
+        expect(ctx.action).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
+        expect(ctx.originalAction).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
+        // @ts-expect-error!
+        ctx.dispatch.route = ctx.dispatch.route;
+        // @ts-expect-error!
+        ctx.dispatch.prevState = ctx.dispatch.prevState;
+        // @ts-expect-error!
+        ctx.dispatch.skipDelivery = false;
+        ctx.dispatch.nextState = ctx.dispatch.nextState;
+        ctx.dispatch.runtime.set("stage-seven", true);
+        return { type: "skip" };
       },
       commit(ctx) {
         expect(ctx.state).type.toBe<unknown>();
+        expect(ctx.action).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
+        expect(ctx.originalAction).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
       },
       effects: {
         condition(ctx) {
@@ -259,10 +288,14 @@ describe("plugin system — этап 7 storage types", () => {
         },
         resolveInvocations(ctx) {
           expect(ctx.state).type.toBe<unknown>();
+          expect(ctx.action).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
+          expect(ctx.originalAction).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
           return [{ id: "invoke" }];
         },
         invoke(ctx) {
           expect(ctx.invocation).type.toBe<unknown>();
+          expect(ctx.action).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
+          expect(ctx.originalAction).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
         },
       },
       snapshot: {
@@ -278,14 +311,276 @@ describe("plugin system — этап 7 storage types", () => {
       identity: {
         resolve(ctx) {
           expect(ctx.state).type.toBe<unknown>();
+          expect(ctx.originalAction).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
           return { type: ctx.action.type };
         },
       },
       reactions: {
         run(ctx) {
           expect(ctx.state).type.toBe<unknown>();
+          expect(ctx.action).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
+          expect(ctx.originalAction).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
         },
       },
+    });
+  });
+
+  test("storage runtime reduceScope различает template и bucket shapes", () => {
+    defineStorageRuntime().create({
+      kind: "default-template-scope",
+      validateTemplate() {},
+      compileTemplate() {},
+      createRuntimeState() {
+        return {};
+      },
+      createPublicInitialState() {
+        return {};
+      },
+      acceptsEvent(ctx) {
+        expect(ctx.template.key).type.toBe<string>();
+        return true;
+      },
+      reduce(ctx) {
+        expect(ctx.template.kind).type.toBe<string>();
+      },
+      commit() {},
+    });
+
+    defineStorageRuntime().create({
+      kind: "explicit-template-scope",
+      reduceScope: "template",
+      validateTemplate() {},
+      compileTemplate() {},
+      createRuntimeState() {
+        return {};
+      },
+      createPublicInitialState() {
+        return {};
+      },
+      acceptsEvent() {
+        return true;
+      },
+      reduce(ctx) {
+        expect(ctx.template.data).type.toBe<unknown>();
+      },
+      commit() {},
+    });
+
+    defineStorageRuntime().create({
+      kind: "bucket-scope",
+      reduceScope: "bucket",
+      validateTemplate() {},
+      compileTemplate() {},
+      createRuntimeState() {
+        return {};
+      },
+      createPublicInitialState() {
+        return {};
+      },
+      reduceBucket(ctx) {
+        expect(ctx.templates).type.toBe<readonly { readonly key: string; readonly kind: string; readonly data?: unknown }[]>();
+        expect(ctx.action).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
+        expect(ctx.originalAction).type.toBe<ManagerAction<{ type: string; payload?: unknown }>>();
+        expect(ctx.state).type.toBe<unknown>();
+        return { type: "skip" };
+      },
+      commit() {},
+    });
+
+    // @ts-expect-error!
+    defineStorageRuntime().create({
+      kind: "bucket-without-explicit-scope",
+      validateTemplate() {},
+      compileTemplate() {},
+      createRuntimeState() {
+        return {};
+      },
+      createPublicInitialState() {
+        return {};
+      },
+      reduceBucket() {},
+      commit() {},
+    });
+
+    // @ts-expect-error!
+    defineStorageRuntime().create({
+      kind: "bucket-with-accepts-event",
+      reduceScope: "bucket",
+      validateTemplate() {},
+      compileTemplate() {},
+      createRuntimeState() {
+        return {};
+      },
+      createPublicInitialState() {
+        return {};
+      },
+      reduceBucket() {},
+      acceptsEvent() {
+        return true;
+      },
+      commit() {},
+    });
+
+    // @ts-expect-error!
+    defineStorageRuntime().create({
+      kind: "bucket-with-reduce",
+      reduceScope: "bucket",
+      validateTemplate() {},
+      compileTemplate() {},
+      createRuntimeState() {
+        return {};
+      },
+      createPublicInitialState() {
+        return {};
+      },
+      reduceBucket() {},
+      reduce() {},
+      commit() {},
+    });
+
+    // @ts-expect-error!
+    defineStorageRuntime().create({
+      kind: "template-with-reduce-bucket",
+      reduceScope: "template",
+      validateTemplate() {},
+      compileTemplate() {},
+      createRuntimeState() {
+        return {};
+      },
+      createPublicInitialState() {
+        return {};
+      },
+      acceptsEvent() {
+        return true;
+      },
+      reduce() {},
+      reduceBucket() {},
+      commit() {},
+    });
+  });
+
+  test("defineStorageRuntime не принимает старый beginReduce", () => {
+    defineStorageRuntime().create({
+      kind: "old-begin-reduce",
+      validateTemplate() {},
+      compileTemplate() {},
+      createRuntimeState() {
+        return {};
+      },
+      createPublicInitialState() {
+        return {};
+      },
+      // @ts-expect-error!
+      beginReduce() {},
+      acceptsEvent() {
+        return true;
+      },
+      reduce() {},
+      commit() {},
+    });
+  });
+
+  test("defineStorageRuntime не принимает старые result contracts", () => {
+    defineStorageRuntime().create({
+      kind: "old-prepare-action-result",
+      validateTemplate() {},
+      compileTemplate() {},
+      createRuntimeState() {
+        return {};
+      },
+      createPublicInitialState() {
+        return {};
+      },
+      // @ts-expect-error!
+      prepareAction(ctx) {
+        return ctx.action;
+      },
+      acceptsEvent() {
+        return true;
+      },
+      reduce() {},
+      commit() {},
+    });
+
+    defineStorageRuntime().create({
+      kind: "old-before-reduce-result",
+      validateTemplate() {},
+      compileTemplate() {},
+      createRuntimeState() {
+        return {};
+      },
+      createPublicInitialState() {
+        return {};
+      },
+      // @ts-expect-error!
+      beforeReduce() {
+        return false;
+      },
+      acceptsEvent() {
+        return true;
+      },
+      reduce() {},
+      commit() {},
+    });
+
+    defineStorageRuntime().create({
+      kind: "old-reduce-result",
+      validateTemplate() {},
+      compileTemplate() {},
+      createRuntimeState() {
+        return {};
+      },
+      createPublicInitialState() {
+        return {};
+      },
+      acceptsEvent() {
+        return true;
+      },
+      // @ts-expect-error!
+      reduce() {
+        return false;
+      },
+      commit() {},
+    });
+
+    defineStorageRuntime().create({
+      kind: "old-reduce-drop-result",
+      validateTemplate() {},
+      compileTemplate() {},
+      createRuntimeState() {
+        return {};
+      },
+      createPublicInitialState() {
+        return {};
+      },
+      acceptsEvent() {
+        return true;
+      },
+      // @ts-expect-error!
+      reduce() {
+        return { type: "drop" };
+      },
+      commit() {},
+    });
+
+    defineStorageRuntime().create({
+      kind: "old-reduce-replace-result",
+      validateTemplate() {},
+      compileTemplate() {},
+      createRuntimeState() {
+        return {};
+      },
+      createPublicInitialState() {
+        return {};
+      },
+      acceptsEvent() {
+        return true;
+      },
+      // @ts-expect-error!
+      reduce() {
+        return { type: "replace", action: { type: "RESET" } };
+      },
+      commit() {},
     });
   });
 

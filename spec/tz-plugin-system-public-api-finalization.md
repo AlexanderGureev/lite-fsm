@@ -717,7 +717,7 @@ defineStorageRuntime<Extension>().create({
   createRuntimeState(ctx) {},
   createPublicInitialState(ctx) {},
   prepareAction(ctx) {},
-  beginReduce(ctx) {},
+  beforeReduce(ctx) {},
   acceptsEvent(ctx) {},
   reduce(ctx) {},
   commit(ctx) {},
@@ -751,7 +751,7 @@ defineStorageRuntime<Extension>().create({
 - Builder сохраняет literal `kind`, даже при explicit `Extension`.
 - `defineStorageRuntime().create(...)` без `Extension` дает machine extension `{ storage: Kind }`.
 - Возвращаемое значение является opaque storage definition для `definePlugin().create({ storage: [...] })`.
-- Builder принимает public shape текущего `StorageRuntime` contract: mandatory base methods, optional `prepareAction`, `beginReduce`, `effects`, `snapshot`, `identity` и `reactions`.
+- Builder принимает public shape текущего `StorageRuntime` contract: mandatory base methods, optional `prepareAction`, `beforeReduce`, `reduceScope`, template-scope `acceptsEvent`/`reduce`, bucket-scope `reduceBucket`, `effects`, `snapshot`, `identity` и `reactions`.
 - Возвращаемое значение не является standalone runtime/preset API и подключается только через `definePlugin().create({ storage: [...] })`.
 - Inline storage runtime object в plugin `storage` section не допускается: section принимает только values от `defineStorageRuntime().create(...)`.
 - `storage` section принимает readonly array definitions, не object map.
@@ -790,7 +790,7 @@ Type tests:
 - tuple и union inputs дают одинаковые helper outputs;
 - `TypedCreateMachineFn` принимает declared storage kinds и отклоняет unknown kind;
 - public `compileTemplate` не принимает return value с ручными `key` или `kind`;
-- optional `prepareAction`, `beginReduce`, `effects.condition`, `effects.resolveInvocations`, `effects.invoke`, `snapshot`, `identity` и `reactions` принимаются в storage builder;
+- optional `prepareAction`, `beforeReduce`, `effects.condition`, `effects.resolveInvocations`, `effects.invoke`, `snapshot`, `identity` и `reactions` принимаются в storage builder;
 - storage runtime contexts не требуют дополнительных public generics для runtime state, template data или snapshot payload;
 - object form `storage: { cache }` не принимается;
 - inline object form `storage: [{ kind: "cache", ... }]` не принимается;
@@ -989,7 +989,7 @@ Docs pages в `apps/docs` остаются заглушками. Полная д
 - thrown errors из intercept/hooks пробрасываются вызывающему и не вызывают `onError`; `reportError(error)` вызывает `onError` и не меняет control flow;
 - `defineStorageRuntime<Extension>().create(...)` связывает storage runtime и machine extension;
 - `PluginMachineExtensionInput` остается internal constraint, не экспортируется и не документируется;
-- `defineStorageRuntime().create(...)` открывает текущий storage runtime contract, включая `prepareAction`, `beginReduce`, `effects.condition`, `effects.resolveInvocations`, `effects.invoke`, `snapshot`, `identity` и `reactions`, но не добавляет generics для `TemplateData`, `RuntimeState` и `SnapshotPayload`;
+- `defineStorageRuntime().create(...)` открывает текущий storage runtime contract, включая `prepareAction`, `beforeReduce`, `reduceScope`, template-scope `acceptsEvent`/`reduce`, bucket-scope `reduceBucket`, `effects.condition`, `effects.resolveInvocations`, `effects.invoke`, `snapshot`, `identity` и `reactions`, но не добавляет generics для `TemplateData`, `RuntimeState` и `SnapshotPayload`;
 - public `compileTemplate(ctx)` возвращает только `void | { data?: unknown }`, а builder подставляет internal `key` и `kind`;
 - plugin `storage` section принимает только values от `defineStorageRuntime().create(...)`, а не inline runtime objects;
 - `PluginMachineExtensions<Plugin>` и `EffectDeps<AppDeps, Plugin>` принимают `PluginUnion` и tuple;

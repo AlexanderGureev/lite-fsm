@@ -3,23 +3,37 @@
 // в фабрике только pipeline-orchestration и lifecycle, а bucket-iteration жил в одном месте.
 
 import type { AnyEvent, MachinesState, MachineStore, ManagerAction } from "../../types";
+import { LiteFsmError } from "../../utils";
 import type { RuntimeBucket } from "./snapshot";
 import {
   type ManagerRuntimeContext,
-  STORAGE_ACTION_DROP,
   type StorageDispatchContext,
-  type StoragePrepareActionResult,
+  type StorageDispatchLifecycleContext,
+  type StorageReduceResult,
 } from "./storage";
 
 type Action = ManagerAction<AnyEvent>;
+type ActionStageOutcome = { readonly type: "continue"; readonly action: Action } | { readonly type: "drop" };
+
+const assertReduceResult = (runtimeKind: string, result: unknown): StorageReduceResult => {
+  if (result === undefined) return result;
+  if (typeof result === "object" && result !== null && (result as { readonly type?: unknown }).type === "skip") {
+    return result as StorageReduceResult;
+  }
+
+  throw new LiteFsmError(
+    "LITE_FSM_INVALID_STORAGE_RUNTIME",
+    `[lite-fsm] storage runtime '${runtimeKind}' returned invalid reduce result.`,
+  );
+};
 
 export type BucketRuntime<S extends MachineStore> = {
-  prepareAction(action: Action, options: unknown, dispatch: StorageDispatchContext): StoragePrepareActionResult;
-  beginReduce(action: Action, dispatch: StorageDispatchContext): void;
-  reduce(action: Action, dispatch: StorageDispatchContext): MachinesState<S>;
-  commit(dispatch: StorageDispatchContext): void;
-  runReactions(action: Action, dispatch: StorageDispatchContext): void;
-  runEffects(dispatch: StorageDispatchContext): void;
+  prepareAction(action: Action, options: unknown, dispatch: StorageDispatchLifecycleContext): ActionStageOutcome;
+  beforeReduce(action: Action, dispatch: StorageDispatchLifecycleContext): ActionStageOutcome;
+  reduce(action: Action, dispatch: StorageDispatchLifecycleContext): MachinesState<S>;
+  commit(dispatch: StorageDispatchLifecycleContext): void;
+  runReactions(action: Action, dispatch: StorageDispatchLifecycleContext): void;
+  runEffects(dispatch: StorageDispatchLifecycleContext): void;
   condition(predicate: (action: Action) => boolean): Promise<boolean>;
 };
 
@@ -30,49 +44,86 @@ export const createBucketRuntime = <S extends MachineStore>(
   defaultStorageKind: string,
 ): BucketRuntime<S> => ({
   prepareAction(action, options, dispatch) {
-    let prepared = action;
+    let currentAction = action;
     for (const bucket of buckets) {
       if (!bucket.runtime.prepareAction) continue;
       const result = bucket.runtime.prepareAction({
-        action: prepared,
+        action: currentAction,
+        originalAction: dispatch.originalAction,
         options,
         state: bucket.state,
         manager: managerContext,
-        dispatch,
+        dispatch: dispatch.dispatch,
       });
-      if (result === STORAGE_ACTION_DROP) return STORAGE_ACTION_DROP;
-      prepared = result;
-      dispatch.preparedAction = prepared;
-      dispatch.route = resolveRoute(prepared);
+      if (result?.type === "drop") return { type: "drop" };
+      if (result?.type !== "replace") continue;
+      currentAction = result.action;
+      dispatch.route = resolveRoute(currentAction);
     }
-    return prepared;
+    return { type: "continue", action: currentAction };
   },
 
-  beginReduce(action, dispatch) {
+  beforeReduce(action, dispatch) {
+    let currentAction = action;
     for (const bucket of buckets) {
-      if (!bucket.runtime.beginReduce) continue;
-      const result = bucket.runtime.beginReduce({
-        action,
+      if (!bucket.runtime.beforeReduce) continue;
+      const result = bucket.runtime.beforeReduce({
+        action: currentAction,
+        originalAction: dispatch.originalAction,
         state: bucket.state,
         manager: managerContext,
-        dispatch,
+        dispatch: dispatch.dispatch,
       });
-      if (result !== false) dispatch.touched.add(bucket.runtime.kind);
+      if (result?.type === "drop") return { type: "drop" };
+      if (result?.type !== "replace") continue;
+      currentAction = result.action;
+      dispatch.route = resolveRoute(currentAction);
     }
+    return { type: "continue", action: currentAction };
   },
 
   reduce(action, dispatch) {
     for (const bucket of buckets) {
+      if (bucket.runtime.reduceScope === "bucket") {
+        const result = assertReduceResult(
+          bucket.runtime.kind,
+          bucket.runtime.reduceBucket({
+            templates: bucket.templates,
+            action,
+            originalAction: dispatch.originalAction,
+            state: bucket.state,
+            manager: managerContext,
+            dispatch: dispatch.dispatch,
+          }),
+        );
+        if (result?.type !== "skip") dispatch.touched.add(bucket.runtime.kind);
+        continue;
+      }
+
       for (const template of bucket.templates) {
-        if (!bucket.runtime.acceptsEvent({ template, action, state: bucket.state, dispatch })) continue;
-        const result = bucket.runtime.reduce({
-          template,
-          action,
-          state: bucket.state,
-          manager: managerContext,
-          dispatch,
-        });
-        if (result !== false) dispatch.touched.add(bucket.runtime.kind);
+        if (
+          !bucket.runtime.acceptsEvent({
+            template,
+            action,
+            originalAction: dispatch.originalAction,
+            state: bucket.state,
+            dispatch: dispatch.dispatch,
+          })
+        ) {
+          continue;
+        }
+        const result = assertReduceResult(
+          bucket.runtime.kind,
+          bucket.runtime.reduce({
+            template,
+            action,
+            originalAction: dispatch.originalAction,
+            state: bucket.state,
+            manager: managerContext,
+            dispatch: dispatch.dispatch,
+          }),
+        );
+        if (result?.type !== "skip") dispatch.touched.add(bucket.runtime.kind);
       }
     }
     return dispatch.nextState as MachinesState<S>;
@@ -81,14 +132,26 @@ export const createBucketRuntime = <S extends MachineStore>(
   commit(dispatch) {
     for (const bucket of buckets) {
       if (!dispatch.touched.has(bucket.runtime.kind)) continue;
-      bucket.runtime.commit({ state: bucket.state, manager: managerContext, dispatch });
+      bucket.runtime.commit({
+        action: dispatch.action,
+        originalAction: dispatch.originalAction,
+        state: bucket.state,
+        manager: managerContext,
+        dispatch: dispatch.dispatch,
+      });
     }
   },
 
   runReactions(action, dispatch) {
     for (const bucket of buckets) {
       if (!dispatch.touched.has(bucket.runtime.kind) || !bucket.runtime.reactions) continue;
-      bucket.runtime.reactions.run({ action, state: bucket.state, manager: managerContext, dispatch });
+      bucket.runtime.reactions.run({
+        action,
+        originalAction: dispatch.originalAction,
+        state: bucket.state,
+        manager: managerContext,
+        dispatch: dispatch.dispatch,
+      });
     }
   },
 
@@ -96,11 +159,20 @@ export const createBucketRuntime = <S extends MachineStore>(
     for (const bucket of buckets) {
       if (!dispatch.touched.has(bucket.runtime.kind) || !bucket.runtime.effects) continue;
       for (const invocation of bucket.runtime.effects.resolveInvocations({
+        action: dispatch.action,
+        originalAction: dispatch.originalAction,
         state: bucket.state,
         manager: managerContext,
-        dispatch,
+        dispatch: dispatch.dispatch,
       })) {
-        bucket.runtime.effects.invoke({ invocation, state: bucket.state, manager: managerContext, dispatch });
+        bucket.runtime.effects.invoke({
+          invocation,
+          action: dispatch.action,
+          originalAction: dispatch.originalAction,
+          state: bucket.state,
+          manager: managerContext,
+          dispatch: dispatch.dispatch,
+        });
       }
     }
   },

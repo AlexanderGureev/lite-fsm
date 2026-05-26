@@ -57,7 +57,6 @@ const createStorageRuntimeDefinition = (
     },
     prepareAction({ action }) {
       options.order?.push(`${kind}:prepare:${action.type}`);
-      return action;
     },
     acceptsEvent({ action }) {
       return action.type === "PING";

@@ -266,38 +266,48 @@ describe("instanceStorageRuntime", () => {
     expect(instanceStorageRuntime.effects).toBeDefined();
     expect(instanceStorageRuntime.snapshot).toBeDefined();
     expect(instanceStorageRuntime.identity).toBeDefined();
-    expect(instanceStorageRuntime.identity?.resolve({ state: runtimeState, action: { type: "INC" } })).toBeUndefined();
+    expect(
+      instanceStorageRuntime.identity?.resolve({
+        state: runtimeState,
+        action: { type: "INC" },
+        originalAction: { type: "INC" },
+      }),
+    ).toBeUndefined();
     expect(
       instanceStorageRuntime.identity?.resolve({
         state: runtimeState,
         action: { type: "INC", meta: { actorId: "missing" } },
+        originalAction: { type: "INC", meta: { actorId: "missing" } },
       }),
     ).toBeUndefined();
     expect(() =>
-      instanceStorageRuntime.identity?.resolve({ state: {}, action: { type: "INC" } }),
+      instanceStorageRuntime.identity?.resolve({
+        state: {},
+        action: { type: "INC" },
+        originalAction: { type: "INC" },
+      }),
     ).toThrow("[lite-fsm] invalid instance storage runtime state.");
+    expect(instanceStorageRuntime.reduceScope).toBe("bucket");
+    expect(instanceStorageRuntime).not.toHaveProperty("acceptsEvent");
+    expect(instanceStorageRuntime).not.toHaveProperty("reduce");
+    const instanceRuntime = instanceStorageRuntime as Extract<StorageRuntime, { readonly reduceScope: "bucket" }>;
     const action = { type: "INC" };
     const createDispatch = (overrides: Record<string, unknown> = {}) => ({
       options: undefined,
       runtime: new Map<string, unknown>(),
-      originalAction: action,
-      preparedAction: action,
-      action,
       skipDelivery: false,
       route: routing.resolveRoute(action),
       prevState: rootState,
       nextState: rootState,
-      nextCalled: true,
-      dropped: false,
-      touched: new Set<string>(),
       reportError() {},
       ...overrides,
     });
     const dispatch = createDispatch();
     expect(
-      instanceStorageRuntime.reduce({
-        template,
+      instanceRuntime.reduceBucket({
+        templates: [template],
         action,
+        originalAction: action,
         state: runtimeState,
         manager,
         dispatch,
@@ -308,24 +318,49 @@ describe("instanceStorageRuntime", () => {
       options: { sender: { actorId: "missing", groupId: "missing", groupTag: "missing" } },
     });
     expect(
-      instanceStorageRuntime.reduce({
-        template,
+      instanceStorageRuntime.prepareAction?.({
         action,
+        originalAction: action,
+        options: droppedDispatch.options,
         state: runtimeState,
         manager,
         dispatch: droppedDispatch,
       }),
-    ).toBe(false);
-    expect(droppedDispatch.dropped).toBe(true);
-    const beginDispatch = createDispatch();
+    ).toEqual({ type: "drop" });
     expect(
-      instanceStorageRuntime.beginReduce?.({ action, state: runtimeState, manager, dispatch: beginDispatch }),
-    ).toBeUndefined();
+      instanceRuntime.reduceBucket({
+        templates: [template],
+        action,
+        originalAction: action,
+        state: runtimeState,
+        manager,
+        dispatch: droppedDispatch,
+      }),
+    ).toEqual({ type: "skip" });
+    expect(droppedDispatch.nextState).toBe(rootState);
+    const beforeDispatch = createDispatch();
     expect(
-      instanceStorageRuntime.beginReduce?.({ action, state: runtimeState, manager, dispatch: beginDispatch }),
-    ).toBeUndefined();
+      instanceStorageRuntime.beforeReduce?.({
+        action,
+        originalAction: action,
+        state: runtimeState,
+        manager,
+        dispatch: beforeDispatch,
+      }),
+    ).toEqual({ type: "replace", action });
+    expect(
+      instanceStorageRuntime.beforeReduce?.({
+        action,
+        originalAction: action,
+        state: runtimeState,
+        manager,
+        dispatch: beforeDispatch,
+      }),
+    ).toEqual({ type: "replace", action });
     expect(
       instanceStorageRuntime.commit({
+        action,
+        originalAction: action,
         state: runtimeState,
         manager,
         dispatch: createDispatch(),

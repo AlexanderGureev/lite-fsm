@@ -3,14 +3,17 @@
 
 import { attachMeta, type NormalizeOptions } from "./actor";
 import type { DispatchContext } from "./dispatchContext";
-import { STORAGE_ACTION_DROP } from "./runtime/kernel/storage";
 import type { RoutingRuntime } from "./runtime/kernel/routing";
 import type { SidecarState } from "./sidecar";
 import type { AnyEvent, ManagerAction, MachineStore } from "./types";
 import { isSystemAction } from "./utils";
 
+export type NormalizeActionResult<P extends AnyEvent> =
+  | { readonly type: "continue"; readonly action: ManagerAction<P> }
+  | { readonly type: "drop" };
+
 export type Normalizer<S extends MachineStore, P extends AnyEvent> = {
-  normalizeAction: (raw: ManagerAction<P>, opts?: NormalizeOptions) => ManagerAction<P> | typeof STORAGE_ACTION_DROP;
+  normalizeAction: (raw: ManagerAction<P>, opts?: NormalizeOptions) => NormalizeActionResult<P>;
   applyPostNormalize: (ctx: DispatchContext<S, P>, action: ManagerAction<P>) => void;
 };
 
@@ -30,12 +33,12 @@ export const createNormalizer = <S extends MachineStore, P extends AnyEvent>(dep
   const normalizeAction = (
     raw: ManagerAction<P>,
     { sender, routingMode = "default" }: NormalizeOptions = {},
-  ): ManagerAction<P> | typeof STORAGE_ACTION_DROP => {
+  ): NormalizeActionResult<P> => {
     // Обычный external action без meta не требует копирования.
-    if (!sender && routingMode === "default" && !("meta" in raw)) return raw;
+    if (!sender && routingMode === "default" && !("meta" in raw)) return { type: "continue", action: raw };
 
     // Sender уже disposed → full no-op.
-    if (sender && !sidecar.actorById.has(sender.actorId)) return STORAGE_ACTION_DROP;
+    if (sender && !sidecar.actorById.has(sender.actorId)) return { type: "drop" };
 
     // Срезаем sender-поля и переписываем настоящими — middleware не подделает sender.
     const meta = routing.stripSenderFields(raw.meta);
@@ -49,7 +52,7 @@ export const createNormalizer = <S extends MachineStore, P extends AnyEvent>(dep
     if (routingMode === "unscoped") {
       const normalized = attachMeta(raw, routing.stripRouting(meta));
       routing.resolveRoute(normalized as ManagerAction<AnyEvent>);
-      return normalized;
+      return { type: "continue", action: normalized };
     }
 
     // Default routing: actor-dispatch без явного routing → в свою группу.
@@ -59,13 +62,13 @@ export const createNormalizer = <S extends MachineStore, P extends AnyEvent>(dep
     }
     const normalized = attachMeta(raw, meta);
     routing.resolveRoute(normalized as ManagerAction<AnyEvent>);
-    return normalized;
+    return { type: "continue", action: normalized };
   };
 
   // ФАЗА 2: post-normalize после middleware. Пишет clean action в ctx.committed.
   const applyPostNormalize = (ctx: DispatchContext<S, P>, action: ManagerAction<P>): void => {
     const normalized = normalizeAction(action, ctx.normalizeOpts);
-    if (normalized !== STORAGE_ACTION_DROP) ctx.committed = normalized;
+    if (normalized.type === "continue") ctx.committed = normalized.action;
   };
 
   return { normalizeAction, applyPostNormalize };

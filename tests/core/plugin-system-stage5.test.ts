@@ -106,11 +106,11 @@ const createRouteRuntime = (log: string[]): StorageRuntime => ({
   },
   prepareAction({ action }) {
     log.push(`prepare:${action.type}`);
-    if (action.type !== "RAW") return action;
+    if (action.type !== "RAW") return;
 
     const meta = { actorId: undefined, entityId: "first" };
     const prepared = { type: "PREPARED", meta };
-    return prepared;
+    return { type: "replace", action: prepared };
   },
   acceptsEvent({ action }) {
     return action.type === "REPLACED";
@@ -118,7 +118,7 @@ const createRouteRuntime = (log: string[]): StorageRuntime => ({
   reduce({ action, dispatch, template }) {
     const data = template.data as { readonly routeId: string };
     if (dispatch.route.scope !== "plugin" || !dispatch.route.targetSet.includes(data.routeId)) {
-      return false;
+      return { type: "skip" };
     }
 
     const prev = dispatch.nextState[template.key] as RoutedSlice;
@@ -131,12 +131,12 @@ const createRouteRuntime = (log: string[]): StorageRuntime => ({
     };
     log.push(`reduce:${data.routeId}:${action.type}`);
   },
-  commit({ dispatch }) {
-    log.push(`commit:${dispatch.action.type}`);
+  commit({ action }) {
+    log.push(`commit:${action.type}`);
   },
   effects: {
-    resolveInvocations({ dispatch }) {
-      return [dispatch.action];
+    resolveInvocations({ action }) {
+      return [action];
     },
     invoke({ invocation }) {
       const action = invocation as { readonly type: string };
@@ -162,7 +162,7 @@ const createMinimalStorageRuntime = (kind: string, routeMetaKeys?: readonly stri
     return false;
   },
   reduce() {
-    return false;
+    return { type: "skip" };
   },
   commit() {},
 });

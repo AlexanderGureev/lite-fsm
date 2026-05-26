@@ -166,8 +166,8 @@ const createNestedRuntime = (
       }
     : {}),
   effects: {
-    resolveInvocations({ dispatch }) {
-      return [{ type: dispatch.action.type }];
+    resolveInvocations({ action }) {
+      return [{ type: action.type }];
     },
     invoke({ invocation, manager }) {
       const action = invocation as { type: string };

@@ -63,7 +63,7 @@ const createRouteRuntime = () => {
 
       routeState.routes.push({ key: route.key, targetSet: [...route.targetSet] });
       if (route.scope !== "plugin" || data.routeId === undefined || !route.targetSet.includes(data.routeId)) {
-        return false;
+        return { type: "skip" };
       }
 
       routeState.reduces += 1;

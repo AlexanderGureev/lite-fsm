@@ -116,6 +116,21 @@ describe("plugin system — этап 7 storage builder", () => {
         typeof createStorageRuntimeDefinition
       >,
     );
+    create({ ...createStorageRuntimeDefinition("explicit-template-scope"), reduceScope: "template" });
+    create({
+      kind: "bucket-scope",
+      reduceScope: "bucket",
+      validateTemplate() {},
+      compileTemplate() {},
+      createRuntimeState() {
+        return {};
+      },
+      createPublicInitialState() {
+        return {};
+      },
+      reduceBucket() {},
+      commit() {},
+    });
     create({ ...createStorageRuntimeDefinition("route-meta-keys"), routeMetaKeys: ["entityId"] });
     expectLiteFsmError(
       () => (defineStorageRuntime as unknown as (arg: unknown) => unknown)({}),
@@ -147,13 +162,100 @@ describe("plugin system — этап 7 storage builder", () => {
       return create(definition as never);
     }, "LITE_FSM_INVALID_PLUGIN_DEFINITION");
     expectLiteFsmError(
+      () => create({ ...createStorageRuntimeDefinition(), reduceScope: "entity" } as never),
+      "LITE_FSM_INVALID_PLUGIN_DEFINITION",
+    );
+    expectLiteFsmError(
+      () =>
+        create({
+          kind: "bucket-missing-reduce-bucket",
+          reduceScope: "bucket",
+          validateTemplate() {},
+          compileTemplate() {},
+          createRuntimeState() {
+            return {};
+          },
+          createPublicInitialState() {
+            return {};
+          },
+          commit() {},
+        } as never),
+      "LITE_FSM_INVALID_PLUGIN_DEFINITION",
+    );
+    expectLiteFsmError(() => {
+      const { acceptsEvent: _acceptsEvent, ...definition } = createStorageRuntimeDefinition();
+      return create(definition as never);
+    }, "LITE_FSM_INVALID_PLUGIN_DEFINITION");
+    expectLiteFsmError(() => {
+      const { reduce: _reduce, ...definition } = createStorageRuntimeDefinition();
+      return create(definition as never);
+    }, "LITE_FSM_INVALID_PLUGIN_DEFINITION");
+    expectLiteFsmError(
+      () =>
+        create({
+          kind: "bucket-with-accepts-event",
+          reduceScope: "bucket",
+          validateTemplate() {},
+          compileTemplate() {},
+          createRuntimeState() {
+            return {};
+          },
+          createPublicInitialState() {
+            return {};
+          },
+          acceptsEvent() {
+            return true;
+          },
+          reduceBucket() {},
+          commit() {},
+        } as never),
+      "LITE_FSM_INVALID_PLUGIN_DEFINITION",
+    );
+    expectLiteFsmError(
+      () =>
+        create({
+          kind: "bucket-with-reduce",
+          reduceScope: "bucket",
+          validateTemplate() {},
+          compileTemplate() {},
+          createRuntimeState() {
+            return {};
+          },
+          createPublicInitialState() {
+            return {};
+          },
+          reduce() {},
+          reduceBucket() {},
+          commit() {},
+        } as never),
+      "LITE_FSM_INVALID_PLUGIN_DEFINITION",
+    );
+    expectLiteFsmError(
+      () => create({ ...createStorageRuntimeDefinition(), reduceScope: "template", reduceBucket() {} } as never),
+      "LITE_FSM_INVALID_PLUGIN_DEFINITION",
+    );
+    expectLiteFsmError(
+      () => create({ ...createStorageRuntimeDefinition(), reduceBucket() {} } as never),
+      "LITE_FSM_INVALID_PLUGIN_DEFINITION",
+    );
+    expectLiteFsmError(
       () => create({ ...createStorageRuntimeDefinition(), prepareAction: false } as never),
       "LITE_FSM_INVALID_PLUGIN_DEFINITION",
     );
     expectLiteFsmError(
-      () => create({ ...createStorageRuntimeDefinition(), beginReduce: null } as never),
+      () => create({ ...createStorageRuntimeDefinition(), beforeReduce: null } as never),
       "LITE_FSM_INVALID_PLUGIN_DEFINITION",
     );
+    // Regression-аудит: удаленные поля старого storage protocol остаются обычными unknown fields.
+    for (const definition of [
+      { ...createStorageRuntimeDefinition(), beginReduce() {} },
+      { ...createStorageRuntimeDefinition(), prepareActionResult: "drop" },
+      { ...createStorageRuntimeDefinition(), beforeReduceResult: "drop" },
+      { ...createStorageRuntimeDefinition(), reduceResult: "skip" },
+      { ...createStorageRuntimeDefinition(), reduceBucketResult: "skip" },
+    ]) {
+      expectLiteFsmError(() => create(definition as never), "LITE_FSM_INVALID_PLUGIN_DEFINITION");
+    }
   });
 
   it("валидирует optional runtime blocks", () => {
@@ -161,6 +263,9 @@ describe("plugin system — этап 7 storage builder", () => {
 
     create({
       ...createStorageRuntimeDefinition("with-optional-blocks"),
+      beforeReduce() {
+        return { type: "replace", action: { type: "OPTIONAL_BLOCK" } };
+      },
       effects: {
         condition: async () => true,
         resolveInvocations: () => [],
@@ -189,6 +294,66 @@ describe("plugin system — этап 7 storage builder", () => {
     ]) {
       expectLiteFsmError(() => create(definition as never), "LITE_FSM_INVALID_PLUGIN_DEFINITION");
     }
+  });
+
+  it("применяет object result protocol в prepareAction и beforeReduce", () => {
+    const calls: string[] = [];
+    const storage = defineStorageRuntime().create({
+      kind: "stage-one-result-protocol",
+      validateTemplate() {},
+      compileTemplate() {},
+      createRuntimeState() {
+        return {};
+      },
+      createPublicInitialState() {
+        return { seen: [] as string[] };
+      },
+      prepareAction({ action }) {
+        calls.push(`prepare:${action.type}`);
+        if (action.type === "RAW") return { type: "replace", action: { type: "PREPARED" } };
+        if (action.type === "PREPARE_DROP") return { type: "drop" };
+      },
+      beforeReduce({ action, originalAction }) {
+        calls.push(`before:${originalAction.type}:${action.type}`);
+        if (action.type === "PREPARED") return { type: "replace", action: { type: "COMMITTED" } };
+        if (action.type === "BEFORE_DROP") return { type: "drop" };
+      },
+      acceptsEvent({ action }) {
+        return action.type === "COMMITTED";
+      },
+      reduce({ action, dispatch, template }) {
+        const current = dispatch.nextState[template.key] as { readonly seen: readonly string[] };
+        dispatch.nextState = {
+          ...dispatch.nextState,
+          [template.key]: { seen: [...current.seen, action.type] },
+        };
+      },
+      commit() {
+        calls.push("commit");
+      },
+    });
+    const plugin = definePlugin().create({ name: "stage-one-result-protocol", storage: [storage] });
+    const manager = MachineManager(
+      {
+        cache: {
+          storage: "stage-one-result-protocol",
+          config: { IDLE: {} },
+          initialState: "IDLE",
+          initialContext: {},
+        },
+      },
+      { plugins: [plugin] },
+    );
+
+    expect(manager.transition({ type: "RAW" })).toEqual({ type: "COMMITTED" });
+    expect(manager.getState()).toEqual({ cache: { seen: ["COMMITTED"] } });
+    expect(calls).toEqual(["prepare:RAW", "before:RAW:PREPARED", "commit"]);
+
+    calls.length = 0;
+    expect(manager.transition({ type: "PREPARE_DROP" })).toEqual({ type: "PREPARE_DROP" });
+    expect(manager.transition({ type: "BEFORE_DROP" })).toEqual({ type: "BEFORE_DROP" });
+    expect(manager.getState()).toEqual({ cache: { seen: ["COMMITTED"] } });
+    expect(calls).toEqual(["prepare:PREPARE_DROP", "prepare:BEFORE_DROP", "before:BEFORE_DROP:BEFORE_DROP"]);
   });
 
   it("принимает storage section только как readonly array opaque definitions", () => {

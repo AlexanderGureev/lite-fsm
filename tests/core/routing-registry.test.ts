@@ -62,7 +62,7 @@ const createRouteStorage = () => {
         route.scope === "plugin" && data.routeId !== undefined && route.targetSet.includes(data.routeId);
       const matchesGroupTag =
         route.scope === "tag" && data.groupTag !== undefined && route.targetSet.includes(data.groupTag);
-      if (!matchesPluginRoute && !matchesGroupTag) return false;
+      if (!matchesPluginRoute && !matchesGroupTag) return { type: "skip" };
 
       routeState.reduces += 1;
       const prev = dispatch.nextState[template.key] as { state: "IDLE"; context: { hits: number } };

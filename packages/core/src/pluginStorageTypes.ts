@@ -10,7 +10,8 @@ import type {
   CreateRuntimeStateContext,
   ResolveEffectInvocationsContext,
   ResolveIdentityContext,
-  StorageBeginReduceContext,
+  StorageActionStageResult,
+  StorageBeforeReduceContext,
   StorageCommitContext,
   StorageConditionContext,
   StorageDehydrateContext,
@@ -20,8 +21,10 @@ import type {
   StorageIdentityRuntime,
   StoragePrepareActionContext,
   StoragePrepareActionResult,
+  StorageReduceBucketContext,
   StorageReactionContext,
   StorageReduceContext,
+  StorageReduceResult,
   StorageRuntimeState,
   StorageSnapshotRuntime,
   ValidateTemplateContext,
@@ -85,7 +88,7 @@ type PluginStorageReactionRuntime = {
   run(ctx: StorageReactionContext): void;
 };
 
-export type PluginStorageRuntime<Kind extends string, Extension extends PluginMachineExtensionInput> = {
+type PluginStorageRuntimeBase<Kind extends string, Extension extends PluginMachineExtensionInput> = {
   readonly kind: Kind;
   readonly routeMetaKeys?: readonly string[];
   validateTemplate(ctx: PluginTemplateContext<Kind, Extension>): void;
@@ -93,15 +96,33 @@ export type PluginStorageRuntime<Kind extends string, Extension extends PluginMa
   createRuntimeState(ctx: CreateRuntimeStateContext): StorageRuntimeState;
   createPublicInitialState(ctx: CreatePublicInitialStateContext): unknown;
   prepareAction?(ctx: StoragePrepareActionContext): StoragePrepareActionResult;
-  beginReduce?(ctx: StorageBeginReduceContext): void | false;
-  acceptsEvent(ctx: AcceptsEventContext): boolean;
-  reduce(ctx: StorageReduceContext): void | false;
+  beforeReduce?(ctx: StorageBeforeReduceContext): StorageActionStageResult;
   commit(ctx: StorageCommitContext): void;
   readonly effects?: PluginStorageEffectsRuntime;
   readonly snapshot?: PluginStorageSnapshotRuntime;
   readonly identity?: PluginStorageIdentityRuntime;
   readonly reactions?: PluginStorageReactionRuntime;
 };
+
+type PluginTemplateStorageRuntime<Kind extends string, Extension extends PluginMachineExtensionInput> =
+  PluginStorageRuntimeBase<Kind, Extension> & {
+    readonly reduceScope?: "template";
+    acceptsEvent(ctx: AcceptsEventContext): boolean;
+    reduce(ctx: StorageReduceContext): StorageReduceResult;
+    readonly reduceBucket?: never;
+  };
+
+type PluginBucketStorageRuntime<Kind extends string, Extension extends PluginMachineExtensionInput> =
+  PluginStorageRuntimeBase<Kind, Extension> & {
+    readonly reduceScope: "bucket";
+    reduceBucket(ctx: StorageReduceBucketContext): StorageReduceResult;
+    readonly acceptsEvent?: never;
+    readonly reduce?: never;
+  };
+
+export type PluginStorageRuntime<Kind extends string, Extension extends PluginMachineExtensionInput> =
+  | PluginTemplateStorageRuntime<Kind, Extension>
+  | PluginBucketStorageRuntime<Kind, Extension>;
 
 type Prettify<Value> = { [Key in keyof Value]: Value[Key] };
 

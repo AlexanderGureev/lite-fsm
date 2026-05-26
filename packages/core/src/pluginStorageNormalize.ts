@@ -10,12 +10,12 @@ const REQUIRED_METHODS = [
   "compileTemplate",
   "createRuntimeState",
   "createPublicInitialState",
-  "acceptsEvent",
-  "reduce",
   "commit",
 ] as const;
 
-const OPTIONAL_METHODS = ["prepareAction", "beginReduce"] as const;
+const OPTIONAL_METHODS = ["prepareAction", "beforeReduce"] as const;
+const TEMPLATE_REDUCE_METHODS = ["acceptsEvent", "reduce"] as const;
+const BUCKET_REDUCE_METHODS = ["reduceBucket"] as const;
 
 type BlockSpec = {
   readonly required: readonly string[];
@@ -33,9 +33,12 @@ type BlockKey = keyof typeof BLOCKS;
 
 const KNOWN_KEYS = new Set<string>([
   "kind",
+  "reduceScope",
   "routeMetaKeys",
   ...REQUIRED_METHODS,
   ...OPTIONAL_METHODS,
+  ...TEMPLATE_REDUCE_METHODS,
+  ...BUCKET_REDUCE_METHODS,
   ...Object.keys(BLOCKS),
 ]);
 
@@ -51,6 +54,33 @@ const assertRouteMetaKeys = (definition: Record<string, unknown>) => {
   if (Array.isArray(keys) && keys.every((key) => typeof key === "string")) return;
 
   invalidPluginDefinition("storage runtime 'routeMetaKeys' must be an array of strings.");
+};
+
+const resolveReduceScope = (definition: Record<string, unknown>): "template" | "bucket" => {
+  if (!hasOwn(definition, "reduceScope") || definition.reduceScope === undefined) return "template";
+  if (definition.reduceScope === "template" || definition.reduceScope === "bucket") return definition.reduceScope;
+
+  return invalidPluginDefinition("storage runtime 'reduceScope' must be 'template' or 'bucket'.");
+};
+
+const assertReduceScopeShape = (definition: Record<string, unknown>) => {
+  const reduceScope = resolveReduceScope(definition);
+  if (reduceScope === "bucket") {
+    assertFunction(definition.reduceBucket, "storage runtime 'reduceBucket' must be a function.");
+    if (hasOwn(definition, "acceptsEvent") && definition.acceptsEvent !== undefined) {
+      invalidPluginDefinition("storage runtime 'acceptsEvent' is not allowed with reduceScope 'bucket'.");
+    }
+    if (hasOwn(definition, "reduce") && definition.reduce !== undefined) {
+      invalidPluginDefinition("storage runtime 'reduce' is not allowed with reduceScope 'bucket'.");
+    }
+    return;
+  }
+
+  assertFunction(definition.acceptsEvent, "storage runtime 'acceptsEvent' must be a function.");
+  assertFunction(definition.reduce, "storage runtime 'reduce' must be a function.");
+  if (hasOwn(definition, "reduceBucket") && definition.reduceBucket !== undefined) {
+    invalidPluginDefinition("storage runtime 'reduceBucket' is not allowed with reduceScope 'template'.");
+  }
 };
 
 const assertBlock = (definition: Record<string, unknown>, key: BlockKey, spec: BlockSpec) => {
@@ -92,6 +122,7 @@ export const assertStorageRuntimeDefinition = (value: unknown): StorageRuntime =
   for (const method of OPTIONAL_METHODS) {
     assertOptionalMethod(value, method, `storage runtime '${method}'`);
   }
+  assertReduceScopeShape(value);
   for (const [key, spec] of Object.entries(BLOCKS) as [BlockKey, BlockSpec][]) {
     assertBlock(value, key, spec);
   }

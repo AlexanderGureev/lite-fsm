@@ -54,13 +54,13 @@ import {
 import {
   createDispatchSlot,
   type DispatchSlot,
-  STORAGE_ACTION_DROP,
   type CompiledStorageTemplate,
   type CreateRuntimeStateContext,
   type ManagerRuntimeContext,
   type ResolveEffectInvocationsContext,
   type ResolveIdentityContext,
-  type StorageBeginReduceContext,
+  type StorageActionStageResult,
+  type StorageBeforeReduceContext,
   type StorageCommitContext,
   type StorageDehydrateContext,
   type StorageDispatchContext,
@@ -69,7 +69,8 @@ import {
   type StorageHydrateResult,
   type StoragePrepareActionContext,
   type StoragePrepareActionResult,
-  type StorageReduceContext,
+  type StorageReduceBucketContext,
+  type StorageReduceResult,
 } from "../kernel/storage";
 import type { RouteConstraint } from "../kernel/routing";
 
@@ -95,7 +96,6 @@ type Action<P extends AnyEvent> = ManagerAction<P>;
 
 type InstanceDispatchState<S extends MachineStore, P extends AnyEvent> = {
   readonly ctx: DispatchContext<S, P>;
-  reduced: boolean;
 };
 
 type InstanceEffectInvocation<S extends MachineStore, P extends AnyEvent> = {
@@ -108,9 +108,8 @@ type InstanceEffectInvocation<S extends MachineStore, P extends AnyEvent> = {
 type InstanceRuntimeState<S extends MachineStore, P extends AnyEvent> = {
   readonly initialState: RootState<S>;
   prepareAction(ctx: StoragePrepareActionContext): StoragePrepareActionResult;
-  beginReduce(ctx: StorageBeginReduceContext): void | false;
-  acceptsEvent(): boolean;
-  reduce(ctx: StorageReduceContext): void | false;
+  beforeReduce(ctx: StorageBeforeReduceContext): StorageActionStageResult;
+  reduceBucket(ctx: StorageReduceBucketContext): StorageReduceResult;
   commit(ctx: StorageCommitContext): void;
   condition(predicate: (action: Action<P>) => boolean): Promise<boolean>;
   resolveEffectInvocations(ctx: ResolveEffectInvocationsContext): InstanceEffectInvocation<S, P>[];
@@ -135,33 +134,24 @@ const getInstanceDispatch = <S extends MachineStore, P extends AnyEvent>(
 
   const created: InstanceDispatchState<S, P> = {
     ctx: createDispatchContext<S, P>(toNormalizeOptions(dispatch.options), sidecarCounters),
-    reduced: false,
   };
   slot.set(dispatch, created);
   return created;
 };
 
-// Двусторонняя синхронизация committed action между storage dispatch и instance ctx.
-// Между beginReduce и reduce action interceptor мог перезаписать dispatch.committedAction —
-// в этом случае instance ctx подхватывает значение из dispatch. Возвращает false, если
-// applyPostNormalize ещё не выставил committed (sender disposed) и dispatch нужно дропнуть.
-const syncCommittedAction = <S extends MachineStore, P extends AnyEvent>(
+const stageCommittedAction = <S extends MachineStore, P extends AnyEvent>(
   dispatch: StorageDispatchContext,
   instanceCtx: DispatchContext<S, P>,
-): boolean => {
-  if (!instanceCtx.committed) return false;
-  const committed = (dispatch.committedAction ?? instanceCtx.committed) as Action<P>;
-  instanceCtx.committed = committed;
+  action: Action<P>,
+): void => {
+  instanceCtx.committed = action;
   instanceCtx.committedPrevState = dispatch.prevState as RootState<S>;
-  dispatch.committedAction = committed as ManagerAction<AnyEvent>;
-  dispatch.committedPrevState = dispatch.prevState;
-  return true;
 };
 
 const isInstanceRuntimeState = <S extends MachineStore, P extends AnyEvent>(
   value: unknown,
 ): value is InstanceRuntimeState<S, P> =>
-  Boolean(value && typeof value === "object" && "prepareAction" in value && "reduce" in value);
+  Boolean(value && typeof value === "object" && "prepareAction" in value && "reduceBucket" in value);
 
 export const validateInstanceTemplate = ({ key, machine }: { key: string; machine: MachineStore[string] }) => {
   if (isActorTemplateConfig(machine)) {
@@ -417,9 +407,9 @@ export const createInstanceRuntimeState = <
     }
 
     forEachRoutedIdentity(scope, targetSet, ctx.pendingSpawned, committed, (identity) => {
-      const reduced = reduceActor(ctx, next, identity, committed);
-      next = reduced.root;
-      if (reduced.delivered) ctx.pendingDelivered.push(identity);
+      const actorResult = reduceActor(ctx, next, identity, committed);
+      next = actorResult.root;
+      if (actorResult.delivered) ctx.pendingDelivered.push(identity);
     });
 
     return collapseTerminalActors(ctx, next);
@@ -505,41 +495,32 @@ export const createInstanceRuntimeState = <
     prepareAction({ action, options, dispatch }) {
       const normalizeOptions = toNormalizeOptions(options);
       const ctx = createDispatchContext<S, P>(normalizeOptions, sidecar.counters);
-      instanceSlot.set(dispatch, { ctx, reduced: false });
+      instanceSlot.set(dispatch, { ctx });
       const preNormalized = normalizeAction(action as Action<P>, normalizeOptions);
-      if (preNormalized === STORAGE_ACTION_DROP) return STORAGE_ACTION_DROP;
-      return preNormalized as Action<P>;
+      if (preNormalized.type === "drop") return { type: "drop" };
+      return { type: "replace", action: preNormalized.action as Action<P> };
     },
-    beginReduce({ action, dispatch }) {
+    beforeReduce({ action, dispatch }) {
       const instanceDispatch = getInstanceDispatch<S, P>(instanceSlot, dispatch, sidecar.counters);
       if (!instanceDispatch.ctx.committed) {
         applyPostNormalize(instanceDispatch.ctx, action as Action<P>);
       }
-      if (!syncCommittedAction(dispatch, instanceDispatch.ctx)) {
-        dispatch.dropped = true;
-        return false;
-      }
+      if (!instanceDispatch.ctx.committed) return { type: "drop" };
+      stageCommittedAction(dispatch, instanceDispatch.ctx, instanceDispatch.ctx.committed);
+      return { type: "replace", action: instanceDispatch.ctx.committed as ManagerAction<AnyEvent> };
     },
-    acceptsEvent() {
-      return true;
-    },
-    reduce(ctx) {
+    reduceBucket(ctx) {
       const { dispatch } = ctx;
       const instanceDispatch = getInstanceDispatch<S, P>(instanceSlot, dispatch, sidecar.counters);
-      if (instanceDispatch.reduced) return false;
-      instanceDispatch.reduced = true;
-
       if (!instanceDispatch.ctx.committed) {
         applyPostNormalize(instanceDispatch.ctx, ctx.action as Action<P>);
       }
-      if (!syncCommittedAction(dispatch, instanceDispatch.ctx)) {
-        dispatch.dropped = true;
-        return false;
-      }
+      if (!instanceDispatch.ctx.committed) return { type: "skip" };
+      stageCommittedAction(dispatch, instanceDispatch.ctx, ctx.action as Action<P>);
       dispatch.nextState = reduceRoot(
         instanceDispatch.ctx,
         dispatch.nextState as RootState<S>,
-        instanceDispatch.ctx.committed as Action<P>,
+        ctx.action as Action<P>,
         dispatch.route,
       ) as Record<string, unknown>;
     },

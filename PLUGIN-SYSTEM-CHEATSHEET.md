@@ -87,6 +87,10 @@ const managerPlugin = definePlugin<PluginEvent>().create({
 
 `intercept` видит `ctx.action` после storage `prepareAction` и `ctx.originalAction` из исходного `manager.transition(...)`.
 
+Storage runtime action stages используют object result protocol: `prepareAction(ctx)` и `beforeReduce(ctx)` возвращают `void | { type: "replace"; action } | { type: "drop" }`, а `reduce(ctx)` и `reduceBucket(ctx)` возвращают `void | { type: "skip" }`. В storage context action читается как `ctx.action`, исходный action — как `ctx.originalAction`; `ctx.dispatch` не содержит action stage fields.
+
+`ctx.dispatch.options`, `route`, `prevState` и `skipDelivery` доступны только для чтения. `ctx.dispatch.runtime` — mutable `Map` для per-dispatch данных storage runtime. `ctx.dispatch.nextState` — mutable root accumulator; заменяйте его иммутабельно: `ctx.dispatch.nextState = { ...ctx.dispatch.nextState, [key]: value }`. `prepareAction` и `beforeReduce` не должны менять `nextState`; используйте для staged данных `dispatch.runtime`.
+
 ```ts
 const dispatchPlugin = definePlugin<PluginEvent, HostEvent>().create({
   name: "dispatch",
@@ -165,14 +169,15 @@ const cacheStorage = defineStorageRuntime<CacheExtension>().create({
   createPublicInitialState(ctx) {
     return { ready: false, value: String(ctx.template.data) };
   },
-  prepareAction(ctx) {
-    return ctx.action;
-  },
-  beginReduce() {},
   acceptsEvent(ctx) {
     return ctx.action.type === "CACHE_REFRESH";
   },
-  reduce() {},
+  reduce(ctx) {
+    ctx.dispatch.nextState = {
+      ...ctx.dispatch.nextState,
+      [ctx.template.key]: { ready: true, value: ctx.action.type },
+    };
+  },
   commit() {},
   effects: {
     condition(ctx) {
@@ -208,6 +213,10 @@ const cachePlugin = definePlugin().create({
 ```
 
 `compileTemplate(ctx)` возвращает только `void | { data?: unknown }`. `key` и `kind` подставляет builder. Методы storage runtime используют contextual typing inline; отдельные named context types не нужны.
+
+`prepareAction(ctx)` выполняется до middleware и может вернуть `{ type: "replace", action }` или `{ type: "drop" }`. `beforeReduce(ctx)` выполняется после middleware и до public interceptors с тем же result protocol. `{ type: "drop" }` является silent no-op, а `{ type: "replace" }` пересчитывает route для следующих фаз.
+
+`reduceScope` по умолчанию равен `"template"`: runtime объявляет `acceptsEvent(ctx)` и `reduce(ctx)`, а core вызывает reducer для каждого matching template. Для batch-обработки укажите `reduceScope: "bucket"` и объявите `reduceBucket(ctx)`: callback вызывается один раз на storage bucket и получает `ctx.templates`. В bucket scope нельзя объявлять `acceptsEvent` или `reduce`; в template scope нельзя объявлять `reduceBucket`. `reduce(ctx)` и `reduceBucket(ctx)` возвращают только `void | { type: "skip" }`; `drop` и `replace` разрешены только в `prepareAction` и `beforeReduce`.
 
 `effectDeps` и `reactionDeps` внутри `CacheExtension` — type contract для machines этого storage kind. Runtime сам решает, какие deps передать при invocation.
 

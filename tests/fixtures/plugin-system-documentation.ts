@@ -116,10 +116,6 @@ export const documentCacheStorage = defineStorageRuntime<DocumentCacheExtension>
   createPublicInitialState(ctx) {
     return { ready: false, value: readInitialValue(ctx.template.data) };
   },
-  prepareAction(ctx) {
-    return ctx.action;
-  },
-  beginReduce() {},
   acceptsEvent(ctx) {
     if (!isDocumentAction(ctx.action)) return false;
     if (ctx.dispatch.route.scope !== "plugin") return true;
@@ -129,7 +125,7 @@ export const documentCacheStorage = defineStorageRuntime<DocumentCacheExtension>
   },
   reduce(ctx) {
     const action = ctx.action;
-    if (!isDocumentAction(action)) return false;
+    if (!isDocumentAction(action)) return { type: "skip" };
 
     const previous = readDocumentState(ctx.dispatch.nextState[ctx.template.key]);
     let next = previous;
