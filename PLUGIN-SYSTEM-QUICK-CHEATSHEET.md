@@ -102,7 +102,9 @@ raw action
 
 ## Storage runtime
 
-`defineStorageRuntime<Extension>().create(...)` используется, когда плагин добавляет собственный тип хранения состояния.
+`defineStorageRuntime<Extension>().create(...)` объявляет opaque storage definition для `definePlugin().create({ storage: [...] })`. Используйте этот API, когда машине нужен не стандартный `instance` storage, а собственный runtime: другое публичное состояние, общий reducer, reactions, effects, snapshot или identity.
+
+`kind` становится значением `machine.storage`. Объекты storage runtime, объявленные inline, не принимаются: раздел `storage` получает только значения из `defineStorageRuntime().create(...)`.
 
 `Extension` разделяет:
 
@@ -112,15 +114,85 @@ raw action
 Storage runtime может:
 
 - валидировать описание машины;
-- подготовить template data;
+- подготовить `templateData`;
 - создать внутреннее состояние и начальное публичное состояние;
-- подготовить или заменить action;
-- выполнить reduce для одного template или группы templates;
+- подготовить, заменить или отменить action через `prepareAction` и `beforeReduce`;
+- выполнить `reduce` для одного template или `reduceBucket` для группы templates;
 - выполнить commit, reactions и effects;
 - участвовать в `dehydrate()` / `hydrate()`;
 - вычислять identity для записей, которыми управляет runtime.
 
-Storage runtime объявляется через `defineStorageRuntime().create(...)` и подключается через `storage` у плагина.
+Основной протокол:
+
+- `compileTemplate(ctx)` возвращает только `void | { data?: TemplateData }`; `key` и `kind` задает runtime.
+- `prepareAction(ctx)` и `beforeReduce(ctx)` возвращают `void | { type: "replace"; action } | { type: "drop" }`.
+- `reduce(ctx)` и `reduceBucket(ctx)` возвращают `void | { type: "skip" }`.
+- `acceptsEvent(ctx)` должен вернуть строго boolean.
+- Если `routeMetaKeys` задан, плагин обязан объявить совместимые `routeMeta` resolvers.
+
+Минимальный пример:
+
+```ts
+import { definePlugin, defineStorageRuntime, MachineManager } from "@lite-fsm/core";
+import type { FSMEvent } from "@lite-fsm/core";
+
+type CacheHit = FSMEvent<"CACHE_HIT">;
+
+type CacheStorageExtension = {
+  readonly input: {
+    readonly initialContext: { readonly value: number };
+  };
+  readonly templateData: { readonly value: number };
+  readonly publicState: { readonly ready: boolean; readonly value: number };
+  readonly observedEvents: CacheHit;
+};
+
+const cacheStorage = defineStorageRuntime<CacheStorageExtension>().create({
+  kind: "cache",
+  validateTemplate() {},
+  compileTemplate({ machine }) {
+    return { data: { value: machine.initialContext.value } };
+  },
+  createRuntimeState() {
+    return {};
+  },
+  createPublicInitialState({ template }) {
+    return { ready: true, value: template.data?.value ?? 0 };
+  },
+  acceptsEvent({ action }) {
+    return action.type === "CACHE_HIT";
+  },
+  reduce({ template, dispatch }) {
+    const current = dispatch.nextState[template.key] as CacheStorageExtension["publicState"];
+
+    dispatch.nextState = {
+      ...dispatch.nextState,
+      [template.key]: { ready: true, value: current.value + 1 },
+    };
+  },
+  commit() {},
+});
+
+const cachePlugin = definePlugin().create({
+  name: "cache-plugin",
+  storage: [cacheStorage],
+});
+
+const manager = MachineManager(
+  {
+    cache: {
+      storage: "cache",
+      config: { idle: { CACHE_HIT: "idle" } },
+      initialState: "idle",
+      initialContext: { value: 1 },
+    },
+  },
+  { plugins: [cachePlugin] as const },
+);
+
+manager.transition({ type: "CACHE_HIT" });
+manager.getState().cache; // { ready: true, value: 2 }
+```
 
 ## Прикладной пример
 
