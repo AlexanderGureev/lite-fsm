@@ -8,8 +8,8 @@ spawn helpers, `EntityId`, `EntityIndex`, `EntityAccess<AppMachines>`,
 types. Плагин регистрирует storage kind `"entity"` через публичный core plugin
 DSL, валидирует entity actor templates при создании `MachineManager`, создает
 manager-owned entity runtime state, добавляет `manager.entities` и создает live
-entity rows через public spawn events. Routing, React hooks и snapshot data еще
-не предоставляются.
+entity rows через public spawn events. Плагин добавляет routing по
+`meta.entityId`; React hooks и snapshot data еще не предоставляются.
 
 ## Установка
 
@@ -217,9 +217,37 @@ storage reduce, subscribers и effects.
 
 Internal `ENTITY_SPAWNED` доставляется созданным actor rows перед public spawn
 event. Default transition из `__INIT` применяется до reducer. Reducer получает
-`self.indices`, direct mutable schema columns, `stateCode`, `prevStateCode`,
-`has(entity)`, `entityId(entity)` и `payloadFor(entity)`. `payloadFor(entity)`
-возвращает actor-specific spawn payload только во время `ENTITY_SPAWNED` и
-только для `EntityIndex` из текущего spawn scope.
+`self.indices`, `self.states`, `self.presence`, `self.rowVersion`, direct
+mutable schema columns, `stateCode`, `prevStateCode`, `has(entity)`,
+`entityId(entity)` и `payloadFor(entity)`. `payloadFor(entity)` возвращает
+actor-specific spawn payload только во время `ENTITY_SPAWNED` и только для
+`EntityIndex` из текущего spawn scope.
+
+## Routing
+
+`entitiesPlugin()` объявляет `routeMeta.entityId`, а entity storage runtime
+требует `routeMetaKeys: ["entityId"]`. Поэтому `manager.transition(...)`
+принимает `meta.entityId?: string | readonly string[]` только при подключенном
+плагине:
+
+```ts
+manager.transition({ type: "TICK", meta: { entityId: "projectile/1" } });
+manager.transition({
+  type: "TICK",
+  meta: { entityId: ["projectile/2", "projectile/1"] },
+});
+```
+
+`meta.entityId` доставляет action всем actor rows указанных entities. Массив
+дедуплицируется с сохранением первого появления. Unknown `entityId` является
+no-op. Если TypeScript был обойден, resolver бросает `LiteFsmError`, когда raw
+value не является строкой или массивом строк.
+
+`meta.groupTag` сохраняет core semantics для `storage: "instance"` и
+дополнительно доставляет action entity rows, у которых `EntitySpawnSpec.groupTag`
+совпадает с route target. `meta.actorId` и `meta.groupId` адресуют только
+`storage: "instance"` actor runtime. Один action может содержать только один
+active routing key; например, `meta.entityId` вместе с `meta.groupTag` бросает
+`LITE_FSM_AMBIGUOUS_ROUTE_META` до delivery.
 
 Пакет пока не предоставляет `@lite-fsm/entities/react`.

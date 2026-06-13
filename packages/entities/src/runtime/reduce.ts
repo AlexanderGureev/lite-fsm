@@ -1,17 +1,25 @@
 import { LiteFsmError } from "@lite-fsm/core";
-import type { AnyEvent, ManagerAction, ReadonlyManagerAction, StorageReduceBucketContext } from "@lite-fsm/core";
+import type { AnyEvent, ManagerAction, StorageReduceBucketContext } from "@lite-fsm/core";
 
 import type { EntityIndex } from "../plugin";
-import { ENTITY_SPAWNED } from "./lifecycle";
 import {
   ENTITY_INIT_STATE_CODE,
+  ENTITY_INVALID_TRANSITION_TARGET,
+  ENTITY_NO_TRANSITION,
+  getEntityStateName,
+} from "./compile";
+import { ENTITY_SPAWNED } from "./lifecycle";
+import { collectEntityPublicReducerBatches } from "./routing";
+import {
+  addActorRowOwnership,
+  addEntityToGroupBucket,
   ensureActorCapacity,
   ensureEntityCapacity,
-  getEntityStateCode,
-  getEntityStateName,
+  moveActorStateBucket,
   refreshActorPublicSlice,
   writeInitialColumnValues,
   type ColumnarActorStore,
+  type EntityActorRowRef,
   type EntityColumn,
   type EntityStore,
   type EntityRuntimeState,
@@ -24,15 +32,12 @@ type SpawnBatch = {
   readonly payloadByEntity: Map<EntityIndex, Record<string, unknown>>;
 };
 
-type PublicBatch = {
-  readonly store: ColumnarActorStore;
-  readonly indices: EntityIndex[];
-};
-
 type ReducerBatch = {
   readonly store: ColumnarActorStore;
   readonly indices: readonly EntityIndex[];
   readonly action: ManagerAction<AnyEvent>;
+  readonly eventCode: number | undefined;
+  readonly accepted?: true;
   readonly payloadByEntity?: ReadonlyMap<EntityIndex, Record<string, unknown>>;
 };
 
@@ -44,6 +49,8 @@ type EntityStoreSnapshot = {
   readonly alive: Uint8Array;
   readonly generation: Uint32Array;
   readonly groupTagByIndex: string[];
+  readonly entitiesByGroupTag: Record<string, EntityIndex[]>;
+  readonly groupTagPosition: Int32Array;
   readonly freeList: EntityIndex[];
   readonly version: number;
 };
@@ -56,10 +63,9 @@ type ActorStoreSnapshot = {
   readonly stateCode: Int16Array;
   readonly prevStateCode: Int16Array;
   readonly rowVersion: Uint32Array;
-  readonly stateBuckets: Record<string, EntityIndex[]>;
+  readonly stateBuckets: EntityIndex[][];
   readonly statePosition: Int32Array;
   readonly acceptedScratch: EntityIndex[];
-  readonly enteredScratchByState: Record<string, EntityIndex[]>;
   readonly columns: Record<string, EntityColumn>;
   readonly publicSlice: ColumnarActorStore["publicSlice"];
 };
@@ -67,11 +73,11 @@ type ActorStoreSnapshot = {
 type RuntimeMutationSnapshot = {
   readonly entityStore: EntityStoreSnapshot;
   readonly actorStores: Record<string, ActorStoreSnapshot>;
+  readonly actorRowsByEntity: EntityActorRowRef[][];
+  readonly actorRowsByGroupTag: Record<string, EntityActorRowRef[]>;
 };
 
 const lifecycleAction: ManagerAction<AnyEvent> = { type: ENTITY_SPAWNED };
-
-const hasOwn = (value: object, key: PropertyKey): boolean => Object.prototype.hasOwnProperty.call(value, key);
 
 const runtimeError = (reason: string): LiteFsmError =>
   new LiteFsmError("LITE_FSM_INVALID_STORAGE_RUNTIME", `[lite-fsm/entities] ${reason}.`);
@@ -81,30 +87,29 @@ const toEntityIndex = (value: number): EntityIndex => value as EntityIndex;
 const resolveTransitionTarget = (
   store: ColumnarActorStore,
   entity: EntityIndex,
+  eventCode: number | undefined,
   eventType: string,
-): { readonly accepted: boolean; readonly nextState: string } => {
+): { readonly accepted: boolean; readonly nextState: string | undefined } => {
+  if (eventCode === undefined) return { accepted: false, nextState: undefined };
+
   const previousCode = store.stateCode[entity];
-  const sourceState = getEntityStateName(store.metadata, previousCode);
-  /* v8 ignore next 3 -- defensive invariant: public batch collection rejects invalid stateCode before reduce. */
-  if (sourceState === undefined) {
+  const stateSlot = previousCode + 1;
+  if (stateSlot < 0 || stateSlot >= store.metadata.stateSlotCount) {
     throw runtimeError(`actor '${store.templateKey}' has invalid stateCode ${previousCode} for entity ${entity}`);
   }
 
-  const transitions = store.metadata.config[sourceState];
-  if (!transitions || !hasOwn(transitions, eventType)) {
-    return { accepted: false, nextState: sourceState };
-  }
-
-  const target = transitions[eventType];
-  const nextState = target === null || target === undefined ? sourceState : target;
-  const nextCode = getEntityStateCode(store.metadata, nextState);
-  if (nextCode === undefined) {
-    throw runtimeError(`actor '${store.templateKey}' transition '${eventType}' targets unknown state '${nextState}'`);
+  const cell = eventCode * store.metadata.stateSlotCount + stateSlot;
+  const nextCode = store.metadata.transitionTable[cell];
+  if (nextCode === ENTITY_NO_TRANSITION) return { accepted: false, nextState: undefined };
+  if (nextCode === ENTITY_INVALID_TRANSITION_TARGET) {
+    throw runtimeError(
+      `actor '${store.templateKey}' transition '${eventType}' targets unknown state '${store.metadata.transitionTargetByCell[cell]}'`,
+    );
   }
 
   store.prevStateCode[entity] = previousCode;
   store.stateCode[entity] = nextCode;
-  return { accepted: true, nextState };
+  return { accepted: true, nextState: getEntityStateName(store.metadata, nextCode) };
 };
 
 const assertValidStateCodes = (store: ColumnarActorStore, indices: readonly EntityIndex[]): void => {
@@ -121,6 +126,13 @@ const markActorRowsTouched = (store: ColumnarActorStore, indices: readonly Entit
   refreshActorPublicSlice(store);
 };
 
+const updateActorStateBuckets = (store: ColumnarActorStore, indices: readonly EntityIndex[]): void => {
+  for (let index = indices.length - 1; index >= 0; index -= 1) {
+    const entity = indices[index];
+    moveActorStateBucket(store, entity, store.prevStateCode[entity], store.stateCode[entity]);
+  }
+};
+
 const createReducerSelf = (
   runtime: EntityRuntimeState,
   store: ColumnarActorStore,
@@ -128,8 +140,11 @@ const createReducerSelf = (
 ): Record<string, unknown> => {
   const self: Record<string, unknown> = {
     indices,
+    states: store.metadata.stateCodeByName,
+    presence: store.presence,
     stateCode: store.stateCode,
     prevStateCode: store.prevStateCode,
+    rowVersion: store.rowVersion,
     has(entity: EntityIndex) {
       return store.presence[entity] === 1;
     },
@@ -149,16 +164,16 @@ const createReducerSelf = (
 
 const createPayloadFor = (
   store: ColumnarActorStore,
-  indices: readonly EntityIndex[],
   payloadByEntity: ReadonlyMap<EntityIndex, Record<string, unknown>> | undefined,
 ) => {
-  const scope = new Set(indices);
+  if (!payloadByEntity) {
+    return (): Record<string, unknown> => {
+      throw runtimeError(`payloadFor(entity) is only available while reducing ${ENTITY_SPAWNED}`);
+    };
+  }
 
   return (entity: EntityIndex): Record<string, unknown> => {
-    if (!payloadByEntity) {
-      throw runtimeError(`payloadFor(entity) is only available while reducing ${ENTITY_SPAWNED}`);
-    }
-    if (!scope.has(entity) || !payloadByEntity.has(entity)) {
+    if (!payloadByEntity.has(entity)) {
       throw runtimeError(
         `payloadFor(entity) for actor '${store.templateKey}' only accepts EntityIndex values from current spawn scope`,
       );
@@ -170,8 +185,24 @@ const createPayloadFor = (
 const cloneIndexMap = (value: Record<string, EntityIndex>): Record<string, EntityIndex> =>
   Object.assign(Object.create(null) as Record<string, EntityIndex>, value);
 
-const cloneIndexArrays = (value: Record<string, EntityIndex[]>): Record<string, EntityIndex[]> =>
-  Object.fromEntries(Object.entries(value).map(([key, indices]) => [key, indices.slice()]));
+const cloneIndexArrayRecord = (value: Record<string, EntityIndex[]>): Record<string, EntityIndex[]> =>
+  Object.assign(
+    Object.create(null) as Record<string, EntityIndex[]>,
+    Object.fromEntries(Object.entries(value).map(([key, indices]) => [key, indices.slice()])),
+  );
+
+const cloneIndexArrays = (value: readonly EntityIndex[][]): EntityIndex[][] => value.map((indices) => indices.slice());
+
+const cloneActorRowRefsByEntity = (value: readonly EntityActorRowRef[][]): EntityActorRowRef[][] =>
+  value.map((rows) => rows.slice());
+
+const cloneActorRowRefRecord = (
+  value: Record<string, EntityActorRowRef[]>,
+): Record<string, EntityActorRowRef[]> =>
+  Object.assign(
+    Object.create(null) as Record<string, EntityActorRowRef[]>,
+    Object.fromEntries(Object.entries(value).map(([key, rows]) => [key, rows.slice()])),
+  );
 
 const cloneColumn = (column: EntityColumn): EntityColumn =>
   Array.isArray(column) ? column.slice() : (column.slice() as EntityColumn);
@@ -187,6 +218,8 @@ const snapshotEntityStore = (store: EntityStore): EntityStoreSnapshot => ({
   alive: store.alive.slice(),
   generation: store.generation.slice(),
   groupTagByIndex: store.groupTagByIndex.slice(),
+  entitiesByGroupTag: cloneIndexArrayRecord(store.entitiesByGroupTag),
+  groupTagPosition: store.groupTagPosition.slice(),
   freeList: store.freeList.slice(),
   version: store.version,
 });
@@ -202,7 +235,6 @@ const snapshotActorStore = (store: ColumnarActorStore): ActorStoreSnapshot => ({
   stateBuckets: cloneIndexArrays(store.stateBuckets),
   statePosition: store.statePosition.slice(),
   acceptedScratch: store.acceptedScratch.slice(),
-  enteredScratchByState: cloneIndexArrays(store.enteredScratchByState),
   columns: cloneColumns(store.columns),
   publicSlice: store.publicSlice,
 });
@@ -212,6 +244,8 @@ const snapshotRuntime = (runtime: EntityRuntimeState): RuntimeMutationSnapshot =
   actorStores: Object.fromEntries(
     Object.entries(runtime.actorStores).map(([templateKey, store]) => [templateKey, snapshotActorStore(store)]),
   ),
+  actorRowsByEntity: cloneActorRowRefsByEntity(runtime.actorRowsByEntity),
+  actorRowsByGroupTag: cloneActorRowRefRecord(runtime.actorRowsByGroupTag),
 });
 
 const restoreEntityStore = (store: EntityStore, snapshot: EntityStoreSnapshot): void => {
@@ -222,6 +256,8 @@ const restoreEntityStore = (store: EntityStore, snapshot: EntityStoreSnapshot): 
   store.alive = snapshot.alive;
   store.generation = snapshot.generation;
   store.groupTagByIndex = snapshot.groupTagByIndex;
+  store.entitiesByGroupTag = snapshot.entitiesByGroupTag;
+  store.groupTagPosition = snapshot.groupTagPosition;
   store.freeList = snapshot.freeList;
   store.version = snapshot.version;
 };
@@ -237,7 +273,9 @@ const restoreActorStore = (store: ColumnarActorStore, snapshot: ActorStoreSnapsh
   store.stateBuckets = snapshot.stateBuckets;
   store.statePosition = snapshot.statePosition;
   store.acceptedScratch = snapshot.acceptedScratch;
-  store.enteredScratchByState = snapshot.enteredScratchByState;
+  store.acceptStateBucketsByEventCode = store.metadata.acceptStateCodesByEventCode.map((stateCodes) =>
+    stateCodes.flatMap((stateCode) => (stateCode >= 0 ? [store.stateBuckets[stateCode]] : [])),
+  );
   store.columns = snapshot.columns;
   store.publicSlice = snapshot.publicSlice;
 };
@@ -247,18 +285,43 @@ const restoreRuntime = (runtime: EntityRuntimeState, snapshot: RuntimeMutationSn
   for (const [templateKey, storeSnapshot] of Object.entries(snapshot.actorStores)) {
     restoreActorStore(runtime.actorStores[templateKey], storeSnapshot);
   }
+  runtime.actorRowsByEntity = snapshot.actorRowsByEntity;
+  runtime.actorRowsByGroupTag = snapshot.actorRowsByGroupTag;
+};
+
+const getAcceptedIndices = (batch: ReducerBatch): readonly EntityIndex[] => {
+  if (batch.accepted) return batch.indices;
+
+  const accepted = batch.store.acceptedScratch;
+  accepted.length = 0;
+  for (const entity of batch.indices) {
+    const result = resolveTransitionTarget(batch.store, entity, batch.eventCode, batch.action.type);
+    if (result.accepted) accepted.push(entity);
+  }
+  return accepted;
+};
+
+const applyDefaultTransitions = (batch: ReducerBatch, accepted: readonly EntityIndex[]): string | undefined => {
+  let firstNextState: string | undefined;
+
+  if (!batch.accepted) {
+    for (const entity of accepted) {
+      firstNextState ??= getEntityStateName(batch.store.metadata, batch.store.stateCode[entity]);
+    }
+    return firstNextState;
+  }
+
+  for (const entity of accepted) {
+    const result = resolveTransitionTarget(batch.store, entity, batch.eventCode, batch.action.type);
+    firstNextState ??= result.nextState;
+  }
+
+  return firstNextState;
 };
 
 const reduceAcceptedBatch = (runtime: EntityRuntimeState, batch: ReducerBatch): boolean => {
-  const accepted: EntityIndex[] = [];
-  let firstNextState: string | undefined;
-
-  for (const entity of batch.indices) {
-    const result = resolveTransitionTarget(batch.store, entity, batch.action.type);
-    if (!result.accepted) continue;
-    accepted.push(entity);
-    firstNextState ??= result.nextState;
-  }
+  const accepted = getAcceptedIndices(batch);
+  const firstNextState = applyDefaultTransitions(batch, accepted);
 
   if (accepted.length === 0) return false;
 
@@ -272,13 +335,14 @@ const reduceAcceptedBatch = (runtime: EntityRuntimeState, batch: ReducerBatch): 
         nextState,
         config: batch.store.metadata.config,
         self: createReducerSelf(runtime, batch.store, accepted),
-        payloadFor: createPayloadFor(batch.store, accepted, batch.payloadByEntity),
+        payloadFor: createPayloadFor(batch.store, batch.payloadByEntity),
       },
     );
   }
 
   assertValidStateCodes(batch.store, accepted);
   markActorRowsTouched(batch.store, accepted);
+  updateActorStateBuckets(batch.store, accepted);
   return true;
 };
 
@@ -292,6 +356,7 @@ const allocateEntity = (runtime: EntityRuntimeState, staged: StagedEntitySpawn):
   entityStore.alive[entity] = 1;
   entityStore.generation[entity] += 1;
   entityStore.groupTagByIndex[entity] = staged.groupTag;
+  addEntityToGroupBucket(entityStore, entity, staged.groupTag);
   entityStore.count += 1;
   entityStore.version += 1;
   return entity;
@@ -312,6 +377,7 @@ const stageActorRow = (
     store.count += 1;
     store.version += 1;
     writeInitialColumnValues(store, entity);
+    addActorRowOwnership(runtime, store, entity, staged.groupTag);
     refreshActorPublicSlice(store);
 
     const batch = batches.get(actor.templateKey) ?? {
@@ -328,14 +394,14 @@ const stageActorRow = (
 const applyStagedSpawns = (
   runtime: EntityRuntimeState,
   stagedSpawns: readonly StagedEntitySpawn[],
-): { readonly touched: boolean; readonly batches: readonly SpawnBatch[] } => {
+): readonly SpawnBatch[] => {
   const batches = new Map<string, SpawnBatch>();
   for (const staged of stagedSpawns) {
     const entity = allocateEntity(runtime, staged);
     stageActorRow(runtime, batches, entity, staged);
   }
 
-  return { touched: true, batches: [...batches.values()] };
+  return [...batches.values()];
 };
 
 const reduceStagedSpawnLifecycle = (
@@ -344,42 +410,19 @@ const reduceStagedSpawnLifecycle = (
 ): boolean => {
   if (staged.length === 0) return false;
 
-  let touched = false;
-  const spawnResult = applyStagedSpawns(runtime, staged);
-  touched ||= spawnResult.touched;
+  const spawnBatches = applyStagedSpawns(runtime, staged);
 
-  for (const batch of spawnResult.batches) {
-    touched = reduceAcceptedBatch(runtime, {
+  for (const batch of spawnBatches) {
+    reduceAcceptedBatch(runtime, {
       store: batch.store,
       indices: batch.indices,
       action: lifecycleAction,
+      eventCode: runtime.eventCodeByType[ENTITY_SPAWNED],
       payloadByEntity: batch.payloadByEntity,
-    }) || touched;
+    });
   }
 
-  return touched;
-};
-
-const collectPublicBatches = (runtime: EntityRuntimeState, action: ReadonlyManagerAction<AnyEvent>): PublicBatch[] => {
-  const batches: PublicBatch[] = [];
-
-  for (const store of Object.values(runtime.actorStores)) {
-    const indices: EntityIndex[] = [];
-    for (let entity = 0; entity < store.presence.length; entity += 1) {
-      if (store.presence[entity] !== 1) continue;
-      /* v8 ignore next 2 -- despawn is introduced after stage 5; live rows are always alive here. */
-      if (runtime.entityStore.alive[entity] !== 1) continue;
-      const state = getEntityStateName(store.metadata, store.stateCode[entity as EntityIndex]);
-      if (state === undefined) {
-        throw runtimeError(`actor '${store.templateKey}' has invalid stateCode ${store.stateCode[entity]} for entity ${entity}`);
-      }
-      const transitions = store.metadata.config[state];
-      if (transitions && hasOwn(transitions, action.type)) indices.push(toEntityIndex(entity));
-    }
-    if (indices.length > 0) batches.push({ store, indices });
-  }
-
-  return batches;
+  return true;
 };
 
 export const reduceEntityBucket = (
@@ -388,16 +431,21 @@ export const reduceEntityBucket = (
 ): { readonly type: "skip" } | void => {
   const staged = getStagedSpawns(ctx.dispatch);
   const snapshot = staged.length > 0 ? snapshotRuntime(runtime) : undefined;
+  const eventCode = runtime.eventCodeByType[ctx.action.type];
 
   try {
     let touched = false;
     touched ||= reduceStagedSpawnLifecycle(runtime, staged);
 
-    for (const batch of collectPublicBatches(runtime, ctx.action)) {
+    if (eventCode === undefined) return touched ? undefined : { type: "skip" };
+
+    for (const batch of collectEntityPublicReducerBatches(runtime, eventCode, ctx.dispatch.route)) {
       if (reduceAcceptedBatch(runtime, {
         store: batch.store,
         indices: batch.indices,
         action: ctx.action as ManagerAction<AnyEvent>,
+        eventCode,
+        accepted: batch.accepted,
       })) {
         touched = true;
       }

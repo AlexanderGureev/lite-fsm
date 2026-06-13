@@ -1,7 +1,7 @@
 import { LiteFsmError } from "@lite-fsm/core";
 import type { AnyEvent, ReadonlyManagerAction } from "@lite-fsm/core";
 
-import type { EntitySpawnDescriptor, EntitySpawnSpec } from "../spawn";
+import type { EntitySpawnDescriptor } from "../spawn";
 import { hasSpawnRecipe, runSpawnRecipe } from "../spawn";
 import type { EntitySpawnSchema } from "../schema";
 import type { EntityRuntimeState } from "./state";
@@ -188,5 +188,3 @@ export const getStagedSpawns = (carrier: RuntimeCarrier): readonly StagedEntityS
   if (!transaction) return [];
   return transaction.stagedSpawns;
 };
-
-export type RuntimeEntitySpawnSpec = EntitySpawnSpec;

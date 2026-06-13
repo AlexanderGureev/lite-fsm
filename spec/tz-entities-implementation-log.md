@@ -24,9 +24,9 @@
 ## Текущий указатель
 
 - Активное ТЗ: `spec/tz-entities-implementation.md`
-- Активный этап: Этап 6 — Columnar reduce pipeline, numeric event/state codes, buckets, routing и hot path guarantees
-- Статус: `not started`
-- Следующее действие: можно начинать этап 6 после завершенного корректирующего ТЗ.
+- Активный этап: Финальная readiness gate части 1
+- Статус: `done`
+- Следующее действие: часть 1 завершена; для продолжения использовать `spec/tz-entities-implementation-part-2.md`.
 
 ## Сводка по этапам
 
@@ -38,8 +38,8 @@
 | 3    | Compile metadata, empty `EntityStore`, `ColumnarActorStore`, public lightweight state и `manager.entities` | `done`        | 2026-06-13           |
 | 4    | Entity lifecycle events, `__INIT` и запрет public lifecycle dispatch                                       | `done`        | 2026-06-13           |
 | 5    | Spawn events, entity spawn и public spawn staging hook                                                     | `done`        | 2026-06-13           |
-| 6    | Columnar reduce pipeline, numeric event/state codes, buckets, routing и hot path guarantees                | `not started` | 2026-06-13           |
-| 7    | Рефакторинг, чистка и полировка части 1                                                                    | `not started` | 2026-06-13           |
+| 6    | Columnar reduce pipeline, numeric event/state codes, buckets, routing и hot path guarantees                | `done`        | 2026-06-13           |
+| 7    | Рефакторинг, чистка и полировка части 1                                                                    | `done`        | 2026-06-13           |
 
 
 ## Ход реализации
@@ -269,8 +269,20 @@
 
 ## Финальная проверка
 
-- Статус: `not started`
-- Записи: нет.
+- Статус: `done`
+- Последнее обновление: 2026-06-13
+
+### 2026-06-13 — Финальная readiness gate части 1
+
+- Статус: `done`.
+- Scope: integrated result этапов 1-7 для `@lite-fsm/entities`, public docs/cheatsheets и затронутые core routeMeta regressions.
+- Traceability: этапы 1-7 в сводке имеют статус `done`; cleanup/refactor этап выполнен после stage gate этапа 6; у этапов есть executor-id, baseline и stage-owned delta в журнале. Исторический `Этап 3 blocked` закрыт последующей contract correction и статусом `done`.
+- Проверки: `pnpm run test` — pass, 99 files/1384 tests, 2 files/14 tests skipped из существующего suite; `pnpm run check-types` — pass, 7 packages + `tsconfig.test.json` + 44 Tstyche files/479 tests/1072 assertions; `pnpm run lint` — pass; `pnpm exec vitest run tests/entities/entities-plugin.test.ts --coverage '--coverage.include=packages/entities/src/**/*.ts'` — pass, 80 tests, 100% coverage; `pnpm exec tstyche tests/types/entities-api.tst.ts` — pass, 22 tests/55 assertions; `pnpm exec vitest run tests/core/routing-registry.test.ts tests/core/plugin-system-stage5.test.ts tests/core/plugin-system-stage8.test.ts` — pass, 38 tests; `git diff --check` — pass.
+- Coverage: focused `packages/entities/src/**/*.ts` — 100% statements/branches/functions/lines (`873/873`, `363/363`, `181/181`, `760/760`). Full coverage не запускался как финальный gate, потому что ТЗ требует 100% для нового/измененного scope.
+- Audits: active entity scope не содержит `TODO/FIXME`, `test.only`, временных `test.skip`, `not implemented`, debug logging, temporary/workaround/hardcode markers; `packages/core/src` не импортирует `@lite-fsm/entities` и не содержит entity-specific hardcode hits; `packages/entities/src/runtime/routing.ts` не содержит `new Set(indices)`, `metadata.config`, `getEntityStateName` или `Map.get`; exact legacy plugin audit содержит только expected historical/spec/test registry hits вне active entity scope.
+- Docs/API: `API-CHEATSHEET.md`, `TYPES-CHEATSHEET.md` и `packages/entities/README.md` отражают public API и types этапов 1-6; `@lite-fsm/entities/react` остается не опубликован до будущего React этапа.
+- Запрещенные команды: docs build, `pnpm run build`, `pnpm run verify:release`, pages build и `next build` внутри `apps/docs` агентом не запускались.
+- Residual risks: package build/dist и docs build не проверялись по запрету/границе ТЗ; переход к этапу 8 должен использовать `spec/tz-entities-implementation-part-2.md`.
 
 ### 2026-06-13 — Корректирующее ТЗ перед этапом 6
 
@@ -280,3 +292,68 @@
 - Итог: `EntitiesPlugin<AppDeps>` стал documented type-only source, runtime `entitiesPlugin(...)` не переносит dependency type, docs/cheatsheets/specs синхронизированы.
 - Проверки: финальный gate корректирующего ТЗ пройден; docs build не запускался по запрету.
 - Следующее действие: можно начинать основной этап 6.
+
+### 2026-06-13 — Этап 6 dispatch
+
+- Статус: `in progress`.
+- Исполнитель: `019ec28d-3a31-7290-88e0-de1280752090`.
+- Corrective: `0/3`.
+- Baseline: рабочее дерево чистое; unstaged и staged diff отсутствуют.
+- Active scope: `packages/entities/src/runtime/compile.ts`, `packages/entities/src/runtime/state.ts`, `packages/entities/src/runtime/routing.ts`, `packages/entities/src/runtime/reduce.ts`, `packages/entities/src/runtime/transaction.ts`, `packages/entities/src/runtime/storage.ts`, точечные изменения `packages/entities/src/plugin.ts`, `packages/entities/src/machine-extension.ts`, runtime/type/performance tests этапа 6, `API-CHEATSHEET.md`, `TYPES-CHEATSHEET.md`, `packages/entities/README.md`.
+- Out of scope: `despawnOn`, entity effects, reactions, snapshot/hydrate, React hooks, public `manager.spawn(...)`, public `manager.despawn(...)`, benchmarks acceptance этапа 13 и entity-specific hardcode в `@lite-fsm/core`.
+- Следующее действие: передать исполнителю brief этапа 6.
+
+### 2026-06-13 — Этап 6 review corrective 1
+
+- Статус: `in progress`.
+- Исполнитель: `019ec28d-3a31-7290-88e0-de1280752090`.
+- Corrective: `1/3`.
+- Review verdict: `return_to_subagent`.
+- Замечания: steady-state reducer context создает `new Set(indices)` для `payloadFor` даже вне `ENTITY_SPAWNED`, что нарушает hot path no per-row allocations; `entityId`/`groupTag` routing выбирает rows через все templates accepting event, а не через actor rows attached to routed entities/groups, поэтому не закрывает целевую сложность routed dispatch; performance guard не измеряет per-row allocation growth.
+- Следующее действие: исполнитель исправляет routing/payloadFor hot path, добавляет focused guards и перезапускает проверки этапа 6.
+
+### 2026-06-13 — Этап 6 verify corrective 2
+
+- Статус: `in progress`.
+- Исполнитель: `019ec28d-3a31-7290-88e0-de1280752090`.
+- Corrective: `2/3`.
+- Verify verdict: `return_to_subagent`.
+- Замечания: `pnpm run check-types` падает на новых тестах этапа 6: `tests/entities/entities-plugin.test.ts(2288,20)` из-за слишком узкого `Middleware<any, { type: "PING" }>` без spawn events/plugin meta и `tests/entities/entities-plugin.test.ts(2388,25)` из-за `push` на `readonly EntityIndex[][]`.
+- Пройденные проверки до failure: package check-types, focused runtime coverage, focused Tstyche, `pnpm run test:types`, core routeMeta regressions, `git diff --check` и source audits.
+- Следующее действие: исполнитель исправляет test typing, перезапускает focused checks и `pnpm run check-types`.
+
+### 2026-06-13 — Этап 6 done
+
+- Статус: `done`.
+- Исполнитель: `019ec28d-3a31-7290-88e0-de1280752090`.
+- Baseline: рабочее дерево было чистым до dispatch; stage-owned delta добавляет numeric compile metadata, routing/storage modules, sidecar ownership, tests/docs этапа 6; журнал обновлен оркестратором.
+- Corrective: `2/3`.
+- Scope: `packages/entities/src/runtime/compile.ts`, `packages/entities/src/runtime/storage.ts`, `packages/entities/src/runtime/routing.ts`, `packages/entities/src/runtime/state.ts`, `packages/entities/src/runtime/reduce.ts`, `packages/entities/src/plugin.ts`, `packages/entities/src/machine-extension.ts`, `tests/entities/entities-plugin.test.ts`, `tests/types/entities-api.tst.ts`, `API-CHEATSHEET.md`, `TYPES-CHEATSHEET.md`, `packages/entities/README.md`.
+- Ключевые контракты: `entitiesPlugin()` объявляет `routeMeta.entityId`, entity storage требует `routeMetaKeys: ["entityId"]`; `manager.transition(...)` типизирует `meta.entityId` только при plugin; reduce использует numeric event/state metadata, transition table, state buckets и `config-default`; `self` получил `states`, `presence`, `rowVersion`; routed `entityId`/`groupTag` идет по attached actor rows sidecar, `actorId`/`groupId` не адресуют entity rows; hot `TICK` не создает row-scaled `Set(indices)` и не сканирует unrelated routed templates.
+- Проверки: `pnpm --filter @lite-fsm/entities check-types` — pass; `pnpm exec vitest run tests/entities/entities-plugin.test.ts --coverage '--coverage.include=packages/entities/src/**/*.ts'` — pass, 80 tests, 100% coverage; `pnpm exec tstyche tests/types/entities-api.tst.ts` — pass, 22 tests/55 assertions; `pnpm run test:types` — pass, 44 files/479 tests/1072 assertions; `pnpm exec vitest run tests/core/routing-registry.test.ts tests/core/plugin-system-stage5.test.ts tests/core/plugin-system-stage8.test.ts` — pass, 38 tests; `pnpm run check-types` — pass; `git diff --check` — pass; source audits по core entity hardcode, no-hacks и routing hot path — no active hits.
+- Coverage: focused `packages/entities/src/**/*.ts` — 100% statements/branches/functions/lines (`876/876`, `365/365`, `181/181`, `763/763`).
+- Риски: docs build не запускался по запрету; legacy plugin audit hits остаются только в historical/spec файлах и разрешены cleanup-критерием.
+- Следующее действие: новый dispatch этапа 7.
+
+### 2026-06-13 — Этап 7 dispatch
+
+- Статус: `in progress`.
+- Исполнитель: `019ec2a7-b91f-7fe0-815b-79a9b029036f`.
+- Corrective: `0/3`.
+- Baseline: stage 1-6 delta и журнал присутствуют в рабочем дереве; staged diff отсутствует. Текущий tracked scope: `API-CHEATSHEET.md`, `TYPES-CHEATSHEET.md`, `packages/entities/README.md`, `packages/entities/src/machine-extension.ts`, `packages/entities/src/plugin.ts`, `packages/entities/src/runtime/reduce.ts`, `packages/entities/src/runtime/state.ts`, `tests/entities/entities-plugin.test.ts`, `tests/types/entities-api.tst.ts`, `spec/tz-entities-implementation-log.md`. Untracked stage 6 files: `packages/entities/src/runtime/compile.ts`, `packages/entities/src/runtime/routing.ts`, `packages/entities/src/runtime/storage.ts`.
+- Active scope: cleanup/refactor только для файлов и tests/docs, затронутых этапами 1-6; source audits из этапа 7; при необходимости точечная чистка `packages/entities/src/runtime/*`, `packages/entities/src/plugin.ts`, `packages/entities/src/machine-extension.ts`, `tests/entities/entities-plugin.test.ts`, `tests/types/entities-api.tst.ts`, `API-CHEATSHEET.md`, `TYPES-CHEATSHEET.md`, `packages/entities/README.md`.
+- Out of scope: новое поведение, public API/types changes beyond cleanup wording, `despawnOn`, entity effects, reactions, snapshot/hydrate, React hooks, benchmarks, docs build и entity-specific hardcode в `@lite-fsm/core`.
+- Следующее действие: передать исполнителю brief этапа 7.
+
+### 2026-06-13 — Этап 7 done
+
+- Статус: `done`.
+- Исполнитель: `019ec2a7-b91f-7fe0-815b-79a9b029036f`.
+- Baseline: stage 1-6 accepted delta была исходным состоянием; stage-owned delta чистит мертвый/unused код без изменения поведения.
+- Corrective: `0/3`.
+- Scope: `packages/entities/src/machine-extension.ts`, `packages/entities/src/runtime/state.ts`, `packages/entities/src/runtime/reduce.ts`, `packages/entities/src/runtime/transaction.ts`, `API-CHEATSHEET.md`.
+- Cleanup: удалены не root-exported `EntityReducerColumn`, unused/future-only `enteredScratchByState`, unused compatibility alias `RuntimeEntitySpawnSpec`; уточнен docs text про live rows части 1 без future hydrate.
+- Проверки: `pnpm exec vitest run tests/entities/entities-plugin.test.ts --coverage '--coverage.include=packages/entities/src/**/*.ts'` — pass, 80 tests, 100% coverage; `pnpm exec tstyche tests/types/entities-api.tst.ts` — pass, 22 tests/55 assertions; `pnpm --filter @lite-fsm/entities check-types` — pass; `pnpm run check-types` — pass; `pnpm run lint` — pass; `pnpm exec vitest run tests/core/routing-registry.test.ts tests/core/plugin-system-stage5.test.ts tests/core/plugin-system-stage8.test.ts` — pass, 38 tests; `git diff --check` — pass; exact cleanup audit — only expected historical/spec/test registry hits outside active entity scope.
+- Coverage: focused `packages/entities/src/**/*.ts` — 100% statements/branches/functions/lines (`873/873`, `363/363`, `181/181`, `760/760`).
+- Риски: docs build не запускался по запрету; cleanup не менял runtime behavior, public API, error semantics, routing order, transaction atomicity или hot path guarantees.
+- Следующее действие: финальная readiness gate части 1.

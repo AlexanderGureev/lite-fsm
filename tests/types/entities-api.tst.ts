@@ -1,6 +1,6 @@
 import { describe, expect, test } from "tstyche";
 
-import { createMachine, MachineManager } from "@lite-fsm/core";
+import { createMachine, definePlugin, defineStorageRuntime, MachineManager } from "@lite-fsm/core";
 import {
   defineEntitySpawn,
   defineSpawnEvents,
@@ -427,21 +427,36 @@ describe("@lite-fsm/entities — этап 5 spawn API types", () => {
   });
 
   test("EntityReducerContext типизирует self columns, state helpers и payloadFor(entity)", () => {
-    const meta = null as unknown as EntityReducerContext<typeof movementInitialContext, typeof movementSpawnSchema>;
+    const meta = null as unknown as EntityReducerContext<
+      typeof movementInitialContext,
+      typeof movementSpawnSchema,
+      typeof movementActor.config
+    >;
     const entity = 0 as EntityIndex;
     const payload = meta.payloadFor(entity);
     const x = meta.self.x[entity];
     const label = meta.self.label[entity];
     const stateCode = meta.self.stateCode[entity];
     const prevStateCode = meta.self.prevStateCode[entity];
+    const aliveCode = meta.self.states.alive;
+    const presence = meta.self.presence[entity];
+    const rowVersion = meta.self.rowVersion[entity];
     const hasEntity = meta.self.has(entity);
     const entityId = meta.self.entityId(entity);
 
     expect(meta.self.indices).type.toBe<readonly EntityIndex[]>();
+    expect(meta.self.states.alive).type.toBe<number>();
+    expect(meta.self.presence).type.toBe<Uint8Array>();
+    expect(meta.self.stateCode).type.toBe<Int16Array>();
+    expect(meta.self.prevStateCode).type.toBe<Int16Array>();
+    expect(meta.self.rowVersion).type.toBe<Uint32Array>();
     expect(x).type.toBe<number>();
     expect(label).type.toBe<string>();
     expect(stateCode).type.toBe<number>();
     expect(prevStateCode).type.toBe<number>();
+    expect(aliveCode).type.toBe<number>();
+    expect(presence).type.toBe<number>();
+    expect(rowVersion).type.toBe<number>();
     expect(hasEntity).type.toBe<boolean>();
     expect(entityId).type.toBe<string>();
     expect(payload.x).type.toBe<number>();
@@ -450,9 +465,12 @@ describe("@lite-fsm/entities — этап 5 spawn API types", () => {
     meta.self.x[entity] = payload.x;
     meta.self.label[entity] = payload.label ?? "";
     meta.self.stateCode[entity] = meta.self.prevStateCode[entity];
+    meta.self.stateCode[entity] = meta.self.states.alive;
 
     // @ts-expect-error!
     meta.payloadFor("projectile/a");
+    // @ts-expect-error!
+    meta.self.states.missing;
   });
 
   test("entity reducer получает типизированный self и payloadFor из storage input", () => {
@@ -470,6 +488,9 @@ describe("@lite-fsm/entities — этап 5 spawn API types", () => {
         const payload = meta.payloadFor(entity);
 
         expect(meta.self.indices).type.toBe<readonly EntityIndex[]>();
+        expect(meta.self.states.alive).type.toBe<number>();
+        expect(meta.self.presence).type.toBe<Uint8Array>();
+        expect(meta.self.rowVersion).type.toBe<Uint32Array>();
         expect(meta.self.x[entity]).type.toBe<number>();
         expect(meta.self.label[entity]).type.toBe<string>();
         expect(meta.self.stateCode[entity]).type.toBe<number>();
@@ -482,6 +503,7 @@ describe("@lite-fsm/entities — этап 5 spawn API types", () => {
         meta.self.x[entity] = payload.x;
         meta.self.label[entity] = payload.label ?? "";
         meta.self.stateCode[entity] = meta.self.prevStateCode[entity];
+        meta.self.stateCode[entity] = meta.self.states.alive;
 
         // @ts-expect-error!
         meta.payloadFor("projectile/a");
@@ -672,5 +694,103 @@ describe("@lite-fsm/entities — этап 5 spawn API types", () => {
 
     type PublicEvents = MachineEvents<{ readonly plainActor: typeof plainActor }>;
     type _NoAutoSpawnEvents = Assert<Equal<Extract<PublicEvents, SpawnEvents>, never>>;
+  });
+});
+
+describe("@lite-fsm/entities — этап 6 route meta и reducer helpers types", () => {
+  type AppEvent = FSMEvent<"TICK">;
+  const entityPlugin = entitiesPlugin();
+  const plugins = [entityPlugin] as const;
+  const createAppMachine: TypedCreateMachineFn<AppEvent, {}, typeof plugins> = createMachine;
+  const actor = createAppMachine({
+    storage: "entity",
+    initialState: "__INIT",
+    initialContext: {
+      x: f32(),
+    },
+    spawnSchema: {},
+    config: {
+      __INIT: { ENTITY_SPAWNED: "alive" },
+      alive: { TICK: "alive" },
+    },
+  });
+  const machines = { actor };
+
+  test("meta.entityId доступен только при установленном entitiesPlugin", () => {
+    const withPlugin = MachineManager(machines, { plugins });
+    const withoutPlugin = MachineManager(machines);
+
+    withPlugin.transition({ type: "TICK", meta: { entityId: "unit/a" } });
+    withPlugin.transition({ type: "TICK", meta: { entityId: ["unit/a", "unit/b"] } });
+    withPlugin.transition({ type: "TICK", meta: { actorId: "actor/0" } });
+    withPlugin.transition({ type: "TICK", meta: { groupId: "group/0" } });
+    withPlugin.transition({ type: "TICK", meta: { groupTag: "unit" } });
+
+    // @ts-expect-error!
+    withoutPlugin.transition({ type: "TICK", meta: { entityId: "unit/a" } });
+    withPlugin.transition({
+      type: "TICK",
+      meta: {
+        // @ts-expect-error!
+        entityId: 1,
+      },
+    });
+  });
+
+  test("routeMetaKeys entityId требует совместимый plugin routeMeta resolver", () => {
+    type RoutedStorageExtension = {
+      readonly input: {
+        readonly initialContext: {};
+      };
+      readonly publicState: {};
+      readonly runtimeState: {};
+      readonly routeMeta: {
+        readonly entityId: string | readonly string[];
+      };
+    };
+    const storage = defineStorageRuntime<RoutedStorageExtension>().create({
+      kind: "typed-entity-route",
+      routeMetaKeys: ["entityId"],
+      validateTemplate() {},
+      compileTemplate() {},
+      createRuntimeState() {
+        return {};
+      },
+      createPublicInitialState() {
+        return {};
+      },
+      acceptsEvent() {
+        return false;
+      },
+      reduce() {},
+      commit() {},
+    });
+
+    definePlugin().create({
+      name: "typed-entity-route-ok",
+      routeMeta: {
+        entityId(value: string | readonly string[]) {
+          return value;
+        },
+      },
+      storage: [storage],
+    });
+
+    // @ts-expect-error!
+    definePlugin().create({
+      name: "typed-entity-route-missing",
+      storage: [storage],
+    });
+
+    definePlugin().create({
+      name: "typed-entity-route-incompatible",
+      routeMeta: {
+        // @ts-expect-error!
+        entityId(value: number) {
+          return String(value);
+        },
+      },
+      storage: [storage],
+    });
   });
 });

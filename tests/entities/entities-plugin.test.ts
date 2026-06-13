@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { definePlugin, defineStorageRuntime, LiteFsmError, MachineManager } from "@lite-fsm/core";
 import { getNormalizedPlugin } from "@lite-fsm/core/internal/plugin";
-import type { FSMEvent, MachineConfig, MachineStore } from "@lite-fsm/core";
+import type { FSMEvent, MachineConfig, MachineStore, Middleware } from "@lite-fsm/core";
 import {
   defineEntitySpawn,
   defineSpawnEvents,
@@ -26,7 +26,12 @@ import {
   ensureActorCapacity,
   ensureEntityCapacity,
   getEntityStateCode,
+  getEntityStateName,
+  getEntityRuntimeState,
+  moveActorStateBucket,
 } from "../../packages/entities/src/runtime/state";
+import { compileEntityRuntimeMetadata } from "../../packages/entities/src/runtime/compile";
+import { collectEntityPublicReducerBatches } from "../../packages/entities/src/runtime/routing";
 
 type CounterEvent = FSMEvent<"INC">;
 type CounterConfig = { readonly READY: { readonly INC: "READY" } };
@@ -926,6 +931,15 @@ describe("@lite-fsm/entities — этап 5 spawn events и entity spawn", () =>
     expect(actorStore.statePosition).toBe(statePosition);
     expect(actorStore.columns.x).toBe(xColumn);
     expect(getEntityStateCode(actorStore.metadata, "__INIT")).toBe(-1);
+    expect(getEntityStateName(actorStore.metadata, -1)).toBe("__INIT");
+
+    moveActorStateBucket(actorStore, 0 as EntityIndex, 0, -1);
+    moveActorStateBucket(actorStore, 0 as EntityIndex, -1, 99);
+    expect(actorStore.statePosition[0]).toBeUndefined();
+
+    ensureActorCapacity(actorStore, 1);
+    moveActorStateBucket(actorStore, 0 as EntityIndex, 0, -1);
+    expect(actorStore.statePosition[0]).toBe(-1);
   });
 
   it("public spawn event создает entity rows, запускает ENTITY_SPAWNED перед public event и инициализирует columns через self", () => {
@@ -1715,5 +1729,734 @@ describe("@lite-fsm/entities — этап 5 spawn events и entity spawn", () =>
       "LITE_FSM_INVALID_OPTIONS",
     );
     expectLiteFsmError(() => entitiesPlugin({ spawn: {} } as never), "LITE_FSM_INVALID_OPTIONS");
+  });
+});
+
+describe("@lite-fsm/entities — этап 6 reduce pipeline и routing", () => {
+  const createStage6SpawnEvents = () =>
+    defineSpawnEvents({
+      SPAWN_STAGE6: spawnEvent<{ readonly id: string; readonly groupTag: string }>(),
+    });
+
+  const spawnStage6Entity = (
+    manager: { transition(action: { readonly type: "SPAWN_STAGE6"; readonly payload: { readonly id: string; readonly groupTag: string } }): unknown },
+    id: string,
+    groupTag = "unit",
+  ) => {
+    manager.transition({ type: "SPAWN_STAGE6", payload: { id, groupTag } });
+  };
+
+  it("TICK доставляется только accepting templates и reducer вызывается один раз на template", () => {
+    const tickCalls: number[] = [];
+    const pingCalls: string[] = [];
+    const tickActor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { TICK: "READY" } },
+      initialState: "__INIT",
+      initialContext: { hits: i32() },
+      spawnSchema: {},
+      reducer(_slice: unknown, action: { readonly type: string }, { self }: { readonly self: any }) {
+        if (action.type !== "TICK") return;
+        tickCalls.push(self.indices.length);
+        for (const entity of self.indices) self.hits[entity] += 1;
+      },
+    } as const;
+    const pingActor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { PING: "READY" } },
+      initialState: "__INIT",
+      initialContext: { hits: i32() },
+      spawnSchema: {},
+      reducer(_slice: unknown, action: { readonly type: string }) {
+        pingCalls.push(action.type);
+      },
+    } as const;
+    const machines = { tickActor, pingActor };
+    const spawnEvents = createStage6SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE6: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: { tickActor: {}, pingActor: {} },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+
+    spawnStage6Entity(manager, "unit/a");
+    spawnStage6Entity(manager, "unit/b");
+    pingCalls.length = 0;
+    manager.transition({ type: "TICK" });
+
+    const tickStore = entityAccess<typeof machines>(manager).get("tickActor");
+    const pingStore = entityAccess<typeof machines>(manager).get("pingActor");
+    expect(tickCalls).toEqual([2]);
+    expect(pingCalls).toEqual([]);
+    expect(tickStore.hits[0 as EntityIndex]).toBe(1);
+    expect(tickStore.hits[1 as EntityIndex]).toBe(1);
+    expect(pingStore.hits[0 as EntityIndex]).toBe(0);
+    expect(pingStore.hits[1 as EntityIndex]).toBe(0);
+  });
+
+  it("compile metadata строит numeric event codes без duplicate event types", () => {
+    const metadata = compileEntityTemplate("actor", {
+      config: {
+        __INIT: { ENTITY_SPAWNED: "READY" },
+        READY: { TICK: "READY" },
+        STOPPED: { TICK: "READY" },
+        EMPTY: undefined,
+        "*": { TICK: "READY" },
+      } as never,
+      initialContext: {},
+      spawnSchema: {},
+    });
+    const compiled = compileEntityRuntimeMetadata([metadata]);
+    const patched = compileEntityRuntimeMetadata([{ ...metadata, eventTypes: ["ENTITY_SPAWNED"] }]);
+
+    expect(compiled.eventTypesByCode).toEqual(["ENTITY_SPAWNED", "TICK"]);
+    expect(compiled.metadataByKey.actor.eventAcceptMask[compiled.eventCodeByType.TICK]).toBe(1);
+    expect(patched.eventTypesByCode).toEqual(["ENTITY_SPAWNED"]);
+  });
+
+  it("lifecycle batch skips actor без ENTITY_SPAWNED transition когда eventCode существует", () => {
+    const passiveActor = {
+      storage: "entity",
+      config: { __INIT: {}, READY: { TICK: "READY" } },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+    } as const;
+    const activeActor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { TICK: "READY" } },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+    } as const;
+    const machines = { passiveActor, activeActor };
+    const spawnEvents = createStage6SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE6: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: { passiveActor: {}, activeActor: {} },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+
+    spawnStage6Entity(manager, "unit/a");
+
+    const access = entityAccess<typeof machines>(manager);
+    expect(access.get("passiveActor").state(0 as EntityIndex)).toBeUndefined();
+    expect(access.get("activeActor").state(0 as EntityIndex)).toBe("READY");
+  });
+
+  it("empty multi-bucket event и unknown eventCode возвращают no-op batches", () => {
+    const actor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "READY" },
+        READY: { TICK: "READY" },
+        STOPPED: { TICK: "STOPPED" },
+      },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+    } as const;
+    const manager = MachineManager({ actor }, { plugins: [entitiesPlugin()] as const });
+    const runtime = getEntityRuntimeState(manager.entities);
+    const eventCode = runtime.eventCodeByType.TICK;
+
+    expect(manager.transition({ type: "TICK" })).toEqual({ type: "TICK" });
+    expect(collectEntityPublicReducerBatches(runtime, eventCode, { scope: "unscoped", key: undefined, targetSet: [] })).toEqual(
+      [],
+    );
+    expect(
+      collectEntityPublicReducerBatches(runtime, 999, { scope: "unscoped", key: undefined, targetSet: [] }),
+    ).toEqual([]);
+    (runtime.templatesByEventCode as unknown as Array<unknown>)[999] = [runtime.actorStores.actor];
+    expect(
+      collectEntityPublicReducerBatches(runtime, 999, { scope: "unscoped", key: undefined, targetSet: [] }),
+    ).toEqual([]);
+  });
+
+  it("entity route пропускает dead, missing actor и non-accepting rows", () => {
+    const routedCalls: string[] = [];
+    const routedActor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "READY" },
+        READY: { PING: "READY", STOP: "STOPPED" },
+        STOPPED: {},
+      },
+      initialState: "__INIT",
+      initialContext: { hits: i32() },
+      spawnSchema: {},
+      reducer(_slice: unknown, action: { readonly type: string }, { self }: { readonly self: any }) {
+        if (action.type !== "PING") return;
+        for (const entity of self.indices) {
+          routedCalls.push(self.entityId(entity));
+          self.hits[entity] += 1;
+        }
+      },
+    } as const;
+    const otherActor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { PING: "READY" } },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+    } as const;
+    const machines = { routedActor, otherActor };
+    const spawnEvents = createStage6SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE6: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: payload.id === "other/a" ? { otherActor: {} } : { routedActor: {} },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+    const runtime = getEntityRuntimeState(manager.entities);
+
+    spawnStage6Entity(manager, "unit/dead");
+    spawnStage6Entity(manager, "other/a");
+    spawnStage6Entity(manager, "unit/stopped");
+    const eventCode = runtime.eventCodeByType.PING;
+    const otherEntity = 1 as EntityIndex;
+    const otherRows = runtime.actorRowsByEntity[otherEntity];
+    delete runtime.actorRowsByEntity[otherEntity];
+    expect(
+      collectEntityPublicReducerBatches(runtime, eventCode, {
+        scope: "plugin",
+        key: "entityId",
+        targetSet: ["other/a"],
+      }),
+    ).toEqual([]);
+    runtime.actorRowsByEntity[otherEntity] = otherRows;
+    runtime.actorStores.otherActor.presence[otherEntity] = 0;
+    runtime.entityStore.alive[0] = 0;
+    manager.transition({ type: "STOP", meta: { entityId: "unit/stopped" } } as never);
+    manager.transition({
+      type: "PING",
+      meta: { entityId: ["unit/dead", "other/a", "unit/stopped"] },
+    } as never);
+
+    expect(routedCalls).toEqual([]);
+    expect(entityAccess<typeof machines>(manager).get("routedActor").hits[0 as EntityIndex]).toBe(0);
+  });
+
+  it("config-default transition применяется до reducer, а reducer может override и rollback stateCode", () => {
+    const observations: string[] = [];
+    const actor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "READY" },
+        READY: { STOP: "STOPPED", TICK: "READY" },
+        STOPPED: {},
+      },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+      reducer(_slice: unknown, action: { readonly type: string }, { self }: { readonly self: any }) {
+        for (const entity of self.indices) {
+          if (action.type === "STOP") {
+            observations.push(`${self.prevStateCode[entity]}->${self.stateCode[entity]}:${self.states.STOPPED}`);
+            self.stateCode[entity] = self.prevStateCode[entity];
+          }
+          if (action.type === "TICK") {
+            self.stateCode[entity] = self.states.STOPPED;
+          }
+        }
+      },
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createStage6SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE6: (payload) => ({ id: payload.id, groupTag: payload.groupTag, actors: { actor: {} } }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+    const store = entityAccess<typeof machines>(manager).get("actor");
+    const entity = 0 as EntityIndex;
+
+    spawnStage6Entity(manager, "unit/a");
+    manager.transition({ type: "STOP" });
+    expect(observations).toEqual(["0->1:1"]);
+    expect(store.state(entity)).toBe("READY");
+
+    manager.transition({ type: "TICK" });
+    expect(store.state(entity)).toBe("STOPPED");
+  });
+
+  it("unscoped event собирает accepted rows из нескольких state buckets в reusable scratch", () => {
+    const frames: string[][] = [];
+    const actor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "READY" },
+        READY: { STOP: "STOPPED", TICK: "READY" },
+        STOPPED: { TICK: "STOPPED" },
+      },
+      initialState: "__INIT",
+      initialContext: { hits: i32() },
+      spawnSchema: {},
+      reducer(_slice: unknown, action: { readonly type: string }, { self }: { readonly self: any }) {
+        if (action.type !== "TICK") return;
+        const ids: string[] = [];
+        for (const entity of self.indices) {
+          ids.push(self.entityId(entity));
+          self.hits[entity] += 1;
+        }
+        frames.push(ids);
+      },
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createStage6SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE6: (payload) => ({ id: payload.id, groupTag: payload.groupTag, actors: { actor: {} } }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+
+    spawnStage6Entity(manager, "unit/a");
+    spawnStage6Entity(manager, "unit/b");
+    manager.transition({ type: "STOP", meta: { entityId: "unit/b" } } as never);
+    manager.transition({ type: "TICK" });
+
+    const store = entityAccess<typeof machines>(manager).get("actor");
+    expect(frames).toEqual([["unit/a", "unit/b"]]);
+    expect(store.hits[0 as EntityIndex]).toBe(1);
+    expect(store.hits[1 as EntityIndex]).toBe(1);
+  });
+
+  it("invalid stateCode после reducer бросает clear dev error", () => {
+    const actor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { TICK: "READY" } },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+      reducer(_slice: unknown, action: { readonly type: string }, { self }: { readonly self: any }) {
+        if (action.type === "TICK") {
+          for (const entity of self.indices) self.stateCode[entity] = 99;
+        }
+      },
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createStage6SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE6: (payload) => ({ id: payload.id, groupTag: payload.groupTag, actors: { actor: {} } }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+
+    spawnStage6Entity(manager, "unit/a");
+    const error = expectLiteFsmError(() => manager.transition({ type: "TICK" }), "LITE_FSM_INVALID_STORAGE_RUNTIME");
+    expect(error.message).toContain("invalid stateCode 99");
+
+    const routedError = expectLiteFsmError(
+      () => manager.transition({ type: "TICK", meta: { entityId: "unit/a" } } as never),
+      "LITE_FSM_INVALID_STORAGE_RUNTIME",
+    );
+    expect(routedError.message).toContain("invalid stateCode 99");
+  });
+
+  it("state transition обновляет buckets через dense swap-remove", () => {
+    const actor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { STOP: "STOPPED" }, STOPPED: {} },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createStage6SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE6: (payload) => ({ id: payload.id, groupTag: payload.groupTag, actors: { actor: {} } }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+
+    spawnStage6Entity(manager, "unit/a");
+    spawnStage6Entity(manager, "unit/b");
+    spawnStage6Entity(manager, "unit/c");
+
+    const actorStore = getEntityRuntimeState(manager.entities).actorStores.actor;
+    const readyCode = actorStore.metadata.stateCodeByName.READY;
+    const stoppedCode = actorStore.metadata.stateCodeByName.STOPPED;
+    expect(actorStore.stateBuckets[readyCode]).toEqual([0, 1, 2]);
+
+    manager.transition({ type: "STOP", meta: { entityId: "unit/b" } } as never);
+
+    expect(actorStore.stateBuckets[readyCode]).toEqual([0, 2]);
+    expect(actorStore.stateBuckets[stoppedCode]).toEqual([1]);
+    expect(actorStore.statePosition[0]).toBe(0);
+    expect(actorStore.statePosition[1]).toBe(0);
+    expect(actorStore.statePosition[2]).toBe(1);
+  });
+
+  it("meta.entityId доставляет rows указанной entity и bump-ит rowVersion только accepted rows", () => {
+    const actor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { PING: "READY" } },
+      initialState: "__INIT",
+      initialContext: { hits: i32() },
+      spawnSchema: {},
+      reducer(_slice: unknown, action: { readonly type: string }, { self }: { readonly self: any }) {
+        if (action.type !== "PING") return;
+        for (const entity of self.indices) self.hits[entity] += 1;
+      },
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createStage6SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE6: (payload) => ({ id: payload.id, groupTag: payload.groupTag, actors: { actor: {} } }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+
+    spawnStage6Entity(manager, "unit/a");
+    spawnStage6Entity(manager, "unit/b");
+    const actorStore = getEntityRuntimeState(manager.entities).actorStores.actor;
+    const beforeA = actorStore.rowVersion[0];
+    const beforeB = actorStore.rowVersion[1];
+
+    manager.transition({ type: "PING", meta: { entityId: "unit/a" } } as never);
+
+    const store = entityAccess<typeof machines>(manager).get("actor");
+    expect(store.hits[0 as EntityIndex]).toBe(1);
+    expect(store.hits[1 as EntityIndex]).toBe(0);
+    expect(actorStore.rowVersion[0]).toBe(beforeA + 1);
+    expect(actorStore.rowVersion[1]).toBe(beforeB);
+  });
+
+  it("meta.entityId array dedupe сохраняет первое появление и порядок доставки", () => {
+    const delivered: string[] = [];
+    const actor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { PING: "READY" } },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+      reducer(_slice: unknown, action: { readonly type: string }, { self }: { readonly self: any }) {
+        if (action.type !== "PING") return;
+        for (const entity of self.indices) delivered.push(self.entityId(entity));
+      },
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createStage6SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE6: (payload) => ({ id: payload.id, groupTag: payload.groupTag, actors: { actor: {} } }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+
+    spawnStage6Entity(manager, "unit/a");
+    spawnStage6Entity(manager, "unit/b");
+    spawnStage6Entity(manager, "unit/c");
+    manager.transition({ type: "PING", meta: { entityId: ["unit/c", "unit/a", "unit/c", "unit/b"] } } as never);
+
+    expect(delivered).toEqual(["unit/c", "unit/a", "unit/b"]);
+  });
+
+  it("invalid raw meta.entityId value throws clear route resolver error", () => {
+    const actor = createEntityTemplate();
+    const manager = MachineManager({ actor }, { plugins: [entitiesPlugin()] as const });
+    const error = expectLiteFsmError(
+      () => manager.transition({ type: "TICK", meta: { entityId: 1 } } as never),
+      "LITE_FSM_INVALID_ROUTE_RESOLVER_RESULT",
+    );
+
+    expect(error.message).toContain("routeMeta.entityId");
+    expect(error.message).toContain("string or an array of strings");
+  });
+
+  it("meta.groupTag доставляет entity rows matching groups и сохраняет instance behavior", () => {
+    const entityActor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { PING: "READY" } },
+      initialState: "__INIT",
+      initialContext: { hits: i32() },
+      spawnSchema: {},
+      reducer(_slice: unknown, action: { readonly type: string }, { self }: { readonly self: any }) {
+        if (action.type !== "PING") return;
+        for (const entity of self.indices) self.hits[entity] += 1;
+      },
+    } as const;
+    const instanceActor = {
+      storage: "instance",
+      groupTag: "enemy",
+      config: { __INIT: { SPAWN_INSTANCE: "READY" }, READY: { PING: "READY" } },
+      initialState: "__INIT",
+      initialContext: { hits: 0 },
+      reducer: (slice: { readonly context: { readonly hits: number } }, _action: unknown, meta: { readonly nextState: "READY" }) => ({
+        state: meta.nextState,
+        context: { hits: slice.context.hits + 1 },
+      }),
+    } as const;
+    const machines = { entityActor, instanceActor };
+    const spawnEvents = createStage6SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE6: (payload) => ({ id: payload.id, groupTag: payload.groupTag, actors: { entityActor: {} } }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+
+    spawnStage6Entity(manager, "enemy/a", "enemy");
+    spawnStage6Entity(manager, "ally/a", "ally");
+    manager.transition({ type: "SPAWN_INSTANCE" } as never);
+    manager.transition({ type: "PING", meta: { groupTag: "enemy" } });
+
+    const store = entityAccess<typeof machines>(manager).get("entityActor");
+    const instanceRows = Object.values(manager.getState().instanceActor);
+    expect(store.hits[0 as EntityIndex]).toBe(1);
+    expect(store.hits[1 as EntityIndex]).toBe(0);
+    expect(instanceRows).toHaveLength(1);
+    expect(instanceRows[0].context.hits).toBe(2);
+  });
+
+  it("entityId и groupTag вместе бросают ambiguous route error до delivery", () => {
+    const actor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { PING: "READY" } },
+      initialState: "__INIT",
+      initialContext: { hits: i32() },
+      spawnSchema: {},
+      reducer(_slice: unknown, action: { readonly type: string }, { self }: { readonly self: any }) {
+        if (action.type !== "PING") return;
+        for (const entity of self.indices) self.hits[entity] += 1;
+      },
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createStage6SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE6: (payload) => ({ id: payload.id, groupTag: payload.groupTag, actors: { actor: {} } }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+
+    spawnStage6Entity(manager, "unit/a");
+    const error = expectLiteFsmError(
+      () => manager.transition({ type: "PING", meta: { entityId: "unit/a", groupTag: "unit" } } as never),
+      "LITE_FSM_AMBIGUOUS_ROUTE_META",
+    );
+
+    expect(error.message).toContain("entityId, groupTag");
+    expect(entityAccess<typeof machines>(manager).get("actor").hits[0 as EntityIndex]).toBe(0);
+  });
+
+  it("actorId не адресует entity rows, unknown entityId и unknown groupTag являются no-op", () => {
+    const actor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { PING: "READY" } },
+      initialState: "__INIT",
+      initialContext: { hits: i32() },
+      spawnSchema: {},
+      reducer(_slice: unknown, action: { readonly type: string }, { self }: { readonly self: any }) {
+        if (action.type !== "PING") return;
+        for (const entity of self.indices) self.hits[entity] += 1;
+      },
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createStage6SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE6: (payload) => ({ id: payload.id, groupTag: payload.groupTag, actors: { actor: {} } }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+    const store = entityAccess<typeof machines>(manager).get("actor");
+
+    spawnStage6Entity(manager, "unit/a");
+    manager.transition({ type: "PING", meta: { actorId: "unit/a" } });
+    manager.transition({ type: "PING", meta: { entityId: "missing" } } as never);
+    manager.transition({ type: "PING", meta: { groupTag: "missing" } });
+
+    expect(store.hits[0 as EntityIndex]).toBe(0);
+  });
+
+  it("middleware rewrite сохраняет meta.entityId для entity delivery", () => {
+    const actor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { PING: "READY" } },
+      initialState: "__INIT",
+      initialContext: { hits: i32() },
+      spawnSchema: {},
+      reducer(_slice: unknown, action: { readonly type: string }, { self }: { readonly self: any }) {
+        if (action.type !== "PING") return;
+        for (const entity of self.indices) self.hits[entity] += 1;
+      },
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createStage6SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE6: (payload) => ({ id: payload.id, groupTag: payload.groupTag, actors: { actor: {} } }),
+    });
+    type Stage6RewriteEvent =
+      | { readonly type: "PING" }
+      | { readonly type: "SPAWN_STAGE6"; readonly payload: { readonly id: string; readonly groupTag: string } };
+    type Stage6RewriteMeta = {
+      readonly actorId?: string | string[];
+      readonly groupId?: string | string[];
+      readonly groupTag?: string | string[];
+      readonly entityId?: string | readonly string[];
+    };
+    const rewrite: Middleware<any, Stage6RewriteEvent, Stage6RewriteMeta> = () => (next) => (action) =>
+      next({ ...action, meta: { ...action.meta, entityId: "unit/b" } } as never);
+    const manager = MachineManager(machines, {
+      middleware: [rewrite],
+      plugins: [entitiesPlugin({ spawn })] as const,
+    });
+
+    spawnStage6Entity(manager, "unit/a");
+    spawnStage6Entity(manager, "unit/b");
+    manager.transition({ type: "PING", meta: { entityId: "unit/a" } } as never);
+
+    const store = entityAccess<typeof machines>(manager).get("actor");
+    expect(store.hits[0 as EntityIndex]).toBe(0);
+    expect(store.hits[1 as EntityIndex]).toBe(1);
+  });
+
+  it("routed entityId и groupTag не сканируют unrelated accepting templates", () => {
+    const delivered: string[] = [];
+    const targetActor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { PING: "READY" } },
+      initialState: "__INIT",
+      initialContext: { hits: i32() },
+      spawnSchema: {},
+      reducer(_slice: unknown, action: { readonly type: string }, { self }: { readonly self: any }) {
+        if (action.type !== "PING") return;
+        for (const entity of self.indices) {
+          delivered.push(self.entityId(entity));
+          self.hits[entity] += 1;
+        }
+      },
+    } as const;
+    const noiseA = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { PING: "READY" } },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+    } as const;
+    const noiseB = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { PING: "READY" } },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+    } as const;
+    const noiseC = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { PING: "READY" } },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+    } as const;
+    const machines = { targetActor, noiseA, noiseB, noiseC };
+    const spawnEvents = createStage6SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE6: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors:
+          payload.groupTag === "target"
+            ? { targetActor: {} }
+            : { noiseA: {}, noiseB: {}, noiseC: {} },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+
+    spawnStage6Entity(manager, "unit/target", "target");
+    spawnStage6Entity(manager, "unit/noise", "noise");
+
+    const runtime = getEntityRuntimeState(manager.entities);
+    let unrelatedScratchReads = 0;
+    for (const templateKey of ["noiseA", "noiseB", "noiseC"] as const) {
+      const store = runtime.actorStores[templateKey];
+      const scratch = store.acceptedScratch;
+      Object.defineProperty(store, "acceptedScratch", {
+        configurable: true,
+        get() {
+          unrelatedScratchReads += 1;
+          return scratch;
+        },
+      });
+    }
+
+    manager.transition({ type: "PING", meta: { entityId: "unit/target" } } as never);
+    manager.transition({ type: "PING", meta: { groupTag: "target" } });
+
+    expect(unrelatedScratchReads).toBe(0);
+    expect(delivered).toEqual(["unit/target", "unit/target"]);
+    expect(entityAccess<typeof machines>(manager).get("targetActor").hits[0 as EntityIndex]).toBe(2);
+  });
+
+  it("hot TICK переиспользует indices buffer и не масштабирует Map.get от row count", () => {
+    const createManager = (rows: number) => {
+      const indicesFrames: Array<readonly EntityIndex[]> = [];
+      const actor = {
+        storage: "entity",
+        config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { TICK: "READY" } },
+        initialState: "__INIT",
+        initialContext: { hits: i32() },
+        spawnSchema: {},
+        reducer(_slice: unknown, action: { readonly type: string }, { self }: { readonly self: any }) {
+          if (action.type !== "TICK") return;
+          indicesFrames.push(self.indices);
+          for (const entity of self.indices) {
+            expect(typeof entity).toBe("number");
+            self.hits[entity] += 1;
+          }
+        },
+      } as const;
+      const machines = { actor };
+      const spawnEvents = createStage6SpawnEvents();
+      const spawn = defineEntitySpawn(machines, spawnEvents)({
+        SPAWN_STAGE6: (payload) => ({ id: payload.id, groupTag: payload.groupTag, actors: { actor: {} } }),
+      });
+      const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+
+      for (let index = 0; index < rows; index += 1) spawnStage6Entity(manager, `unit/${index}`);
+      return { manager, indicesFrames };
+    };
+    const countMapGets = (rows: number): number => {
+      const { manager } = createManager(rows);
+      const originalGet = Map.prototype.get;
+      let calls = 0;
+      Map.prototype.get = function patchedMapGet(this: Map<unknown, unknown>, key: unknown) {
+        calls += 1;
+        return originalGet.call(this, key);
+      };
+      try {
+        manager.transition({ type: "TICK" });
+      } finally {
+        Map.prototype.get = originalGet;
+      }
+      return calls;
+    };
+    const countSetArrayEntries = (rows: number): number => {
+      const { manager } = createManager(rows);
+      const OriginalSet = globalThis.Set;
+      let copiedEntries = 0;
+      class CountingSet<T> extends OriginalSet<T> {
+        constructor(iterable?: Iterable<T> | null) {
+          if (Array.isArray(iterable)) copiedEntries += iterable.length;
+          super(iterable);
+        }
+      }
+      (globalThis as typeof globalThis & { Set: SetConstructor }).Set = CountingSet as SetConstructor;
+      try {
+        manager.transition({ type: "TICK" });
+      } finally {
+        (globalThis as typeof globalThis & { Set: SetConstructor }).Set = OriginalSet;
+      }
+      return copiedEntries;
+    };
+    const { manager, indicesFrames } = createManager(32);
+
+    manager.transition({ type: "TICK" });
+    manager.transition({ type: "TICK" });
+    manager.transition({ type: "TICK" });
+
+    const routingSource = readFileSync(join(rootDir, "packages/entities/src/runtime/routing.ts"), "utf8");
+    expect(new Set(indicesFrames).size).toBe(1);
+    expect(indicesFrames[0]).toHaveLength(32);
+    expect(countMapGets(32)).toBe(countMapGets(1));
+    expect(countSetArrayEntries(32)).toBe(countSetArrayEntries(1));
+    expect(countSetArrayEntries(32)).toBe(0);
+    expect(routingSource).not.toContain("metadata.config");
+    expect(routingSource).not.toContain("getEntityStateName");
   });
 });

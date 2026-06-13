@@ -7,7 +7,7 @@
 | Импорт                                                         | Runtime exports                                                                                                                                                   |
 | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `@lite-fsm/core`                                               | `createMachine`, `createConfig`, `createReducer`, `createEffect`, `createActorMeta`, `definePlugin`, `defineStorageRuntime`, `Machine`, `defineMachine`, `MachineManager`, `LiteFsmError` |
-| `@lite-fsm/entities`                                           | alpha: `entitiesPlugin`, `defineSpawnEvents`, `defineEntitySpawn`, `spawnEvent`, schema descriptors `f32`/`i16`/`i32`/`u8`/`string`/`optional`; storage kind `"entity"`, lifecycle guards, public spawn events, lightweight public slices и `manager.entities` |
+| `@lite-fsm/entities`                                           | alpha: `entitiesPlugin`, `defineSpawnEvents`, `defineEntitySpawn`, `spawnEvent`, schema descriptors `f32`/`i16`/`i32`/`u8`/`string`/`optional`; storage kind `"entity"`, lifecycle guards, public spawn events, `meta.entityId` routing, lightweight public slices и `manager.entities` |
 | `@lite-fsm/persist`                                            | `persistManager`, `createJsonStorage`                                                                                                                             |
 | `@lite-fsm/persist/react`                                      | `usePersistStatuses`, `useIsPersistRestoring`                                                                                                                     |
 | `@lite-fsm/middleware`                                         | `immerMiddleware`, `devToolsMiddleware`                                                                                                                           |
@@ -75,7 +75,7 @@ manager.getState().movementActor;
 // { storage: "entity", version: 0, count: 0, capacity: 0 }
 ```
 
-Columns не попадают в `manager.getState()`. Runtime создает `EntityStore` и `ColumnarActorStore` на каждый entity actor template; live rows появляются через public spawn events или будущий hydrate.
+Columns не попадают в `manager.getState()`. Runtime создает `EntityStore` и `ColumnarActorStore` на каждый entity actor template; live rows появляются через public spawn events.
 
 `manager.entities` доступен только при установленном `entitiesPlugin()`:
 
@@ -119,7 +119,11 @@ Spawn hook выполняется в `hooks.beforeReduce` по финально�
 
 Созданные rows сначала получают internal `ENTITY_SPAWNED`: default transition из `__INIT` применяется до reducer, затем reducer может инициализировать direct columns через `self`. После этого newly spawned rows получают public spawn event в том же dispatch, если их current state принимает этот event. `payloadFor(entity)` доступен только в reducer на `ENTITY_SPAWNED` и только для `EntityIndex` из текущего spawn scope.
 
-`@lite-fsm/entities` пока не добавляет routing по `meta.entityId`, snapshots или React hooks. `@lite-fsm/entities/react` не публикуется до появления React API.
+Entity reducer получает batch-oriented `self`: `indices`, `states`, `presence`, `rowVersion`, `stateCode`, `prevStateCode`, direct schema columns, `has(entity)` и `entityId(entity)`. Runtime применяет config-default transition до reducer; reducer может записать `self.stateCode[entity]` в другой valid code или вернуть default transition через `self.prevStateCode[entity]`.
+
+`entitiesPlugin()` объявляет `routeMeta.entityId`, а entity storage runtime требует `routeMetaKeys: ["entityId"]`. При подключенном plugin `manager.transition(...)` принимает `meta.entityId?: string | readonly string[]`. Route доставляет action actor rows указанных entities; массив дедуплицируется с сохранением первого появления, unknown ids являются no-op. `meta.groupTag` одновременно сохраняет instance runtime behavior и доставляет entity rows с matching `EntitySpawnSpec.groupTag`. `meta.actorId` и `meta.groupId` не адресуют entity rows. Один action может содержать только один active routing key; `meta.entityId` вместе с `meta.groupTag` бросает `LITE_FSM_AMBIGUOUS_ROUTE_META`. Raw `meta.entityId`, не являющийся строкой или массивом строк, бросает route resolver error.
+
+`@lite-fsm/entities` пока не добавляет snapshots или React hooks. `@lite-fsm/entities/react` не публикуется до появления React API.
 
 ## Alpha graph compiler
 
@@ -390,7 +394,7 @@ Storage-specific machine typing подключается через app wrapper 
 
 Все plugin keys находятся в плоском namespace: `routeMeta.cacheKey` означает `action.meta.cacheKey`, `manager.cache` — `manager.cache`, `scopedDeps.trace` — `deps.trace`, `scopedTransition.refresh` — `deps.transition.refresh`. Core не добавляет prefix; plugin author и integrator отвечают за уникальные keys, особенно в multi-instance factories. Дубликаты route meta, manager, scoped deps, scoped transition и storage kind являются hard error; diagnostics указывают section, key и обоих владельцев.
 
-`routeMeta` объявляет routing contract, а не пользовательские данные. Ключ section становится action meta key; используйте scalar keys вроде `entityId`, `cacheKey`, `documentId`, `tenantId`. Reserved route/sender keys запрещены. Resolver возвращает `string | readonly string[]`; runtime не проверяет тип входного `value`, но проверяет результат resolver. `dispatch.route` остается single constraint: один action может содержать только один active routing key из `actorId`, registered plugin route keys, `groupId`, `groupTag`. Несколько routing keys бросают `LITE_FSM_AMBIGUOUS_ROUTE_META`; для fanout отправляйте отдельные `manager.transition(...)` или unscoped domain event. `PluginRouteMeta<PluginUnion>` возвращает raw map значений, а optional semantics относятся к `manager.transition(...).meta`.
+`routeMeta` объявляет routing contract, а не пользовательские данные. Ключ section становится action meta key; используйте scalar keys вроде `entityId`, `cacheKey`, `documentId`, `tenantId`. Reserved route/sender keys запрещены. Resolver возвращает `string | readonly string[]`; core runtime проверяет result resolver, а raw `value` валидирует сам resolver, если plugin требует строгий input. `dispatch.route` остается single constraint: один action может содержать только один active routing key из `actorId`, registered plugin route keys, `groupId`, `groupTag`. Несколько routing keys бросают `LITE_FSM_AMBIGUOUS_ROUTE_META`; для fanout отправляйте отдельные `manager.transition(...)` или unscoped domain event. `PluginRouteMeta<PluginUnion>` возвращает raw map значений, а optional semantics относятся к `manager.transition(...).meta`.
 
 `manager` объявляет manager extensions. Ключ section становится полем returned manager, тип поля равен return type factory. Runtime DSL остается прежним: `definePlugin().create({ manager: { key(ctx) { ... } } })`. Factory получает `ManagerRuntimeContext<PluginEvents, S = MachineStore>`: `ctx.transition(...)` принимает события plugin, а не `HostEvents`, `ctx.config` имеет тип текущего store `S`, `ctx.getState()` возвращает `MachinesState<S>`. Generic factory может вернуть extension, зависящий от `MachineStore`, без дополнительных runtime callbacks. Factory вызывается один раз при создании manager после compile templates, runtime state и initial public state.
 

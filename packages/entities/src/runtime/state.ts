@@ -1,8 +1,12 @@
-import type { AnyEvent, MachineStore, ManagerAction, StorageManagerContext, StorageTemplate } from "@lite-fsm/core";
+import type { MachineStore, StorageManagerContext, StorageTemplate } from "@lite-fsm/core";
 
 import { createEntityAccess, type EntityAccess } from "./access";
+import {
+  compileEntityRuntimeMetadata,
+  ENTITY_INIT_STATE_CODE,
+  type EntityTemplateMetadata,
+} from "./compile";
 import type { EntityIndex } from "../plugin";
-import type { EntityContextSchema, EntitySpawnSchema } from "../schema";
 
 type EntityPublicStateSlice = {
   readonly storage: "entity";
@@ -18,22 +22,6 @@ type EntityContextDescriptor = {
   readonly default?: number | string;
 };
 
-type EntityActorReducer = (
-  state: { readonly state: string; readonly context: Record<string, unknown> },
-  action: ManagerAction<AnyEvent>,
-  meta: Record<string, unknown>,
-) => unknown;
-
-export type EntityTemplateMetadata = {
-  readonly templateKey: string;
-  readonly config: Record<string, Record<string, string | null | undefined> | undefined>;
-  readonly initialContext: EntityContextSchema;
-  readonly spawnSchema: EntitySpawnSchema;
-  readonly publicStates: readonly string[];
-  readonly stateCodeByName: Readonly<Record<string, number>>;
-  readonly reducer?: EntityActorReducer;
-};
-
 export type EntityStore = {
   count: number;
   capacity: number;
@@ -42,8 +30,15 @@ export type EntityStore = {
   alive: Uint8Array;
   generation: Uint32Array;
   groupTagByIndex: string[];
+  entitiesByGroupTag: Record<string, EntityIndex[]>;
+  groupTagPosition: Int32Array;
   freeList: EntityIndex[];
   version: number;
+};
+
+export type EntityActorRowRef = {
+  readonly store: ColumnarActorStore;
+  readonly entity: EntityIndex;
 };
 
 export type ColumnarActorStore = {
@@ -56,10 +51,11 @@ export type ColumnarActorStore = {
   stateCode: Int16Array;
   prevStateCode: Int16Array;
   rowVersion: Uint32Array;
-  stateBuckets: Record<string, EntityIndex[]>;
+  stateBuckets: EntityIndex[][];
   statePosition: Int32Array;
   acceptedScratch: EntityIndex[];
-  enteredScratchByState: Record<string, EntityIndex[]>;
+  routingScratchVersion: number;
+  acceptStateBucketsByEventCode: EntityIndex[][][];
   columns: Record<string, EntityColumn>;
   publicSlice: EntityPublicStateSlice;
 };
@@ -67,15 +63,18 @@ export type ColumnarActorStore = {
 export type EntityRuntimeState = {
   readonly entityStore: EntityStore;
   readonly actorStores: Record<string, ColumnarActorStore>;
+  readonly eventCodeByType: Readonly<Record<string, number>>;
+  readonly eventTypesByCode: readonly string[];
+  readonly templatesByEventCode: readonly (readonly ColumnarActorStore[])[];
+  actorRowsByEntity: EntityActorRowRef[][];
+  actorRowsByGroupTag: Record<string, EntityActorRowRef[]>;
+  routingScratchVersion: number;
   readonly access: EntityAccess<MachineStore>;
 };
 
 const runtimeByManager = new WeakMap<object, EntityRuntimeState>();
 
-export const ENTITY_INIT_STATE = "__INIT";
-export const ENTITY_INIT_STATE_CODE = -1;
-
-const nonPublicStateNames = new Set(["__INIT", "__RESOLVED", "__REJECTED", "__CANCELLED", "*"]);
+export { compileEntityTemplate, ENTITY_INIT_STATE, ENTITY_INIT_STATE_CODE, getEntityStateCode, getEntityStateName } from "./compile";
 
 const emptyColumnFactories = {
   f32: () => new Float32Array(0),
@@ -138,8 +137,7 @@ const growUint32 = (value: Uint32Array, capacity: number): Uint32Array => {
   return next;
 };
 
-const createScratchByState = (states: readonly string[]): Record<string, EntityIndex[]> =>
-  Object.fromEntries(states.map((state) => [state, [] as EntityIndex[]]));
+const createScratchByState = (states: readonly string[]): EntityIndex[][] => states.map(() => [] as EntityIndex[]);
 
 const createEntityStore = (): EntityStore => ({
   count: 0,
@@ -149,6 +147,8 @@ const createEntityStore = (): EntityStore => ({
   alive: new Uint8Array(0),
   generation: new Uint32Array(0),
   groupTagByIndex: [],
+  entitiesByGroupTag: Object.create(null) as Record<string, EntityIndex[]>,
+  groupTagPosition: new Int32Array(0),
   freeList: [],
   version: 0,
 });
@@ -180,53 +180,49 @@ const createColumnarActorStore = (metadata: EntityTemplateMetadata): ColumnarAct
     stateBuckets: createScratchByState(metadata.publicStates),
     statePosition: new Int32Array(0),
     acceptedScratch: [],
-    enteredScratchByState: createScratchByState(metadata.publicStates),
+    routingScratchVersion: 0,
+    acceptStateBucketsByEventCode: [],
     columns,
     publicSlice: { storage: "entity", version: 0, count: 0, capacity: 0 },
   };
 
+  store.acceptStateBucketsByEventCode = metadata.acceptStateCodesByEventCode.map((stateCodes) =>
+    stateCodes.flatMap((stateCode) => (stateCode >= 0 ? [store.stateBuckets[stateCode]] : [])),
+  );
   store.publicSlice = createPublicSlice(store);
   return store;
-};
-
-export const compileEntityTemplate = (
-  templateKey: string,
-  machine: {
-    readonly config: object;
-    readonly initialContext: EntityContextSchema;
-    readonly spawnSchema: EntitySpawnSchema;
-    readonly reducer?: unknown;
-  },
-): EntityTemplateMetadata => {
-  const publicStates = Object.keys(machine.config).filter((state) => !nonPublicStateNames.has(state));
-  const stateCodeByName = Object.fromEntries(publicStates.map((state, index) => [state, index]));
-
-  return {
-    templateKey,
-    config: machine.config as Record<string, Record<string, string | null | undefined> | undefined>,
-    initialContext: machine.initialContext,
-    spawnSchema: machine.spawnSchema,
-    publicStates,
-    stateCodeByName,
-    ...(typeof machine.reducer === "function" ? { reducer: machine.reducer as EntityActorReducer } : {}),
-  };
 };
 
 export const createEntityRuntimeState = (
   templates: readonly StorageTemplate<EntityTemplateMetadata>[],
   manager: StorageManagerContext,
 ): EntityRuntimeState => {
+  const compiled = compileEntityRuntimeMetadata(templates.map((template) => template.data as EntityTemplateMetadata));
   const runtime = {
     entityStore: createEntityStore(),
     actorStores: Object.create(null) as Record<string, ColumnarActorStore>,
+    eventCodeByType: compiled.eventCodeByType,
+    eventTypesByCode: compiled.eventTypesByCode,
+    templatesByEventCode: compiled.eventTypesByCode.map(() => [] as ColumnarActorStore[]),
+    actorRowsByEntity: [],
+    actorRowsByGroupTag: Object.create(null) as Record<string, EntityActorRowRef[]>,
+    routingScratchVersion: 0,
     access: undefined as unknown as EntityAccess<MachineStore>,
   };
 
   for (const template of templates) {
-    runtime.actorStores[template.key] = createColumnarActorStore(template.data as EntityTemplateMetadata);
+    const metadata = compiled.metadataByKey[template.key];
+    const store = createColumnarActorStore(metadata);
+    runtime.actorStores[template.key] = store;
+    for (let eventCode = 0; eventCode < metadata.eventAcceptMask.length; eventCode += 1) {
+      if (metadata.eventAcceptMask[eventCode] === 1) {
+        (runtime.templatesByEventCode[eventCode] as ColumnarActorStore[]).push(store);
+      }
+    }
   }
   runtime.access = createEntityAccess(runtime);
   runtimeByManager.set(manager, runtime);
+  runtimeByManager.set(runtime.access, runtime);
 
   return runtime;
 };
@@ -249,6 +245,7 @@ export const ensureEntityCapacity = (store: EntityStore, capacity: number): void
   store.capacity = capacity;
   store.alive = growUint8(store.alive, capacity);
   store.generation = growUint32(store.generation, capacity);
+  store.groupTagPosition = growInt32(store.groupTagPosition, capacity, -1);
 };
 
 export const ensureActorCapacity = (store: ColumnarActorStore, capacity: number): void => {
@@ -278,18 +275,66 @@ export const writeInitialColumnValues = (store: ColumnarActorStore, entity: Enti
   }
 };
 
-export const getEntityStateName = (metadata: EntityTemplateMetadata, code: number): string | undefined => {
-  if (code === ENTITY_INIT_STATE_CODE) return ENTITY_INIT_STATE;
-  return metadata.publicStates[code];
-};
-
-export const getEntityStateCode = (metadata: EntityTemplateMetadata, state: string): number | undefined => {
-  if (state === ENTITY_INIT_STATE) return ENTITY_INIT_STATE_CODE;
-  return metadata.stateCodeByName[state];
-};
-
 export const refreshActorPublicSlice = (store: ColumnarActorStore): void => {
   store.publicSlice = createPublicSlice(store);
+};
+
+export const addEntityToGroupBucket = (store: EntityStore, entity: EntityIndex, groupTag: string): void => {
+  const bucket = store.entitiesByGroupTag[groupTag] ?? [];
+  if (bucket.length === 0) store.entitiesByGroupTag[groupTag] = bucket;
+  store.groupTagPosition[entity] = bucket.length;
+  bucket.push(entity);
+};
+
+export const addActorRowOwnership = (
+  runtime: EntityRuntimeState,
+  store: ColumnarActorStore,
+  entity: EntityIndex,
+  groupTag: string,
+): void => {
+  const row = { store, entity };
+  const entityRows = runtime.actorRowsByEntity[entity] ?? [];
+  if (entityRows.length === 0) runtime.actorRowsByEntity[entity] = entityRows;
+  entityRows.push(row);
+
+  const groupRows = runtime.actorRowsByGroupTag[groupTag] ?? [];
+  if (groupRows.length === 0) runtime.actorRowsByGroupTag[groupTag] = groupRows;
+  groupRows.push(row);
+};
+
+const removeActorFromStateBucket = (store: ColumnarActorStore, entity: EntityIndex, stateCode: number): void => {
+  if (stateCode < 0) return;
+  const bucket = store.stateBuckets[stateCode];
+  const position = store.statePosition[entity];
+  if (!bucket || position < 0) return;
+
+  const last = bucket.pop();
+  if (last !== undefined && last !== entity) {
+    bucket[position] = last;
+    store.statePosition[last] = position;
+  }
+  store.statePosition[entity] = -1;
+};
+
+const addActorToStateBucket = (store: ColumnarActorStore, entity: EntityIndex, stateCode: number): void => {
+  if (stateCode < 0) return;
+  const bucket = store.stateBuckets[stateCode];
+  if (!bucket) return;
+
+  store.statePosition[entity] = bucket.length;
+  bucket.push(entity);
+};
+
+export const moveActorStateBucket = (
+  store: ColumnarActorStore,
+  entity: EntityIndex,
+  previousCode: number,
+  nextCode: number,
+): void => {
+  if (previousCode === nextCode) return;
+
+  removeActorFromStateBucket(store, entity, previousCode);
+  addActorToStateBucket(store, entity, nextCode);
 };
 
 export const createPublicInitialState = (

@@ -1,4 +1,4 @@
-import type { StorageDependentField, StorageDependentTypeLambda } from "@lite-fsm/core";
+import type { ActorPublicState, StorageDependentField, StorageDependentTypeLambda } from "@lite-fsm/core";
 
 import type { EntityContextSchema, EntitySpawnPayload, EntitySpawnSchema } from "./schema";
 import type { EntityIndex } from "./plugin";
@@ -58,10 +58,6 @@ export type EntityMachinePublicState<Metadata> = {
   readonly [entityStateMetadata]?: Metadata;
 };
 
-export type EntityReducerColumn<T> = {
-  [entity: EntityIndex]: T;
-};
-
 type DescriptorMutableColumn<Descriptor> = Descriptor extends { readonly kind: "f32" }
   ? Float32Array
   : Descriptor extends { readonly kind: "i16" }
@@ -78,10 +74,17 @@ type EntityReducerColumns<ContextSchema extends EntityContextSchema> = {
   readonly [Field in keyof ContextSchema]: DescriptorMutableColumn<ContextSchema[Field]>;
 };
 
-export type EntityReducerSelf<ContextSchema extends EntityContextSchema> = {
+export type EntityReducerStates<Config extends object> = {
+  readonly [State in ActorPublicState<Config>]: number;
+};
+
+export type EntityReducerSelf<ContextSchema extends EntityContextSchema, Config extends object = object> = {
   readonly indices: readonly EntityIndex[];
-  readonly stateCode: EntityReducerColumn<number>;
-  readonly prevStateCode: EntityReducerColumn<number>;
+  readonly states: EntityReducerStates<Config>;
+  readonly presence: Uint8Array;
+  readonly stateCode: Int16Array;
+  readonly prevStateCode: Int16Array;
+  readonly rowVersion: Uint32Array;
   has(entity: EntityIndex): boolean;
   entityId(entity: EntityIndex): string;
 } & EntityReducerColumns<ContextSchema>;
@@ -89,16 +92,18 @@ export type EntityReducerSelf<ContextSchema extends EntityContextSchema> = {
 export type EntityReducerContext<
   ContextSchema extends EntityContextSchema,
   SpawnSchema extends EntitySpawnSchema,
+  Config extends object = object,
 > = {
-  readonly self: EntityReducerSelf<ContextSchema>;
+  readonly self: EntityReducerSelf<ContextSchema, Config>;
   payloadFor(entity: EntityIndex): EntitySpawnPayload<SpawnSchema>;
 };
 
 type EntityReducerContextForInput<Input> = Input extends {
   readonly initialContext: infer ContextSchema extends EntityContextSchema;
   readonly spawnSchema: infer SpawnSchema extends EntitySpawnSchema;
+  readonly config: infer Config extends object;
 }
-  ? EntityReducerContext<ContextSchema, SpawnSchema>
+  ? EntityReducerContext<ContextSchema, SpawnSchema, Config>
   : never;
 
 interface EntityReducerContextLambda extends StorageDependentTypeLambda {

@@ -54,8 +54,8 @@
 | `EntityAccess<AppMachines>` | typed root accessor для `manager.entities`                                |
 | `EntitiesPlugin<AppDeps, PluginEvents>` | type-only plugin source для `TypedCreateMachineFn` и manager events от runtime `spawn` |
 | `EntityMachineExtension`    | machine-facing extension для `storage: "entity"` через plugin source      |
-| `EntityReducerContext<ContextSchema, SpawnSchema>` | reducer context с `self` и `payloadFor(entity)` для entity actor template |
-| `EntityReducerSelf<ContextSchema>` | batch self API: `indices`, direct columns, `stateCode`, `prevStateCode`, `has`, `entityId` |
+| `EntityReducerContext<ContextSchema, SpawnSchema, Config = object>` | reducer context с `self` и `payloadFor(entity)` для entity actor template |
+| `EntityReducerSelf<ContextSchema, Config = object>` | batch self API: `indices`, `states`, `presence`, `rowVersion`, direct columns, `stateCode`, `prevStateCode`, `has`, `entityId` |
 | `LiteFsmEntityLifecycleEvents` | internal lifecycle union для `storage: "entity"` templates               |
 | `SpawnEventsFrom<typeof spawnEvents>` | discriminated union public spawn events                                  |
 
@@ -154,14 +154,17 @@ const manager = MachineManager(machines, {
 manager.transition({ type: "SPAWN_PROJECTILE", payload: { id: "p1", x: 1, label: null } });
 ```
 
-`EntityReducerContext<ContextSchema, SpawnSchema>` описывает runtime-visible reducer helpers: `self.indices`, direct mutable schema columns, `self.stateCode`, `self.prevStateCode`, `self.has(entity)`, `self.entityId(entity)` и `payloadFor(entity)`. `payloadFor(entity)` принимает `EntityIndex`, возвращает payload из actor `spawnSchema` и не принимает `EntityId` string.
+`EntityReducerContext<ContextSchema, SpawnSchema, Config = object>` описывает runtime-visible reducer helpers: `self.indices`, `self.states`, `self.presence`, `self.rowVersion`, direct mutable schema columns, `self.stateCode`, `self.prevStateCode`, `self.has(entity)`, `self.entityId(entity)` и `payloadFor(entity)`. `self.states` типизируется public state names из `Config` и дает numeric state codes для safe override. `payloadFor(entity)` принимает `EntityIndex`, возвращает payload из actor `spawnSchema` и не принимает `EntityId` string.
 
 ```ts
 type MovementReducerContext = EntityReducerContext<
   typeof movementActor.initialContext,
-  typeof movementActor.spawnSchema
+  typeof movementActor.spawnSchema,
+  typeof movementActor.config
 >;
 ```
+
+`entitiesPlugin()` добавляет route meta key `entityId`. При подключенном plugin `manager.transition(...)` принимает `meta.entityId?: string | readonly string[]`; без plugin этот meta key недоступен на уровне TypeScript. Core keys `actorId`, `groupId` и `groupTag` остаются доступны. Entity storage runtime объявляет `routeMetaKeys: ["entityId"]`, поэтому storage binding требует совместимый resolver `routeMeta.entityId` в `definePlugin().create(...)`.
 
 На текущем этапе `@lite-fsm/entities` не экспортирует React types.
 
@@ -413,7 +416,7 @@ Public `compileTemplate(ctx)` возвращает только `void | { data?:
 
 Новые public diagnostics входят в `LiteFsmError["code"]`: `LITE_FSM_REENTRANT_TRANSITION_FORBIDDEN`, `LITE_FSM_AMBIGUOUS_ROUTE_META`, `LITE_FSM_INVALID_PLUGIN_CALLBACK_RESULT`, `LITE_FSM_INVALID_STORAGE_CALLBACK_RESULT`, `LITE_FSM_INVALID_REPLACEMENT_ACTION`.
 
-В storage context `ctx.action` и `ctx.originalAction` доступны напрямую. `ctx.manager` имеет тип `StorageManagerContext<Extension["observedEvents"]>` и не раскрывает `routing`, `createScopedDeps`, `config`, `options`, `schemaVersion` или registry/kernel objects. `StorageDispatchContext` не экспортируется из root API, но `ctx.dispatch` доступен через public callback contexts, например `StorageReduceContext<Ext>["dispatch"]`. `ctx.dispatch.options`, `route`, `prevState` и `skipDelivery` доступны только для чтения; `ctx.dispatch.runtime` является mutable `Map`; `ctx.dispatch.nextState` заменяется как root accumulator. Action stage fields в `ctx.dispatch` отсутствуют. Если `Extension["routeMeta"]` задан, `routeMetaKeys` типизируется как `readonly (keyof Extension["routeMeta"] & string)[]`; без `routeMeta` сохраняется совместимость со списком строковых ключей. При подключении storage definition `definePlugin().create(...)` проверяет, что plugin объявляет resolver для каждого требуемого ключа и что тип первого параметра resolver assignable к соответствующему `Extension["routeMeta"][key]`. Неаннотированный `value` считается `unknown` и совместим только с требованием `unknown`. Runtime по-прежнему валидирует только protocol resolver result, а не raw value; resolver вызывается только когда его key является единственным active routing key текущего action. Storage definitions регистрируются только через `definePlugin().create({ storage: [...] })` и `MachineManager(..., { plugins })`.
+В storage context `ctx.action` и `ctx.originalAction` доступны напрямую. `ctx.manager` имеет тип `StorageManagerContext<Extension["observedEvents"]>` и не раскрывает `routing`, `createScopedDeps`, `config`, `options`, `schemaVersion` или registry/kernel objects. `StorageDispatchContext` не экспортируется из root API, но `ctx.dispatch` доступен через public callback contexts, например `StorageReduceContext<Ext>["dispatch"]`. `ctx.dispatch.options`, `route`, `prevState` и `skipDelivery` доступны только для чтения; `ctx.dispatch.runtime` является mutable `Map`; `ctx.dispatch.nextState` заменяется как root accumulator. Action stage fields в `ctx.dispatch` отсутствуют. Если `Extension["routeMeta"]` задан, `routeMetaKeys` типизируется как `readonly (keyof Extension["routeMeta"] & string)[]`; без `routeMeta` сохраняется совместимость со списком строковых ключей. При подключении storage definition `definePlugin().create(...)` проверяет, что plugin объявляет resolver для каждого требуемого ключа и что тип первого параметра resolver assignable к соответствующему `Extension["routeMeta"][key]`. Неаннотированный `value` считается `unknown` и совместим только с требованием `unknown`. Core runtime валидирует protocol resolver result; raw value валидирует сам resolver, если plugin требует строгий input. Resolver вызывается только когда его key является единственным active routing key текущего action. Storage definitions регистрируются только через `definePlugin().create({ storage: [...] })` и `MachineManager(..., { plugins })`.
 
 `snapshot.dehydrate(ctx)` возвращает `{ machines?, snapshot? }`; `snapshot` типизируется как `Extension["snapshotData"]` и сохраняется в `MachineManagerSnapshot["storage"][kind]`. `snapshot.hydrate(ctx)` получает `ctx.machines: Readonly<Record<string, unknown>>` и `ctx.snapshot: Extension["snapshotData"] | undefined`.
 
