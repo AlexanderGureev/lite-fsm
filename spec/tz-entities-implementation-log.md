@@ -1,6 +1,6 @@
 # Журнал реализации ТЗ Entities, часть 1
 
-ТЗ: [`tz-entities-implementation.md`](./tz-entities-implementation.md)
+ТЗ: `[tz-entities-implementation.md](./tz-entities-implementation.md)`
 
 Цель журнала — восстановить состояние реализации после сжатия контекста. Журнал не заменяет ТЗ и не пересказывает diff.
 
@@ -24,21 +24,23 @@
 ## Текущий указатель
 
 - Активное ТЗ: `spec/tz-entities-implementation.md`
-- Активный этап: Этап 4 — Entity lifecycle events, `__INIT` и запрет public lifecycle dispatch
+- Активный этап: Этап 6 — Columnar reduce pipeline, numeric event/state codes, buckets, routing и hot path guarantees
 - Статус: `not started`
-- Следующее действие: начать этап 4 после review stage 3 diff.
+- Следующее действие: можно начинать этап 6.
 
 ## Сводка по этапам
+
 
 | Этап | Название                                                                                                   | Статус        | Последнее обновление |
 | ---- | ---------------------------------------------------------------------------------------------------------- | ------------- | -------------------- |
 | 1    | Пакет `@lite-fsm/entities`, exports, plugin shell и `storage: "entity"` storage definition                 | `done`        | 2026-06-13           |
 | 2    | Schema descriptors и `EntityMachineExtension`                                                              | `done`        | 2026-06-13           |
 | 3    | Compile metadata, empty `EntityStore`, `ColumnarActorStore`, public lightweight state и `manager.entities` | `done`        | 2026-06-13           |
-| 4    | Entity lifecycle events, `__INIT` и запрет public lifecycle dispatch                                       | `not started` | 2026-06-13           |
-| 5    | Spawn events, entity spawn и public spawn staging hook                                                     | `not started` | 2026-06-13           |
+| 4    | Entity lifecycle events, `__INIT` и запрет public lifecycle dispatch                                       | `done`        | 2026-06-13           |
+| 5    | Spawn events, entity spawn и public spawn staging hook                                                     | `done`        | 2026-06-13           |
 | 6    | Columnar reduce pipeline, numeric event/state codes, buckets, routing и hot path guarantees                | `not started` | 2026-06-13           |
 | 7    | Рефакторинг, чистка и полировка части 1                                                                    | `not started` | 2026-06-13           |
+
 
 ## Ход реализации
 
@@ -199,6 +201,71 @@
 - Проверки: `pnpm exec vitest run tests/core/runtime-ownership.test.ts` — pass, 17 tests; `pnpm exec vitest run tests/entities/entities-plugin.test.ts` — pass, 34 tests; `pnpm exec tstyche tests/types/entities-api.tst.ts` — pass, 11 tests; `pnpm --filter @lite-fsm/entities check-types` — pass; `pnpm run check-types` — pass; `pnpm --filter @lite-fsm/entities build` — pass; `pnpm exec vitest run tests/entities/entities-plugin.test.ts tests/core/plugin-system-stage5.test.ts tests/core/runtime-ownership.test.ts tests/core/storage-runtime-dispatch-pipeline.test.ts` — pass, 115 tests; `git diff --check` — pass.
 - Риски: docs build не запускался по запрету; ignored `packages/entities/dist` пересоздан package build и не входит в git status.
 - Следующее действие: можно начинать этап 4.
+
+### 2026-06-13 — Этап 4 dispatch
+
+- Статус: `in progress`.
+- Исполнитель: `019ec214-c574-7b51-8aae-98e8aea0e3f7`.
+- Corrective: `0/3`.
+- Baseline: перед dispatch в рабочем дереве был только unstaged diff журнала `spec/tz-entities-implementation-log.md` (markdown-ссылка ТЗ обернута как inline-code, добавлены пустые строки); staged diff отсутствовал.
+- Active scope: `packages/entities/src/machine-extension.ts`, `packages/entities/src/plugin.ts`, `packages/entities/src/index.ts`, возможный новый `packages/entities/src/runtime/lifecycle.ts` или локальный runtime helper для lifecycle names, runtime/type tests этапа 4, `API-CHEATSHEET.md`, `TYPES-CHEATSHEET.md`, `packages/entities/README.md`.
+- Out of scope: `defineSpawnEvents`, `spawnEvent`, `SpawnEventsFrom`, `defineEntitySpawn`, public spawn events, spawn transaction, `payloadFor(entity)`, `despawnOn`, `transition.despawn(...)`, reactions, snapshot/hydrate, React hooks, benchmarks и entity-specific hardcode в `@lite-fsm/core`.
+- Следующее действие: передать исполнителю brief этапа 4.
+
+### 2026-06-13 — Этап 4 done
+
+- Статус: `done`.
+- Исполнитель: `019ec214-c574-7b51-8aae-98e8aea0e3f7`.
+- Baseline: сохранен baseline dispatch; stage-owned delta не включает предшествующую markdown-правку журнала.
+- Corrective: `0/3`.
+- Scope: `packages/entities/src/runtime/lifecycle.ts`, `packages/entities/src/machine-extension.ts`, `packages/entities/src/plugin.ts`, `packages/entities/src/index.ts`, `tests/entities/entities-plugin.test.ts`, `tests/types/entities-api.tst.ts`, `API-CHEATSHEET.md`, `TYPES-CHEATSHEET.md`, `packages/entities/README.md`.
+- Ключевые контракты: добавлен `LiteFsmEntityLifecycleEvents`; `EntityMachineExtension.internalEvents` делает lifecycle events доступными entity config/reducer surface; public dispatch `ENTITY_SPAWNED`/`ENTITY_DESPAWNED` запрещен до delivery и после plugin intercept replacement; entity `__INIT` допускает только `ENTITY_SPAWNED`; `storage: "instance"` custom `__INIT` не изменен; `@lite-fsm/core` не изменялся и не содержит entity lifecycle hardcode.
+- Проверки: `pnpm exec vitest run tests/entities/entities-plugin.test.ts` — pass, 39 tests; `pnpm exec tstyche tests/types/entities-api.tst.ts` — pass, 14 tests; `pnpm --filter @lite-fsm/entities check-types` — pass; `pnpm run test:types` — pass, 44 files/471 tests/1038 assertions; `pnpm --filter @lite-fsm/entities build` — pass; `pnpm exec vitest run tests/core/storage-runtime-dispatch-pipeline.test.ts tests/core/plugin-system-stage1.test.ts` — pass, 60 tests; `pnpm run check-types` — pass; `git diff --check` — pass; source audit по no-hacks и core lifecycle/entity hits — no hits.
+- Coverage: changed runtime scope `packages/entities/src/plugin.ts` и `packages/entities/src/runtime/lifecycle.ts` — 100% statements/branches/functions/lines. Full package include additionally reports an unchanged pre-existing branch gap in `packages/entities/src/runtime/state.ts:196`, outside stage 4 delta.
+- Риски: TypeScript-level запрет custom `__INIT` edge не реализован, потому что текущий core `internalEvents` добавляет events в общий storage machine union; runtime validation является источником истины по ТЗ. Docs build не запускался по запрету.
+- Следующее действие: новый dispatch этапа 5.
+
+### 2026-06-13 — Этап 5 dispatch
+
+- Статус: `in progress`.
+- Исполнитель: `019ec220-dda1-7303-b178-b90845cd14bd`.
+- Corrective: `0/3`.
+- Baseline: stage 1-4 delta и журнал присутствуют в рабочем дереве; staged diff отсутствует. Текущий unstaged scope: `API-CHEATSHEET.md`, `TYPES-CHEATSHEET.md`, `packages/entities/README.md`, `packages/entities/src/index.ts`, `packages/entities/src/machine-extension.ts`, `packages/entities/src/plugin.ts`, `packages/entities/src/runtime/lifecycle.ts`, `tests/entities/entities-plugin.test.ts`, `tests/types/entities-api.tst.ts`, `spec/tz-entities-implementation-log.md`.
+- Active scope: `packages/entities/src/spawn.ts`, `packages/entities/src/runtime/transaction.ts`, `packages/entities/src/runtime/reduce.ts`, точечные изменения `packages/entities/src/runtime/state.ts`, `packages/entities/src/runtime/lifecycle.ts`, `packages/entities/src/plugin.ts`, `packages/entities/src/machine-extension.ts`, `packages/entities/src/index.ts`, runtime/type tests этапа 5, `API-CHEATSHEET.md`, `TYPES-CHEATSHEET.md`, `packages/entities/README.md`.
+- Out of scope: columnar performance optimizations этапа 6, routing hot path, `despawnOn`, `transition.despawn(...)`, entity effects, reactions, snapshot/hydrate, React hooks, benchmarks и entity-specific hardcode в `@lite-fsm/core`.
+- Следующее действие: передать исполнителю brief этапа 5.
+
+### 2026-06-13 — Этап 5 review corrective 1
+
+- Статус: `in progress`.
+- Исполнитель: `019ec220-dda1-7303-b178-b90845cd14bd`.
+- Corrective: `1/3`.
+- Review verdict: `return_to_subagent`.
+- Замечания: contextual reducer type contract не закрыт — tests проверяют exported `EntityReducerContext`, но не `createMachine(... reducer(_, _, meta) ...)`; допускается только generic core type resolver fix без entity hardcode, если entities-local workaround невозможен. Runtime spawn lifecycle мутирует live rows до завершения `ENTITY_SPAWNED` reducer/validation, поэтому reducer-time errors могут оставить partially spawned rows; добавить rollback/atomicity tests. Дополнить type traceability для missing/unknown recipe keys, если текущие mapped types это уже поддерживают.
+- Следующее действие: исполнитель вносит corrective fix, перезапускает focused runtime/type/coverage/build checks и возвращает `ready_for_review` или подтвержденный `blocked`.
+
+### 2026-06-13 — Этап 5 review corrective 2
+
+- Статус: `in progress`.
+- Исполнитель: `019ec220-dda1-7303-b178-b90845cd14bd`.
+- Corrective: `2/3`.
+- Review verdict: `return_to_subagent`.
+- Замечания: `entitiesPlugin<AppDeps>({ spawn })` из общего контракта больше не типизируется, потому что overload с одним generic трактует его как `Spawn`; нужен overload, который сохраняет AppDeps generic и продолжает выводить spawn events из value. Проверить, что `StorageDependentField` не становится слишком broad structural match для обычных object fields; при необходимости сделать marker nominal/required и сохранить существующие plugin-system type tests. Дополнительно закрыть atomicity для ошибки в public spawn event reducer того же dispatch, если она оставляет newly spawned rows после thrown transition.
+- Следующее действие: исполнитель вносит точечный API/type corrective, перезапускает focused checks и возвращает `ready_for_review` или подтвержденный `blocked`.
+
+### 2026-06-13 — Этап 5 done
+
+- Статус: `done`.
+- Исполнитель: `019ec220-dda1-7303-b178-b90845cd14bd`.
+- Baseline: stage 1-4 delta и журнал были исходным состоянием; stage-owned delta добавляет spawn API/runtime, generic core type resolver и spec contract correction.
+- Corrective: `2/3`.
+- Scope: `packages/entities/src/spawn.ts`, `packages/entities/src/runtime/transaction.ts`, `packages/entities/src/runtime/reduce.ts`, `packages/entities/src/runtime/state.ts`, `packages/entities/src/plugin.ts`, `packages/entities/src/machine-extension.ts`, `packages/entities/src/index.ts`, `packages/entities/README.md`, `API-CHEATSHEET.md`, `TYPES-CHEATSHEET.md`, `tests/entities/entities-plugin.test.ts`, `tests/types/entities-api.tst.ts`, `tests/types/create-machine-dependent-storage.tst.ts`, `packages/core/src/createMachine.types.ts`, `packages/core/src/pluginStorageTypes.ts`, `packages/core/src/index.ts`, `spec/tz-entities-implementation.md`, `spec/tz-entities-implementation-part-2.md`.
+- Ключевые контракты: добавлены `defineSpawnEvents`, `spawnEvent`, `SpawnEventsFrom`, `defineEntitySpawn`, `entitiesPlugin({ spawn })`; public spawn events типизируют `manager.transition(...)`; spawn recipes stage-ятся в `hooks.beforeReduce` по финальному action; entity rows создаются через internal `ENTITY_SPAWNED`; reducer получает `self` и `payloadFor(entity)`; payload/spec validation и reducer-time spawn dispatch errors откатывают staged spawn mutations; public lifecycle dispatch остается запрещен.
+- Contract correction: `entitiesPlugin<AppDeps>({ spawn })` не поддерживается как shorthand из-за ограничения TypeScript partial type argument inference; для точного вывода spawn events runtime manager использует `entitiesPlugin({ spawn })`, а `entitiesPlugin<AppDeps>()` остается источником типизации для wrappers/deps.
+- Core type support: добавлены generic `StorageDependentField`/`StorageDependentTypeLambda` без entity-specific hardcode; marker nominal/required, fixed object extension fields покрыты regression type test.
+- Проверки: `pnpm exec vitest run tests/entities/entities-plugin.test.ts` — pass, 62 tests; `pnpm exec tstyche tests/types/entities-api.tst.ts tests/types/create-machine-dependent-storage.tst.ts tests/types/create-machine-entity-proof.tst.ts` — pass, 25 tests/73 assertions; `pnpm --filter @lite-fsm/entities check-types` — pass; `pnpm run test:types` — pass, 44 files/477 tests/1061 assertions; `pnpm run check-types` — pass; `pnpm exec vitest run tests/entities/entities-plugin.test.ts --coverage '--coverage.include=packages/entities/src/**/*.ts'` — pass, 100% statements/branches/functions/lines; `pnpm exec vitest run tests/core/storage-runtime-dispatch-pipeline.test.ts tests/core/plugin-system-stage1.test.ts` — pass, 60 tests; serial `pnpm --filter @lite-fsm/core build` — pass; serial `pnpm --filter @lite-fsm/entities build` — pass; `git diff --check` — pass; no-hacks/core hardcode audit — only spec policy text hits.
+- Риски: docs build не запускался по запрету; core/entities package builds regenerated ignored `dist`.
+- Следующее действие: новый dispatch этапа 6.
 
 ## Финальная проверка
 

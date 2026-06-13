@@ -1,12 +1,33 @@
 import { describe, expect, test } from "tstyche";
 
 import { createMachine, MachineManager } from "@lite-fsm/core";
-import { entitiesPlugin, f32, i16, i32, optional, string, u8 } from "@lite-fsm/entities";
-import type { EntityAccess, EntityId, EntityIndex, EntityMachineExtension } from "@lite-fsm/entities";
+import {
+  defineEntitySpawn,
+  defineSpawnEvents,
+  entitiesPlugin,
+  f32,
+  i16,
+  i32,
+  optional,
+  spawnEvent,
+  string,
+  u8,
+} from "@lite-fsm/entities";
+import type {
+  EntityAccess,
+  EntityId,
+  EntityIndex,
+  EntityMachineExtension,
+  EntityReducerContext,
+  LiteFsmEntityLifecycleEvents,
+  SpawnEventsFrom,
+} from "@lite-fsm/entities";
 import type {
   FSMEvent,
   LiteFsmPlugin,
   MachineResultMetadata,
+  MachineEvents,
+  ManagerAction,
   MachinesState,
   MachineStore,
   TypedCreateMachineFn,
@@ -75,7 +96,7 @@ describe("@lite-fsm/entities — этап 2 schema descriptors и machine extens
   });
 
   test('wrapper с plugin source принимает storage: "entity"', () => {
-    type AppEvent = FSMEvent<"SPAWN"> | FSMEvent<"TICK">;
+    type AppEvent = FSMEvent<"TICK">;
     type AppDeps = { readonly api: { readonly load: () => Promise<void> } };
     const entityPlugin = entitiesPlugin<AppDeps>();
     const plugins = [entityPlugin] as const;
@@ -98,7 +119,7 @@ describe("@lite-fsm/entities — этап 2 schema descriptors и machine extens
       initialContext,
       spawnSchema,
       config: {
-        __INIT: { SPAWN: "ALIVE" },
+        __INIT: { ENTITY_SPAWNED: "ALIVE" },
         ALIVE: { TICK: "ALIVE" },
       },
     });
@@ -123,7 +144,7 @@ describe("@lite-fsm/entities — этап 2 schema descriptors и machine extens
   });
 
   test('core createMachine без wrapper не принимает storage: "entity"', () => {
-    type AppEvent = FSMEvent<"SPAWN">;
+    type AppEvent = FSMEvent<"TICK">;
 
     // @ts-expect-error!
     createMachine<AppEvent>({
@@ -131,7 +152,7 @@ describe("@lite-fsm/entities — этап 2 schema descriptors и machine extens
       initialState: "__INIT",
       initialContext: {},
       spawnSchema: {},
-      config: { __INIT: { SPAWN: "ALIVE" }, ALIVE: {} },
+      config: { __INIT: { ENTITY_SPAWNED: "ALIVE" }, ALIVE: {} },
     });
   });
 });
@@ -154,7 +175,7 @@ describe("@lite-fsm/entities — этап 3 EntityAccess и manager.entities typ
       x: f32(),
     },
     config: {
-      __INIT: { SPAWN: "moving" },
+      __INIT: { ENTITY_SPAWNED: "moving" },
       moving: { TICK: "moving", STOP: "stopped" },
       stopped: { TICK: "moving" },
     },
@@ -168,7 +189,7 @@ describe("@lite-fsm/entities — этап 3 EntityAccess и manager.entities typ
     },
     spawnSchema: {},
     config: {
-      __INIT: { SPAWN: "visible" },
+      __INIT: { ENTITY_SPAWNED: "visible" },
       visible: { TICK: "visible" },
     },
   });
@@ -273,5 +294,362 @@ describe("@lite-fsm/entities — этап 3 EntityAccess и manager.entities typ
 
     // @ts-expect-error!
     withoutPlugin.entities;
+  });
+});
+
+describe("@lite-fsm/entities — этап 4 lifecycle events types", () => {
+  type AppEvent = FSMEvent<"TICK">;
+  const entityPlugin = entitiesPlugin();
+  const plugins = [entityPlugin] as const;
+  const createAppMachine: TypedCreateMachineFn<AppEvent, {}, typeof plugins> = createMachine;
+
+  test("LiteFsmEntityLifecycleEvents описывает internal lifecycle union", () => {
+    type _Lifecycle = Assert<
+      Equal<
+        LiteFsmEntityLifecycleEvents,
+        { readonly type: "ENTITY_SPAWNED" } | { readonly type: "ENTITY_DESPAWNED" }
+      >
+    >;
+  });
+
+  const lifecycleActor = createAppMachine({
+    storage: "entity",
+    initialState: "__INIT",
+    initialContext: {
+      x: f32(),
+    },
+    spawnSchema: {},
+    config: {
+      __INIT: { ENTITY_SPAWNED: "alive" },
+      alive: { TICK: "alive" },
+    },
+  });
+
+  const machines = { lifecycleActor };
+
+  test("lifecycle events доступны в entity config и reducer surface", () => {
+    createAppMachine({
+      storage: "entity",
+      initialState: "__INIT",
+      initialContext: {
+        x: f32(),
+      },
+      spawnSchema: {},
+      config: {
+        __INIT: { ENTITY_SPAWNED: "alive" },
+        alive: { TICK: "alive" },
+      },
+      reducer(_state, action) {
+        expect(action).type.toBe<ManagerAction<AppEvent | LiteFsmEntityLifecycleEvents>>();
+
+        if (action.type === "ENTITY_SPAWNED") {
+          expect(action).type.toBe<ManagerAction<{ readonly type: "ENTITY_SPAWNED" }>>();
+        }
+      },
+    });
+
+    type LifecycleConfig = typeof lifecycleActor.config;
+    type _InitEvent = Assert<Equal<keyof LifecycleConfig["__INIT"], "ENTITY_SPAWNED">>;
+  });
+
+  test("lifecycle events не входят в MachineEvents и public manager.transition", () => {
+    type PublicEvents = MachineEvents<typeof machines>;
+    type _NoLifecycleInPublicEvents = Assert<Equal<Extract<PublicEvents, LiteFsmEntityLifecycleEvents>, never>>;
+
+    const manager = MachineManager(machines, { plugins });
+
+    manager.transition({ type: "TICK" });
+
+    // @ts-expect-error!
+    manager.transition({ type: "ENTITY_SPAWNED" });
+    // @ts-expect-error!
+    manager.transition({ type: "ENTITY_DESPAWNED" });
+  });
+});
+
+describe("@lite-fsm/entities — этап 5 spawn API types", () => {
+  type AppEvent = FSMEvent<"TICK">;
+  const spawnEvents = defineSpawnEvents({
+    SPAWN_PROJECTILE: spawnEvent<{
+      readonly id: string;
+      readonly x: number;
+      readonly label: string | null;
+    }>(),
+    SPAWN_EMPTY: spawnEvent<{ readonly id: string }>(),
+  });
+  type SpawnEvents = SpawnEventsFrom<typeof spawnEvents>;
+  type AppEventsWithSpawn = AppEvent | SpawnEvents;
+  const entityPlugin = entitiesPlugin();
+  const plugins = [entityPlugin] as const;
+  const createAppMachine: TypedCreateMachineFn<AppEventsWithSpawn, {}, typeof plugins> = createMachine;
+  const movementInitialContext = {
+    x: f32(),
+    label: string(),
+  } as const;
+  const movementSpawnSchema = {
+    x: f32(),
+    label: optional(string()),
+  } as const;
+
+  const movementActor = createAppMachine({
+    storage: "entity",
+    initialState: "__INIT",
+    initialContext: movementInitialContext,
+    spawnSchema: movementSpawnSchema,
+    config: {
+      __INIT: { ENTITY_SPAWNED: "alive" },
+      alive: { TICK: "alive", SPAWN_PROJECTILE: "alive" },
+    },
+  });
+
+  const domainMachine = createMachine<AppEvent, {}, { readonly idle: { readonly TICK: "idle" } }, {}>({
+    config: { idle: { TICK: "idle" } },
+    initialState: "idle",
+    initialContext: {},
+  });
+
+  const machines = { movementActor, domainMachine };
+
+  test("SpawnEventsFrom выводит discriminated union", () => {
+    type _SpawnEvents = Assert<
+      Equal<
+        SpawnEvents,
+        | {
+            readonly type: "SPAWN_PROJECTILE";
+            readonly payload: { readonly id: string; readonly x: number; readonly label: string | null };
+          }
+        | { readonly type: "SPAWN_EMPTY"; readonly payload: { readonly id: string } }
+      >
+    >;
+  });
+
+  test("EntityReducerContext типизирует self columns, state helpers и payloadFor(entity)", () => {
+    const meta = null as unknown as EntityReducerContext<typeof movementInitialContext, typeof movementSpawnSchema>;
+    const entity = 0 as EntityIndex;
+    const payload = meta.payloadFor(entity);
+    const x = meta.self.x[entity];
+    const label = meta.self.label[entity];
+    const stateCode = meta.self.stateCode[entity];
+    const prevStateCode = meta.self.prevStateCode[entity];
+    const hasEntity = meta.self.has(entity);
+    const entityId = meta.self.entityId(entity);
+
+    expect(meta.self.indices).type.toBe<readonly EntityIndex[]>();
+    expect(x).type.toBe<number>();
+    expect(label).type.toBe<string>();
+    expect(stateCode).type.toBe<number>();
+    expect(prevStateCode).type.toBe<number>();
+    expect(hasEntity).type.toBe<boolean>();
+    expect(entityId).type.toBe<string>();
+    expect(payload.x).type.toBe<number>();
+    expect(payload.label).type.toBe<string | null>();
+
+    meta.self.x[entity] = payload.x;
+    meta.self.label[entity] = payload.label ?? "";
+    meta.self.stateCode[entity] = meta.self.prevStateCode[entity];
+
+    // @ts-expect-error!
+    meta.payloadFor("projectile/a");
+  });
+
+  test("entity reducer получает типизированный self и payloadFor из storage input", () => {
+    createAppMachine({
+      storage: "entity",
+      initialState: "__INIT",
+      initialContext: movementInitialContext,
+      spawnSchema: movementSpawnSchema,
+      config: {
+        __INIT: { ENTITY_SPAWNED: "alive" },
+        alive: { TICK: "alive" },
+      },
+      reducer(_state, _action, meta) {
+        const entity = meta.self.indices[0];
+        const payload = meta.payloadFor(entity);
+
+        expect(meta.self.indices).type.toBe<readonly EntityIndex[]>();
+        expect(meta.self.x[entity]).type.toBe<number>();
+        expect(meta.self.label[entity]).type.toBe<string>();
+        expect(meta.self.stateCode[entity]).type.toBe<number>();
+        expect(meta.self.prevStateCode[entity]).type.toBe<number>();
+        expect(meta.self.has(entity)).type.toBe<boolean>();
+        expect(meta.self.entityId(entity)).type.toBe<string>();
+        expect(payload.x).type.toBe<number>();
+        expect(payload.label).type.toBe<string | null>();
+
+        meta.self.x[entity] = payload.x;
+        meta.self.label[entity] = payload.label ?? "";
+        meta.self.stateCode[entity] = meta.self.prevStateCode[entity];
+
+        // @ts-expect-error!
+        meta.payloadFor("projectile/a");
+      },
+    });
+  });
+
+  test("defineEntitySpawn выводит recipe payload и проверяет actor payload", () => {
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_PROJECTILE: (payload) => {
+        expect(payload.id).type.toBe<string>();
+        expect(payload.x).type.toBe<number>();
+        expect(payload.label).type.toBe<string | null>();
+
+        return {
+          id: payload.id,
+          groupTag: "projectile",
+          actors: {
+            movementActor: {
+              x: payload.x,
+              label: payload.label,
+            },
+          },
+        };
+      },
+      SPAWN_EMPTY: () => [],
+    });
+
+    expect(spawn.spawnEvents).type.toBe<typeof spawnEvents>();
+
+    defineEntitySpawn(machines, spawnEvents)(
+      // @ts-expect-error!
+      {
+        SPAWN_PROJECTILE: (payload) => ({
+          id: payload.id,
+          groupTag: "projectile",
+          actors: {
+            movementActor: {
+              x: payload.x,
+              label: payload.label,
+            },
+          },
+        }),
+      },
+    );
+
+    defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_PROJECTILE: (payload) => ({
+        id: payload.id,
+        groupTag: "projectile",
+        actors: {
+          movementActor: {
+            x: payload.x,
+            label: payload.label,
+          },
+        },
+      }),
+      SPAWN_EMPTY: () => [],
+      // @ts-expect-error!
+      SPAWN_UNKNOWN: () => [],
+    });
+
+    defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_PROJECTILE: (payload) => ({
+        id: payload.id,
+        groupTag: "projectile",
+        actors: {
+          // @ts-expect-error!
+          movementActor: { x: payload.x },
+        },
+      }),
+      SPAWN_EMPTY: () => [],
+    });
+
+    defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_PROJECTILE: (payload) => ({
+        id: payload.id,
+        groupTag: "projectile",
+        actors: {
+          movementActor: {
+            // @ts-expect-error!
+            x: "bad",
+            label: payload.label,
+          },
+        },
+      }),
+      SPAWN_EMPTY: () => [],
+    });
+
+    defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_PROJECTILE: (payload) => ({
+        id: payload.id,
+        groupTag: "projectile",
+        actors: {
+          // @ts-expect-error!
+          unknownActor: {},
+        },
+      }),
+      SPAWN_EMPTY: () => [],
+    });
+  });
+
+  test("entitiesPlugin({ spawn }) расширяет manager.transition без отдельной передачи spawnEvents", () => {
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_PROJECTILE: (payload) => ({
+        id: payload.id,
+        groupTag: "projectile",
+        actors: {
+          movementActor: {
+            x: payload.x,
+            label: payload.label,
+          },
+        },
+      }),
+      SPAWN_EMPTY: () => [],
+    });
+    const spawnPlugin = entitiesPlugin({ spawn });
+    const manager = MachineManager(machines, { plugins: [spawnPlugin] as const });
+
+    manager.transition({ type: "TICK" });
+    manager.transition({ type: "SPAWN_PROJECTILE", payload: { id: "projectile/a", x: 1, label: null } });
+    manager.transition({ type: "SPAWN_EMPTY", payload: { id: "noop" } });
+
+    // @ts-expect-error!
+    manager.transition({ type: "SPAWN_PROJECTILE", payload: { id: "projectile/a", x: "bad", label: null } });
+    // @ts-expect-error!
+    manager.transition({ type: "ENTITY_SPAWNED" });
+  });
+
+  test("machine AppEvents не получает spawn events автоматически", () => {
+    const plainPlugin = entitiesPlugin();
+    const plainPlugins = [plainPlugin] as const;
+    const createPlainMachine: TypedCreateMachineFn<AppEvent, {}, typeof plainPlugins> = createMachine;
+
+    createPlainMachine({
+      storage: "entity",
+      initialState: "__INIT",
+      initialContext: {
+        x: f32(),
+      },
+      spawnSchema: {
+        x: f32(),
+      },
+      config: {
+        __INIT: { ENTITY_SPAWNED: "alive" },
+        alive: {
+          TICK: "alive",
+          // @ts-expect-error!
+          SPAWN_PROJECTILE: "alive",
+        },
+      },
+    });
+
+    const plainActor = createPlainMachine({
+      storage: "entity",
+      initialState: "__INIT",
+      initialContext: {
+        x: f32(),
+      },
+      spawnSchema: {
+        x: f32(),
+      },
+      config: {
+        __INIT: { ENTITY_SPAWNED: "alive" },
+        alive: {
+          TICK: "alive",
+        },
+      },
+    });
+
+    type PublicEvents = MachineEvents<{ readonly plainActor: typeof plainActor }>;
+    type _NoAutoSpawnEvents = Assert<Equal<Extract<PublicEvents, SpawnEvents>, never>>;
   });
 });

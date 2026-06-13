@@ -41,6 +41,8 @@ export type {
   StorageCreatePublicInitialStateContext,
   StorageCreateRuntimeStateContext,
   StorageDehydrateContext,
+  StorageDependentField,
+  StorageDependentTypeLambda,
   StorageEffectInvocationContext,
   StorageHydrateContext,
   StorageIdentityContext,

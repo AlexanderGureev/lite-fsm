@@ -18,12 +18,23 @@ import type {
 type TypeOnlyDependentObjectField = (...args: any[]) => object;
 type TypeOnlyDependentPublicStateField = (...args: any[]) => unknown;
 
+declare const storageDependentFieldMarker: unique symbol;
+
+export type StorageDependentTypeLambda = {
+  readonly input: object;
+  readonly type: unknown;
+};
+
+export type StorageDependentField<Lambda extends StorageDependentTypeLambda> = {
+  readonly [storageDependentFieldMarker]: Lambda;
+};
+
 export type StorageRuntimeExtension = {
   readonly input?: object;
   readonly internalEvents?: AnyEvent;
   readonly observedEvents?: AnyEvent;
   readonly routeMeta?: object;
-  readonly reducerContext?: object | TypeOnlyDependentObjectField;
+  readonly reducerContext?: object | TypeOnlyDependentObjectField | StorageDependentField<StorageDependentTypeLambda>;
   readonly effectDeps?: object | TypeOnlyDependentObjectField;
   readonly reactionDeps?: object | TypeOnlyDependentObjectField;
   readonly resultMetadata?: object | TypeOnlyDependentObjectField;
@@ -39,7 +50,7 @@ export type StorageMachineTypingExtension = {
   readonly storage?: string;
   readonly input?: object;
   readonly internalEvents?: AnyEvent;
-  readonly reducerContext?: object | TypeOnlyDependentObjectField;
+  readonly reducerContext?: object | TypeOnlyDependentObjectField | StorageDependentField<StorageDependentTypeLambda>;
   readonly effectDeps?: object | TypeOnlyDependentObjectField;
   readonly reactionDeps?: object | TypeOnlyDependentObjectField;
   readonly resultMetadata?: object | TypeOnlyDependentObjectField;

@@ -3,12 +3,13 @@
 Alpha-пакет для entity storage в `lite-fsm`.
 
 На текущем этапе пакет экспортирует `entitiesPlugin()`, schema descriptors,
-`EntityId`, `EntityIndex`, `EntityAccess<AppMachines>` и
-`EntityMachineExtension`. Плагин регистрирует storage kind `"entity"` через
-публичный core plugin DSL, валидирует entity actor templates при создании
-`MachineManager`, создает пустой manager-owned entity runtime state и добавляет
-`manager.entities`. Он еще не создает live entity rows, spawn recipes, lifecycle
-events, routing, React hooks или snapshot data.
+spawn helpers, `EntityId`, `EntityIndex`, `EntityAccess<AppMachines>`,
+`LiteFsmEntityLifecycleEvents`, `EntityMachineExtension` и reducer context
+types. Плагин регистрирует storage kind `"entity"` через публичный core plugin
+DSL, валидирует entity actor templates при создании `MachineManager`, создает
+manager-owned entity runtime state, добавляет `manager.entities` и создает live
+entity rows через public spawn events. Routing, React hooks и snapshot data еще
+не предоставляются.
 
 ## Установка
 
@@ -19,8 +20,25 @@ npm install @lite-fsm/entities
 ## Точка входа
 
 ```ts
-import { entitiesPlugin, f32, optional, string } from "@lite-fsm/entities";
-import type { EntityAccess, EntityId, EntityIndex, EntityMachineExtension } from "@lite-fsm/entities";
+import {
+  defineEntitySpawn,
+  defineSpawnEvents,
+  entitiesPlugin,
+  f32,
+  optional,
+  spawnEvent,
+  string,
+} from "@lite-fsm/entities";
+import type {
+  EntityAccess,
+  EntityId,
+  EntityIndex,
+  EntityMachineExtension,
+  EntityReducerContext,
+  EntityReducerSelf,
+  LiteFsmEntityLifecycleEvents,
+  SpawnEventsFrom,
+} from "@lite-fsm/entities";
 ```
 
 `EntityId` является публичной строкой. `EntityIndex` является branded number для
@@ -44,7 +62,7 @@ const movementActor = createEntityMachine({
     label: optional(string()),
   },
   config: {
-    __INIT: { SPAWNED: "active" },
+    __INIT: { ENTITY_SPAWNED: "active" },
     active: { TICK: "active" },
   },
 });
@@ -64,6 +82,20 @@ object maps известных descriptors: `f32`, `i16`, `i32`, `u8`, `string` 
 Зарезервированные имена колонок запрещены: `count`, `capacity`, `ids`,
 `indexById`, `alive`, `generation`, `freeList`, `stateCode`, `version`,
 `columns`, `presence`, `rowVersion`, `indices`, `states`.
+
+`LiteFsmEntityLifecycleEvents` описывает internal события
+`ENTITY_SPAWNED` и `ENTITY_DESPAWNED`. Они доступны только в type surface
+`storage: "entity"` templates через `EntityMachineExtension`: их можно указать в
+`config` и обработать в reducer entity template. Эти события не входят в
+пользовательский `AppEvents`, не добавляются в public `manager.transition(...)`
+и не проходят через middleware, interceptors или subscribers как public actions.
+Public dispatch `ENTITY_SPAWNED` или `ENTITY_DESPAWNED` бросает `LiteFsmError`,
+даже если приложение вручную добавило эти names в свой event union.
+
+`__INIT` в entity template должен быть transition map и может содержать только
+transition по `ENTITY_SPAWNED`. Custom event edge из `__INIT` отклоняется при
+инициализации `MachineManager`. Для `storage: "instance"` обычный custom
+`__INIT` сохраняет текущую semantics.
 
 ## Plugin
 
@@ -107,8 +139,70 @@ movement.x[entityIndex]; // number, если x описан через f32()
 был обойден. Store view exposes indexed readonly columns из `initialContext`,
 `count`, `version`, `has(entity)` и `state(entity)`.
 
-`entitiesPlugin()` не принимает options на текущем этапе alpha. Передача объекта
-options отклоняется при инициализации, чтобы будущие spawn API не принимались до
-появления их runtime контракта.
+## Spawn events
+
+```ts
+const spawnEvents = defineSpawnEvents({
+  SPAWN_PROJECTILE: spawnEvent<{
+    id: string;
+    x: number;
+    y: number;
+    label: string | null;
+  }>(),
+});
+
+type SpawnEvents = SpawnEventsFrom<typeof spawnEvents>;
+
+const spawn = defineEntitySpawn(machines, spawnEvents)({
+  SPAWN_PROJECTILE: (payload) => ({
+    id: `projectile/${payload.id}`,
+    groupTag: "projectile",
+    actors: {
+      movementActor: {
+        x: payload.x,
+        y: payload.y,
+        label: payload.label,
+      },
+    },
+  }),
+});
+
+const manager = MachineManager(machines, {
+  plugins: [entitiesPlugin({ spawn })],
+});
+
+manager.transition({
+  type: "SPAWN_PROJECTILE",
+  payload: { id: "1", x: 10, y: 20, label: null },
+});
+```
+
+`spawnEvents` является источником event names, payload types и recipe keys.
+`defineEntitySpawn(machines, spawnEvents)` требует recipe для каждого spawn event
+и не принимает unknown keys. `entitiesPlugin()` без options остается валидным и
+не добавляет public spawn events; `entitiesPlugin({ spawn })` расширяет тип
+`manager.transition(...)` событиями из `spawnEvents`.
+
+Recipe возвращает один `EntitySpawnSpec` или массив. Пустой массив означает
+no-op spawn: public event delivery продолжается. `id` и `groupTag` обязательны и
+должны быть непустыми строками. `actors` должен содержать хотя бы один entity
+actor key из `machines`; payload каждого actor проверяется по `spawnSchema`.
+`optional(...)` в `spawnSchema` означает required key со значением `T | null`;
+отсутствующий ключ и `undefined` невалидны.
+
+Spawn recipe выполняется в `hooks.beforeReduce` после middleware `next`, storage
+`beforeReduce` и всех plugin `intercept` replacements. Если middleware не
+вызывает `next` или финальный interceptor выставил `skipDelivery: true`, recipe
+не запускается. Hook читает финальный action, валидирует результат recipe и
+stage-ит операции в per-dispatch transaction slot; live runtime state меняется
+только в entity storage reduce. Невалидный spec или payload прерывает dispatch до
+storage reduce, subscribers и effects.
+
+Internal `ENTITY_SPAWNED` доставляется созданным actor rows перед public spawn
+event. Default transition из `__INIT` применяется до reducer. Reducer получает
+`self.indices`, direct mutable schema columns, `stateCode`, `prevStateCode`,
+`has(entity)`, `entityId(entity)` и `payloadFor(entity)`. `payloadFor(entity)`
+возвращает actor-specific spawn payload только во время `ENTITY_SPAWNED` и
+только для `EntityIndex` из текущего spawn scope.
 
 Пакет пока не предоставляет `@lite-fsm/entities/react`.

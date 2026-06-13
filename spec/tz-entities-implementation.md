@@ -354,7 +354,7 @@ type EntityMachinePublicState<Metadata> = {
 - `entitiesPlugin<AppDeps>()` принимает `AppDeps` только на уровне типов, чтобы `EntityEffectDeps`/`EntityReactionDeps` могли извлечь `EntityAccess<AppMachines>` из `AppDeps.entities`.
 - `AppDeps` может ссылаться на `AppState = MachinesState<typeof machines>` по существующему self-reference pattern для `getState`.
 - `AppDeps` может ссылаться на `AppMachines = typeof machines` для строгой типизации `entities`.
-- Для bootstrap с `defineEntitySpawn(machines, spawnEvents)` typed wrapper может использовать `entitiesPlugin<AppDeps>()` как источник типизации до создания `spawn`; runtime manager после этого может использовать `entitiesPlugin<AppDeps>({ spawn })`.
+- Для bootstrap с `defineEntitySpawn(machines, spawnEvents)` typed wrapper может использовать `entitiesPlugin<AppDeps>()` как источник типизации до создания `spawn`; runtime manager после этого использует `entitiesPlugin({ spawn })`, чтобы TypeScript вывел точные spawn events из значения `spawn`. `entitiesPlugin<AppDeps>({ spawn })` не поддерживается как shorthand, потому что TypeScript не умеет одновременно задать первый type argument и вывести следующий generic из `options.spawn` без потери точности `manager.transition(...)`.
 - Extension не меняет global `createMachine` typing.
 - Extension не добавляет lifecycle events в public `AppEvents`.
 - Extension сохраняет `initialContext` и `spawnSchema` как phantom metadata в result type каждого entity actor template.

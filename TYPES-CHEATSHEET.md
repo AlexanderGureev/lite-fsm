@@ -6,8 +6,8 @@
 
 | Импорт                       | Типы                                                                                                                                                                                                                                                                                              |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@lite-fsm/core`             | весь `types.ts` + `interfaces.ts`: `FSMEvent`, `MachineConfig`, `CFG`, `MachineReducer`, `MachineEffect`, `MachineManagerSnapshot`, `MachinesState`, `MachineEvents`, `MachineDependencies`, `IMachineManager`, `Middleware`, actor types, snapshot types, `ReadonlyManagerAction`, helpers; plugin helper/value/context types для `definePlugin().create(...)`, `LiteFsmPlugin`, `LiteFsmStorageRuntimeDefinition`, `StorageManagerContext`, `StorageRuntimeExtension`, `StorageTemplate`, public `Storage*Context` |
-| `@lite-fsm/entities`         | alpha: `EntityId`, `EntityIndex`, `EntityAccess<AppMachines>`, `EntityMachineExtension`; runtime exports `entitiesPlugin()`, `f32`, `i16`, `i32`, `u8`, `string`, `optional`                                                                                                  |
+| `@lite-fsm/core`             | весь `types.ts` + `interfaces.ts`: `FSMEvent`, `MachineConfig`, `CFG`, `MachineReducer`, `MachineEffect`, `MachineManagerSnapshot`, `MachinesState`, `MachineEvents`, `MachineDependencies`, `IMachineManager`, `Middleware`, actor types, snapshot types, `ReadonlyManagerAction`, helpers; plugin helper/value/context types для `definePlugin().create(...)`, `LiteFsmPlugin`, `LiteFsmStorageRuntimeDefinition`, `StorageManagerContext`, `StorageRuntimeExtension`, `StorageDependentField`, `StorageDependentTypeLambda`, `StorageTemplate`, public `Storage*Context` |
+| `@lite-fsm/entities`         | alpha: `EntityId`, `EntityIndex`, `EntityAccess<AppMachines>`, `EntityMachineExtension`, `EntityReducerContext`, `EntityReducerSelf`, `LiteFsmEntityLifecycleEvents`, `SpawnEventsFrom`; runtime exports `entitiesPlugin()`, `defineSpawnEvents`, `defineEntitySpawn`, `spawnEvent`, `f32`, `i16`, `i32`, `u8`, `string`, `optional` |
 | `@lite-fsm/react`            | `FSMContextType`, `FSMContextProviderProps`, `FSMPersistLifecycle`, `FSMHydrationBoundaryProps`, typed hook aliases                                                                                                                                                                               |
 | `@lite-fsm/persist`          | `MaybePromise`, `PersistedRecord`, `PersistStorage`, `PersistStatus`, `PersistRestoreSettledResult`, `PersistManagerOptions`, `PersistController`                                                                                                                                                 |
 | `@lite-fsm/persist/react`    | runtime hooks only: `usePersistStatuses`, `useIsPersistRestoring`                                                                                                                                                                                                                                 |
@@ -53,14 +53,19 @@
 | `EntityIndex`               | branded `number`; runtime index, не plain input type пользовательского API |
 | `EntityAccess<AppMachines>` | typed root accessor для `manager.entities`                                |
 | `EntityMachineExtension`    | machine-facing extension для `storage: "entity"` через plugin source      |
+| `EntityReducerContext<ContextSchema, SpawnSchema>` | reducer context с `self` и `payloadFor(entity)` для entity actor template |
+| `EntityReducerSelf<ContextSchema>` | batch self API: `indices`, direct columns, `stateCode`, `prevStateCode`, `has`, `entityId` |
+| `LiteFsmEntityLifecycleEvents` | internal lifecycle union для `storage: "entity"` templates               |
+| `SpawnEventsFrom<typeof spawnEvents>` | discriminated union public spawn events                                  |
 
 `EntityMachineExtension` подключается к `TypedCreateMachineFn` только через `typeof entitiesPlugin()` или tuple plugins. Передача `EntityMachineExtension` третьим generic напрямую не является поддерживаемым plugin source.
 
 ```ts
 import { createMachine as createLiteFsmMachine, type TypedCreateMachineFn } from "@lite-fsm/core";
-import { entitiesPlugin, f32, optional, string } from "@lite-fsm/entities";
+import { defineEntitySpawn, defineSpawnEvents, entitiesPlugin, f32, optional, spawnEvent, string } from "@lite-fsm/entities";
+import type { EntityReducerContext, SpawnEventsFrom } from "@lite-fsm/entities";
 
-type AppEvent = { type: "SPAWNED" } | { type: "TICK" };
+type AppEvent = { type: "TICK" };
 const plugins = [entitiesPlugin()] as const;
 
 export const createEntityMachine: TypedCreateMachineFn<AppEvent, {}, typeof plugins> = createLiteFsmMachine;
@@ -78,11 +83,15 @@ const movementActor = createEntityMachine({
     label: optional(string()),
   },
   config: {
-    __INIT: { SPAWNED: "active" },
+    __INIT: { ENTITY_SPAWNED: "active" },
     active: { TICK: "active" },
   },
 });
 ```
+
+`LiteFsmEntityLifecycleEvents` равен `{ type: "ENTITY_SPAWNED" } | { type: "ENTITY_DESPAWNED" }`. `EntityMachineExtension.internalEvents` добавляет эти события только в `storage: "entity"` config/reducer type surface. Они не входят в пользовательский `AppEvent`, не выводятся в `MachineEvents<typeof machines>` и не принимаются public `manager.transition(...)`, если приложение не добавило их вручную в свой public union. Runtime все равно запрещает public dispatch этих names.
+
+`__INIT` entity template должен быть transition map и может объявлять только `ENTITY_SPAWNED`. Custom event edge из `__INIT` является ошибкой инициализации. `storage: "instance"` продолжает поддерживать обычные custom `__INIT` events.
 
 Descriptors несут type-level metadata для future columns и spawn payload. `f32` использует `Float32Array`, `i16` — `Int16Array`, `i32` — `Int32Array`, `u8` — `Uint8Array`, `string()` — строковую колонку. `optional(inner)` допустим только в `spawnSchema` и дает `T | null`; ключ payload остается обязательным. `MachineResultMetadata<typeof movementActor>` сохраняет `entityContextSchema` и `entitySpawnSchema`.
 
@@ -111,7 +120,49 @@ entities.get("movementActor").state(entity); // "moving" | "stopped" | undefined
 
 `entities.get("unknownActor")`, domain machines и `storage: "instance"` actor templates являются TypeScript errors. `store.state(entity)` возвращает public actor state union без `"__INIT"` и `undefined` для отсутствующей строки.
 
-`MachineManager(machines, { plugins: [entitiesPlugin()] as const })` добавляет `.entities`; без plugin returned manager не содержит этого поля. На текущем этапе `@lite-fsm/entities` не экспортирует spawn helper types, lifecycle events или React types.
+`MachineManager(machines, { plugins: [entitiesPlugin()] as const })` добавляет `.entities`; без plugin returned manager не содержит этого поля.
+
+Public spawn events выводятся из `defineSpawnEvents(...)`:
+
+```ts
+const spawnEvents = defineSpawnEvents({
+  SPAWN_PROJECTILE: spawnEvent<{ id: string; x: number; label: string | null }>(),
+});
+
+type SpawnEvents = SpawnEventsFrom<typeof spawnEvents>;
+// { type: "SPAWN_PROJECTILE"; payload: { id: string; x: number; label: string | null } }
+```
+
+`defineEntitySpawn(machines, spawnEvents)` связывает `spawnEvents` с exhaustive recipes. Recipe payload выводится из `spawnEvents`, actor keys ограничены entity actor keys из `machines`, actor payload проверяется по `spawnSchema`. `entitiesPlugin({ spawn })` добавляет `SpawnEventsFrom<typeof spawnEvents>` в `manager.transition(...)` без отдельной передачи `spawnEvents`; `AppEvent` машин не расширяется автоматически.
+
+```ts
+const spawn = defineEntitySpawn(machines, spawnEvents)({
+  SPAWN_PROJECTILE: (payload) => ({
+    id: payload.id,
+    groupTag: "projectile",
+    actors: {
+      movementActor: { x: payload.x, label: payload.label },
+    },
+  }),
+});
+
+const manager = MachineManager(machines, {
+  plugins: [entitiesPlugin({ spawn })] as const,
+});
+
+manager.transition({ type: "SPAWN_PROJECTILE", payload: { id: "p1", x: 1, label: null } });
+```
+
+`EntityReducerContext<ContextSchema, SpawnSchema>` описывает runtime-visible reducer helpers: `self.indices`, direct mutable schema columns, `self.stateCode`, `self.prevStateCode`, `self.has(entity)`, `self.entityId(entity)` и `payloadFor(entity)`. `payloadFor(entity)` принимает `EntityIndex`, возвращает payload из actor `spawnSchema` и не принимает `EntityId` string.
+
+```ts
+type MovementReducerContext = EntityReducerContext<
+  typeof movementActor.initialContext,
+  typeof movementActor.spawnSchema
+>;
+```
+
+На текущем этапе `@lite-fsm/entities` не экспортирует React types.
 
 ## События
 
@@ -215,6 +266,8 @@ type EntityStorageExtension = {
 ```
 
 `input` остается fixed object shape и дает contextual typing storage-specific fields. `internalEvents` остается fixed field. Dependent field signatures не создаются и не вызываются в runtime.
+
+`StorageDependentField<Lambda>` и `StorageDependentTypeLambda` предназначены для advanced storage extensions, которым нужен result type как функция от всего concrete storage input, а не только shallow replacement по именам полей. `Lambda["type"]` вычисляется через `this["input"]`; runtime value для такого поля не создается.
 
 ## `MachineReducer<C, P, T>`
 

@@ -10,6 +10,8 @@ import type {
 
 import type { EntityMachineExtension } from "./machine-extension";
 import type { EntityAccess } from "./runtime/access";
+import { assertEntityInitLifecycleConfig, assertPublicEntityLifecycleDispatch } from "./runtime/lifecycle";
+import { reduceEntityBucket } from "./runtime/reduce";
 import {
   asEntityRuntimeState,
   compileEntityTemplate,
@@ -20,15 +22,19 @@ import {
   type EntityRuntimeState,
   type EntityTemplateMetadata,
 } from "./runtime/state";
+import { prepareEntityTransaction, stageSpawnAction } from "./runtime/transaction";
 import { validateEntitySchema } from "./schema";
 import type { EntityContextSchema, EntitySpawnSchema } from "./schema";
+import { assertEntitySpawnDescriptor, type AnyEntitySpawnDescriptor, type EntitySpawnPluginEvents } from "./spawn";
 
 declare const entityIndexBrand: unique symbol;
 
 export type EntityId = string;
 export type EntityIndex = number & { readonly [entityIndexBrand]: "EntityIndex" };
 
-type EntityPluginOptions<AppDeps> = [AppDeps] extends [unknown] ? undefined : never;
+type EntityPluginOptions<Spawn extends AnyEntitySpawnDescriptor> = {
+  readonly spawn: Spawn;
+};
 type EntityStorageRuntimeExtension = Omit<EntityMachineExtension, "storage" | "publicState"> & {
   readonly publicState: ReturnType<typeof createEntityPublicInitialState>;
   readonly runtimeState: EntityRuntimeState;
@@ -38,9 +44,9 @@ type EntityStorageDefinition = LiteFsmStorageRuntimeDefinition<"entity", EntityM
 type EntityManagerDefinition = {
   readonly entities: <S extends MachineStore>(ctx: ManagerRuntimeContext<AnyEvent, S>) => EntityAccess<S>;
 };
-type EntitiesPlugin = LiteFsmPlugin<
+type EntitiesPlugin<PluginEvents extends AnyEvent = never> = LiteFsmPlugin<
   "@lite-fsm/entities",
-  never,
+  PluginEvents,
   {
     readonly name: "@lite-fsm/entities";
     readonly storage: readonly [EntityStorageDefinition];
@@ -73,11 +79,12 @@ const validateEntityTemplate = (key: string, machine: Record<string, unknown>): 
     throw invalidEntityTemplate(key, 'missing required field "spawnSchema"');
   }
   if (hasOwn(machine, "groupTag") && machine.groupTag !== undefined) {
-    throw invalidEntityTemplate(key, 'groupTag is defined by EntitySpawnSpec, not by actor template');
+    throw invalidEntityTemplate(key, "groupTag is defined by EntitySpawnSpec, not by actor template");
   }
 
   validateEntitySchema(key, "initialContext", machine.initialContext);
   validateEntitySchema(key, "spawnSchema", machine.spawnSchema);
+  assertEntityInitLifecycleConfig(key, machine.config);
 };
 
 const entityStorageRuntime = defineStorageRuntime<EntityStorageRuntimeExtension>().create({
@@ -94,6 +101,7 @@ const entityStorageRuntime = defineStorageRuntime<EntityStorageRuntimeExtension>
           readonly config: object;
           readonly initialContext: EntityContextSchema;
           readonly spawnSchema: EntitySpawnSchema;
+          readonly reducer?: unknown;
         },
       ),
     };
@@ -104,37 +112,57 @@ const entityStorageRuntime = defineStorageRuntime<EntityStorageRuntimeExtension>
   createPublicInitialState({ template, state }: StorageCreatePublicInitialStateContext<EntityStorageRuntimeExtension>) {
     return createEntityPublicInitialState(asEntityRuntimeState(state), template);
   },
-  reduceBucket() {
-    return { type: "skip" };
+  prepareAction({ action, dispatch, state }) {
+    assertPublicEntityLifecycleDispatch(action.type);
+    prepareEntityTransaction(dispatch, asEntityRuntimeState(state));
+  },
+  reduceBucket(ctx) {
+    return reduceEntityBucket(asEntityRuntimeState(ctx.state), ctx);
   },
   commit({ state, dispatch }) {
     dispatch.nextState = restorePublicSlices(asEntityRuntimeState(state), dispatch.nextState);
   },
 });
 
-const createEntitiesPlugin = (): EntitiesPlugin =>
-  definePlugin().create({
+const createEntitiesPlugin = <PluginEvents extends AnyEvent>(
+  spawn: AnyEntitySpawnDescriptor | undefined,
+): EntitiesPlugin<PluginEvents> =>
+  definePlugin<PluginEvents>().create({
     name: ENTITY_PLUGIN_NAME,
     storage: [entityStorageRuntime],
+    hooks: {
+      beforeReduce(ctx) {
+        const { action } = ctx;
+        assertPublicEntityLifecycleDispatch(action.type);
+        if (spawn) stageSpawnAction(ctx, spawn);
+      },
+    },
     manager: {
       entities<S extends MachineStore>(ctx: ManagerRuntimeContext<AnyEvent, S>): EntityAccess<S> {
         return getEntityRuntimeState(ctx).access as EntityAccess<S>;
       },
     },
-  }) as unknown as EntitiesPlugin;
+  }) as unknown as EntitiesPlugin<PluginEvents>;
 
-const assertEntityPluginOptions = (options: unknown): void => {
-  if (options === undefined) return;
+const resolveEntityPluginSpawn = (options: unknown): AnyEntitySpawnDescriptor | undefined => {
+  if (options === undefined) return undefined;
+  if (options !== null && typeof options === "object" && "spawn" in options) {
+    const spawn = (options as { readonly spawn?: unknown }).spawn;
+    assertEntitySpawnDescriptor(spawn);
+    return spawn;
+  }
 
   throw new LiteFsmError(
     "LITE_FSM_INVALID_OPTIONS",
-    "[lite-fsm] entitiesPlugin options are not supported in this alpha stage.",
+    "[lite-fsm/entities] entitiesPlugin options must be { spawn } with a defineEntitySpawn(...) descriptor.",
   );
 };
 
-export function entitiesPlugin<AppDeps = unknown>(
-  options?: EntityPluginOptions<AppDeps>,
-): EntitiesPlugin {
-  assertEntityPluginOptions(options);
-  return createEntitiesPlugin();
+export function entitiesPlugin<AppDeps = unknown>(): EntitiesPlugin;
+export function entitiesPlugin<const Spawn extends AnyEntitySpawnDescriptor>(
+  options: EntityPluginOptions<Spawn>,
+): EntitiesPlugin<EntitySpawnPluginEvents<Spawn>>;
+export function entitiesPlugin(options?: unknown): EntitiesPlugin<AnyEvent> {
+  const spawn = resolveEntityPluginSpawn(options);
+  return createEntitiesPlugin(spawn);
 }

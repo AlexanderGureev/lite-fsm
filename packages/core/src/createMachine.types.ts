@@ -23,7 +23,11 @@ import type {
 } from "./types";
 import type { LiteFsmPlugin } from "./plugin";
 import type { StorageTypingExtensionsForPluginSource } from "./pluginHelpers";
-import type { StorageMachineTypingExtension } from "./pluginStorageTypes";
+import type {
+  StorageDependentField,
+  StorageDependentTypeLambda,
+  StorageMachineTypingExtension,
+} from "./pluginStorageTypes";
 
 // === Дефолтный снимок =======================================================
 //
@@ -209,12 +213,18 @@ type ResolveDependentResult<Result, ConcreteInput extends object> =
     ? { readonly [Key in keyof Result]: ResolveDependentResultValue<Key, Result[Key], ConcreteInput> }
     : Result;
 
+type ApplyStorageDependentLambda<Lambda extends StorageDependentTypeLambda, ConcreteInput extends object> = (
+  Lambda & { readonly input: ConcreteInput }
+)["type"];
+
 type ApplyExtensionField<Field, ConcreteInput extends object> =
-  Field extends { <Input extends ConcreteInput>(input: Input): infer Result }
-    ? ResolveDependentResult<Result, ConcreteInput>
-    : Field extends (input: ConcreteInput) => infer Result
+  Field extends StorageDependentField<infer Lambda>
+    ? ApplyStorageDependentLambda<Lambda, ConcreteInput>
+    : Field extends { <Input extends ConcreteInput>(input: Input): infer Result }
       ? ResolveDependentResult<Result, ConcreteInput>
-      : Field;
+      : Field extends (input: ConcreteInput) => infer Result
+        ? ResolveDependentResult<Result, ConcreteInput>
+        : Field;
 
 type ExtensionObjectField<
   Extension extends StorageMachineTypingExtension,

@@ -53,6 +53,9 @@ type FixedStorageExtension = {
   readonly resultMetadata: {
     readonly fixed: true;
   };
+  readonly reducerContext: {
+    readonly fixedReducer: { readonly cache: string };
+  };
   readonly effectDeps: {
     readonly fixedApi: { readonly read: () => string };
   };
@@ -189,6 +192,9 @@ describe("TypedCreateMachineFn cfg-dependent storage fields", () => {
       config: { idle: { LOAD: "idle" } },
       initialState: "idle",
       initialContext: { token: "" },
+      reducer(_state, _action, meta) {
+        expect(meta.fixedReducer.cache).type.toBe<string>();
+      },
       effects: {
         idle: ({ fixedApi }) => {
           expect(fixedApi.read()).type.toBe<string>();
