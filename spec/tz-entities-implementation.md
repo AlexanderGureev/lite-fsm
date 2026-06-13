@@ -47,6 +47,8 @@
 - Entity runtime использует plugin section `routeMeta` для `meta.entityId`.
 - Entity storage runtime на этапе routing объявляет `routeMetaKeys: ["entityId"]`, а `definePlugin().create(...)` проверяет, что plugin объявил совместимый resolver `routeMeta.entityId`.
 - Entity effect/reaction deps типизируются через `EntityMachineExtension.effectDeps` и `EntityMachineExtension.reactionDeps`, а не через global plugin `scopedDeps`.
+- Строгая типизация объекта `entities`, который инжектируется в entity effects/reactions, выводится из `AppDeps.entities?: EntityAccess<AppState>`.
+- `AppDeps.entities` является опциональным источником типов; runtime entity effects/reactions не читает это dependency и инжектирует accessor, привязанный к текущему entity scope.
 - Новые entity-specific transition helpers типизируются через `EntityMachineExtension.effectDeps`, а не через global plugin `scopedTransition`.
 - Entity runtime использует plugin section `manager` для `manager.entities`.
 - `@lite-fsm/core` не содержит реализацию entity runtime и не импортирует `@lite-fsm/entities`.
@@ -83,7 +85,7 @@
 
 - Пакет `@lite-fsm/entities`.
 - Entity plugin `entitiesPlugin(...)`.
-- `EntityMachineExtension` для `TypedCreateMachineFn`.
+- `EntityMachineExtension` как storage typing, который `TypedCreateMachineFn` получает через plugin source.
 - `storage: "entity"` runtime поверх internal columnar storage.
 - Schema descriptors `f32`, `i16`, `i32`, `u8`, `string`, `optional`.
 - `defineSpawnEvents`, `spawnEvent<T>()`, `SpawnEventsFrom<TSpawnEvents>`.
@@ -160,13 +162,15 @@
 - Foreign actor store mutations выполняются через events.
 - Effects выполняют mutation только через `transition(...)`.
 - Reactions являются sync-only.
-- `ENTITY_DESPAWNED` reactions видят columns до cleanup.
+- Internal `ENTITY_DESPAWNED` reactions видят columns до cleanup.
+- Generic reactions для исходного события выполняются после cleanup только для rows со статусом `alive`.
 - `payloadFor(entity)` работает только в reducer на `ENTITY_SPAWNED`; reactions/effects читают инициализированные columns через `self`/`entities`.
 - `payloadFor(entity)` принимает только `EntityIndex` из текущего `self.indices`; строковый `EntityId` не поддерживается.
 - Hydrate не вызывает spawn recipes.
 - `actorId` routing к entity actor rows не поддерживается.
 - `groupTag` берется из `EntitySpawnSpec`.
-- Hot path не делает string comparisons, per-row objects, `Map.get` и allocations на `TICK`.
+- Entity hot loops не делают string comparisons, per-row objects, `Map.get` и per-row allocations на `TICK`.
+- Полный dispatch может иметь ограниченный per-action overhead core/kernel pipeline; overhead не должен расти от количества rows иначе чем через reused buffers и проход по accepted rows.
 
 ### Общие ошибки конфигурации
 
@@ -231,6 +235,7 @@ const managerWithSpawn = MachineManager(machines, {
 
 - `entitiesPlugin(...)` является generic factory.
 - `entitiesPlugin()` разрешен и устанавливает entity storage/runtime без public spawn events.
+- `entitiesPlugin<AppDeps>()` использует `AppDeps` только на уровне типов для entity effect/reaction deps; runtime behavior совпадает с `entitiesPlugin()`.
 - `entitiesPlugin({ spawn })` включает public spawn events.
 - `spawn` должен быть результатом `defineEntitySpawn(machines, spawnEvents)`.
 - Plugin `PluginEvents` для spawn transition events выводятся из `spawnEvents`, сохраненного в `spawn`.
@@ -250,40 +255,86 @@ const managerWithSpawn = MachineManager(machines, {
 ```ts
 import {
   createMachine as createLiteFsmMachine,
+  type ActorPublicState,
   type TypedCreateMachineFn,
 } from "@lite-fsm/core";
-import type { EntityMachineExtension } from "@lite-fsm/entities";
+import { entitiesPlugin } from "@lite-fsm/entities";
+
+const entityPlugin = entitiesPlugin<AppDeps>();
+const entityPlugins = [entityPlugin] as const;
 
 export const createMachine: TypedCreateMachineFn<
   AppEvents,
   AppDeps,
-  EntityMachineExtension
+  typeof entityPlugins
 > = createLiteFsmMachine;
 ```
 
 ```ts
+type EntityMachineInput<
+  ContextSchema extends EntitySchema = EntitySchema,
+  SpawnSchema extends EntitySchema = EntitySchema,
+  Config extends object = Record<string, never>,
+> = {
+  storage: "entity";
+  config: Config;
+  initialState: "__INIT";
+  initialContext: ContextSchema;
+  spawnSchema: SpawnSchema;
+  despawnOn?: string | readonly string[];
+  reactions?: EntityReactions<ContextSchema>;
+};
+
 type EntityMachineExtension<
   ContextSchema extends EntitySchema = EntitySchema,
   SpawnSchema extends EntitySchema = EntitySchema,
+  Config extends object = Record<string, never>,
+  AppDeps = unknown,
 > = {
   storage: "entity";
   internalEvents: LiteFsmEntityLifecycleEvents;
-  input: {
-    storage: "entity";
-    initialState: "__INIT";
-    initialContext: ContextSchema;
-    spawnSchema: SpawnSchema;
-    despawnOn?: string | readonly string[];
-    reactions?: EntityReactions<ContextSchema>;
-  };
+  input: EntityMachineInput<ContextSchema, SpawnSchema, Config>;
   reducerContext: EntityReducerContext<SpawnSchema>;
-  effectDeps: EntityEffectDeps<ContextSchema>;
-  reactionDeps: EntityReactionDeps<ContextSchema>;
-  publicState: EntityMachinePublicState<ContextSchema>;
-  resultMetadata: {
-    entityContextSchema: ContextSchema;
-    entitySpawnSchema: SpawnSchema;
+  effectDeps: EntityEffectDeps<ContextSchema, AppDeps>;
+  reactionDeps: EntityReactionDeps<ContextSchema, AppDeps>;
+  publicState: <Input extends EntityMachineInput<ContextSchema, SpawnSchema, Config>>(
+    input: Input,
+  ) => EntityMachinePublicState<
+    EntityMachineStateMetadata<
+      Input["initialContext"],
+      Input["spawnSchema"],
+      ActorPublicState<Input["config"]>
+    >
+  >;
+  resultMetadata: <Input extends EntityMachineInput<ContextSchema, SpawnSchema, Config>>(
+    input: Input,
+  ) => {
+    entityContextSchema: Input["initialContext"];
+    entitySpawnSchema: Input["spawnSchema"];
+    entityState: ActorPublicState<Input["config"]>;
   };
+};
+```
+
+```ts
+declare const entityStateMetadata: unique symbol;
+
+type EntityMachineStateMetadata<
+  ContextSchema extends EntitySchema,
+  SpawnSchema extends EntitySchema,
+  State extends string = string,
+> = {
+  readonly entityContextSchema: ContextSchema;
+  readonly entitySpawnSchema: SpawnSchema;
+  readonly entityState: State;
+};
+
+type EntityMachinePublicState<Metadata> = {
+  storage: "entity";
+  version: number;
+  count: number;
+  capacity: number;
+  readonly [entityStateMetadata]?: Metadata;
 };
 ```
 
@@ -301,13 +352,18 @@ type EntityMachineExtension<
 
 Контракт:
 
-- Extension подключается только через typed wrapper `TypedCreateMachineFn<AppEvents, AppDeps, EntityMachineExtension>`.
+- Extension подключается к `TypedCreateMachineFn` только через plugin source: `typeof entityPlugin` или tuple `typeof plugins`.
+- Передача `EntityMachineExtension` третьим параметром типа в `TypedCreateMachineFn` не поддерживается.
+- `entitiesPlugin<AppDeps>()` принимает `AppDeps` только на уровне типов, чтобы `EntityEffectDeps`/`EntityReactionDeps` могли извлечь `EntityAccess<AppState>` из `AppDeps.entities`.
+- `AppDeps` может ссылаться на `AppState = MachinesState<typeof machines>` по существующему self-reference pattern для `getState`.
+- Для bootstrap с `defineEntitySpawn(machines, spawnEvents)` typed wrapper может использовать `entitiesPlugin<AppDeps>()` как источник типизации до создания `spawn`; runtime manager после этого может использовать `entitiesPlugin<AppDeps>({ spawn })`.
 - Extension не меняет global `createMachine` typing.
 - Extension не добавляет lifecycle events в public `AppEvents`.
-- Extension сохраняет `initialContext` и `spawnSchema` как phantom metadata в result type каждого entity actor template.
+- Extension сохраняет `initialContext`, `spawnSchema` и union public states из `config` как phantom metadata в result type каждого entity actor template.
 - Extension добавляет entity-specific `effectDeps` и `reactionDeps` только для `storage: "entity"` templates.
 - Extension задает lightweight `publicState`, поэтому `MachinesState<typeof machines>` не раскрывает column arrays.
-- Extension metadata используется `MachinesState<typeof machines>` и `EntityAccess<AppState>`.
+- `EntityMachinePublicState<Metadata>` содержит закрытый `unique symbol` phantom field, который не создается runtime и переносит metadata для `EntityAccess<AppState>`.
+- Extension metadata используется `MachineResultMetadata<typeof machine>`, `MachinesState<typeof machines>` и `EntityAccess<AppState>`.
 - `storage: "entity"` actor template типизируется только при подключенной extension.
 
 ### Spawn events
@@ -375,7 +431,7 @@ const spawn = defineEntitySpawn(machines, spawnEvents)({
 type AppState = MachinesState<typeof machines>;
 
 type AppDeps = {
-  getState: () => AppState;
+  getState?: () => AppState;
   entities?: EntityAccess<AppState>;
 };
 
@@ -388,13 +444,15 @@ manager.setDependencies({
 
 Контракт:
 
-- `manager.entities` создает runtime-owned accessor к entity actor stores.
+- `manager.entities` возвращает accessor к entity actor stores, которым владеет entity runtime.
 - `manager.entities` является stable live accessor object на весь lifetime manager и переживает hydrate replace.
 - Разработчик не создает `entities` вручную.
 - `manager.entities` не подмешивается в user deps автоматически.
 - Если domain/process effects должны читать root entity stores, приложение может передать `entities: manager.entities` в `setDependencies(...)`.
-- Entity effects и reactions получают scope-bound `entities` через `EntityMachineExtension.effectDeps`/`reactionDeps`; они не зависят от `deps.entities` пользователя.
-- `EntityAccess<AppState>` выводит доступные keys из `MachinesState<typeof machines>` и включает только `storage: "entity"` actor templates.
+- `AppDeps.entities?: EntityAccess<AppState>` является опциональным источником типов для строгой типизации `entities.get(...)` в entity effects/reactions.
+- Entity effects и reactions получают объект `entities`, привязанный к текущему entity scope, через `EntityMachineExtension.effectDeps`/`reactionDeps`; runtime не читает `deps.entities` для entity scopes.
+- Если `AppDeps.entities` не объявлен, инжектируемый объект `entities` runtime доступен, но `entities.get(...)`/`entities.maybe(...)` имеют `never` key union на уровне TypeScript.
+- `EntityAccess<AppState>` выводит доступные keys из `MachinesState<typeof machines>` по закрытому phantom metadata и включает только `storage: "entity"` actor templates.
 - Обычные domain/process machines читаются через `getState()`.
 - Для `entities` не требуется ручной `AppActorRegistry` или codegen.
 - Core plugin system не хардкодит key `entities`.
@@ -402,6 +460,51 @@ manager.setDependencies({
 ### `EntityAccess<AppState>`
 
 ```ts
+type ReadonlyEntityColumn<T> = {
+  readonly [entity: EntityIndex]: T;
+};
+
+type EntityMachineMetadataFor<
+  AppState,
+  K extends EntityActorKey<AppState>,
+> = AppState[K] extends {
+  readonly [entityStateMetadata]?: infer Metadata;
+}
+  ? Metadata
+  : never;
+
+type EntityContextFor<
+  AppState,
+  K extends EntityActorKey<AppState>,
+> = EntityMachineMetadataFor<AppState, K> extends {
+  readonly entityContextSchema: infer Context extends EntitySchema;
+}
+  ? EntityContextFromSchema<Context>
+  : never;
+
+type EntityStateFor<
+  AppState,
+  K extends EntityActorKey<AppState>,
+> = EntityMachineMetadataFor<AppState, K> extends {
+  readonly entityState: infer State extends string;
+}
+  ? State
+  : never;
+
+type EntityActorStoreViewFor<
+  AppState,
+  K extends EntityActorKey<AppState>,
+> = {
+  readonly count: number;
+  readonly version: number;
+  has(entity: EntityIndex): boolean;
+  state(entity: EntityIndex): EntityStateFor<AppState, K> | undefined;
+} & {
+  readonly [Field in keyof EntityContextFor<AppState, K>]: ReadonlyEntityColumn<
+    EntityContextFor<AppState, K>[Field]
+  >;
+};
+
 type EntityAccess<AppState> = {
   get<K extends EntityActorKey<AppState>>(
     key: K,
@@ -417,12 +520,19 @@ type EntityAccess<AppState> = {
 
 - `entities.get("actorKey")` является required access.
 - `entities.maybe("actorKey")` является optional access.
+- `entities.get(...)` и `entities.maybe(...)` возвращают один публичный тип store view; отличие между ними поведенческое и диагностическое.
 - Store view кешируется per `actorKey`: повторный `entities.get("actorKey")` возвращает тот же live view object.
 - Store view читает current committed columns и переживает hydrate replace.
 - `actorKey` типизируется по entity actor keys из `AppState`.
 - Unknown `actorKey` является TypeScript error.
 - Return type выводится из `initialContext` actor template.
 - `EntityAccess<AppState>` строит key union только из machines с `storage: "entity"`.
+- `EntityStateFor<AppState, K>` выводится из `ActorPublicState<Input["config"]>` в phantom metadata и не деградирует до `string`.
+- `entities.get("movementActor").x[entity]` типизируется как value type поля `x` из `initialContext`.
+- Store view содержит `count`, `version`, `has(entity)` и `state(entity)`.
+- `store.state(entity)` возвращает public state name actor row или `undefined`, если row отсутствует.
+- `store.state(entity)` не возвращает `__INIT`; terminal states после cleanup недоступны.
+- Store view не раскрывает raw typed arrays как public contract; indexed readonly column API является public contract.
 - Root `manager.entities.get(...)` проверяет только known `actorKey`; presence проверяется через `store.has(entityIndex)`.
 - Scoped `entities.get(...)` validation проверяет, что каждая entity из текущего `self.indices` имеет requested actor row, если runtime diagnostics включены.
 - `entities.maybe(...)` не валидирует наличие actor row.
@@ -583,7 +693,7 @@ Owners и module boundaries:
 - `plugin.ts` связывает `entitiesPlugin(...)` с core plugin system: `definePlugin().create(...)`, section `storage`, section `routeMeta.entityId`, spawn `hooks.beforeReduce(ctx)` и section `manager.entities`.
 - `schema.ts` владеет descriptors и runtime/type-level schema validation.
 - `spawn.ts` владеет `defineSpawnEvents`, `spawnEvent`, `SpawnEventsFrom`, `defineEntitySpawn` и recipe typing.
-- `machine-extension.ts` владеет `EntityMachineExtension` для `TypedCreateMachineFn`.
+- `machine-extension.ts` владеет `EntityMachineExtension`, который `entitiesPlugin(...)` передает через storage definition для `TypedCreateMachineFn`.
 - `runtime/storage.ts` собирает `defineStorageRuntime<EntityStorageRuntimeExtension>().create(...)` и runtime blocks `effects`, `snapshot`, `identity`, `reactions` для `storage: "entity"`.
 - `runtime/compile.ts` валидирует entity templates и компилирует event/state codes, transition tables, buckets metadata, reactions/effects metadata и `despawnOn`.
 - `runtime/state.ts` владеет `EntityStore`, `ColumnarActorStore`, capacity growth, buckets и public lightweight state.
@@ -592,9 +702,9 @@ Owners и module boundaries:
 - `runtime/identity.ts` реализует storage `identity.resolve(...)` для entity identity lookup без public `actorId`.
 - `runtime/reduce.ts` выполняет default transition, reducer batch invocation и post-reducer validation.
 - `runtime/lifecycle.ts` выполняет internal `ENTITY_SPAWNED`, `ENTITY_DESPAWNED`, `despawnOn` и `transition.despawn(...)`.
-- `runtime/reactions.ts` реализует storage `reactions.run(...)`, выполняет sync reactions и передает non-fatal errors через `ctx.dispatch.reportError(...)`.
+- `runtime/reactions.ts` реализует storage `reactions.run(...)`, выполняет generic sync reactions для исходного события только для rows со статусом `alive` и передает non-fatal errors через `ctx.dispatch.reportError(...)`.
 - `runtime/effects.ts` реализует storage `effects.resolveInvocations(...)` и `effects.invoke(...)` для core-managed effect phase.
-- `runtime/access.ts` создает root и scope-bound `EntityAccess`/store views.
+- `runtime/access.ts` создает root `EntityAccess` и `EntityAccess`/store views, привязанные к текущему scope.
 - `runtime/snapshot.ts` реализует storage `snapshot.dehydrate(...)` и `snapshot.hydrate(...)` для `snapshot.storage.entity`.
 - `react/index.ts` реализует React hooks на `useSyncExternalStore` и rowVersion cache.
 
@@ -604,9 +714,9 @@ Owners и module boundaries:
 2. Storage `prepareAction(ctx)` создает entity transaction slot в `ctx.dispatch.runtime`; spawn `hooks.beforeReduce(ctx)` stage-ит spawn operations в `ctx.runtime` после всех `intercept` replacements, но не мутирует live runtime state.
 3. Route and batch выбирает entity indices и actor rows по normalized route constraints и reusable buffers.
 4. Reduce применяет default transition, вызывает reducer один раз на batch, валидирует `stateCode` и собирает touched rows.
-5. Lifecycle выполняет staged spawn через internal `ENTITY_SPAWNED`, explicit despawn, `despawnOn` и internal `ENTITY_DESPAWNED`.
-6. Commit применяет staged column/state/presence changes, обновляет buckets, `rowVersion`, actor `version` и public lightweight slices.
-7. Reactions выполняются после reducer/lifecycle processing и до subscribers; `ENTITY_DESPAWNED` reactions видят columns до окончательного cleanup.
+5. Lifecycle выполняет staged spawn через internal `ENTITY_SPAWNED`, explicit despawn, `despawnOn`, internal `ENTITY_DESPAWNED` reducer calls и lifecycle reactions до физического cleanup удаляемых rows.
+6. Commit применяет staged column/state/presence changes, cleanup rows/entity indexes, обновляет buckets, `rowVersion`, actor `version` и public lightweight slices.
+7. Generic reactions для исходного события выполняются через storage `reactions.run(...)` после cleanup и до subscribers только для rows со статусом `alive`.
 8. Effects создают captured invocations с `entityIndex + generation`; core вызывает effect phase после subscribers и middleware post-`next`.
 
 Граница core:
@@ -762,7 +872,8 @@ Type tests:
 
 #### Типовой контракт этапа
 
-- `EntityMachineExtension` подключается только через typed wrapper `TypedCreateMachineFn<AppEvents, AppDeps, EntityMachineExtension>`.
+- `EntityMachineExtension` подключается к `TypedCreateMachineFn` только через plugin source `typeof entityPlugin` или tuple `typeof plugins`.
+- Передача `EntityMachineExtension` третьим параметром типа в `TypedCreateMachineFn` является TypeScript error.
 - Global `createMachine` typing не меняется.
 - `storage: "entity"` actor template типизируется только при подключенной extension.
 - `initialContext` сохраняется как phantom `entityContextSchema`.
@@ -789,7 +900,7 @@ Type tests:
 #### Совместимость
 
 - `storage: "instance"` typing и runtime validation не меняются.
-- Existing `TypedCreateMachineFn<AppEvents, AppDeps>` wrappers без third generic сохраняют behavior.
+- Existing `TypedCreateMachineFn<AppEvents, AppDeps>` wrappers без третьего параметра типа сохраняют behavior.
 - Plugin runtime validation остается обязательной даже при TypeScript wrapper.
 
 #### Не делать в этом этапе
@@ -818,7 +929,8 @@ Runtime tests:
 
 Type tests:
 
-- wrapper с `EntityMachineExtension` принимает `storage: "entity"`;
+- wrapper с plugin source от `entitiesPlugin<AppDeps>()` принимает `storage: "entity"`;
+- передача `EntityMachineExtension` третьим параметром типа является TypeScript error;
 - core `createMachine` без wrapper не принимает `storage: "entity"`;
 - `initialContext` schema inference сохраняет column types;
 - `spawnSchema` payload inference сохраняет nullable через `optional(...)`;
@@ -852,7 +964,7 @@ Type tests:
 
 Обновить:
 
-- `EntityMachineExtension` получает `publicState: EntityMachinePublicState<ContextSchema>`.
+- `EntityMachineExtension` получает dependent `publicState(input)`, который возвращает `EntityMachinePublicState<EntityMachineStateMetadata<Input["initialContext"], Input["spawnSchema"], ActorPublicState<Input["config"]>>>`.
 
 #### Runtime-контракт этапа
 
@@ -860,15 +972,31 @@ Type tests:
 - Public state slice для entity actor template имеет форму lightweight read model:
 
 ```ts
-type EntityMachineState<Metadata> = {
+declare const entityStateMetadata: unique symbol;
+
+type EntityMachineStateMetadata<
+  ContextSchema extends EntitySchema,
+  SpawnSchema extends EntitySchema,
+  State extends string = string,
+> = {
+  readonly entityContextSchema: ContextSchema;
+  readonly entitySpawnSchema: SpawnSchema;
+  readonly entityState: State;
+};
+
+type EntityMachinePublicState<Metadata> = {
   storage: "entity";
   version: number;
   count: number;
   capacity: number;
+  readonly [entityStateMetadata]?: Metadata;
 };
 ```
 
 - Каждый entity actor template имеет собственный public slice.
+- Runtime `createPublicInitialState(...)` не создает поле `[entityStateMetadata]`; это закрытый type-only phantom carrier.
+- `EntityMachinePublicState<Metadata>` не использует строковые служебные поля для entity marker.
+- Phantom metadata переносит `initialContext`, `spawnSchema` и public state union actor template, выведенный из `ActorPublicState<Input["config"]>`.
 - `version`, `count` и `capacity` инициализируются из empty actor store.
 - `version` увеличивается при committed изменениях actor store: row create, row despawn/collapse, state change, accepted reducer rows, hydrate invalidation.
 - `count` равен количеству present rows для actor template.
@@ -880,12 +1008,15 @@ type EntityMachineState<Metadata> = {
 - Actor store индексируется global `entityIndex`.
 - Данные в actor columns валидны только при `presence[entityIndex] === 1`.
 - Capacity actor stores растет автоматически.
-- `manager.entities` возвращает runtime-owned root accessor.
+- `manager.entities` возвращает root accessor, которым владеет entity runtime.
 - Root accessor умеет создавать store views для known entity actor keys.
 - Root accessor является stable live object на весь lifetime manager.
 - Store views кешируются per template key и читают current committed runtime state.
 - `entities.get(...)` и `entities.maybe(...)` возвращают read-only typed store views для внешнего чтения.
 - `store.has(entity)` доступен и возвращает `false` для отсутствующих rows.
+- `store.state(entity)` доступен и возвращает public state name actor row или `undefined`, если row отсутствует.
+- `store.state(entity)` не возвращает `__INIT`; terminal states после cleanup недоступны.
+- Store view exposes columns через indexed readonly column API и не делает raw typed arrays частью public contract.
 - Runtime не использует Proxy-based protection.
 
 #### Типовой контракт этапа
@@ -894,7 +1025,7 @@ type EntityMachineState<Metadata> = {
 - Key union включает только `storage: "entity"` actor templates.
 - Unknown `actorKey` является TypeScript error.
 - Return type `entities.get("actorKey")` выводится из `initialContext`.
-- `MachinesState<typeof machines>` сохраняет enough metadata для `EntityAccess<AppState>`.
+- `MachinesState<typeof machines>` сохраняет enough metadata для `EntityAccess<AppState>` только через закрытый `unique symbol` phantom field.
 - `MachinesState<typeof machines>` использует `EntityMachineExtension.publicState` для entity actor templates.
 - `EntityAccess<AppState>` не требует ручного `AppActorRegistry` или codegen.
 
@@ -933,6 +1064,7 @@ Runtime tests:
 - `manager.entities.maybe("actorKey")` возвращает optional store view;
 - repeated `manager.entities.get("actorKey")` returns same live view object;
 - `store.has(entity)` возвращает `false` для missing row;
+- `store.state(entity)` возвращает `undefined` для missing row;
 - returned manager не содержит `entities` без plugin;
 - `storage: "instance"` state shape не меняется.
 
@@ -941,7 +1073,9 @@ Type tests:
 - `EntityAccess<AppState>` включает entity actor keys;
 - `EntityAccess<AppState>` исключает domain/process machines и `storage: "instance"` actor templates;
 - `entities.get("unknownActor")` является TypeScript error;
-- store view columns выводятся из `initialContext`.
+- `EntityMachinePublicState<Metadata>` сохраняет разные metadata для разных actor templates через закрытый `unique symbol`;
+- store view columns выводятся из `initialContext`;
+- `store.state(entity)` типизируется public state union actor template.
 
 #### Gate завершения
 
@@ -1232,7 +1366,7 @@ Type tests:
 
 #### Runtime-контракт этапа
 
-- Event `type` переводится в `eventCode` один раз на входе `manager.transition`.
+- Event `type` переводится в `eventCode` один раз для финального `ctx.action` после `prepareAction`, middleware `next(action)`, storage `beforeReduce` и всех `intercept` replacements, до entity reduce.
 - State names переводятся в `stateCode` при init manager.
 - Transition lookup в dispatch выполняется по numeric `eventCode/stateCode`.
 - Compiled template metadata содержит `eventAcceptMask`, `transitionTable`, `templatesByEventCode` и `acceptStateBucketsByEventCode`.
@@ -1277,7 +1411,9 @@ Hot path requirements:
 - Per-row reducer/effect/reaction calls запрещены.
 - `Map.get` в per-row loops запрещен.
 - String comparisons в per-row loops запрещены.
-- Allocations на steady-state `TICK` запрещены.
+- Per-row allocations на steady-state `TICK` запрещены.
+- Allocation guard измеряет отсутствие per-row allocation growth, а не абсолютный ноль heap allocations на весь `manager.transition(...)`.
+- Полный dispatch допускает ограниченный per-action overhead core/kernel pipeline.
 - `self.indices` ссылается на state bucket или reusable scratch buffer.
 - `entities.get("templateKey").<column>[entity]` является direct indexed access после получения store view.
 - `entities.get(...)` и `entities.maybe(...)` вызываются вне per-entity loops.
