@@ -158,13 +158,14 @@ export const createMachineManagerFactory = (preset: RuntimePreset): MachineManag
     // managerContext передаётся в storage runtimes и plugin manager extensions; bucketRuntime
     // зависит от него, поэтому строим в указанном порядке.
 
-    const managerContext: ManagerRuntimeContext = {
-      config: config as MachineStore,
+    const managerContext: ManagerRuntimeContext<RuntimeEvents, S> = {
+      config,
       options: opts,
       schemaVersion: opts?.schemaVersion,
       routing: pluginRegistry.routing,
-      getState: () => getState() as MachinesState<MachineStore>,
-      transition: (action, options) => widenAction(transition(narrowAction(action), options)),
+      getState,
+      transition: (action, options) =>
+        transition(narrowAction(action as Action), options) as ManagerAction<RuntimeEvents>,
       onTransition: (cb) => onTransition(cb as TransitionSubscriber<S, RuntimeEvents, RuntimeMeta>),
       getDependencies: () => userDeps as Record<string, unknown>,
       createScopedDeps: (baseDeps, ctx) =>
@@ -173,16 +174,17 @@ export const createMachineManagerFactory = (preset: RuntimePreset): MachineManag
           event: createReadonlyActionView(ctx.event as Action),
         }),
     };
+    const storageManagerContext = managerContext as ManagerRuntimeContext;
 
     const bucketRuntime = createBucketRuntime<S>(
       buckets,
-      managerContext,
+      storageManagerContext,
       pluginRegistry.routing.resolveRoute,
       pluginRegistry.defaultStorageKind,
       withTransitionGuard,
     );
 
-    state = initBucketState<S>(buckets, bucketsByKind, templates, managerContext);
+    state = initBucketState<S>(buckets, bucketsByKind, templates, storageManagerContext);
 
     const snapshotRuntime = createSnapshotRuntime<S>({
       config: config as MachineStore,
@@ -190,7 +192,7 @@ export const createMachineManagerFactory = (preset: RuntimePreset): MachineManag
       bucketsByKind,
       templateKindByKey,
       defaultStorageKind: pluginRegistry.defaultStorageKind,
-      managerContext,
+      managerContext: storageManagerContext,
       getState,
       getSchemaVersion: () => opts?.schemaVersion,
     });

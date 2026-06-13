@@ -3,7 +3,8 @@
 
 import type { LiteFsmStorageRuntimeDefinition } from "./pluginStorage";
 import type { LiteFsmPlugin } from "./plugin";
-import type { AnyEvent, CoreActionMeta } from "./types";
+import type { AnyEvent, CoreActionMeta, MachinesState, MachineStore } from "./types";
+import type { ManagerRuntimeContext } from "./pluginTypes";
 
 // === Utility types ===========================================================
 
@@ -24,6 +25,53 @@ type FactoryReturn<Factory> = Factory extends (...args: any[]) => infer Result ?
 type RouteMetaValue<Resolver> = Resolver extends (value: infer Value, ...args: any[]) => unknown
   ? UnknownIfUnannotated<Value>
   : unknown;
+
+type IsExactly<Value, Expected> = [Value] extends [Expected]
+  ? [Expected] extends [Value]
+    ? true
+    : false
+  : false;
+
+type IsStoreReference<Value> =
+  IsExactly<Value, MachineStore> extends true
+    ? true
+    : IsExactly<Value, MachinesState<MachineStore>> extends true
+      ? true
+      : false;
+
+// Generic manager factories при ReturnType-подобном извлечении схлопываются до constraint.
+// Локальная специализация восстанавливает ссылки на `MachineStore` и `MachinesState`.
+type HasStoreReferences<Value> =
+  IsAny<Value> extends true
+    ? false
+    : [Value] extends [never]
+      ? false
+      : IsStoreReference<Value> extends true
+        ? true
+        : Value extends (...args: any[]) => infer Result
+          ? HasStoreReferences<Result>
+          : Value extends object
+            ? keyof Value extends never
+              ? false
+              : true extends { [Key in keyof Value]: HasStoreReferences<Value[Key]> }[keyof Value]
+                ? true
+                : false
+            : false;
+
+type SpecializeStoreReferences<Value, S extends MachineStore> =
+  IsExactly<Value, MachineStore> extends true
+    ? S
+    : IsExactly<Value, MachinesState<MachineStore>> extends true
+      ? MachinesState<S>
+      : Value extends (...args: infer Args) => infer Result
+        ? HasStoreReferences<Result> extends true
+          ? (...args: Args) => SpecializeStoreReferences<Result, S>
+          : Value
+        : Value extends object
+          ? HasStoreReferences<Value> extends true
+            ? { [Key in keyof Value]: SpecializeStoreReferences<Value[Key], S> }
+            : Value
+          : Value;
 
 // === Plugin tuple traversal ==================================================
 
@@ -52,9 +100,19 @@ type ScopedTransitionForPlugin<Plugin> =
     ? { [Key in keyof ScopedTransition]: FactoryReturn<ScopedTransition[Key]> }
     : {};
 
-type ManagerExtensionsForPlugin<Plugin> =
+type ManagerFactoryReturn<Factory, S extends MachineStore> =
+  SpecializeStoreReferences<
+    Factory extends (ctx: ManagerRuntimeContext<infer Events, any>) => unknown
+      ? Factory extends (ctx: ManagerRuntimeContext<Events, S>) => infer Result
+        ? Result
+        : FactoryReturn<Factory>
+      : FactoryReturn<Factory>,
+    S
+  >;
+
+type ManagerExtensionsForPlugin<Plugin, S extends MachineStore> =
   PluginDefinitionOf<Plugin> extends { readonly manager?: infer Manager extends object }
-    ? { [Key in keyof Manager]: FactoryReturn<Manager[Key]> }
+    ? { [Key in keyof Manager]: ManagerFactoryReturn<Manager[Key], S> }
     : {};
 
 type MachineExtensionsForPlugin<Plugin> =
@@ -117,10 +175,10 @@ export type PluginScopedTransition<Plugin> = IntersectCapabilities<
     : never
 >;
 
-export type PluginManagerExtensions<Plugin> = IntersectCapabilities<
+export type PluginManagerExtensions<Plugin, S extends MachineStore = MachineStore> = IntersectCapabilities<
   PluginMember<Plugin> extends infer Member
     ? Member extends LiteFsmPlugin<any, any, any>
-      ? ManagerExtensionsForPlugin<Member>
+      ? ManagerExtensionsForPlugin<Member, S>
       : never
     : never
 >;

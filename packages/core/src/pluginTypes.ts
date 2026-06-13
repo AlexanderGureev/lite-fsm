@@ -75,25 +75,30 @@ export type ScopedInvocationContext = {
 
 // === Manager extension =======================================================
 
-export type ManagerRuntimeContext<Events extends AnyEvent = AnyEvent> = {
-  readonly config: MachineStore;
+export type ManagerRuntimeContext<
+  Events extends AnyEvent = AnyEvent,
+  S extends MachineStore = MachineStore,
+> = {
+  readonly config: S;
   readonly options: unknown;
   readonly schemaVersion: number | undefined;
-  getState(): MachinesState<MachineStore>;
+  getState(): MachinesState<S>;
   transition(action: ManagerAction<Events>, options?: unknown): ManagerAction<Events>;
   onTransition(
     cb: (
-      prevState: MachinesState<MachineStore>,
-      currentState: MachinesState<MachineStore>,
+      prevState: MachinesState<S>,
+      currentState: MachinesState<S>,
       action: ReadonlyManagerAction<Events> | { readonly type: string; readonly payload?: unknown },
     ) => void,
   ): () => void;
   getDependencies(): Record<string, unknown>;
 };
 
-export type ManagerExtensionFactory<Events extends AnyEvent = AnyEvent, Value = unknown> = (
-  ctx: ManagerRuntimeContext<Events>,
-) => Value;
+export type ManagerExtensionFactory<
+  Events extends AnyEvent = AnyEvent,
+  Value = unknown,
+  S extends MachineStore = MachineStore,
+> = (ctx: ManagerRuntimeContext<Events, S>) => Value;
 
 // === Normalized plugin payload ===============================================
 // Internal representation, в которое plugin DSL приводит входное plugin definition.

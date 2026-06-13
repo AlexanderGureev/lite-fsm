@@ -208,18 +208,21 @@ export const createDispatchSlot = <T>(key: string): DispatchSlot<T> => ({
   },
 });
 
-export type ManagerRuntimeContext = PublicManagerRuntimeContext & {
-  readonly config: MachineStore;
+export type ManagerRuntimeContext<
+  Events extends AnyEvent = AnyEvent,
+  S extends MachineStore = MachineStore,
+> = PublicManagerRuntimeContext<Events, S> & {
+  readonly config: S;
   readonly options: MachineManagerOptions<any, any, any> | undefined;
   readonly schemaVersion: number | undefined;
   readonly routing: RoutingRuntime;
-  getState(): MachinesState<MachineStore>;
-  transition(action: ManagerAction<AnyEvent>, options?: unknown): ManagerAction<AnyEvent>;
+  getState(): MachinesState<S>;
+  transition(action: ManagerAction<Events>, options?: unknown): ManagerAction<Events>;
   onTransition(
     cb: (
-      prevState: MachinesState<MachineStore>,
-      currentState: MachinesState<MachineStore>,
-      action: ReadonlyManagerAction<AnyEvent> | { readonly type: string; readonly payload?: unknown },
+      prevState: MachinesState<S>,
+      currentState: MachinesState<S>,
+      action: ReadonlyManagerAction<Events> | { readonly type: string; readonly payload?: unknown },
     ) => void,
   ): () => void;
   getDependencies(): Record<string, unknown>;

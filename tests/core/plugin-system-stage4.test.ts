@@ -211,11 +211,14 @@ describe("plugin system — этап 4 — routeMeta", () => {
 
 describe("plugin system — этап 4 — manager", () => {
   it("добавляет manager extension и вызывает factory один раз после initial state", () => {
+    const machines = { counter: createCounter() };
     const factory = vi.fn((ctx) => {
+      expect(ctx.config).toBe(machines);
       expect(ctx.getState()).toEqual({ counter: { state: "IDLE", context: { count: 0 } } });
       expect(ctx.getDependencies()).toEqual({});
       ctx.transition({ type: "INC" });
       return {
+        readConfig: () => ctx.config,
         readCount: () => ctx.getState().counter.context.count,
         readDeps: () => ctx.getDependencies(),
         bump: () => ctx.transition({ type: "INC" }),
@@ -225,10 +228,9 @@ describe("plugin system — этап 4 — manager", () => {
       name: "stage-four-manager",
       manager: { audit: factory },
     });
-    const manager = MachineManager({ counter: createCounter() }, { plugins: [plugin] }) as unknown as ReturnType<
-      typeof MachineManager
-    > & {
+    const manager = MachineManager(machines, { plugins: [plugin] }) as unknown as ReturnType<typeof MachineManager> & {
       readonly audit: {
+        readConfig(): unknown;
         readCount(): number;
         readDeps(): Record<string, unknown>;
         bump(): unknown;
@@ -239,6 +241,7 @@ describe("plugin system — этап 4 — manager", () => {
     manager.audit.bump();
 
     expect(factory).toHaveBeenCalledTimes(1);
+    expect(manager.audit.readConfig()).toBe(machines);
     expect(manager.audit.readCount()).toBe(2);
     expect(manager.audit.readDeps()).toEqual({ api: "ready" });
   });

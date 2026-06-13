@@ -21,7 +21,7 @@ const plugin = definePlugin<PluginEvents, HostEvents>().create({
 | Раздел | Что добавляет | Контракт |
 | --- | --- | --- |
 | `routeMeta` | Ключи маршрутизации в `action.meta` | Resolver преобразует значение meta в `string | readonly string[]`. |
-| `manager` | Методы и поля менеджера | Фабрика вызывается один раз. `ctx.transition(...)` принимает только `PluginEvents`. |
+| `manager` | Методы и поля менеджера | Фабрика вызывается один раз. `ctx.transition(...)` принимает только `PluginEvents`; `ctx.config` и `ctx.getState()` параметризуются `MachineStore` текущего менеджера. |
 | `intercept` | Управление action до доставки в машины | Может вернуть `{ action }`, `{ skipDelivery }`, `{ stopInterceptors }` или `{}`. |
 | `hooks` | Наблюдение фаз обработки action | Доступные фазы: `beforeReduce`, `afterReduce`, `beforeCommit`, `beforeSubscribers`, `beforeEffects`, `afterEffects`. Возвращаемое значение игнорируется. |
 | `scopedDeps` | Зависимости для `effects` и `reactions` | Фабрика вызывается для каждого effect или reaction и получает `scope.event`, `scope.source`, `scope.phase`, `scope.indices`. |
@@ -34,7 +34,7 @@ const plugin = definePlugin<PluginEvents, HostEvents>().create({
 | --- | --- |
 | `PluginManagerEvents<Plugins>` | События, которые добавляет текущий набор плагинов |
 | `PluginRouteMeta<Plugins>` | Значения `routeMeta` |
-| `PluginManagerExtensions<Plugins>` | Поля, добавленные через `manager` |
+| `PluginManagerExtensions<Plugins, S = MachineStore>` | Поля, добавленные через `manager`; второй generic задает store текущего менеджера |
 | `PluginScopedDeps<Plugins>` | Зависимости из `scopedDeps` |
 | `PluginScopedTransition<Plugins>` | Методы из `scopedTransition` |
 | `PluginMachineExtensions<Plugins>` | Поля storage runtime, доступные в описании машины |
@@ -44,6 +44,32 @@ const plugin = definePlugin<PluginEvents, HostEvents>().create({
 
 ```ts
 const manager = MachineManager(machines, { plugins: [plugin] });
+```
+
+Расширение manager, параметризованное `MachineStore`, объявляется тем же runtime DSL. Типовой параметр нужен только в типе factory, если возвращаемое поле зависит от `MachinesState<S>`:
+
+```ts
+import { definePlugin, MachineManager } from "@lite-fsm/core";
+import type { AnyEvent, MachineStore, ManagerRuntimeContext, MachinesState } from "@lite-fsm/core";
+
+type EntityAccess<State> = {
+  read(): State;
+};
+
+const typedAccessPlugin = definePlugin().create({
+  name: "typed-access",
+  manager: {
+    access<S extends MachineStore>(ctx: ManagerRuntimeContext<AnyEvent, S>): EntityAccess<MachinesState<S>> {
+      return {
+        read: () => ctx.getState(),
+      };
+    },
+  },
+});
+
+const manager = MachineManager(machines, { plugins: [typedAccessPlugin] });
+
+manager.access.read(); // MachinesState<typeof machines>
 ```
 
 ## Жизненный цикл action

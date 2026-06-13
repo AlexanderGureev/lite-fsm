@@ -192,4 +192,4 @@ export type ManagerFromPlugins<
   AppEvents extends AnyEvent,
   Plugins extends readonly LiteFsmPlugin<any, any, any>[],
 > = IMachineManager<S, ManagerTransitionEvents<AppEvents, Plugins>, ManagerActionMeta<Plugins>, Plugins> &
-  PluginManagerExtensions<Plugins>;
+  PluginManagerExtensions<Plugins, S>;
