@@ -345,7 +345,8 @@ type EntityMachinePublicState<Metadata> = {
 | `storage`, `input.storage`, `initialState`, `initialContext`, `spawnSchema`, `resultMetadata` | 2 |
 | `publicState` | 3 |
 | `internalEvents` | 4 |
-| `reducerContext.payloadFor(entity)` | 5 |
+| `reducerContext.payloadFor(entity)` и минимальный reducer `self` API (`indices`, schema columns, `stateCode`, `prevStateCode`, `has`, `entityId`) | 5 |
+| Оптимизированные метаданные batch reducer (`states`, `presence`, `rowVersion`, bucket-backed `indices`) | 6 |
 | `despawnOn` | 8 |
 | `effectDeps` | 9 |
 | `reactions`, `reactionDeps` | 10 |
@@ -1193,6 +1194,15 @@ Type tests:
 - `entitiesPlugin({ spawn })` options;
 - `manager.transition(...)` принимает `SpawnEventsFrom<typeof spawnEvents>` от текущего `entitiesPlugin(...)`.
 
+Уточнить минимальный runtime-visible reducer API для entity actor templates:
+
+- `self.indices`;
+- `self.stateCode`;
+- `self.prevStateCode`;
+- `self.has(entity)`;
+- `self.entityId(entity)`;
+- schema columns как direct fields.
+
 #### Runtime-контракт этапа
 
 - `spawnEvents` является источником истины для spawn event names, payload types, `manager.transition(...)` typing и spawn recipe keys.
@@ -1216,6 +1226,11 @@ Type tests:
 - Runtime доставляет scoped internal `ENTITY_SPAWNED` созданным actor rows.
 - Default `__INIT -> target` transition применяется до reducer.
 - Reducer вызывается один раз на actor template batch.
+- Entity reducer получает `self` со scope текущего batch: `indices`, schema columns, `stateCode`, `prevStateCode`, `has(entity)` и `entityId(entity)`.
+- Runtime компилирует минимальную state name ↔ `stateCode` map, достаточную для `self.stateCode` и `self.prevStateCode`; полная numeric event/state metadata и hot path lookup добавляются на этапе 6.
+- `self.indices` в этом этапе содержит rows текущего spawn lifecycle batch или rows public spawn event batch; реализация может использовать простые scratch arrays без hot path guarantees этапа 6.
+- Schema columns доступны как direct mutable fields на `self` и являются единственным способом инициализировать actor columns из reducer.
+- Reducer может override-ить финальный state через `self.stateCode[entity]`; rollback default transition выполняется записью `self.stateCode[entity] = self.prevStateCode[entity]`.
 - `payloadFor(entity)` всегда присутствует в reducer context.
 - `payloadFor(entity)` принимает только `EntityIndex` из текущего `self.indices`.
 - `payloadFor(entity)` возвращает actor-specific spawn payload только во время `ENTITY_SPAWNED`.
@@ -1292,6 +1307,8 @@ Runtime tests:
 
 - public spawn event создает entity и actor rows;
 - public spawn event доставляется после internal `ENTITY_SPAWNED`;
+- `ENTITY_SPAWNED` reducer получает `self.indices`, schema columns и state helpers;
+- actor reducer инициализирует columns через direct `self` fields;
 - `payloadFor(entity)` возвращает actor-specific spawn payload во время `ENTITY_SPAWNED`;
 - `payloadFor(entity)` outside `ENTITY_SPAWNED` бросает clear error;
 - `payloadFor(entity)` для entity вне current spawn scope бросает clear error;
@@ -1320,6 +1337,7 @@ Type tests:
 - `entitiesPlugin({ spawn })` сохраняет transition event typing без отдельной передачи `spawnEvents`;
 - `manager.transition(...)` не принимает lifecycle events;
 - machine `AppEvents` не получает spawn events автоматически;
+- entity reducer `self` типизирует `indices`, schema columns, `stateCode`, `prevStateCode`, `has(entity)` и `entityId(entity)`;
 - recipe payload выводится из `spawnEvents`;
 - `payloadFor(entity)` типизируется по actor `spawnSchema`;
 - `payloadFor(entityId)` является TypeScript error;
@@ -1352,22 +1370,19 @@ Type tests:
 - `EntityStorageRuntimeExtension.routeMeta: { entityId: string | readonly string[] }`.
 - `entityStorageRuntime` получает `routeMetaKeys: ["entityId"]`.
 
-Уточнить runtime-visible reducer API для entity actor templates:
+Оптимизировать и расширить runtime-visible reducer API для entity actor templates:
 
-- `self.indices`;
 - `self.states`;
-- `self.prevStateCode`;
 - `self.presence`;
-- `self.stateCode`;
 - `self.rowVersion`;
-- `self.has(entity)`;
-- `self.entityId(entity)`;
-- schema columns как direct fields.
+- bucket-backed или reusable `self.indices`;
+- numeric validation для `self.stateCode` и `self.prevStateCode`;
+- schema columns остаются direct fields из этапа 5.
 
 #### Runtime-контракт этапа
 
 - Event `type` переводится в `eventCode` один раз для финального `ctx.action` после `prepareAction`, middleware `next(action)`, storage `beforeReduce` и всех `intercept` replacements, до entity reduce.
-- State names переводятся в `stateCode` при init manager.
+- Минимальная state name ↔ `stateCode` map этапа 5 расширяется до полной compiled state metadata для transition lookup, buckets, masks и diagnostics.
 - Transition lookup в dispatch выполняется по numeric `eventCode/stateCode`.
 - Compiled template metadata содержит `eventAcceptMask`, `transitionTable`, `templatesByEventCode` и `acceptStateBucketsByEventCode`.
 - `templatesByEventCode[eventCode]` содержит только templates, которые принимают event в `config`.
@@ -1379,7 +1394,7 @@ Type tests:
 - Отмена default transition выполняется записью `self.stateCode[entity] = self.prevStateCode[entity]`.
 - Effects в будущих этапах запускаются по финальному state после reducer.
 - Reducer вызывается один раз на actor template per event.
-- `self.indices` содержит только rows, подходящие по presence, state, event и routing.
+- `self.indices` содержит только rows, подходящие по presence, state, event и routing, и ссылается на state bucket или reusable scratch buffer.
 - Reducer не обязан проверять `self.has(entity)` для entity из `self.indices`.
 - После reducer runtime bump-ит `rowVersion` для всех `self.indices`.
 - После accepted reducer call runtime считает все `self.indices` измененными.
@@ -1492,7 +1507,7 @@ Type tests:
 - `meta.entityId` доступен только при установленном `entitiesPlugin(...)`;
 - `routeMetaKeys: ["entityId"]` требует plugin `routeMeta.entityId` resolver на уровне `definePlugin().create(...)`;
 - `actorId`, `groupId`, `groupTag` остаются доступны;
-- entity reducer `self` получает schema columns и state helpers.
+- entity reducer `self` получает оптимизированные state helpers и bucket-backed `indices`.
 
 #### Gate завершения
 

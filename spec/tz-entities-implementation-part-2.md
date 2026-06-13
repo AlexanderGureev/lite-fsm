@@ -6,7 +6,7 @@
 
 ## 2. Как выполнять это ТЗ
 
-Этот файл покрывает этапы 8-14. Он самодостаточен для этих этапов: ниже продублированы цель, термины, public API, runtime architecture, общие инварианты, ошибки и gate предыдущих этапов.
+Этот файл покрывает этапы 8-15. Он самодостаточен для этих этапов: ниже продублированы цель, термины, public API, runtime architecture, общие инварианты, ошибки и gate предыдущих этапов.
 
 Реализация идет строго по этапам. Этап `N+1` начинается только после полного выполнения gate этапа `N`.
 
@@ -345,7 +345,8 @@ type EntityMachinePublicState<Metadata> = {
 | `storage`, `input.storage`, `initialState`, `initialContext`, `spawnSchema`, `resultMetadata` | 2 |
 | `publicState` | 3 |
 | `internalEvents` | 4 |
-| `reducerContext.payloadFor(entity)` | 5 |
+| `reducerContext.payloadFor(entity)` и минимальный reducer `self` API (`indices`, schema columns, `stateCode`, `prevStateCode`, `has`, `entityId`) | 5 |
+| Оптимизированные метаданные batch reducer (`states`, `presence`, `rowVersion`, bucket-backed `indices`) | 6 |
 | `despawnOn` | 8 |
 | `effectDeps` | 9 |
 | `reactions`, `reactionDeps` | 10 |
@@ -733,18 +734,21 @@ Owners и module boundaries:
 
 ### Контракт перед этапом 8
 
-Этап 8 начинается только после завершения этапов 1-7. Для реализации этапов 8-14 достаточно считать выполненным следующий контракт:
+Этап 8 начинается только после завершения этапов 1-7. Для реализации этапов 8-15 достаточно считать выполненным следующий контракт:
 
 - `@lite-fsm/entities` существует как package с exports `"."` и `"./package.json"`.
 - `entitiesPlugin(...)` устанавливается через `MachineManager(..., { plugins })` и подключает `storage: "entity"` через plugin storage section.
 - `storage: "entity"` без plugin бросает clear unknown storage error.
 - `@lite-fsm/core` не импортирует `@lite-fsm/entities` и не знает про entity store, columnar layout, generation, spawn recipes, buckets, lifecycle и reactions.
 - Schema descriptors `f32`, `i16`, `i32`, `u8`, `string`, `optional` реализованы и валидируются.
-- `EntityMachineExtension` типизирует `storage: "entity"` actor templates через typed wrapper с plugin source, сохраняет phantom metadata `initialContext`/`spawnSchema`/`ActorPublicState<Input["config"]>`, задает lightweight `publicState` и содержит entity-specific `effectDeps`/`reactionDeps`.
+- `EntityMachineExtension` типизирует `storage: "entity"` actor templates через typed wrapper с plugin source, сохраняет phantom metadata `initialContext`/`spawnSchema`/`ActorPublicState<Input["config"]>` и задает lightweight `publicState`.
+- `effectDeps` для entity effects еще не являются частью выполненного контракта части 1 и добавляются на этапе 9.
+- `reactions` и `reactionDeps` еще не являются частью выполненного контракта части 1 и добавляются на этапе 10.
 - Entity templates требуют `initialState: "__INIT"`, `initialContext` и `spawnSchema`.
 - `manager.entities` существует только при установленном `entitiesPlugin(...)` и типизируется как `EntityAccess<AppState>`.
 - Public state slice для entity actor templates является lightweight read model с `storage`, `version`, `count`, `capacity` и закрытым type-only phantom metadata; columns не попадают в `manager.getState()`.
-- Internal lifecycle events `ENTITY_SPAWNED` и `ENTITY_DESPAWNED` доступны только в entity config/reducer/reactions и запрещены через public `manager.transition(...)`.
+- Internal lifecycle events `ENTITY_SPAWNED` и `ENTITY_DESPAWNED` доступны только в entity config/reducer и запрещены через public `manager.transition(...)`; reactions получают lifecycle events на этапе 10.
+- Минимальный reducer `self` API реализован: `self.indices`, schema columns, `self.stateCode`, `self.prevStateCode`, `self.has(entity)` и `self.entityId(entity)`.
 - `payloadFor(entity)` работает только в reducer на `ENTITY_SPAWNED`, принимает только `EntityIndex` из текущего `self.indices` и типизируется по actor `spawnSchema`.
 - `defineSpawnEvents`, `spawnEvent<T>()`, `SpawnEventsFrom<TSpawnEvents>` и `defineEntitySpawn(machines, spawnEvents)` реализованы.
 - Public spawn `hooks.beforeReduce(ctx)` stage-ит atomic spawn transaction по финальному action после всех `intercept` replacements и не вызывает spawn recipes при hydrate.
@@ -1391,7 +1395,7 @@ function useStorageHydrationPreview(storageKind: string): FSMStorageHydrationPre
 - Hooks используют `useSyncExternalStore`.
 - `@lite-fsm/entities/react` использует существующий manager context из `@lite-fsm/react`; отдельный provider не добавляется.
 - Main export `@lite-fsm/entities` не импортирует React и не зависит runtime-веткой от `@lite-fsm/react`.
-- `@lite-fsm/entities` объявляет `react` и `@lite-fsm/react` как optional peer dependencies для subpath `"./react"`.
+- `@lite-fsm/entities` объявляет `react` и `@lite-fsm/react` в package-level `peerDependencies` с `peerDependenciesMeta.optional: true`; эти зависимости нужны subpath `"./react"`, а main export их не импортирует.
 - `useEntitySnapshot` subscribes to one entity row.
 - `useEntitySnapshot(templateKey, null)` и `useEntitySnapshot(templateKey, undefined)` возвращают `undefined` и не подписываются на конкретный row. Это нужно для selected/hovered entity без условного вызова hooks.
 - `useEntitySnapshot` возвращает serializable row snapshot с `entityId`, `groupTag`, `state` и `context`.
@@ -1686,13 +1690,67 @@ Expected remaining hits:
 - Coverage нового и измененного кода остается 100%.
 - Docs build не запускался.
 
+### Этап 15 — Финальная проверка `ecs_example`
+
+#### Цель
+
+Проверить, что минимальный игровой пример в `ecs_example` компилируется и выполняется на финальном `@lite-fsm/entities` API после завершения runtime, React, snapshot, benchmark, документационных и cleanup этапов.
+
+#### Зависит от
+
+- Этапы 1-14.
+
+#### Контракт этапа
+
+- Этап не меняет public API, public types, runtime behavior, snapshot format, React hooks или benchmark thresholds.
+- `ecs_example/store` должен оставаться app-level примером, который потребляет публичные entrypoints `@lite-fsm/core`, `@lite-fsm/entities`, `@lite-fsm/entities/react`, `@lite-fsm/middleware/immer`, `@lite-fsm/persist` и `@lite-fsm/react`.
+- Пример должен использовать финальный API из этого ТЗ: `entitiesPlugin({ spawn })`, `defineSpawnEvents`, `spawnEvent`, `SpawnEventsFrom`, `defineEntitySpawn`, schema descriptors, `storage: "entity"`, `spawnSchema`, `initialContext`, `despawnOn`, `manager.entities`, `EntityAccess<AppState>`, `transition.entity(...)`, `transition.tag(...)`, `transition.actor(...)`, `transition.despawn(...)`, `reactions` и React entity hook aliases.
+- Пример должен содержать минимум один обычный domain/process machine, один `storage: "instance"` actor и один `storage: "entity"` actor template.
+- Все три владельца поведения должны принимать `TICK`; каждый reducer/effect/reaction должен менять только свой слой ответственности.
+- Public spawn должен идти через `manager.transition({ type: "SPAWN_ENEMY", ... })`, а не через несуществующий public `manager.spawn(...)`.
+- Entity routing должен проверяться через `meta.entityId`; `groupTag` routing должен проверяться через `meta.groupTag` или `transition.tag(...)`.
+- Пример должен проверять root `manager.entities.get("enemyActor")`, snapshot `dehydrate()`, preview `getHydratedState(...)`, hydrate `hydrate(...)` и persist save/restore loop.
+- `ecs_example` не должен использовать `@ts-nocheck`, `as any`, ручной `EntityAccess`, private/internal entrypoints, raw storage runtime APIs или public routing по `actorId` к entity rows.
+- Если финальная реализация API отличается от чернового примера, исправлять нужно пример или ТЗ только через публичный финальный контракт, а не через ослабление типов.
+
+#### Не делать в этом этапе
+
+- Не менять runtime implementation, public API, public types, docs snippets или benchmark thresholds ради прохождения примера.
+- Не добавлять compatibility shim только для `ecs_example`.
+- Не запускать docs build и команды, которые транзитивно запускают docs build.
+- Не превращать пример в package docs вместо executable gate: пример должен оставаться проверяемым кодом.
+
+#### Тесты этапа
+
+- `pnpm exec tsc --noEmit -p ecs_example/tsconfig.json` проходит.
+- Добавить или обновить focused smoke test, который импортирует `runEcsExample()` из `ecs_example/run-example.ts`, выполняет сценарий и проверяет минимум:
+  - `SPAWN_ENEMY` создает entity row;
+  - `TICK` проходит через обычный machine, instance actor и entity actor;
+  - `meta.entityId` доставляет `DAMAGE_ENTITY` нужной entity row;
+  - `groupTag` routing доставляет `BOOST_ENEMIES`;
+  - `manager.entities.get("enemyActor").count` отражает live row;
+  - `dehydrate()`, `getHydratedState(...)` и `hydrate(...)` сохраняют entity storage;
+  - persist storage получает запись после save;
+  - sprite adapter получает reaction/effect commands без ручной мутации UI.
+- Focused smoke test запускается отдельной командой без docs build, например `pnpm exec vitest run tests/entities/ecs-example-final-gate.test.ts`.
+- `pnpm exec eslint ecs_example` проходит.
+- `git diff --check` проходит.
+
+#### Критерий завершения
+
+- `ecs_example` компилируется без `@ts-nocheck`, `as any` и private/internal imports.
+- Runtime smoke test примера проходит и проверяет интеграцию spawn, entity routing, `TICK`, effects, reactions, snapshot/hydrate, `manager.entities` и persist.
+- Lint и whitespace checks этапа проходят.
+- Docs build не запускался.
+
 ## 6. Критерий полной готовности
 
 ТЗ считается реализованным только когда выполнены все условия:
 
-- Все этапы 1-14 завершены по своим gates.
+- Все этапы 1-15 завершены по своим gates.
 - Plugin system реализована и прошла собственный gate до финальной приемки `@lite-fsm/entities`.
 - Каждое runtime/type/snapshot/react/benchmark/error требование из этого документа реализовано и покрыто tests либо явно относится к разделу «Вне области работ».
+- `ecs_example` компилируется и выполняется как финальный integration gate на публичном API `@lite-fsm/entities`.
 - Все существующие behavior tests проходят без изменения пользовательских сценариев.
 - Все новые и измененные runtime tests проходят.
 - Все type tests проходят.
