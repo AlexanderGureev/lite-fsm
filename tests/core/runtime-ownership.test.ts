@@ -216,6 +216,58 @@ describe("storage runtime ownership", () => {
     expect(order).toEqual(["custom:reduce", "custom:commit", "custom:reaction", "subscriber"]);
   });
 
+  it("external replacement помечает owner bucket по замененному public slice", () => {
+    const runtimeState = { commits: 0 };
+    const customRuntime: StorageRuntime = {
+      kind: "custom",
+      reduceScope: "bucket",
+      validateTemplate() {},
+      compileTemplate(ctx) {
+        return { key: ctx.key, kind: "custom" };
+      },
+      createRuntimeState() {
+        return runtimeState;
+      },
+      createPublicInitialState() {
+        return { ready: true, restored: true };
+      },
+      reduceBucket() {
+        return { type: "skip" };
+      },
+      commit({ dispatch }) {
+        runtimeState.commits += 1;
+        dispatch.nextState = {
+          ...dispatch.nextState,
+          custom: { ready: true, restored: true },
+        };
+      },
+    };
+    const manager = createMachineManagerFactory({
+      name: "preset/instance-custom",
+      defaultStorageKind: "instance",
+      plugins: [
+        runtimePlugin("instance", [{ kind: "instance", runtime: instanceStorageRuntime }]),
+        runtimePlugin("custom", [{ kind: "custom", runtime: customRuntime }]),
+      ],
+    })({
+      counter: createCounter("instance"),
+      custom: createCounter("custom"),
+    });
+
+    manager.transition({ type: "TICK" });
+
+    expect(runtimeState.commits).toBe(0);
+
+    manager.replaceReducer((next) => (state, action) => ({
+      ...next(state, action),
+      custom: { ready: false, restored: false },
+    }) as never);
+    manager.transition({ type: "TICK" });
+
+    expect(runtimeState.commits).toBe(1);
+    expect(manager.getState().custom).toEqual({ ready: true, restored: true });
+  });
+
   it("storage runtime не вызывает subscribers и effects во время reduce или commit", () => {
     const order: string[] = [];
     const runtime = createTestRuntime("custom", { effects: true, order });

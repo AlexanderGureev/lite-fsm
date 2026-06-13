@@ -29,6 +29,11 @@ export type BucketRuntime<S extends MachineStore> = {
   prepareAction(action: Action, options: unknown, dispatch: StorageDispatchLifecycleContext): ActionStageOutcome;
   beforeReduce(action: Action, dispatch: StorageDispatchLifecycleContext): ActionStageOutcome;
   reduce(action: Action, dispatch: StorageDispatchLifecycleContext): MachinesState<S>;
+  markExternallyChangedBuckets(
+    prevState: Record<string, unknown>,
+    nextState: Record<string, unknown>,
+    dispatch: StorageDispatchLifecycleContext,
+  ): void;
   commit(dispatch: StorageDispatchLifecycleContext): void;
   runReactions(action: Action, dispatch: StorageDispatchLifecycleContext): void;
   runEffects(dispatch: StorageDispatchLifecycleContext): void;
@@ -147,6 +152,18 @@ export const createBucketRuntime = <S extends MachineStore>(
       }
     }
     return dispatch.nextState as MachinesState<S>;
+  },
+
+  markExternallyChangedBuckets(prevState, nextState, dispatch) {
+    for (const bucket of buckets) {
+      if (dispatch.touched.has(bucket.runtime.kind)) continue;
+
+      for (const template of bucket.templates) {
+        if (prevState[template.key] === nextState[template.key]) continue;
+        dispatch.touched.add(bucket.runtime.kind);
+        break;
+      }
+    }
   },
 
   commit(dispatch) {

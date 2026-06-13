@@ -7,6 +7,7 @@
 | Импорт                                                         | Runtime exports                                                                                                                                                   |
 | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `@lite-fsm/core`                                               | `createMachine`, `createConfig`, `createReducer`, `createEffect`, `createActorMeta`, `definePlugin`, `defineStorageRuntime`, `Machine`, `defineMachine`, `MachineManager`, `LiteFsmError` |
+| `@lite-fsm/entities`                                           | alpha: `entitiesPlugin`, schema descriptors `f32`/`i16`/`i32`/`u8`/`string`/`optional`; регистрирует storage kind `"entity"`, lightweight public slices и `manager.entities` без rows и spawn runtime |
 | `@lite-fsm/persist`                                            | `persistManager`, `createJsonStorage`                                                                                                                             |
 | `@lite-fsm/persist/react`                                      | `usePersistStatuses`, `useIsPersistRestoring`                                                                                                                     |
 | `@lite-fsm/middleware`                                         | `immerMiddleware`, `devToolsMiddleware`                                                                                                                           |
@@ -19,6 +20,68 @@
 |                                                                |
 
 `@lite-fsm/react` помечен `"use client"`. Импортировать можно из SSR/RSC, hooks/provider — только в client tree.
+
+## Alpha entities
+
+`@lite-fsm/entities` подключается только явным импортом и не входит в core bundle. Пакет предоставляет `entitiesPlugin()`, schema descriptors, storage-specific typing для actor templates с `storage: "entity"` и root accessor `manager.entities`.
+
+```ts
+import { MachineManager } from "@lite-fsm/core";
+import { entitiesPlugin, f32, optional, string } from "@lite-fsm/entities";
+
+const manager = MachineManager(machines, {
+  plugins: [entitiesPlugin()],
+});
+```
+
+Entity actor template проходит init-time validation при создании `MachineManager`:
+
+```ts
+const movementActor = createEntityMachine({
+  storage: "entity",
+  initialState: "__INIT",
+  initialContext: {
+    x: f32({ default: 0 }),
+    y: f32(),
+  },
+  spawnSchema: {
+    x: f32(),
+    y: f32(),
+    label: optional(string()),
+  },
+  config: {
+    __INIT: { SPAWNED: "active" },
+    active: { TICK: "active" },
+  },
+});
+```
+
+`initialContext` и `spawnSchema` являются plain object maps известных descriptors. `optional(...)` допустим только в `spawnSchema`: ключ остается обязательным, value type становится `T | null`. `opts.default` допустим только в `initialContext`; в `spawnSchema` defaults отклоняются. Зарезервированные имена колонок (`count`, `capacity`, `ids`, `indexById`, `alive`, `generation`, `freeList`, `stateCode`, `version`, `columns`, `presence`, `rowVersion`, `indices`, `states`) запрещены. `groupTag` задается будущим `EntitySpawnSpec`, а не template.
+
+Public state entity actor template является lightweight read model:
+
+```ts
+manager.getState().movementActor;
+// { storage: "entity", version: 0, count: 0, capacity: 0 }
+```
+
+Columns не попадают в `manager.getState()`. Пустой runtime создает `EntityStore` и `ColumnarActorStore` на каждый entity actor template, но live rows до spawn stages не создаются.
+
+`manager.entities` доступен только при установленном `entitiesPlugin()`:
+
+```ts
+const movement = manager.entities.get("movementActor");
+
+movement.count; // 0
+movement.version; // 0
+movement.has(entityIndex); // false для отсутствующей строки
+movement.state(entityIndex); // undefined для отсутствующей строки
+movement.x[entityIndex]; // typed indexed column из initialContext
+```
+
+`entities.get(key)` и `entities.maybe(key)` принимают только известные entity actor keys. Runtime unknown key бросает `LiteFsmError`. Store views кешируются на actor key и читают текущий runtime store. `storage: "instance"` state shape и selectors не меняются.
+
+`entitiesPlugin()` пока не принимает options, не добавляет public spawn events, lifecycle events, routing, snapshots или React hooks. Spawn delivery и live rows еще не создаются. `@lite-fsm/entities/react` не публикуется до появления React API.
 
 ## Alpha graph compiler
 

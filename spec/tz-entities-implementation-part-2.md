@@ -47,7 +47,7 @@
 - Entity runtime использует plugin section `routeMeta` для `meta.entityId`.
 - Entity storage runtime на этапе routing объявляет `routeMetaKeys: ["entityId"]`, а `definePlugin().create(...)` проверяет, что plugin объявил совместимый resolver `routeMeta.entityId`.
 - Entity effect/reaction deps типизируются через `EntityMachineExtension.effectDeps` и `EntityMachineExtension.reactionDeps`, а не через global plugin `scopedDeps`.
-- Строгая типизация объекта `entities`, который инжектируется в entity effects/reactions, выводится из `AppDeps.entities?: EntityAccess<AppState>`.
+- Строгая типизация объекта `entities`, который инжектируется в entity effects/reactions, выводится из `AppDeps.entities?: EntityAccess<AppMachines>`.
 - `AppDeps.entities` является опциональным источником типов; runtime entity effects/reactions не читает это dependency и инжектирует accessor, привязанный к текущему entity scope.
 - Новые entity-specific transition helpers типизируются через `EntityMachineExtension.effectDeps`, а не через global plugin `scopedTransition`.
 - Entity runtime использует plugin section `manager` для `manager.entities`.
@@ -91,7 +91,7 @@
 - `defineSpawnEvents`, `spawnEvent<T>()`, `SpawnEventsFrom<TSpawnEvents>`.
 - `defineEntitySpawn(machines, spawnEvents)`.
 - Public spawn events через `manager.transition(...)`.
-- `manager.entities` и typed `EntityAccess<AppState>`.
+- `manager.entities` и typed `EntityAccess<AppMachines>`.
 - Новые entity effect helpers `transition.entity(...)` и `transition.despawn(...)`.
 - Существующие transition helpers `transition.tag(...)` и `transition.actor(...)` доступны в entity effects с текущей core semantics.
 - `ENTITY_SPAWNED` и `ENTITY_DESPAWNED` как system lifecycle events только внутри entity runtime.
@@ -137,7 +137,7 @@
 - Тесты поведения являются источником истины для обратной совместимости. Их нельзя переписывать под новую реализацию, если public behavior не меняется.
 - Тесты, привязанные к internal functions, которые удалены или переехали при рефакторинге, обновляются на нового владельца поведения или заменяются тестами публичного контракта.
 - Runtime tests покрывают spawn transaction, duplicate entity ids, empty actors validation, `transition.despawn(...)`, entity routing, `groupTag` routing, `despawnOn`, bucket updates, stale scope validation, read-only effects/reactions и reaction error handling.
-- Type tests покрывают `EntityMachineExtension`, `initialContext` schema inference, `spawnSchema` payload inference, `SpawnEventsFrom`, `defineEntitySpawn`, `manager.entities`, `EntityAccess<AppState>` и исключение lifecycle events из public `manager.transition`.
+- Type tests покрывают `EntityMachineExtension`, `initialContext` schema inference, `spawnSchema` payload inference, `SpawnEventsFrom`, `defineEntitySpawn`, `manager.entities`, `EntityAccess<AppMachines>` и исключение lifecycle events из public `manager.transition`.
 - Snapshot tests покрывают JSON round-trip, legacy snapshot без `generation`/`rowVersion`, hydrate replace invalidation, sidecar rebuild и routing after hydrate.
 - React tests покрывают row-level subscription invalidation.
 - Benchmark tests покрывают movement update, projectile lifetime update, `despawnOn` cleanup и sprite sync reaction.
@@ -302,8 +302,7 @@ type EntityMachineExtension<
   ) => EntityMachinePublicState<
     EntityMachineStateMetadata<
       Input["initialContext"],
-      Input["spawnSchema"],
-      ActorPublicState<Input["config"]>
+      Input["spawnSchema"]
     >
   >;
   resultMetadata: <Input extends EntityMachineInput<ContextSchema, SpawnSchema, Config>>(
@@ -311,7 +310,6 @@ type EntityMachineExtension<
   ) => {
     entityContextSchema: Input["initialContext"];
     entitySpawnSchema: Input["spawnSchema"];
-    entityState: ActorPublicState<Input["config"]>;
   };
 };
 ```
@@ -322,11 +320,9 @@ declare const entityStateMetadata: unique symbol;
 type EntityMachineStateMetadata<
   ContextSchema extends EntitySchema,
   SpawnSchema extends EntitySchema,
-  State extends string = string,
 > = {
   readonly entityContextSchema: ContextSchema;
   readonly entitySpawnSchema: SpawnSchema;
-  readonly entityState: State;
 };
 
 type EntityMachinePublicState<Metadata> = {
@@ -355,16 +351,17 @@ type EntityMachinePublicState<Metadata> = {
 
 - Extension подключается к `TypedCreateMachineFn` только через plugin source: `typeof entityPlugin` или tuple `typeof plugins`.
 - Передача `EntityMachineExtension` третьим параметром типа в `TypedCreateMachineFn` не поддерживается.
-- `entitiesPlugin<AppDeps>()` принимает `AppDeps` только на уровне типов, чтобы `EntityEffectDeps`/`EntityReactionDeps` могли извлечь `EntityAccess<AppState>` из `AppDeps.entities`.
+- `entitiesPlugin<AppDeps>()` принимает `AppDeps` только на уровне типов, чтобы `EntityEffectDeps`/`EntityReactionDeps` могли извлечь `EntityAccess<AppMachines>` из `AppDeps.entities`.
 - `AppDeps` может ссылаться на `AppState = MachinesState<typeof machines>` по существующему self-reference pattern для `getState`.
+- `AppDeps` может ссылаться на `AppMachines = typeof machines` для строгой типизации `entities`.
 - Для bootstrap с `defineEntitySpawn(machines, spawnEvents)` typed wrapper может использовать `entitiesPlugin<AppDeps>()` как источник типизации до создания `spawn`; runtime manager после этого может использовать `entitiesPlugin<AppDeps>({ spawn })`.
 - Extension не меняет global `createMachine` typing.
 - Extension не добавляет lifecycle events в public `AppEvents`.
-- Extension сохраняет `initialContext`, `spawnSchema` и union public states из `config` как phantom metadata в result type каждого entity actor template.
+- Extension сохраняет `initialContext` и `spawnSchema` как phantom metadata в result type каждого entity actor template.
 - Extension добавляет entity-specific `effectDeps` и `reactionDeps` только для `storage: "entity"` templates.
 - Extension задает lightweight `publicState`, поэтому `MachinesState<typeof machines>` не раскрывает column arrays.
-- `EntityMachinePublicState<Metadata>` содержит закрытый `unique symbol` phantom field, который не создается runtime и переносит metadata для `EntityAccess<AppState>`.
-- Extension metadata используется `MachineResultMetadata<typeof machine>`, `MachinesState<typeof machines>` и `EntityAccess<AppState>`.
+- `EntityMachinePublicState<Metadata>` содержит закрытый `unique symbol` phantom field, который не создается runtime и переносит metadata внутри lightweight slice.
+- Extension metadata используется `MachineResultMetadata<typeof machine>` и `MachinesState<typeof machines>`.
 - `storage: "entity"` actor template типизируется только при подключенной extension.
 
 ### Spawn events
@@ -429,11 +426,12 @@ const spawn = defineEntitySpawn(machines, spawnEvents)({
 ### `manager.entities`
 
 ```ts
+type AppMachines = typeof machines;
 type AppState = MachinesState<typeof machines>;
 
 type AppDeps = {
   getState?: () => AppState;
-  entities?: EntityAccess<AppState>;
+  entities?: EntityAccess<AppMachines>;
 };
 
 manager.setDependencies({
@@ -450,70 +448,61 @@ manager.setDependencies({
 - Разработчик не создает `entities` вручную.
 - `manager.entities` не подмешивается в user deps автоматически.
 - Если domain/process effects должны читать root entity stores, приложение может передать `entities: manager.entities` в `setDependencies(...)`.
-- `AppDeps.entities?: EntityAccess<AppState>` является опциональным источником типов для строгой типизации `entities.get(...)` в entity effects/reactions.
+- `AppDeps.entities?: EntityAccess<AppMachines>` является опциональным источником типов для строгой типизации `entities.get(...)` в entity effects/reactions.
 - Entity effects и reactions получают объект `entities`, привязанный к текущему entity scope, через `EntityMachineExtension.effectDeps`/`reactionDeps`; runtime не читает `deps.entities` для entity scopes.
 - Если `AppDeps.entities` не объявлен, инжектируемый объект `entities` runtime доступен, но `entities.get(...)`/`entities.maybe(...)` имеют `never` key union на уровне TypeScript.
-- `EntityAccess<AppState>` выводит доступные keys из `MachinesState<typeof machines>` по закрытому phantom metadata и включает только `storage: "entity"` actor templates.
+- `EntityAccess<AppMachines>` выводит доступные keys из machine definitions и включает только `storage: "entity"` actor templates.
 - Обычные domain/process machines читаются через `getState()`.
 - Для `entities` не требуется ручной `AppActorRegistry` или codegen.
 - Core plugin system не хардкодит key `entities`.
 
-### `EntityAccess<AppState>`
+### `EntityAccess<AppMachines>`
 
 ```ts
 type ReadonlyEntityColumn<T> = {
   readonly [entity: EntityIndex]: T;
 };
 
-type EntityMachineMetadataFor<
-  AppState,
-  K extends EntityActorKey<AppState>,
-> = AppState[K] extends {
-  readonly [entityStateMetadata]?: infer Metadata;
-}
-  ? Metadata
-  : never;
-
 type EntityContextFor<
-  AppState,
-  K extends EntityActorKey<AppState>,
-> = EntityMachineMetadataFor<AppState, K> extends {
-  readonly entityContextSchema: infer Context extends EntitySchema;
+  AppMachines extends MachineStore,
+  K extends EntityActorKey<AppMachines>,
+> = AppMachines[K] extends {
+  readonly initialContext: infer Context extends EntitySchema;
 }
   ? EntityContextFromSchema<Context>
   : never;
 
 type EntityStateFor<
-  AppState,
-  K extends EntityActorKey<AppState>,
-> = EntityMachineMetadataFor<AppState, K> extends {
-  readonly entityState: infer State extends string;
+  AppMachines extends MachineStore,
+  K extends EntityActorKey<AppMachines>,
+> = AppMachines[K] extends {
+  readonly config: infer Config extends object;
 }
-  ? State
+  ? ActorPublicState<Config>
   : never;
 
 type EntityActorStoreViewFor<
-  AppState,
-  K extends EntityActorKey<AppState>,
+  AppMachines extends MachineStore,
+  K extends EntityActorKey<AppMachines>,
 > = {
   readonly count: number;
   readonly version: number;
   has(entity: EntityIndex): boolean;
-  state(entity: EntityIndex): EntityStateFor<AppState, K> | undefined;
+  state(entity: EntityIndex): EntityStateFor<AppMachines, K> | undefined;
 } & {
-  readonly [Field in keyof EntityContextFor<AppState, K>]: ReadonlyEntityColumn<
-    EntityContextFor<AppState, K>[Field]
+  readonly [Field in keyof EntityContextFor<AppMachines, K>]: ReadonlyEntityColumn<
+    EntityContextFor<AppMachines, K>[Field]
   >;
 };
 
-type EntityAccess<AppState> = {
-  get<K extends EntityActorKey<AppState>>(
+type EntityAccess<AppMachines extends MachineStore> = {
+  get<K extends EntityActorKey<AppMachines>>(
     key: K,
-  ): EntityActorStoreViewFor<AppState, K>;
+  ): EntityActorStoreViewFor<AppMachines, K>;
 
-  maybe<K extends EntityActorKey<AppState>>(
+  maybe<K extends EntityActorKey<AppMachines>>(
     key: K,
-  ): EntityActorStoreViewFor<AppState, K>;
+  ): EntityActorStoreViewFor<AppMachines, K>;
 };
 ```
 
@@ -524,11 +513,11 @@ type EntityAccess<AppState> = {
 - `entities.get(...)` и `entities.maybe(...)` возвращают один публичный тип store view; отличие между ними поведенческое и диагностическое.
 - Store view кешируется per `actorKey`: повторный `entities.get("actorKey")` возвращает тот же live view object.
 - Store view читает current committed columns и переживает hydrate replace.
-- `actorKey` типизируется по entity actor keys из `AppState`.
+- `actorKey` типизируется по entity actor keys из `AppMachines`.
 - Unknown `actorKey` является TypeScript error.
 - Return type выводится из `initialContext` actor template.
-- `EntityAccess<AppState>` строит key union только из machines с `storage: "entity"`.
-- `EntityStateFor<AppState, K>` выводится из `ActorPublicState<Input["config"]>` в phantom metadata и не деградирует до `string`.
+- `EntityAccess<AppMachines>` строит key union только из machines с `storage: "entity"`.
+- `EntityStateFor<AppMachines, K>` выводится из `ActorPublicState<AppMachines[K]["config"]>` и не деградирует до `string`.
 - `entities.get("movementActor").x[entity]` типизируется как value type поля `x` из `initialContext`.
 - Store view содержит `count`, `version`, `has(entity)` и `state(entity)`.
 - `store.state(entity)` возвращает public state name actor row или `undefined`, если row отсутствует.
@@ -741,11 +730,11 @@ Owners и module boundaries:
 - `storage: "entity"` без plugin бросает clear unknown storage error.
 - `@lite-fsm/core` не импортирует `@lite-fsm/entities` и не знает про entity store, columnar layout, generation, spawn recipes, buckets, lifecycle и reactions.
 - Schema descriptors `f32`, `i16`, `i32`, `u8`, `string`, `optional` реализованы и валидируются.
-- `EntityMachineExtension` типизирует `storage: "entity"` actor templates через typed wrapper с plugin source, сохраняет phantom metadata `initialContext`/`spawnSchema`/`ActorPublicState<Input["config"]>` и задает lightweight `publicState`.
+- `EntityMachineExtension` типизирует `storage: "entity"` actor templates через typed wrapper с plugin source, сохраняет phantom metadata `initialContext`/`spawnSchema` и задает lightweight `publicState`.
 - `effectDeps` для entity effects еще не являются частью выполненного контракта части 1 и добавляются на этапе 9.
 - `reactions` и `reactionDeps` еще не являются частью выполненного контракта части 1 и добавляются на этапе 10.
 - Entity templates требуют `initialState: "__INIT"`, `initialContext` и `spawnSchema`.
-- `manager.entities` существует только при установленном `entitiesPlugin(...)` и типизируется как `EntityAccess<AppState>`.
+- `manager.entities` существует только при установленном `entitiesPlugin(...)` и типизируется как `EntityAccess<AppMachines>`.
 - Public state slice для entity actor templates является lightweight read model с `storage`, `version`, `count`, `capacity` и закрытым type-only phantom metadata; columns не попадают в `manager.getState()`.
 - Internal lifecycle events `ENTITY_SPAWNED` и `ENTITY_DESPAWNED` доступны только в entity config/reducer и запрещены через public `manager.transition(...)`; reactions получают lifecycle events на этапе 10.
 - Минимальный reducer `self` API реализован: `self.indices`, schema columns, `self.stateCode`, `self.prevStateCode`, `self.has(entity)` и `self.entityId(entity)`.
@@ -879,7 +868,7 @@ Type tests:
 
 - `EntityMachineExtension` получает `effectDeps: EntityEffectDeps<ContextSchema, AppDeps>`;
 - `self` read-only view текущего actor batch;
-- `entities` типа `EntityAccess<AppState>`, привязанный к текущему entity scope;
+- `entities` типа `EntityAccess<AppMachines>`, привязанный к текущему entity scope;
 - `transition.entity(...)`;
 - `transition.despawn(...)`.
 
@@ -905,8 +894,8 @@ Public exports не меняются.
 - `self` и `entities` в async effect являются live views, bound к captured invocation scope.
 - `self.indices` является stable captured list для effect invocation.
 - Captured invocation сохраняет `entityIndex + generation`.
-- `entities` в entity effect имеет публичный тип `EntityAccess<AppState>`, но runtime-значение является accessor, привязанным к текущему entity scope.
-- Строгий `AppState` для инжектируемого объекта `entities` выводится из `AppDeps.entities?: EntityAccess<AppState>`.
+- `entities` в entity effect имеет публичный тип `EntityAccess<AppMachines>`, но runtime-значение является accessor, привязанным к текущему entity scope.
+- Строгий `AppMachines` для инжектируемого объекта `entities` выводится из `AppDeps.entities?: EntityAccess<AppMachines>`.
 - Если `AppDeps.entities` не объявлен, инжектируемый объект `entities` runtime доступен, но `entities.get(...)`/`entities.maybe(...)` имеют `never` key union на уровне TypeScript.
 - `deps.entities` не читается runtime при создании entity effect scope.
 - `self.has(entity)` после `await` проверяет current presence и captured generation.
@@ -938,7 +927,7 @@ Public exports не меняются.
 #### Типовой контракт этапа
 
 - Entity effect deps включают `entities`, привязанный к текущему entity scope, а не root `manager.entities`.
-- Domain/process machines продолжают видеть root `manager.entities`, если они явно типизированы на `EntityAccess<AppState>`.
+- Domain/process machines продолжают видеть root `manager.entities`, если они явно типизированы на `EntityAccess<AppMachines>`.
 - Effect invocation получает captured `entities`, привязанный к текущему entity scope и доступный до и после `await`.
 - `entities.get(...)` и `entities.maybe(...)` возвращают read-only typed store views в effects.
 - `transition.entity(...)` и `transition.despawn(...)` типизируются как entity-specific helpers только в entity effects через `EntityMachineExtension.effectDeps`.
@@ -998,7 +987,7 @@ Type tests:
 
 - entity effect deps expose typed `self` columns;
 - entity effect deps expose scoped `entities`;
-- `AppDeps.entities?: EntityAccess<AppState>` включает строгую типизацию `entities.get("actorKey")` в entity effects;
+- `AppDeps.entities?: EntityAccess<AppMachines>` включает строгую типизацию `entities.get("actorKey")` в entity effects;
 - отсутствие `AppDeps.entities` отклоняет string keys для `entities`, инжектируемого в entity effect;
 - entity-specific transition helpers are typed in entity effects;
 - raw `EntityIndex` is not accepted outside entity effect scope;
@@ -1053,8 +1042,8 @@ Public exports не меняются.
 - Runtime не обязан ловить eventual rejection Promise, возвращенного reaction, потому async reactions не поддерживаются.
 - `self` и `entities` read-only в reaction.
 - `entities.get(...)` и `entities.maybe(...)` доступны в reaction через deps, которые entity storage собирает для `EntityMachineExtension.reactionDeps`.
-- `entities` в entity reaction имеет публичный тип `EntityAccess<AppState>`, но runtime-значение является accessor, привязанным к текущему entity scope.
-- Строгий `AppState` для инжектируемого объекта `entities` выводится из `AppDeps.entities?: EntityAccess<AppState>`.
+- `entities` в entity reaction имеет публичный тип `EntityAccess<AppMachines>`, но runtime-значение является accessor, привязанным к текущему entity scope.
+- Строгий `AppMachines` для инжектируемого объекта `entities` выводится из `AppDeps.entities?: EntityAccess<AppMachines>`.
 - Если `AppDeps.entities` не объявлен, инжектируемый объект `entities` runtime доступен, но `entities.get(...)`/`entities.maybe(...)` имеют `never` key union на уровне TypeScript.
 - `deps.entities` не читается runtime при создании entity reaction scope.
 - `entities.get(...)` и `entities.maybe(...)` вызываются вне per-entity loops.
@@ -1140,7 +1129,7 @@ Type tests:
 - reactions are accepted on entity templates;
 - reactions are rejected for `storage: "instance"`;
 - reaction deps expose read-only `self` and scoped `entities`;
-- `AppDeps.entities?: EntityAccess<AppState>` включает строгую типизацию `entities.get("actorKey")` в entity reactions;
+- `AppDeps.entities?: EntityAccess<AppMachines>` включает строгую типизацию `entities.get("actorKey")` в entity reactions;
 - отсутствие `AppDeps.entities` отклоняет string keys для `entities`, инжектируемого в entity reaction;
 - reaction deps do not expose `transition`;
 - lifecycle events are available in entity reactions.
@@ -1333,17 +1322,26 @@ type EntityListOptions = {
   readonly groupTag?: string;
 };
 
-function useEntitySnapshot<K extends EntityActorKey<AppState>>(
+function useEntitySnapshot<
+  AppMachines extends MachineStore = MachineStore,
+  K extends EntityActorKey<AppMachines> = EntityActorKey<AppMachines>,
+>(
   templateKey: K,
   entityId: EntityId | null | undefined,
-): EntityRowSnapshot<EntityContextFor<AppState, K>, EntityStateFor<AppState, K>> | undefined;
+): EntityRowSnapshot<EntityContextFor<AppMachines, K>, EntityStateFor<AppMachines, K>> | undefined;
 
-function useEntityCount<K extends EntityActorKey<AppState>>(
+function useEntityCount<
+  AppMachines extends MachineStore = MachineStore,
+  K extends EntityActorKey<AppMachines> = EntityActorKey<AppMachines>,
+>(
   templateKey: K,
   options?: EntityListOptions,
 ): number;
 
-function useEntityList<K extends EntityActorKey<AppState>>(
+function useEntityList<
+  AppMachines extends MachineStore = MachineStore,
+  K extends EntityActorKey<AppMachines> = EntityActorKey<AppMachines>,
+>(
   templateKey: K,
   options?: EntityListOptions,
 ): readonly EntityId[];
@@ -1351,9 +1349,28 @@ function useEntityList<K extends EntityActorKey<AppState>>(
 
 Добавить typed aliases для app-level wrappers:
 
-- `TypedUseEntitySnapshotHook<AppState>`;
-- `TypedUseEntityCountHook<AppState>`;
-- `TypedUseEntityListHook<AppState>`.
+```ts
+type TypedUseEntitySnapshotHook<AppMachines extends MachineStore> = <
+  K extends EntityActorKey<AppMachines>,
+>(
+  templateKey: K,
+  entityId: EntityId | null | undefined,
+) => EntityRowSnapshot<EntityContextFor<AppMachines, K>, EntityStateFor<AppMachines, K>> | undefined;
+
+type TypedUseEntityCountHook<AppMachines extends MachineStore> = <
+  K extends EntityActorKey<AppMachines>,
+>(
+  templateKey: K,
+  options?: EntityListOptions,
+) => number;
+
+type TypedUseEntityListHook<AppMachines extends MachineStore> = <
+  K extends EntityActorKey<AppMachines>,
+>(
+  templateKey: K,
+  options?: EntityListOptions,
+) => readonly EntityId[];
+```
 
 Обязательные exports из `"./react"`:
 
@@ -1509,7 +1526,7 @@ Type tests:
 - `useEntitySnapshot` accepts `EntityId | null | undefined`;
 - `useEntityList` returns `readonly EntityId[]`;
 - `useEntityList` and `useEntityCount` accept `{ groupTag?: string }`;
-- typed hook aliases preserve app `AppState`;
+- typed hook aliases preserve app `AppMachines`;
 - `useStorageHydrationPreview(...)` exposes unknown storage payload and does not expose entity-specific types;
 - public hook types do not expose raw `EntityIndex` as required input.
 
@@ -1571,7 +1588,7 @@ Type tests:
 - Public API и public types в cheatsheets соответствуют реализованным exports.
 - README показывает typed wrapper с plugin source `typeof entityPlugin` или `typeof plugins`, а не передачу `EntityMachineExtension` третьим параметром типа.
 - README показывает `defineSpawnEvents`, `spawnEvent`, `SpawnEventsFrom`, `defineEntitySpawn`, `entitiesPlugin({ spawn })` и `manager.entities`.
-- README показывает `AppDeps` с `getState?: () => AppState` и `entities?: EntityAccess<AppState>`.
+- README показывает `AppDeps` с `getState?: () => AppState` и `entities?: EntityAccess<AppMachines>`.
 - README показывает `manager.setDependencies({ entities: manager.entities, ... })` только для domain/process effects, которым нужен root entity access.
 - README явно разделяет `deps.entities` как опциональный root accessor и источник типов, а также объект `entities`, который инжектируется в entity effects/reactions и привязан к текущему entity scope.
 - Examples используют spawn events, а не public `manager.spawn(...)`.
@@ -1622,7 +1639,7 @@ Documentation/example tests:
 - package README snippets compile or are mirrored by test fixtures;
 - runnable example fixture covers `movementActor`, `projectileActor`, `spriteSyncActor`, `TICK`, spawn projectile/unit and `despawnOn`;
 - examples use `manager.entities` as root deps source only for domain/process effects that need root entity access;
-- examples keep typed entity effects/reactions by declaring `entities?: EntityAccess<AppState>` in `AppDeps`;
+- examples keep typed entity effects/reactions by declaring `entities?: EntityAccess<AppMachines>` in `AppDeps`;
 - examples avoid public `actorId` routing for entity rows.
 
 #### Gate завершения
@@ -1704,7 +1721,7 @@ Expected remaining hits:
 
 - Этап не меняет public API, public types, runtime behavior, snapshot format, React hooks или benchmark thresholds.
 - `ecs_example/store` должен оставаться app-level примером, который потребляет публичные entrypoints `@lite-fsm/core`, `@lite-fsm/entities`, `@lite-fsm/entities/react`, `@lite-fsm/middleware/immer`, `@lite-fsm/persist` и `@lite-fsm/react`.
-- Пример должен использовать финальный API из этого ТЗ: `entitiesPlugin({ spawn })`, `defineSpawnEvents`, `spawnEvent`, `SpawnEventsFrom`, `defineEntitySpawn`, schema descriptors, `storage: "entity"`, `spawnSchema`, `initialContext`, `despawnOn`, `manager.entities`, `EntityAccess<AppState>`, `transition.entity(...)`, `transition.tag(...)`, `transition.actor(...)`, `transition.despawn(...)`, `reactions` и React entity hook aliases.
+- Пример должен использовать финальный API из этого ТЗ: `entitiesPlugin({ spawn })`, `defineSpawnEvents`, `spawnEvent`, `SpawnEventsFrom`, `defineEntitySpawn`, schema descriptors, `storage: "entity"`, `spawnSchema`, `initialContext`, `despawnOn`, `manager.entities`, `EntityAccess<AppMachines>`, `transition.entity(...)`, `transition.tag(...)`, `transition.actor(...)`, `transition.despawn(...)`, `reactions` и React entity hook aliases.
 - Пример должен содержать минимум один обычный domain/process machine, один `storage: "instance"` actor и один `storage: "entity"` actor template.
 - Все три владельца поведения должны принимать `TICK`; каждый reducer/effect/reaction должен менять только свой слой ответственности.
 - Public spawn должен идти через `manager.transition({ type: "SPAWN_ENEMY", ... })`, а не через несуществующий public `manager.spawn(...)`.

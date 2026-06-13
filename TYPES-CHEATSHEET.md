@@ -7,6 +7,7 @@
 | Импорт                       | Типы                                                                                                                                                                                                                                                                                              |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `@lite-fsm/core`             | весь `types.ts` + `interfaces.ts`: `FSMEvent`, `MachineConfig`, `CFG`, `MachineReducer`, `MachineEffect`, `MachineManagerSnapshot`, `MachinesState`, `MachineEvents`, `MachineDependencies`, `IMachineManager`, `Middleware`, actor types, snapshot types, `ReadonlyManagerAction`, helpers; plugin helper/value/context types для `definePlugin().create(...)`, `LiteFsmPlugin`, `LiteFsmStorageRuntimeDefinition`, `StorageManagerContext`, `StorageRuntimeExtension`, `StorageTemplate`, public `Storage*Context` |
+| `@lite-fsm/entities`         | alpha: `EntityId`, `EntityIndex`, `EntityAccess<AppMachines>`, `EntityMachineExtension`; runtime exports `entitiesPlugin()`, `f32`, `i16`, `i32`, `u8`, `string`, `optional`                                                                                                  |
 | `@lite-fsm/react`            | `FSMContextType`, `FSMContextProviderProps`, `FSMPersistLifecycle`, `FSMHydrationBoundaryProps`, typed hook aliases                                                                                                                                                                               |
 | `@lite-fsm/persist`          | `MaybePromise`, `PersistedRecord`, `PersistStorage`, `PersistStatus`, `PersistRestoreSettledResult`, `PersistManagerOptions`, `PersistController`                                                                                                                                                 |
 | `@lite-fsm/persist/react`    | runtime hooks only: `usePersistStatuses`, `useIsPersistRestoring`                                                                                                                                                                                                                                 |
@@ -43,6 +44,74 @@
 | `StateType<C, T>` · `MachineState<C, T>` | `{ state: StateName<C>; context: T }`     |
 | `Reducer<S, P>`                          | `(state: S, action: P) => S`              |
 | `EffectType`                             | `"every" \| "latest"`                     |
+
+## Entity Types
+
+| Тип                         | Контракт                                                                  |
+| --------------------------- | ------------------------------------------------------------------------- |
+| `EntityId`                  | alias `string`; публичный id entity                                       |
+| `EntityIndex`               | branded `number`; runtime index, не plain input type пользовательского API |
+| `EntityAccess<AppMachines>` | typed root accessor для `manager.entities`                                |
+| `EntityMachineExtension`    | machine-facing extension для `storage: "entity"` через plugin source      |
+
+`EntityMachineExtension` подключается к `TypedCreateMachineFn` только через `typeof entitiesPlugin()` или tuple plugins. Передача `EntityMachineExtension` третьим generic напрямую не является поддерживаемым plugin source.
+
+```ts
+import { createMachine as createLiteFsmMachine, type TypedCreateMachineFn } from "@lite-fsm/core";
+import { entitiesPlugin, f32, optional, string } from "@lite-fsm/entities";
+
+type AppEvent = { type: "SPAWNED" } | { type: "TICK" };
+const plugins = [entitiesPlugin()] as const;
+
+export const createEntityMachine: TypedCreateMachineFn<AppEvent, {}, typeof plugins> = createLiteFsmMachine;
+
+const movementActor = createEntityMachine({
+  storage: "entity",
+  initialState: "__INIT",
+  initialContext: {
+    x: f32(),
+    y: f32(),
+  },
+  spawnSchema: {
+    x: f32(),
+    y: f32(),
+    label: optional(string()),
+  },
+  config: {
+    __INIT: { SPAWNED: "active" },
+    active: { TICK: "active" },
+  },
+});
+```
+
+Descriptors несут type-level metadata для future columns и spawn payload. `f32` использует `Float32Array`, `i16` — `Int16Array`, `i32` — `Int32Array`, `u8` — `Uint8Array`, `string()` — строковую колонку. `optional(inner)` допустим только в `spawnSchema` и дает `T | null`; ключ payload остается обязательным. `MachineResultMetadata<typeof movementActor>` сохраняет `entityContextSchema` и `entitySpawnSchema`.
+
+`EntityMachineExtension.publicState` задает lightweight slice для `MachinesState<typeof machines>`:
+
+```ts
+type AppState = MachinesState<typeof machines>;
+type MovementSlice = AppState["movementActor"];
+// { storage: "entity"; version: number; count: number; capacity: number; ...phantom metadata }
+```
+
+Phantom metadata переносит `initialContext` и `spawnSchema` внутри lightweight slice. Runtime не создает phantom поля. Public state union actor template для `EntityAccess<AppMachines>` выводится из machine definitions.
+
+`EntityAccess<AppMachines>` выводит actor keys, columns и public state union из machine definitions и включает только templates с `storage: "entity"`:
+
+```ts
+type AppMachines = typeof machines;
+type Entities = EntityAccess<AppMachines>;
+
+declare const entities: Entities;
+declare const entity: EntityIndex;
+
+entities.get("movementActor").x[entity]; // number
+entities.get("movementActor").state(entity); // "moving" | "stopped" | undefined
+```
+
+`entities.get("unknownActor")`, domain machines и `storage: "instance"` actor templates являются TypeScript errors. `store.state(entity)` возвращает public actor state union без `"__INIT"` и `undefined` для отсутствующей строки.
+
+`MachineManager(machines, { plugins: [entitiesPlugin()] as const })` добавляет `.entities`; без plugin returned manager не содержит этого поля. На текущем этапе `@lite-fsm/entities` не экспортирует spawn helper types, lifecycle events или React types.
 
 ## События
 

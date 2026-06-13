@@ -50,6 +50,7 @@
   "devDependencies": {
     "@lite-fsm/core": "workspace:*",
     "@lite-fsm/cli": "workspace:*",
+    "@lite-fsm/entities": "workspace:*",
     "@lite-fsm/graph": "workspace:*",
     "@lite-fsm/middleware": "workspace:*",
     "@lite-fsm/persist": "workspace:*",

@@ -3,6 +3,7 @@
     "paths": {
       "@lite-fsm/core": ["./packages/core/src/index.ts"],
       "@lite-fsm/core/internal/*": ["./packages/core/src/*"],
+      "@lite-fsm/entities": ["./packages/entities/src/index.ts"],
       "@lite-fsm/react": ["./packages/react/src/index.ts"],
       "@lite-fsm/middleware": ["./packages/middleware/src/index.ts"],
       "@lite-fsm/middleware/devTools": ["./packages/middleware/src/devTools.ts"],

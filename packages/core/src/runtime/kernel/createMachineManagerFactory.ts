@@ -333,10 +333,10 @@ export const createMachineManagerFactory = (preset: RuntimePreset): MachineManag
       } else {
         const nextState = rootReducer(prevState, narrowAction(dispatch.action));
         if (nextState === undefined) throw new Error(VOID_REDUCER_ERROR);
-        // replaceReducer может заменить root state без вызова storage reducer.
-        // Такой replacement все равно должен пройти commit владельца default state.
-        if (nextState !== prevState && dispatch.touched.size === 0) {
-          dispatch.touched.add(pluginRegistry.defaultStorageKind);
+        // replaceReducer может заменить slice, которым владеет storage runtime,
+        // без вызова его reducer. Такой owner все равно должен пройти commit.
+        if (nextState !== prevState) {
+          bucketRuntime.markExternallyChangedBuckets(prevState as RootState, nextState as RootState, dispatch);
         }
         dispatch.nextState = nextState as RootState;
       }
