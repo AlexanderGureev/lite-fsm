@@ -1,19 +1,7 @@
-import type { EntityId } from "@lite-fsm/entities";
-import type { FSMEvent } from "@lite-fsm/core";
-
 import { createConfig, createEffect, createMachine, createReducer } from "../create-machine";
+import type { WorldEvents } from "../types";
 
-export type TickPayload = {
-  frame: number;
-  deltaMs: number;
-};
-
-export type Events =
-  | FSMEvent<"START_GAME">
-  | FSMEvent<"TICK", TickPayload>
-  | FSMEvent<"WORLD_SAMPLE_READY", { frame: number; sampledAt: number; enemyCount: number }>
-  | FSMEvent<"ENEMY_ALERTED", { entityIds: readonly EntityId[] }>
-  | FSMEvent<"RESET_WORLD">;
+export type Events = WorldEvents;
 
 type WorldContext = {
   frame: number;
@@ -96,10 +84,10 @@ const reducer = createReducer<typeof config, WorldContext>((state, action, { nex
 
 const sampleWorld = createEffect<typeof config, "SAMPLING">({
   type: "latest",
-  effect: async ({ action, clock, entities, getState, transition }) => {
+  effect: async ({ action, clock, getState, transition }) => {
     if (action.type !== "TICK") return;
 
-    const enemyCount = entities?.get("enemyActor").count ?? getState().enemyActor.count;
+    const enemyCount = getState().enemyActor.count;
 
     transition({
       type: "WORLD_SAMPLE_READY",

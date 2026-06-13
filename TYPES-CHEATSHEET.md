@@ -205,7 +205,9 @@ columns, `has(entity)` и `entityId(entity)`. `entities` имеет тип
 
 ```ts
 type AppMachines = typeof machines;
+type AppState = MachinesState<AppMachines>;
 type AppDeps = {
+  readonly getState?: () => AppState;
   entities?: EntityAccess<AppMachines>;
 };
 
@@ -255,6 +257,11 @@ actor effect typing; `transition.tag(...)` использует `meta.groupTag`,
 `AppDeps.entities?: EntityAccess<AppMachines>` задает strict keys для
 `entities.get(...)` и `entities.maybe(...)`; без этого поля ключи имеют тип
 `never`.
+
+`AppDeps.entities` остается optional: runtime entity effects/reactions не читают
+root dependency и получают scoped `entities` из `EntityMachineExtension`.
+Передача `manager.setDependencies({ entities: manager.entities })` нужна только
+обычным domain/process effects, которые должны читать root entity stores.
 
 ```ts
 const syncActor = createMachine({

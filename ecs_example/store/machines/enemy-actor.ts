@@ -1,44 +1,37 @@
-import type { EntityId, EntityIndex } from "@lite-fsm/entities";
 import { f32, i16, i32, optional, string as stringColumn, u8 } from "@lite-fsm/entities";
-import type { FSMEvent } from "@lite-fsm/core";
+import type { EntitiesPlugin } from "@lite-fsm/entities";
+import {
+  createMachine as createLiteFsmMachine,
+  type TypedCreateMachineFn,
+} from "@lite-fsm/core";
 
-import { createMachine } from "../create-machine";
-import type { TickPayload } from "./world-machine";
+import type { EnemyEvents } from "../types";
 
-export type Events =
-  | FSMEvent<"TICK", TickPayload>
-  | FSMEvent<"DAMAGE_ENTITY", { amount: number; source: "player" | "hazard" }>
-  | FSMEvent<"BOOST_ENEMIES", { dx: number; dy: number }>
-  | FSMEvent<"RECOVER_ENTITY">
-  | FSMEvent<"RESET_WORLD">;
+export type Events = EnemyEvents;
 
 const ENEMY_ESCAPED_X = 320;
 const FLAG_DESPAWNED = 1;
 
-const toEntityIds = (
-  indices: readonly EntityIndex[],
-  entityId: (entity: EntityIndex) => EntityId,
-): readonly EntityId[] => indices.map((entity) => entityId(entity));
+const createEnemyMachine: TypedCreateMachineFn<EnemyEvents, {}, EntitiesPlugin<{}>> = createLiteFsmMachine;
 
-export const enemyActor = createMachine({
+export const enemyActor = createEnemyMachine({
   storage: "entity",
-  despawnOn: "DEAD",
   config: {
     __INIT: {
       ENTITY_SPAWNED: "ALIVE",
     },
     ALIVE: {
-      TICK: null,
+      TICK: "ALIVE",
       DAMAGE_ENTITY: "STUNNED",
-      BOOST_ENEMIES: null,
+      BOOST_ENEMIES: "ALIVE",
       RESET_WORLD: "DEAD",
       ENTITY_DESPAWNED: "__RESOLVED",
     },
     STUNNED: {
-      TICK: null,
+      TICK: "STUNNED",
       RECOVER_ENTITY: "ALIVE",
-      DAMAGE_ENTITY: null,
-      BOOST_ENEMIES: null,
+      DAMAGE_ENTITY: "STUNNED",
+      BOOST_ENEMIES: "STUNNED",
       RESET_WORLD: "DEAD",
       ENTITY_DESPAWNED: "__RESOLVED",
     },
@@ -69,7 +62,7 @@ export const enemyActor = createMachine({
     spriteId: stringColumn(),
     faction: optional(stringColumn()),
   },
-  reducer: (self, action, { payloadFor }) => {
+  reducer: (_state, action, { payloadFor, self }) => {
     switch (action.type) {
       case "ENTITY_SPAWNED":
         for (const entity of self.indices) {
@@ -114,68 +107,5 @@ export const enemyActor = createMachine({
         }
         return;
     }
-  },
-  effects: {
-    ALIVE: ({ action, self, transition }) => {
-      if (action.type !== "ENTITY_SPAWNED") return;
-
-      const entityIds = toEntityIds(self.indices, self.entityId);
-      const firstEntityId = entityIds[0];
-      if (!firstEntityId) return;
-
-      transition.actor("blinkActor/hud", {
-        type: "FLASH_FROM_ENTITY",
-        payload: { source: firstEntityId, intensity: 0.4 },
-      });
-    },
-
-    STUNNED: ({ entities, self, transition }) => {
-      const enemyStore = entities.get("enemyActor");
-      const entityIds = toEntityIds(self.indices, self.entityId);
-      const firstEntityId = entityIds[0];
-
-      transition({
-        type: "ENEMY_ALERTED",
-        payload: { entityIds },
-      });
-
-      transition.entity(entityIds, { type: "RECOVER_ENTITY" });
-
-      if (!firstEntityId) return;
-
-      transition.tag("screen-flash", {
-        type: "FLASH_FROM_ENTITY",
-        payload: { source: firstEntityId, intensity: enemyStore.count > 1 ? 1 : 0.7 },
-      });
-    },
-
-    ESCAPED: ({ self, transition }) => {
-      transition.despawn(self.indices);
-    },
-  },
-  reactions: {
-    TICK: ({ entities, self, sprites }) => {
-      const enemyStore = entities.maybe("enemyActor");
-
-      for (const entity of self.indices) {
-        if (!enemyStore.has(entity)) continue;
-
-        sprites.syncEnemy(
-          self.entityId(entity),
-          enemyStore.spriteId[entity],
-          {
-            x: enemyStore.x[entity],
-            y: enemyStore.y[entity],
-          },
-          enemyStore.hp[entity],
-        );
-      }
-    },
-
-    ENTITY_DESPAWNED: ({ self, sprites }) => {
-      for (const entity of self.indices) {
-        sprites.removeEnemy(self.entityId(entity), self.spriteId[entity]);
-      }
-    },
   },
 });

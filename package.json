@@ -29,6 +29,8 @@
     "pages:preview": "node scripts/preview-pages.mjs",
     "test": "vitest run",
     "bench": "vitest bench tests/bench",
+    "bench:entities": "pnpm --filter @lite-fsm/core run build && pnpm --filter @lite-fsm/entities run build && node --expose-gc tests/bench/entities/run-node.mjs",
+    "bench:entities:browser": "pnpm --filter @lite-fsm/core run build && pnpm --filter @lite-fsm/entities run build && node tests/bench/entities/run-browser.mjs",
     "test:types": "tstyche",
     "test:types:dist": "tstyche --config tstyche.dist.json",
     "test:types:all": "pnpm run test:types && pnpm run build:packages && pnpm run test:types:dist",

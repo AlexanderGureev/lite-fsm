@@ -45,7 +45,9 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "examples",
+    "PERFORMANCE.md"
   ],
   "keywords": [
     "lite-fsm",

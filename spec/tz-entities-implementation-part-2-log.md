@@ -25,9 +25,9 @@
 ## Текущий указатель
 
 - Активное ТЗ: `spec/tz-entities-implementation-part-2.md`
-- Активный этап: Этап 13 — Benchmarks, README/examples
-- Статус: `not started`
-- Следующее действие: dispatch этапа 13.
+- Активный этап: все этапы 8-15 завершены
+- Статус: `done`
+- Следующее действие: performance budgets этапа 13 закрыть отдельным ТЗ.
 
 ## Сводка по этапам
 
@@ -38,9 +38,9 @@
 | 10   | Reactions и reaction error semantics                                | `done`        | 2026-06-13           |
 | 11   | Snapshot/hydrate через `snapshot.storage.entity`                    | `done`        | 2026-06-13           |
 | 12   | React hooks: `useEntitySnapshot`, `useEntityCount`, `useEntityList` | `done`        | 2026-06-13           |
-| 13   | Benchmarks, README/examples                                         | `not started` | 2026-06-13           |
-| 14   | Рефакторинг, чистка и полировка                                     | `not started` | 2026-06-13           |
-| 15   | Финальная проверка `ecs_example`                                    | `not started` | 2026-06-13           |
+| 13   | Benchmarks, README/examples                                         | `done`        | 2026-06-14           |
+| 14   | Рефакторинг, чистка и полировка                                     | `done`        | 2026-06-14           |
+| 15   | Финальная проверка `ecs_example`                                    | `done`        | 2026-06-14           |
 
 ## Ход реализации
 
@@ -152,7 +152,7 @@
 
 ### Этап 11 — Snapshot/hydrate через `snapshot.storage.entity`
 
-Статус: `in progress`
+Статус: `done`
 
 Записи:
 
@@ -219,29 +219,104 @@
 
 ### Этап 13 — Benchmarks, README/examples
 
-Статус: `not started`
+Статус: `done`
 
 Записи:
 
-- Записей пока нет.
+### 2026-06-14 — Этап 13 dispatch
+
+- Статус: `in progress`.
+- Исполнитель: `019ec31d-a874-7633-975d-0aea869d3eca`.
+- Corrective: `0/3`.
+- Baseline: рабочее дерево чистое; `git status --short`, `git diff` и `git diff --staged` без вывода.
+- Active scope: benchmark fixtures/scripts для `@lite-fsm/entities`, package README/examples и package docs, `API-CHEATSHEET.md`, `TYPES-CHEATSHEET.md`, тесты или fixture checks для README/examples, точечные изменения `package.json`/workspace scripts без docs build.
+- Out of scope: runtime behavior, public API/types, docs pages в `apps/docs`, DevTools UI, editor prefab UI, graph visualizer UI, public `manager.spawn(...)`, public routing по `actorId` к entity rows, docs build и любые команды, которые транзитивно запускают docs build.
+- Следующее действие: передать исполнителю brief этапа 13.
+
+### 2026-06-14 — Этап 13 done с performance deferral
+
+- Статус: `done`.
+- Исполнитель: `019ec31d-a874-7633-975d-0aea869d3eca`.
+- Corrective: `0/3`.
+- Baseline: рабочее дерево до dispatch было чистым; stage-owned delta добавляет benchmark scripts, package example, performance report, README/cheatsheet updates и example fixture test. Orchestrator-owned delta журнала не входит в stage-owned delta.
+- Scope: `tests/bench/entities/*`, `packages/entities/examples/composition-lite-fsm-entities.ts`, `packages/entities/PERFORMANCE.md`, `tests/entities/entities-examples.test.ts`, `packages/entities/README.md`, `API-CHEATSHEET.md`, `TYPES-CHEATSHEET.md`, `package.json`, `packages/entities/package.json`.
+- Ключевые контракты: добавлены `pnpm run bench:entities` и `pnpm run bench:entities:browser`; benchmark `composition-lite-fsm-entities` измеряет movement update, projectile lifetime update, `despawnOn` cleanup и sprite sync reaction на `10k`/`50k` rows, печатает median/p95 после `5` warmup и `30` measured iterations, использует production `dist` entrypoints и Node allocation guard. README/example закрепляют spawn events, `groupTag`, descriptors, `entitiesPlugin({ spawn })`, root `manager.entities` и scoped `entities` в reactions без `manager.spawn(...)` и public `actorId` routing.
+- Проверки: `pnpm exec vitest run tests/entities/entities-examples.test.ts --reporter=dot` — pass, 2 tests; `pnpm exec tsc --ignoreConfig --noEmit --moduleResolution bundler --module ESNext --target ES2022 --strict --skipLibCheck --types node,vitest --allowSyntheticDefaultImports packages/entities/examples/composition-lite-fsm-entities.ts` — pass; `pnpm exec tstyche tests/types/entities-api.tst.ts` — pass, 32 tests/91 assertions; `pnpm --filter @lite-fsm/entities run check-types` — pass; `pnpm run check-types` — pass по отчету исполнителя; `pnpm run lint` — pass; `git diff --check` — pass.
+- Benchmark gate: `pnpm run bench:entities` и `pnpm run bench:entities:browser` запускаются и печатают p95, но падают по hard median ratio budgets: Node ratios от `4.80x` до `79.53x`, browser ratios от `3.19x` до `70.00x` при budget `1.5x` reducer-only и `2x` full-pipeline; Node allocation guard прошел (`0 bytes` retained growth). По решению пользователя от 2026-06-14 этот performance blocker не блокирует этапы 14-15 и выносится в отдельное ТЗ.
+- Coverage: для production runtime не применимо, runtime behavior/source не менялись; package example покрыт focused fixture test.
+- Риски: performance budgets этапа 13 не выполнены и должны быть закрыты отдельным performance ТЗ до строгого release gate; docs build и запрещенные build-команды не запускались.
+- Следующее действие: новый dispatch этапа 14.
 
 ### Этап 14 — Рефакторинг, чистка и полировка
 
-Статус: `not started`
+Статус: `done`
 
 Записи:
 
-- Записей пока нет.
+### 2026-06-14 — Этап 14 dispatch
+
+- Статус: `in progress`.
+- Исполнитель: `019ec33a-ed95-79a1-9867-c589a7e5a8c6`.
+- Corrective: `0/3`.
+- Baseline: accepted delta этапов 8-13 и журнал присутствуют в рабочем дереве; staged diff отсутствует. Текущий diff включает entity lifecycle/effects/reactions/snapshot/react runtime, benchmark scripts, package example/docs, performance report и orchestrator-owned записи журнала. Untracked stage-owned файлы этапа 13: `packages/entities/PERFORMANCE.md`, `packages/entities/examples/`, `tests/bench/entities/`, `tests/entities/entities-examples.test.ts`.
+- Active scope: `packages/entities/src`, `packages/entities/examples`, `tests/bench/entities`, `tests/entities`, `tests/react`, `tests/types`, `packages/entities/README.md`, `packages/entities/PERFORMANCE.md`, `API-CHEATSHEET.md`, `TYPES-CHEATSHEET.md`, точечные package/script/docs cleanup changes.
+- Out of scope: public API/types changes, storage snapshot format, React hook signatures, routing semantics, benchmark thresholds, runtime behavior changes, docs pages в `apps/docs`, DevTools UI, graph UI, editor prefab UI, docs build и любые команды, которые транзитивно запускают docs build.
+- Следующее действие: передать исполнителю brief этапа 14.
+
+### 2026-06-14 — Этап 14 done
+
+- Статус: `done`.
+- Исполнитель: `019ec33a-ed95-79a1-9867-c589a7e5a8c6`.
+- Corrective: `0/3`.
+- Baseline: принятая дельта этапов 8-13 была исходным состоянием; stage-owned delta этапа 14 переносит общий scoped `self`/captured-scope liveness helper в `packages/entities/src/runtime/access.ts` и уточняет README/performance wording без изменения public API, runtime behavior, snapshot format, React hook signatures, routing semantics или benchmark thresholds.
+- Scope: `packages/entities/src/runtime/access.ts`, `packages/entities/src/runtime/effects.ts`, `packages/entities/src/runtime/reactions.ts`, `packages/entities/README.md`, `packages/entities/PERFORMANCE.md`.
+- Ключевые контракты: `runtime/access.ts` стал единым владельцем scoped `self` и captured-scope liveness для effects/reactions; README quick-start не содержит circular typed-wrapper snippet; performance report явно фиксирует accepted deferral без изменения failed benchmark statuses; benchmark `console.log/error` оставлен как CLI report/progress output.
+- Проверки: `pnpm exec vitest run tests/entities/entities-plugin.test.ts --reporter=dot` — pass, 114 tests; `pnpm exec vitest run tests/entities/entities-plugin.test.ts --coverage '--coverage.include=packages/entities/src/runtime/access.ts' '--coverage.include=packages/entities/src/runtime/effects.ts' '--coverage.include=packages/entities/src/runtime/reactions.ts'` — pass, 100% statements/branches/functions/lines (`225/225`, `93/93`, `57/57`, `194/194`); `pnpm exec vitest run tests/entities/entities-examples.test.ts --reporter=dot` — pass, 2 tests; `pnpm exec tstyche tests/types/entities-api.tst.ts` — pass, 32 tests/91 assertions; `pnpm --filter @lite-fsm/entities run check-types` — pass; `pnpm exec tsc --ignoreConfig --noEmit --moduleResolution bundler --module ESNext --target ES2022 --strict --skipLibCheck --types node,vitest --allowSyntheticDefaultImports packages/entities/examples/composition-lite-fsm-entities.ts` — pass; `pnpm run check-types` — pass, 44 type files/490 tests/1113 assertions; `pnpm run lint` — pass; `git diff --check` — pass.
+- Source audit: `rg -n "ctx\\.storage|storage\\.register|PluginInstallContext|PluginCapabilities|StorageRuntimeBase|public spawn intercept|spawn .*intercept|generic action interceptors" packages/entities packages/react tests spec` — только historical specs, core regression tests и `ctx.storageKind` false positives в type tests; active `packages/entities`/`packages/react` source hits отсутствуют.
+- Coverage: touched runtime files — 100%.
+- Риски: stage 13 performance budgets остаются deferred отдельному ТЗ по решению пользователя; docs build и запрещенные build-команды не запускались.
+- Следующее действие: новый dispatch этапа 15.
 
 ### Этап 15 — Финальная проверка `ecs_example`
 
-Статус: `not started`
+Статус: `done`
 
 Записи:
 
-- Записей пока нет.
+### 2026-06-14 — Этап 15 dispatch
+
+- Статус: `in progress`.
+- Исполнитель: `019ec342-1509-77c3-ac49-578f7a72d5c9`.
+- Corrective: `0/3`.
+- Baseline: принятая дельта этапов 8-14 и журнал присутствуют в рабочем дереве; staged diff отсутствует. Текущий diff включает entity runtime/docs/bench/example updates, cleanup scoped-access helper и orchestrator-owned записи журнала. Untracked accepted files: `packages/entities/PERFORMANCE.md`, `packages/entities/examples/`, `tests/bench/entities/`, `tests/entities/entities-examples.test.ts`.
+- Active scope: `ecs_example/**`, focused smoke test для `runEcsExample()` в `tests/entities` или ближайшем test scope, минимальные package/test config изменения только если нужны для запуска smoke test.
+- Out of scope: runtime implementation, public API/types, storage snapshot format, React hooks, benchmark thresholds, docs snippets, compatibility shims только для `ecs_example`, docs build и любые команды, которые транзитивно запускают docs build.
+- Следующее действие: передать исполнителю brief этапа 15.
+
+### 2026-06-14 — Этап 15 done
+
+- Статус: `done`.
+- Исполнитель: `019ec342-1509-77c3-ac49-578f7a72d5c9`.
+- Corrective: `0/3`.
+- Baseline: принятая дельта этапов 8-14 была исходным состоянием; stage-owned delta этапа 15 обновляет `ecs_example` под финальный public API и добавляет focused smoke test без изменений runtime implementation, public API/types, snapshot format, React hooks, benchmark thresholds или docs snippets.
+- Scope: `ecs_example/**`, `tests/entities/ecs-example-final-gate.test.ts`.
+- Ключевые контракты: `ecs_example/store` использует public entrypoints `@lite-fsm/core`, `@lite-fsm/entities`, `@lite-fsm/entities/react`, `@lite-fsm/middleware/immer`, `@lite-fsm/persist` и `@lite-fsm/react`; пример содержит `worldMachine`, `blinkActor`, `enemyActor` и `enemySpriteActor`; public spawn идет через `manager.transition({ type: "SPAWN_ENEMY" })`; entity routing проверяется через `meta.entityId`, group routing через `meta.groupTag`; `manager.entities.get("enemyActor")`, `dehydrate()`, `getHydratedState(...)`, `hydrate(...)` и persist save/restore loop покрыты smoke test.
+- Проверки: `pnpm exec tsc --noEmit -p ecs_example/tsconfig.json` — pass; `pnpm exec vitest run tests/entities/ecs-example-final-gate.test.ts --reporter=dot` — pass, 1 test; `pnpm exec eslint ecs_example` — pass; `git diff --check` — pass; audit `rg -n "@ts-nocheck|as any|manager\\.spawn|actorId|@lite-fsm/core/|packages/entities/src|runtime/" ecs_example tests/entities/ecs-example-final-gate.test.ts` — no matches; audit legacy draft APIs `rg -n "columnar|defineSpawnConfig|defineSpawnRecipes|storageHandlers|contextSchema|manager\\.spawn|@ts-nocheck|as any|actorId|@lite-fsm/core/columnar|private|internal" ecs_example tests/entities/ecs-example-final-gate.test.ts` — no matches.
+- Coverage: не применимо для production runtime, этап менял executable example и focused integration smoke.
+- Риски: stage 13 performance budgets остаются deferred отдельному ТЗ по решению пользователя; docs build и запрещенные build-команды не запускались.
+- Следующее действие: финальный readiness gate.
 
 ## Финальная проверка
 
-- Статус: `not started`
-- Записи: нет.
+- Статус: `done`
+
+### 2026-06-14 — Final readiness gate
+
+- Статус: `done` с явно принятым performance deferral.
+- Traceability: этапы 8-15 имеют статус `done`, уникальные executor-id, baseline, stage-owned delta, corrective counters и результаты проверок в журнале.
+- Scope итоговой проверки: entity runtime/effects/reactions cleanup, React hooks regressions, snapshot/hydrate regressions через `entities-plugin` tests, package example/docs, benchmark scripts/report, `ecs_example` final gate, public type surface, lint/source audits.
+- Проверки: `pnpm run test` — pass, 102 files passed/2 skipped, 1443 tests passed/14 skipped; skipped tests находятся в existing stress/GC helpers, не в active scope и не добавлялись этим ТЗ. `pnpm run check-types` — pass, 44 type files/490 tests/1113 assertions. `pnpm exec vitest run tests/entities/entities-plugin.test.ts tests/entities/entities-examples.test.ts tests/entities/ecs-example-final-gate.test.ts tests/react/entities.test.tsx tests/react/hydration.test.tsx tests/react/hooks.test.tsx --reporter=dot` — pass, 6 files/188 tests. `pnpm exec vitest run tests/entities/entities-plugin.test.ts --coverage '--coverage.include=packages/entities/src/runtime/access.ts' '--coverage.include=packages/entities/src/runtime/effects.ts' '--coverage.include=packages/entities/src/runtime/reactions.ts'` — pass, touched runtime files 100% statements/branches/functions/lines (`225/225`, `93/93`, `57/57`, `194/194`). `pnpm exec tsc --noEmit -p ecs_example/tsconfig.json` — pass. `pnpm exec vitest run tests/entities/ecs-example-final-gate.test.ts --reporter=dot` — pass, 1 test. `pnpm run lint` — pass. `git diff --check` — pass.
+- Source audits: no active-scope `test.only`, temporary `test.skip`, TODO/FIXME, `not implemented`, `debugger`, old `columnar` draft APIs, `manager.spawn(...)`, public `actorId` routing, `as any`, `@ts-nocheck`, private entity imports, or `@lite-fsm/entities/react` imports from `@lite-fsm/react`. Remaining `console.*` hits are public examples/error handlers and benchmark CLI output; remaining legacy plugin audit hits are historical specs, core regression tests and `ctx.storageKind` false positives, not active entity/react source.
+- Benchmark status: `pnpm run bench:entities` и `pnpm run bench:entities:browser` are implemented and were run during stage 13; both print median/p95 and fail hard median ratio budgets. Node allocation guard passed. По решению пользователя от 2026-06-14 этот performance blocker вынесен в отдельное ТЗ и не блокирует завершение этапов 14-15 или текущий readiness record.
+- Build/docs: forbidden commands `pnpm run build`, docs build commands, pages build commands and `next build` inside `apps/docs` were not run. Docs build remains delegated to user/CI if needed.
+- Residual risks: performance budgets from stage 13 remain open for a separate performance ТЗ before a strict release gate; no other known runtime/type/lint/source-audit blockers remain.

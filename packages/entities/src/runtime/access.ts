@@ -69,6 +69,12 @@ export type EntityAccessScope = {
   readonly entries: readonly CapturedEntityScopeEntry[];
 };
 
+type ScopedEntitySelfOptions = {
+  readonly scopeName: "effect" | "reaction";
+  readonly indices: readonly EntityIndex[];
+  readonly entries: readonly CapturedEntityScopeEntry[];
+};
+
 const unknownEntityActor = (key: string): LiteFsmError =>
   new LiteFsmError(
     "LITE_FSM_INVALID_STORAGE_RUNTIME",
@@ -96,6 +102,13 @@ const scopedAccessError = (
     `[lite-fsm/entities] scoped entities.get('${requestedKey}') failed for source actor '${scope.sourceActor}' while handling '${scope.eventType}' on entity '${entityId}': ${reason}.`,
   );
 
+export const capturedEntityScopeEntryIsLive = (
+  runtime: EntityRuntimeState,
+  entry: CapturedEntityScopeEntry,
+): boolean =>
+  runtime.entityStore.alive[entry.entity] === 1 &&
+  runtime.entityStore.generation[entry.entity] === entry.generation;
+
 const validateRequiredScopedAccess = (
   runtime: EntityRuntimeState,
   scope: EntityAccessScope,
@@ -106,10 +119,7 @@ const validateRequiredScopedAccess = (
   if (!isDev()) return;
 
   for (const entry of scope.entries) {
-    const stale =
-      runtime.entityStore.alive[entry.entity] !== 1 ||
-      runtime.entityStore.generation[entry.entity] !== entry.generation;
-    if (stale) {
+    if (!capturedEntityScopeEntryIsLive(runtime, entry)) {
       throw scopedAccessError(scope, requestedKey, entry.id, "captured entity scope is stale");
     }
     if (store.presence[entry.entity] !== 1) {
@@ -172,6 +182,41 @@ export const createEntityAccess = (runtime: EntityRuntimeState): EntityAccess<Ma
       return getView(key);
     },
   } as EntityAccess<MachineStore>;
+};
+
+export const createScopedEntitySelf = (
+  runtime: EntityRuntimeState,
+  store: ColumnarActorStore,
+  options: ScopedEntitySelfOptions,
+): Record<string, unknown> => {
+  const entriesByEntity = new Map(options.entries.map((entry) => [entry.entity, entry]));
+  const self: Record<string, unknown> = {
+    indices: options.indices,
+    states: store.metadata.stateCodeByName,
+    presence: store.presence,
+    stateCode: store.stateCode,
+    prevStateCode: store.prevStateCode,
+    rowVersion: store.rowVersion,
+    has(entity: EntityIndex) {
+      const entry = entriesByEntity.get(entity);
+      if (!entry) return false;
+      return capturedEntityScopeEntryIsLive(runtime, entry) && store.presence[entity] === 1;
+    },
+    entityId(entity: EntityIndex) {
+      const entry = entriesByEntity.get(entity);
+      if (entry) return entry.id;
+      throw new LiteFsmError(
+        "LITE_FSM_INVALID_STORAGE_RUNTIME",
+        `[lite-fsm/entities] entity index ${entity} is outside current entity ${options.scopeName} scope.`,
+      );
+    },
+  };
+
+  for (const [name, column] of Object.entries(store.columns)) {
+    self[name] = column;
+  }
+
+  return self;
 };
 
 export const createScopedEntityAccess = (

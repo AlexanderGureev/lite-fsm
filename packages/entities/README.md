@@ -2,14 +2,14 @@
 
 Alpha-пакет для entity storage в `lite-fsm`.
 
-На текущем этапе пакет экспортирует `entitiesPlugin()`, schema descriptors,
-spawn helpers, `EntityId`, `EntityIndex`, `EntityAccess<AppMachines>`,
+Пакет экспортирует `entitiesPlugin()`, schema descriptors, spawn helpers,
+`EntityId`, `EntityIndex`, `EntityAccess<AppMachines>`,
 `LiteFsmEntityLifecycleEvents`, `EntityMachineExtension` и reducer context
 types. Плагин регистрирует storage kind `"entity"` через публичный core plugin
 DSL, валидирует entity actor templates при создании `MachineManager`, создает
 manager-owned entity runtime state, добавляет `manager.entities`, создает live
 entity rows через public spawn events и выполняет lifecycle cleanup через
-`despawnOn`. Плагин добавляет routing по `meta.entityId` и entity enter-state
+`despawnOn`. Плагин добавляет routing по `meta.entityId`, entity enter-state
 effects, sync-only entity reactions и durable snapshot через
 `snapshot.storage.entity`. React read hooks доступны отдельной точкой входа
 `@lite-fsm/entities/react`.
@@ -75,20 +75,18 @@ Main export `@lite-fsm/entities` не импортирует React runtime. Дл
 ```ts
 import {
   createMachine as createLiteFsmMachine,
+  MachineManager,
+  type MachinesState,
   type TypedCreateMachineFn,
 } from "@lite-fsm/core";
-import type { EntitiesPlugin } from "@lite-fsm/entities";
+import { entitiesPlugin, f32, optional, string } from "@lite-fsm/entities";
+import type { EntitiesPlugin, EntityAccess } from "@lite-fsm/entities";
 
 type AppEvent = { readonly type: "TICK" };
-type AppDeps = {};
+const createEntityTemplate: TypedCreateMachineFn<AppEvent, {}, EntitiesPlugin<{}>> =
+  createLiteFsmMachine;
 
-export const createMachine: TypedCreateMachineFn<
-  AppEvent,
-  AppDeps,
-  EntitiesPlugin<AppDeps>
-> = createLiteFsmMachine;
-
-const movementActor = createMachine({
+const movementActor = createEntityTemplate({
   storage: "entity",
   initialState: "__INIT",
   initialContext: {
@@ -104,6 +102,24 @@ const movementActor = createMachine({
     __INIT: { ENTITY_SPAWNED: "active" },
     active: { TICK: "active" },
   },
+});
+
+const machines = { movementActor };
+type AppMachines = typeof machines;
+type AppState = MachinesState<AppMachines>;
+type AppDeps = {
+  readonly getState?: () => AppState;
+  readonly entities?: EntityAccess<AppMachines>;
+};
+
+export const createMachine: TypedCreateMachineFn<
+  AppEvent,
+  AppDeps,
+  EntitiesPlugin<AppDeps>
+> = createLiteFsmMachine;
+
+const manager = MachineManager(machines, {
+  plugins: [entitiesPlugin()],
 });
 ```
 
@@ -338,8 +354,28 @@ movement.x[entityIndex]; // number, если x описан через f32()
 
 `entities.get(key)` и `entities.maybe(key)` возвращают cached live store view для
 известного entity actor key. Unknown key бросает `LiteFsmError`, если TypeScript
-был обойден. Store view exposes indexed readonly columns из `initialContext`,
+был обойден. Store view содержит indexed readonly columns из `initialContext`,
 `count`, `version`, `has(entity)` и `state(entity)`.
+
+`AppDeps.entities?: EntityAccess<AppMachines>` является опциональным источником
+типов для scoped объекта `entities` внутри entity effects/reactions. Runtime не
+читает `deps.entities`, когда создает entity scope: объект `entities` в deps
+effect/reaction всегда инжектируется runtime и привязан к текущему batch
+entities.
+
+Если обычные domain/process effects должны читать root entity stores, передайте
+root accessor явно:
+
+```ts
+manager.setDependencies({
+  getState: manager.getState,
+  entities: manager.entities,
+});
+```
+
+Без этой передачи domain/process effects не получают root access. Entity
+effects/reactions продолжают получать scoped `entities`, если
+`AppDeps.entities?: EntityAccess<AppMachines>` объявлен как источник типов.
 
 ## Snapshot и hydrate
 
@@ -503,6 +539,30 @@ mutable schema columns, `stateCode`, `prevStateCode`, `has(entity)`,
 actor-specific spawn payload только во время `ENTITY_SPAWNED` и только для
 `EntityIndex` из текущего spawn scope.
 
+## Runnable composition example
+
+`examples/composition-lite-fsm-entities.ts` показывает минимальную композицию
+`movementActor`, `projectileActor` и `spriteSyncActor` на финальном public API.
+Пример покрывается fixture test и использует только public entrypoints:
+
+- typed wrapper `TypedCreateMachineFn<AppEvent, AppDeps, EntitiesPlugin<AppDeps>>`;
+- `AppDeps` с `getState?: () => AppState` и
+  `entities?: EntityAccess<AppMachines>`;
+- `defineSpawnEvents`, `spawnEvent`, `SpawnEventsFrom`,
+  `defineEntitySpawn`, `entitiesPlugin({ spawn })` и `manager.entities`;
+- spawn events `SPAWN_UNIT` и `SPAWN_PROJECTILE`, а не public
+  `manager.spawn(...)`;
+- обязательный `groupTag` в каждом `EntitySpawnSpec`;
+- descriptors `f32`, `i32`, `string` и `optional(...)`;
+- `initialContext` как описание persistent columns и `spawnSchema` как описание
+  payload actor row при spawn;
+- `reactions` для sprite sync через `entities.get("movementActor")`;
+- `despawnOn: "expired"` для projectile lifetime cleanup.
+
+Пример не использует public routing по `actorId` к entity rows. Внешняя
+адресация entity rows выполняется через spawn events, `meta.entityId`,
+`meta.groupTag` или scoped transition helpers внутри entity effects.
+
 ## Routing
 
 `entitiesPlugin()` объявляет `routeMeta.entityId`, а entity storage runtime
@@ -532,3 +592,23 @@ active routing key; например, `meta.entityId` вместе с `meta.grou
 
 `@lite-fsm/entities/react` не добавляет mutation API, arbitrary filters,
 sorting, multi-tag filtering, raw column arrays или public `EntityIndex` input.
+
+## Benchmarks
+
+Пакет содержит benchmark `composition-lite-fsm-entities`, который сравнивает
+entity runtime с hand-written SoA ECS baseline для movement update, projectile
+lifetime update, `despawnOn` cleanup и sprite sync reaction на `10k` и `50k`
+rows.
+
+```bash
+pnpm run bench:entities
+pnpm run bench:entities:browser
+```
+
+Обе команды собирают только `@lite-fsm/core` и `@lite-fsm/entities`, затем
+запускают benchmark по production `dist` entrypoints. Docs build не выполняется.
+Каждый сценарий выполняет `5` warmup iterations и `30` measured iterations.
+Hard gate сравнивает median measured time с baseline: reducer-only `TICK` —
+не медленнее `1.5x`, full pipeline без renderer calls — не медленнее `2x`.
+Output и [`PERFORMANCE.md`](./PERFORMANCE.md) фиксируют median и p95; p95 не
+является hard gate.

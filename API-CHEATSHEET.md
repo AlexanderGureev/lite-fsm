@@ -27,12 +27,22 @@
 `@lite-fsm/entities` подключается только явным импортом и не входит в core bundle. Пакет предоставляет `entitiesPlugin()`, schema descriptors, storage-specific typing для actor templates с `storage: "entity"`, type-only lifecycle events, public spawn events и root accessor `manager.entities`.
 
 ```ts
-import { createMachine as createLiteFsmMachine, MachineManager, type TypedCreateMachineFn } from "@lite-fsm/core";
+import {
+  createMachine as createLiteFsmMachine,
+  MachineManager,
+  type MachinesState,
+  type TypedCreateMachineFn,
+} from "@lite-fsm/core";
 import { defineEntitySpawn, defineSpawnEvents, entitiesPlugin, f32, optional, spawnEvent, string } from "@lite-fsm/entities";
-import type { EntitiesPlugin } from "@lite-fsm/entities";
+import type { EntitiesPlugin, EntityAccess } from "@lite-fsm/entities";
 
 type AppEvent = { type: "TICK" };
-type AppDeps = {};
+type AppMachines = typeof machines;
+type AppState = MachinesState<AppMachines>;
+type AppDeps = {
+  readonly getState?: () => AppState;
+  readonly entities?: EntityAccess<AppMachines>;
+};
 
 export const createMachine: TypedCreateMachineFn<AppEvent, AppDeps, EntitiesPlugin<AppDeps>> = createLiteFsmMachine;
 
@@ -167,6 +177,12 @@ Reaction должна быть sync-only. Exception и обнаруженный 
 reducer result, не отменяют cleanup/subscribers/effects и не меняют return value
 `manager.transition(...)`.
 
+`AppDeps.entities?: EntityAccess<AppMachines>` является опциональным источником
+типов для scoped объекта `entities` в entity effects/reactions. Runtime не
+читает `deps.entities` при создании entity scope. Root `manager.entities`
+передается через `manager.setDependencies({ entities: manager.entities })`
+только domain/process effects, которым нужен root access к entity stores.
+
 `entitiesPlugin()` объявляет `routeMeta.entityId`, а entity storage runtime требует `routeMetaKeys: ["entityId"]`. При подключенном plugin `manager.transition(...)` принимает `meta.entityId?: string | readonly string[]`. Route доставляет action actor rows указанных entities; массив дедуплицируется с сохранением первого появления, unknown ids являются no-op. `meta.groupTag` одновременно сохраняет instance runtime behavior и доставляет entity rows с matching `EntitySpawnSpec.groupTag`. `meta.actorId` и `meta.groupId` не адресуют entity rows. Один action может содержать только один active routing key; `meta.entityId` вместе с `meta.groupTag` бросает `LITE_FSM_AMBIGUOUS_ROUTE_META`. Raw `meta.entityId`, не являющийся строкой или массивом строк, бросает route resolver error.
 
 Entity storage объявляет storage `snapshot` block. `manager.dehydrate()` по умолчанию добавляет durable payload в `snapshot.storage.entity`; `dehydrate({ storage: [] })` отключает storage payloads, а `dehydrate({ machines: [], storage: ["entity"] })` выгружает только entity storage. Фильтры `machines` и `storage` независимы. Durable rows, columns, ids, `generation`, `freeList`, actor presence, states и `rowVersion` находятся только в `storage.entity`; `machines[entityActorKey]` остается lightweight slice `{ storage, version, count, capacity }`.
@@ -188,6 +204,15 @@ const enemyCount = useEntityCount("movementActor", { groupTag: "enemy" });
 `useEntityList(templateKey, options?)` возвращает `readonly EntityId[]`, а `useEntityCount(templateKey, options?)` — `number`. `options.groupTag?: string` является exact filter по `EntitySpawnSpec.groupTag`. Порядок списка определяется runtime и не сортируется. Ссылка на список сохраняется, если membership и порядок не изменились.
 
 Во время `FSMHydrationBoundary` hooks читают active `snapshot.storage.entity` preview через generic bridge `useStorageHydrationPreview("entity")` и не мутируют committed entity runtime до hydrate commit. Вложенный boundary без `storage.entity` наследует parent preview; boundary со своим `storage.entity` заменяет parent preview для entity hooks.
+
+Benchmark `composition-lite-fsm-entities` запускается командами
+`pnpm run bench:entities` и `pnpm run bench:entities:browser`. Он использует
+production `dist` entrypoints, сравнивает movement update, projectile lifetime
+update, `despawnOn` cleanup и sprite sync reaction с hand-written SoA ECS
+baseline на `10k`/`50k` rows, выполняет `5` warmup и `30` measured iterations,
+печатает median и p95. Hard gate: reducer-only `TICK` не медленнее `1.5x`,
+full pipeline без renderer calls не медленнее `2x`; Node profile дополнительно
+проверяет отсутствие per-row retained allocation growth на steady-state `TICK`.
 
 ## Alpha graph compiler
 

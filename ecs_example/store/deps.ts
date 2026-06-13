@@ -1,6 +1,5 @@
 import type { EntityAccess } from "@lite-fsm/entities";
-
-import type { AppState } from ".";
+import type { MachineStore } from "@lite-fsm/core";
 
 export type SpritePosition = {
   x: number;
@@ -28,14 +27,21 @@ export type JsonStorageLike = {
   removeItem(key: string): void;
 };
 
-export type AppDeps = {
-  getState: () => AppState;
-  entities?: EntityAccess<AppState>;
+export type EntityCountState = {
+  readonly enemyActor: {
+    readonly count: number;
+  };
+};
+
+export type MachineDeps = {
+  getState: () => EntityCountState;
   sprites: SpriteAdapter;
   clock: ClockAdapter;
 };
 
-export type RuntimeDeps = Omit<AppDeps, "getState" | "entities"> & {
+export type AppEntityAccess<AppMachines extends MachineStore> = EntityAccess<AppMachines>;
+
+export type RuntimeDeps = Omit<MachineDeps, "getState"> & {
   persistStorage?: JsonStorageLike;
 };
 

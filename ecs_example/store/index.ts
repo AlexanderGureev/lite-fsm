@@ -3,9 +3,10 @@ import { entitiesPlugin, defineEntitySpawn } from "@lite-fsm/entities";
 import { immerMiddleware } from "@lite-fsm/middleware/immer";
 import { createJsonStorage, persistManager } from "@lite-fsm/persist";
 
-import type { AppDeps, RuntimeDeps } from "./deps";
+import type { AppEntityAccess, MachineDeps, RuntimeDeps } from "./deps";
 import { blinkActor } from "./machines/blink-actor";
 import { enemyActor } from "./machines/enemy-actor";
+import { enemySpriteActor } from "./machines/enemy-sprite-actor";
 import { worldMachine } from "./machines/world-machine";
 import { spawnEvents } from "./spawn-events";
 import type { AppEvents } from "./types";
@@ -14,10 +15,15 @@ export const machines = {
   worldMachine,
   blinkActor,
   enemyActor,
-} as const;
+  enemySpriteActor,
+};
 
 export type AppMachines = typeof machines;
 export type AppState = MachinesState<AppMachines>;
+export type AppDeps = Omit<MachineDeps, "getState"> & {
+  getState: () => AppState;
+  entities?: AppEntityAccess<AppMachines>;
+};
 
 export const spawn = defineEntitySpawn(machines, spawnEvents)({
   SPAWN_ENEMY: (payload) => ({
@@ -34,11 +40,14 @@ export const spawn = defineEntitySpawn(machines, spawnEvents)({
         spriteId: payload.spriteId,
         faction: payload.faction,
       },
+      enemySpriteActor: {
+        spriteId: payload.spriteId,
+      },
     },
   }),
 });
 
-const createPlugins = () => [entitiesPlugin<AppDeps>({ spawn })] as const;
+const createPlugins = () => [entitiesPlugin({ spawn })] as const;
 
 type AppPlugins = ReturnType<typeof createPlugins>;
 
@@ -72,7 +81,6 @@ export const makeStore = (deps: RuntimeDeps) => {
   manager.setDependencies({
     ...deps,
     getState: manager.getState,
-    entities: manager.entities,
   });
 
   const persistStorage = createJsonStorage<AppMachines>({
@@ -95,7 +103,7 @@ export type AppStore = ReturnType<typeof makeStore>;
 
 export * from "./hooks";
 export * from "./selectors";
-export type { AppDeps, RuntimeDeps } from "./deps";
+export type { MachineDeps, RuntimeDeps } from "./deps";
 export { createMemorySprites, createMemoryStorage } from "./deps";
 export { spawnEvents };
 export type { AppEvents } from "./types";

@@ -2,7 +2,7 @@ import { LiteFsmError } from "@lite-fsm/core";
 import type { AnyEvent, ReadonlyManagerAction, StorageManagerContext } from "@lite-fsm/core";
 
 import type { EntityIndex } from "../plugin";
-import { createScopedEntityAccess, type EntityAccessScope } from "./access";
+import { createScopedEntityAccess, createScopedEntitySelf } from "./access";
 import type { ColumnarActorStore, EntityRuntimeState } from "./state";
 import { getEntityTransaction, type CapturedEntityScopeEntry, type EntityReactionBatch } from "./transaction";
 
@@ -14,43 +14,6 @@ type ReactionRunContext = {
 
 const runtimeError = (reason: string): LiteFsmError =>
   new LiteFsmError("LITE_FSM_INVALID_STORAGE_RUNTIME", `[lite-fsm/entities] ${reason}.`);
-
-const capturedEntryIsLive = (runtime: EntityRuntimeState, entry: CapturedEntityScopeEntry): boolean =>
-  runtime.entityStore.alive[entry.entity] === 1 &&
-  runtime.entityStore.generation[entry.entity] === entry.generation;
-
-const createReactionSelf = (
-  runtime: EntityRuntimeState,
-  store: ColumnarActorStore,
-  indices: readonly EntityIndex[],
-  scope: EntityAccessScope,
-): Record<string, unknown> => {
-  const entriesByEntity = new Map(scope.entries.map((entry) => [entry.entity, entry]));
-  const self: Record<string, unknown> = {
-    indices,
-    states: store.metadata.stateCodeByName,
-    presence: store.presence,
-    stateCode: store.stateCode,
-    prevStateCode: store.prevStateCode,
-    rowVersion: store.rowVersion,
-    has(entity: EntityIndex) {
-      const entry = entriesByEntity.get(entity);
-      if (!entry) return false;
-      return capturedEntryIsLive(runtime, entry) && store.presence[entity] === 1;
-    },
-    entityId(entity: EntityIndex) {
-      const entry = entriesByEntity.get(entity);
-      if (entry) return entry.id;
-      throw runtimeError(`entity index ${entity} is outside current entity reaction scope`);
-    },
-  };
-
-  for (const [name, column] of Object.entries(store.columns)) {
-    self[name] = column;
-  }
-
-  return self;
-};
 
 const collectReactionScopeEntries = (
   runtime: EntityRuntimeState,
@@ -88,15 +51,15 @@ const createReactionDeps = (
   delete userDeps.self;
   delete userDeps.transition;
 
+  const indices = entries.map((entry) => entry.entity);
   return {
     ...userDeps,
     action: ctx.action,
-    self: createReactionSelf(
-      runtime,
-      store,
-      entries.map((entry) => entry.entity),
-      scope,
-    ),
+    self: createScopedEntitySelf(runtime, store, {
+      scopeName: "reaction",
+      indices,
+      entries,
+    }),
     entities: createScopedEntityAccess(runtime, scope),
   };
 };

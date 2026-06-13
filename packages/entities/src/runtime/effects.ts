@@ -2,8 +2,13 @@ import { LiteFsmError } from "@lite-fsm/core";
 import type { AnyEvent, ManagerAction, ReadonlyManagerAction, StorageManagerContext } from "@lite-fsm/core";
 
 import type { EntityIndex } from "../plugin";
-import { createScopedEntityAccess, type EntityAccessScope } from "./access";
-import type { ColumnarActorStore, EntityRuntimeState } from "./state";
+import {
+  capturedEntityScopeEntryIsLive,
+  createScopedEntityAccess,
+  createScopedEntitySelf,
+  type EntityAccessScope,
+} from "./access";
+import type { EntityRuntimeState } from "./state";
 import {
   createEntityDespawnOptions,
   ENTITY_DESPAWN_ACTION_TYPE,
@@ -82,10 +87,6 @@ const entityIdIsLive = (runtime: EntityRuntimeState, id: string): boolean => {
 const liveEntityIds = (runtime: EntityRuntimeState, value: string | readonly string[]): readonly string[] =>
   dedupeStrings(normalizeStringTargets("entity", value)).filter((id) => entityIdIsLive(runtime, id));
 
-const capturedEntryIsLive = (runtime: EntityRuntimeState, entry: CapturedEntityScopeEntry): boolean =>
-  runtime.entityStore.alive[entry.entity] === 1 &&
-  runtime.entityStore.generation[entry.entity] === entry.generation;
-
 const staleCapturedScopeError = (entry: CapturedEntityScopeEntry): LiteFsmError =>
   runtimeError(`stale entity effect scope cannot despawn entity '${entry.id}' at index ${entry.entity}`);
 
@@ -95,7 +96,7 @@ const liveCapturedEntries = (
 ): readonly CapturedEntityScopeEntry[] => {
   const live: CapturedEntityScopeEntry[] = [];
   for (const entry of entries) {
-    if (capturedEntryIsLive(runtime, entry)) {
+    if (capturedEntityScopeEntryIsLive(runtime, entry)) {
       live.push(entry);
       continue;
     }
@@ -103,38 +104,6 @@ const liveCapturedEntries = (
     if (isDev()) throw staleCapturedScopeError(entry);
   }
   return live;
-};
-
-const createEffectSelf = (
-  runtime: EntityRuntimeState,
-  store: ColumnarActorStore,
-  invocation: EntityEffectInvocation,
-): Record<string, unknown> => {
-  const entriesByEntity = new Map(invocation.scope.entries.map((entry) => [entry.entity, entry]));
-  const self: Record<string, unknown> = {
-    indices: invocation.indices,
-    states: store.metadata.stateCodeByName,
-    presence: store.presence,
-    stateCode: store.stateCode,
-    prevStateCode: store.prevStateCode,
-    rowVersion: store.rowVersion,
-    has(entity: EntityIndex) {
-      const entry = entriesByEntity.get(entity);
-      if (!entry) return false;
-      return capturedEntryIsLive(runtime, entry) && store.presence[entity] === 1;
-    },
-    entityId(entity: EntityIndex) {
-      const entry = entriesByEntity.get(entity);
-      if (entry) return entry.id;
-      throw runtimeError(`entity index ${entity} is outside current entity effect scope`);
-    },
-  };
-
-  for (const [name, column] of Object.entries(store.columns)) {
-    self[name] = column;
-  }
-
-  return self;
 };
 
 const createEffectTransition = (
@@ -241,7 +210,11 @@ export const invokeEntityEffect = (
   const deps = {
     ...ctx.manager.getDependencies(),
     action: ctx.action,
-    self: createEffectSelf(runtime, store, invocation),
+    self: createScopedEntitySelf(runtime, store, {
+      scopeName: "effect",
+      indices: invocation.indices,
+      entries: invocation.scope.entries,
+    }),
     entities: createScopedEntityAccess(runtime, invocation.scope),
     transition: createEffectTransition(runtime, ctx.manager, invocation),
     condition: unsupportedCondition,

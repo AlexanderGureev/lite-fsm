@@ -1,128 +1,114 @@
-// @ts-nocheck
+type Entity = number;
 
-/*
- * ECS composition example:
- * a new entity type is a new set of components.
- *
- * Units:
- * - Position + Velocity + Sprite
- *
- * Projectiles:
- * - Position + Velocity + Sprite + Lifetime + DamageOnHit
- *
- * Existing systems automatically pick entities by component set.
- */
+type Position = {
+  x: number;
+  y: number;
+};
 
-export class Position extends Component {
-  constructor(
-    public x: number,
-    public y: number,
-  ) {
-    super();
+type Velocity = {
+  dx: number;
+  dy: number;
+};
+
+type Sprite = {
+  spriteId: string;
+};
+
+type Lifetime = {
+  ticksLeft: number;
+};
+
+type DamageOnHit = {
+  amount: number;
+};
+
+type EcsWorld = {
+  nextEntity: Entity;
+  positions: Map<Entity, Position>;
+  velocities: Map<Entity, Velocity>;
+  sprites: Map<Entity, Sprite>;
+  lifetimes: Map<Entity, Lifetime>;
+  damageOnHit: Map<Entity, DamageOnHit>;
+  spritePositions: Map<string, Position>;
+  removedSprites: string[];
+};
+
+const createWorld = (): EcsWorld => ({
+  nextEntity: 0,
+  positions: new Map(),
+  velocities: new Map(),
+  sprites: new Map(),
+  lifetimes: new Map(),
+  damageOnHit: new Map(),
+  spritePositions: new Map(),
+  removedSprites: [],
+});
+
+const addEntity = (world: EcsWorld): Entity => {
+  const entity = world.nextEntity;
+  world.nextEntity += 1;
+  return entity;
+};
+
+const removeEntity = (world: EcsWorld, entity: Entity) => {
+  const sprite = world.sprites.get(entity);
+  if (sprite) world.removedSprites.push(sprite.spriteId);
+
+  world.positions.delete(entity);
+  world.velocities.delete(entity);
+  world.sprites.delete(entity);
+  world.lifetimes.delete(entity);
+  world.damageOnHit.delete(entity);
+};
+
+const updateMovement = (world: EcsWorld) => {
+  for (const [entity, position] of world.positions) {
+    const velocity = world.velocities.get(entity);
+    if (!velocity) continue;
+
+    position.x += velocity.dx;
+    position.y += velocity.dy;
   }
-}
+};
 
-export class Velocity extends Component {
-  constructor(
-    public dx: number,
-    public dy: number,
-  ) {
-    super();
+const syncSprites = (world: EcsWorld) => {
+  for (const [entity, sprite] of world.sprites) {
+    const position = world.positions.get(entity);
+    if (!position) continue;
+
+    world.spritePositions.set(sprite.spriteId, { ...position });
   }
-}
+};
 
-export class Sprite extends Component {
-  constructor(public spriteId: string) {
-    super();
+const updateLifetime = (world: EcsWorld) => {
+  for (const [entity, lifetime] of world.lifetimes) {
+    lifetime.ticksLeft -= 1;
+    if (lifetime.ticksLeft <= 0) removeEntity(world, entity);
   }
-}
+};
 
-export class Lifetime extends Component {
-  constructor(public ticksLeft: number) {
-    super();
-  }
-}
+export const runEcsCompositionExample = () => {
+  const world = createWorld();
 
-export class DamageOnHit extends Component {
-  constructor(public amount: number) {
-    super();
-  }
-}
+  const unit = addEntity(world);
+  world.positions.set(unit, { x: 10, y: 20 });
+  world.velocities.set(unit, { dx: 1, dy: 0 });
+  world.sprites.set(unit, { spriteId: "unit-sprite-1" });
 
-export class MoveSystem extends System {
-  public componentsRequired = new Set([Position, Velocity]);
-  public ecs!: ECS;
+  const projectile = addEntity(world);
+  world.positions.set(projectile, { x: 14, y: 20 });
+  world.velocities.set(projectile, { dx: 3, dy: 0 });
+  world.sprites.set(projectile, { spriteId: "arrow-sprite-1" });
+  world.lifetimes.set(projectile, { ticksLeft: 1 });
+  world.damageOnHit.set(projectile, { amount: 10 });
 
-  onRegister = (ecs: ECS) => {
-    this.ecs = ecs;
+  updateMovement(world);
+  syncSprites(world);
+  updateLifetime(world);
+
+  return {
+    unitPosition: world.spritePositions.get("unit-sprite-1"),
+    projectileAlive: world.positions.has(projectile),
+    removedSprites: world.removedSprites,
   };
-
-  update(entities: Entities) {
-    for (const entity of entities) {
-      const [position, velocity] = this.ecs.getComponents(entity, Position, Velocity);
-      position.x += velocity.dx;
-      position.y += velocity.dy;
-    }
-  }
-}
-
-export class SpriteSyncSystem extends System {
-  public componentsRequired = new Set([Position, Sprite]);
-  public ecs!: ECS;
-
-  constructor(private sprites: SpriteService) {
-    super();
-  }
-
-  onRegister = (ecs: ECS) => {
-    this.ecs = ecs;
-  };
-
-  update(entities: Entities) {
-    for (const entity of entities) {
-      const [position, sprite] = this.ecs.getComponents(entity, Position, Sprite);
-      this.sprites.setPosition(sprite.spriteId, {
-        x: position.x,
-        y: position.y,
-      });
-    }
-  }
-}
-
-export class LifetimeSystem extends System {
-  public componentsRequired = new Set([Lifetime]);
-  public ecs!: ECS;
-
-  onRegister = (ecs: ECS) => {
-    this.ecs = ecs;
-  };
-
-  update(entities: Entities) {
-    for (const entity of entities) {
-      const [lifetime] = this.ecs.getComponents(entity, Lifetime);
-      lifetime.ticksLeft -= 1;
-
-      if (lifetime.ticksLeft <= 0) {
-        this.ecs.removeEntity(entity);
-      }
-    }
-  }
-}
-
-const ecs = createECS();
-ecs.addSystem(new MoveSystem(), new SpriteSyncSystem(new SpriteService()), new LifetimeSystem());
-
-const unit = ecs.addEntity();
-ecs.addComponent(unit, new Position(10, 20), new Velocity(1, 0), new Sprite("unit-sprite-1"));
-
-const projectile = ecs.addEntity();
-ecs.addComponent(
-  projectile,
-  new Position(14, 20),
-  new Velocity(3, 0),
-  new Sprite("arrow-sprite-1"),
-  new Lifetime(40),
-  new DamageOnHit(10),
-);
-
-ecs.update();
+};

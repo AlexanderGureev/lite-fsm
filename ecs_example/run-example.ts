@@ -1,6 +1,6 @@
-import type { EntityId } from "@lite-fsm/entities";
+import type { EntityAccess, EntityId } from "@lite-fsm/entities";
 
-import { createMemorySprites, createMemoryStorage, makeStore } from "./store";
+import { createMemorySprites, createMemoryStorage, makeStore, type AppMachines } from "./store";
 import { selectGameGateStatus } from "./store/selectors";
 
 export const runEcsExample = async () => {
@@ -12,7 +12,7 @@ export const runEcsExample = async () => {
     persistStorage,
   });
   const { manager } = store;
-  const enemyId = "enemy/slime-1" as EntityId;
+  const enemyId: EntityId = "enemy/slime-1";
 
   await store.persist[0].restore();
 
@@ -44,22 +44,36 @@ export const runEcsExample = async () => {
     payload: { dx: 0.05, dy: 0 },
     meta: { groupTag: "enemy" },
   });
+  await Promise.resolve();
 
-  const enemyStore = manager.entities.get("enemyActor");
+  const entities: EntityAccess<AppMachines> = manager.entities;
+  const enemyStore = entities.get("enemyActor");
   const snapshot = manager.dehydrate();
   const preview = manager.getHydratedState(snapshot);
 
   manager.hydrate(snapshot, { strategy: "replace" });
+  const hydratedEnemyCount = manager.getState().enemyActor.count;
   await store.persist[0].save();
+  const persisted = persistStorage.dump();
+  const restoredSprites = createMemorySprites();
+  const restoredStore = makeStore({
+    sprites: restoredSprites,
+    clock: { now: () => 2_000 },
+    persistStorage,
+  });
+  const restoreStatus = await restoredStore.persist[0].restore();
 
   return {
     state: manager.getState(),
     gate: selectGameGateStatus(manager.getState()),
     enemyCount: enemyStore.count,
     previewEnemyCount: preview.enemyActor.count,
+    hydratedEnemyCount,
     snapshot,
     spriteCommands: sprites.commands,
-    persisted: persistStorage.dump(),
+    persisted,
+    restoredBlinkActors: Object.keys(restoredStore.manager.getState().blinkActor).length,
+    restoreStatus,
   };
 };
 

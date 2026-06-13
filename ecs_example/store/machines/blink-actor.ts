@@ -1,15 +1,7 @@
-import type { FSMEvent } from "@lite-fsm/core";
-
 import { createMachine } from "../create-machine";
-import type { TickPayload } from "./world-machine";
+import type { BlinkEvents } from "../types";
 
-export type Events =
-  | FSMEvent<"START_BLINK_ACTOR", { id: string; maxTicks: number }>
-  | FSMEvent<"FLASH_FROM_ENTITY", { source: string; intensity: number }>
-  | FSMEvent<"BLINK_FLASHED">
-  | FSMEvent<"STOP_BLINK_ACTOR", { id: string }>
-  | FSMEvent<"TICK", TickPayload>
-  | FSMEvent<"RESET_WORLD">;
+export type Events = BlinkEvents;
 
 type BlinkContext = {
   id: string;
