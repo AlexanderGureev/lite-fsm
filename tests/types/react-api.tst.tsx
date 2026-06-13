@@ -24,6 +24,7 @@ import {
   type FSMContextProviderProps,
   FSMHydrationBoundary,
   type FSMHydrationBoundaryProps,
+  type FSMStorageHydrationPreview,
   type TypedUseMachineHook,
   type TypedUseManagerHook,
   type TypedUseSelectorHook,
@@ -31,6 +32,7 @@ import {
   useManager,
   useHydrateSnapshot,
   useSelector,
+  useStorageHydrationPreview,
   useTransition,
 } from "@lite-fsm/react";
 
@@ -241,6 +243,21 @@ describe("useSelector<S, R>", () => {
       slice.meta.actorId = "next";
       return slice.meta.groupId;
     });
+  });
+});
+
+describe("useStorageHydrationPreview", () => {
+  test("возвращает generic unknown preview payload без entity-specific типов", () => {
+    const preview = useStorageHydrationPreview("entity");
+
+    expect(preview).type.toBe<FSMStorageHydrationPreview>();
+    expect(preview.hasPreview).type.toBe<boolean>();
+    expect(preview.preview).type.toBe<unknown>();
+    expect(preview.hasServerPreview).type.toBe<boolean>();
+    expect(preview.serverPreview).type.toBe<unknown>();
+
+    // @ts-expect-error!
+    preview.preview.actors;
   });
 });
 

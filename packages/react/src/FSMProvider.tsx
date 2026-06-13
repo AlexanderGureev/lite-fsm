@@ -3,7 +3,7 @@ import React from "react";
 import type { AnyEvent, IMachineManager, MachinesState, MachineStore } from "@lite-fsm/core";
 
 import { FSMContext } from "./FSMContext";
-import { FSMServerSnapshotProvider } from "./hydrationOverlay";
+import { FSMServerSnapshotProvider, NO_STORAGE_HYDRATION_PREVIEW } from "./hydrationOverlay";
 import {
   arePersistLifecycleSequencesEqual,
   EMPTY_PERSIST_ENTRIES,
@@ -41,9 +41,10 @@ export const FSMContextProvider = <S extends MachineStore, P extends AnyEvent = 
   persist,
 }: FSMContextProviderProps<S, P>) => {
   const serverSnapshot = React.useMemo(() => {
-    if (getServerSnapshot) return { getState: getServerSnapshot };
+    const getStoragePreview = () => NO_STORAGE_HYDRATION_PREVIEW;
+    if (getServerSnapshot) return { getState: getServerSnapshot, getStoragePreview };
     const snapshot = machineManager.getState();
-    return { getState: () => snapshot };
+    return { getState: () => snapshot, getStoragePreview };
   }, [getServerSnapshot, machineManager]);
   const persistEntries = usePersistEntries(persist);
   const persistStatusSources = React.useMemo(() => resolvePersistStatusSources(persistEntries), [persistEntries]);

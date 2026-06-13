@@ -75,6 +75,7 @@ describe("регрессионная матрица public entry points", () => 
         | "useHydrateSnapshot"
         | "useManager"
         | "useSelector"
+        | "useStorageHydrationPreview"
         | "useTransition"
       >
     >;

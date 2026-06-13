@@ -3,8 +3,12 @@ import type { LiteFsmStorageRuntimeDefinition, StorageCreatePublicInitialStateCo
 
 import type { EntityMachineExtension } from "../machine-extension";
 import { validateEntitySchema, type EntityContextSchema, type EntitySpawnSchema } from "../schema";
+import { invokeEntityEffect, resolveEntityEffectInvocations, type EntityEffectInvocation } from "./effects";
 import { assertEntityInitLifecycleConfig, assertPublicEntityLifecycleDispatch } from "./lifecycle";
 import { reduceEntityBucket } from "./reduce";
+import { createEntityReactRuntime } from "./react";
+import { runEntityReactions } from "./reactions";
+import { dehydrateEntityRuntime, hydrateEntityRuntime, type EntitySnapshot } from "./snapshot";
 import type { EntityTemplateMetadata } from "./compile";
 import {
   asEntityRuntimeState,
@@ -24,6 +28,8 @@ export type EntityStorageRuntimeExtension = Omit<EntityMachineExtension, "storag
   readonly routeMeta: EntityStorageRouteMeta;
   readonly runtimeState: EntityRuntimeState;
   readonly templateData: EntityTemplateMetadata;
+  readonly snapshotData: EntitySnapshot;
+  readonly invocation: EntityEffectInvocation;
 };
 
 export type EntityStorageDefinition<AppDeps = unknown> = LiteFsmStorageRuntimeDefinition<
@@ -41,6 +47,44 @@ const invalidEntityTemplate = (machineKey: string, reason: string): LiteFsmError
     "LITE_FSM_INVALID_STORAGE_CONFIG",
     `[lite-fsm/entities] machine '${machineKey}' has invalid storage: "entity" config: ${reason}.`,
   );
+
+const invalidDespawnOnStorage = (machineKey: string): LiteFsmError =>
+  new LiteFsmError(
+    "LITE_FSM_INVALID_STORAGE_CONFIG",
+    `[lite-fsm/entities] machine '${machineKey}' uses despawnOn, but despawnOn is only supported with storage: "entity".`,
+  );
+
+const invalidReactionsStorage = (machineKey: string): LiteFsmError =>
+  new LiteFsmError(
+    "LITE_FSM_INVALID_STORAGE_CONFIG",
+    `[lite-fsm/entities] machine '${machineKey}' uses reactions, but reactions are only supported with storage: "entity".`,
+  );
+
+const validateDespawnOnStorageUsage = (machines: Readonly<Record<string, unknown>>): void => {
+  for (const [key, machine] of Object.entries(machines)) {
+    /* v8 ignore next -- defensive: MachineManager config entries are machine objects after core validation. */
+    if (machine === null || typeof machine !== "object") continue;
+
+    const record = machine as Record<string, unknown>;
+    if (!hasOwn(record, "despawnOn") || record.despawnOn === undefined) continue;
+    if (record.storage === ENTITY_STORAGE_KIND) continue;
+
+    throw invalidDespawnOnStorage(key);
+  }
+};
+
+const validateReactionsStorageUsage = (machines: Readonly<Record<string, unknown>>): void => {
+  for (const [key, machine] of Object.entries(machines)) {
+    /* v8 ignore next -- defensive: MachineManager config entries are machine objects after core validation. */
+    if (machine === null || typeof machine !== "object") continue;
+
+    const record = machine as Record<string, unknown>;
+    if (!hasOwn(record, "reactions") || record.reactions === undefined) continue;
+    if (record.storage === ENTITY_STORAGE_KIND) continue;
+
+    throw invalidReactionsStorage(key);
+  }
+};
 
 const validateEntityTemplate = (key: string, machine: Record<string, unknown>): void => {
   if (!hasOwn(machine, "initialState") || machine.initialState === undefined) {
@@ -64,6 +108,15 @@ const validateEntityTemplate = (key: string, machine: Record<string, unknown>): 
   assertEntityInitLifecycleConfig(key, machine.config);
 };
 
+const createRuntimeState = (
+  templates: Parameters<typeof createEntityRuntimeState>[0],
+  manager: Parameters<typeof createEntityRuntimeState>[1],
+): EntityRuntimeState => {
+  const runtime = createEntityRuntimeState(templates, manager);
+  runtime.react = createEntityReactRuntime(runtime);
+  return runtime;
+};
+
 export const entityStorageRuntime: EntityStorageDefinition<unknown> =
   defineStorageRuntime<EntityStorageRuntimeExtension>().create({
     kind: ENTITY_STORAGE_KIND,
@@ -80,13 +133,22 @@ export const entityStorageRuntime: EntityStorageDefinition<unknown> =
             readonly config: object;
             readonly initialContext: EntityContextSchema;
             readonly spawnSchema: EntitySpawnSchema;
+            readonly despawnOn?: unknown;
+            readonly effects?: unknown;
+            readonly reactions?: unknown;
             readonly reducer?: unknown;
           },
         ),
       };
     },
     createRuntimeState({ templates, manager }) {
-      return createEntityRuntimeState(templates, manager);
+      const config = (manager as { readonly config?: unknown }).config;
+      /* v8 ignore next -- internal manager context provides config; cast only hides it from public storage types. */
+      if (config === null || typeof config !== "object") return createRuntimeState(templates, manager);
+
+      validateDespawnOnStorageUsage(config as Readonly<Record<string, unknown>>);
+      validateReactionsStorageUsage(config as Readonly<Record<string, unknown>>);
+      return createRuntimeState(templates, manager);
     },
     createPublicInitialState({ template, state }: StorageCreatePublicInitialStateContext<EntityStorageRuntimeExtension>) {
       return createEntityPublicInitialState(asEntityRuntimeState(state), template);
@@ -100,5 +162,26 @@ export const entityStorageRuntime: EntityStorageDefinition<unknown> =
     },
     commit({ state, dispatch }) {
       dispatch.nextState = restorePublicSlices(asEntityRuntimeState(state), dispatch.nextState);
+    },
+    effects: {
+      resolveInvocations(ctx) {
+        return resolveEntityEffectInvocations(asEntityRuntimeState(ctx.state), ctx);
+      },
+      invoke(ctx) {
+        invokeEntityEffect(asEntityRuntimeState(ctx.state), ctx.invocation, ctx);
+      },
+    },
+    reactions: {
+      run(ctx) {
+        runEntityReactions(asEntityRuntimeState(ctx.state), ctx);
+      },
+    },
+    snapshot: {
+      dehydrate(ctx) {
+        return dehydrateEntityRuntime(asEntityRuntimeState(ctx.state), ctx);
+      },
+      hydrate(ctx) {
+        return hydrateEntityRuntime(asEntityRuntimeState(ctx.state), ctx);
+      },
     },
   });

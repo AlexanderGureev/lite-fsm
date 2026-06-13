@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { definePlugin, defineStorageRuntime, LiteFsmError, MachineManager } from "@lite-fsm/core";
+import { definePlugin, defineStorageRuntime, HYDRATE_ACTION_TYPE, LiteFsmError, MachineManager } from "@lite-fsm/core";
 import { getNormalizedPlugin } from "@lite-fsm/core/internal/plugin";
 import type { FSMEvent, MachineConfig, MachineStore, Middleware } from "@lite-fsm/core";
 import {
@@ -30,8 +30,20 @@ import {
   getEntityRuntimeState,
   moveActorStateBucket,
 } from "../../packages/entities/src/runtime/state";
-import { compileEntityRuntimeMetadata } from "../../packages/entities/src/runtime/compile";
+import {
+  compileEntityRuntimeMetadata,
+  ENTITY_RESOLVED_STATE_CODE,
+} from "../../packages/entities/src/runtime/compile";
+import { invokeEntityEffect, resolveEntityEffectInvocations } from "../../packages/entities/src/runtime/effects";
 import { collectEntityPublicReducerBatches } from "../../packages/entities/src/runtime/routing";
+import {
+  createEntityDespawnOptions,
+  prepareEntityTransaction,
+  scheduleEntityDespawn,
+  scheduleEntityEffectBatch,
+  scheduleEntityReactionBatch,
+} from "../../packages/entities/src/runtime/transaction";
+import { runEntityReactionBatches, runEntityReactions } from "../../packages/entities/src/runtime/reactions";
 
 type CounterEvent = FSMEvent<"INC">;
 type CounterConfig = { readonly READY: { readonly INC: "READY" } };
@@ -230,13 +242,13 @@ describe("@lite-fsm/entities — этап 1 plugin shell", () => {
     expect(entities.string).toBe(string);
   });
 
-  it("публикует только root и package.json exports", () => {
+  it("публикует root, react и package.json exports", () => {
     const packageJson = JSON.parse(readFileSync(join(rootDir, "packages/entities/package.json"), "utf8")) as {
       readonly exports: Record<string, unknown>;
     };
 
-    expect(Object.keys(packageJson.exports).sort()).toEqual([".", "./package.json"]);
-    expect(packageJson.exports).not.toHaveProperty("./react");
+    expect(Object.keys(packageJson.exports).sort()).toEqual([".", "./package.json", "./react"]);
+    expect(packageJson.exports).toHaveProperty("./react");
   });
 
   it("устанавливается один раз через MachineManager", () => {
@@ -2458,5 +2470,2074 @@ describe("@lite-fsm/entities — этап 6 reduce pipeline и routing", () => {
     expect(countSetArrayEntries(32)).toBe(0);
     expect(routingSource).not.toContain("metadata.config");
     expect(routingSource).not.toContain("getEntityStateName");
+  });
+});
+
+describe("@lite-fsm/entities — этап 8 despawnOn и lifecycle cleanup", () => {
+  const createStage8SpawnEvents = () =>
+    defineSpawnEvents({
+      SPAWN_STAGE8: spawnEvent<{ readonly id: string; readonly groupTag: string; readonly hp: number }>(),
+    });
+
+  const spawnStage8Entity = (
+    manager: {
+      transition(action: {
+        readonly type: "SPAWN_STAGE8";
+        readonly payload: { readonly id: string; readonly groupTag: string; readonly hp: number };
+      }): unknown;
+    },
+    id: string,
+    hp: number,
+    groupTag = "unit",
+  ) => {
+    manager.transition({ type: "SPAWN_STAGE8", payload: { id, groupTag, hp } });
+  };
+
+  it("despawnOn удаляет всю entity в том же dispatch, дедуплицирует rows и позволяет переиспользовать id", () => {
+    const ownerLifecycleCalls: string[] = [];
+    const cleanupLifecycleCalls: string[] = [];
+    const ownerActor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "ALIVE" },
+        ALIVE: { EXPIRE: "EXPIRED" },
+        EXPIRED: {},
+      },
+      initialState: "__INIT",
+      initialContext: { hp: i32() },
+      spawnSchema: { hp: i32() },
+      despawnOn: "EXPIRED",
+      reducer(
+        _slice: unknown,
+        action: { readonly type: string },
+        { self, payloadFor }: { readonly self: any; payloadFor(entity: EntityIndex): { readonly hp: number } },
+      ) {
+        for (const entity of self.indices) {
+          if (action.type === "ENTITY_SPAWNED") self.hp[entity] = payloadFor(entity).hp;
+          if (action.type === "ENTITY_DESPAWNED") ownerLifecycleCalls.push(self.entityId(entity));
+        }
+      },
+    } as const;
+    const cleanupActor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "ACTIVE" },
+        ACTIVE: { EXPIRE: "EXPIRED", ENTITY_DESPAWNED: "CLEANED" },
+        EXPIRED: { ENTITY_DESPAWNED: "CLEANED" },
+        CLEANED: {},
+      },
+      initialState: "__INIT",
+      initialContext: { hp: i32() },
+      spawnSchema: { hp: i32() },
+      despawnOn: ["EXPIRED"] as const,
+      reducer(
+        _slice: unknown,
+        action: { readonly type: string },
+        { self, payloadFor }: { readonly self: any; payloadFor(entity: EntityIndex): { readonly hp: number } },
+      ) {
+        for (const entity of self.indices) {
+          if (action.type === "ENTITY_SPAWNED") self.hp[entity] = payloadFor(entity).hp;
+          if (action.type === "ENTITY_DESPAWNED") {
+            cleanupLifecycleCalls.push(`cleanup:${self.entityId(entity)}:${self.hp[entity]}`);
+          }
+        }
+      },
+    } as const;
+    const auditActor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "ACTIVE" },
+        ACTIVE: { ENTITY_DESPAWNED: "CLEANED" },
+        CLEANED: {},
+      },
+      initialState: "__INIT",
+      initialContext: { hp: i32() },
+      spawnSchema: { hp: i32() },
+      reducer(
+        _slice: unknown,
+        action: { readonly type: string },
+        { self, payloadFor }: { readonly self: any; payloadFor(entity: EntityIndex): { readonly hp: number } },
+      ) {
+        for (const entity of self.indices) {
+          if (action.type === "ENTITY_SPAWNED") self.hp[entity] = payloadFor(entity).hp;
+          if (action.type === "ENTITY_DESPAWNED") {
+            cleanupLifecycleCalls.push(`audit:${self.entityId(entity)}:${self.hp[entity]}`);
+          }
+        }
+      },
+    } as const;
+    const machines = { ownerActor, cleanupActor, auditActor };
+    const spawnEvents = createStage8SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE8: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: {
+          ownerActor: { hp: payload.hp },
+          cleanupActor: { hp: payload.hp },
+          auditActor: { hp: payload.hp },
+        },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+    const access = entityAccess<typeof machines>(manager);
+    const ownerStore = access.get("ownerActor");
+    const cleanupStore = access.get("cleanupActor");
+    const auditStore = access.get("auditActor");
+    const subscriberSnapshots: Array<{ readonly ownerHasA: boolean; readonly ownerCount: number; readonly cleanupCount: number }> = [];
+    manager.onTransition((_prev, _next, action) => {
+      if (action.type !== "EXPIRE") return;
+      subscriberSnapshots.push({
+        ownerHasA: ownerStore.has(0 as EntityIndex),
+        ownerCount: ownerStore.count,
+        cleanupCount: cleanupStore.count,
+      });
+    });
+
+    spawnStage8Entity(manager, "unit/a", 10);
+    spawnStage8Entity(manager, "unit/b", 20);
+    const runtime = getEntityRuntimeState(manager.entities);
+    const firstGeneration = runtime.entityStore.generation[0];
+
+    manager.transition({ type: "EXPIRE", meta: { entityId: "unit/a" } } as never);
+
+    expect(ownerLifecycleCalls).toEqual([]);
+    expect(cleanupLifecycleCalls).toEqual(["cleanup:unit/a:10", "audit:unit/a:10"]);
+    expect(subscriberSnapshots).toEqual([{ ownerHasA: false, ownerCount: 1, cleanupCount: 1 }]);
+    expect(ownerStore.has(0 as EntityIndex)).toBe(false);
+    expect(cleanupStore.has(0 as EntityIndex)).toBe(false);
+    expect(auditStore.has(0 as EntityIndex)).toBe(false);
+    expect(ownerStore.has(1 as EntityIndex)).toBe(true);
+    expect(cleanupStore.hp[0 as EntityIndex]).toBe(0);
+    expect(runtime.actorRowsByEntity[0]).toEqual([]);
+    expect(runtime.entityStore.alive[0]).toBe(0);
+    expect(runtime.entityStore.alive[1]).toBe(1);
+    expect(runtime.entityStore.indexById["unit/a"]).toBeUndefined();
+    expect(runtime.entityStore.indexById["unit/b"]).toBe(1);
+    expect(runtime.entityStore.freeList).toEqual([0]);
+    expect(runtime.entityStore.count).toBe(1);
+    expect(manager.getState().ownerActor.count).toBe(1);
+
+    spawnStage8Entity(manager, "unit/a", 30);
+
+    expect(runtime.entityStore.indexById["unit/a"]).toBe(0);
+    expect(runtime.entityStore.generation[0]).toBe(firstGeneration + 1);
+    expect(runtime.entityStore.freeList).toEqual([]);
+    expect(ownerStore.has(0 as EntityIndex)).toBe(true);
+    expect(cleanupStore.has(0 as EntityIndex)).toBe(true);
+    expect(cleanupStore.hp[0 as EntityIndex]).toBe(30);
+    expect(cleanupStore.hp[1 as EntityIndex]).toBe(20);
+    expect(runtime.actorStores.cleanupActor.rowVersion[0]).toBe(1);
+  });
+
+  it("переход в __RESOLVED удаляет только terminal row и не despawn-ит entity", () => {
+    const lifecycleCalls: string[] = [];
+    const resolverActor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "ACTIVE" },
+        ACTIVE: { DONE: "__RESOLVED" },
+      },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+      reducer(_slice: unknown, action: { readonly type: string }, { self }: { readonly self: any }) {
+        if (action.type !== "ENTITY_DESPAWNED") return;
+        for (const entity of self.indices) lifecycleCalls.push(self.entityId(entity));
+      },
+    } as const;
+    const siblingActor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "ACTIVE" },
+        ACTIVE: { PING: "ACTIVE" },
+      },
+      initialState: "__INIT",
+      initialContext: { hits: i32() },
+      spawnSchema: {},
+      reducer(_slice: unknown, action: { readonly type: string }, { self }: { readonly self: any }) {
+        if (action.type !== "PING") return;
+        for (const entity of self.indices) self.hits[entity] += 1;
+      },
+    } as const;
+    const machines = { resolverActor, siblingActor };
+    const spawnEvents = createStage8SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE8: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: { resolverActor: {}, siblingActor: {} },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+    const resolverStore = entityAccess<typeof machines>(manager).get("resolverActor");
+    const siblingStore = entityAccess<typeof machines>(manager).get("siblingActor");
+    const subscriberSnapshots: Array<{ readonly resolverCount: number; readonly siblingCount: number }> = [];
+    manager.onTransition((_prev, _next, action) => {
+      if (action.type !== "DONE") return;
+      subscriberSnapshots.push({ resolverCount: resolverStore.count, siblingCount: siblingStore.count });
+    });
+
+    spawnStage8Entity(manager, "unit/a", 1);
+    manager.transition({ type: "DONE", meta: { entityId: "unit/a" } } as never);
+
+    const runtime = getEntityRuntimeState(manager.entities);
+    expect(lifecycleCalls).toEqual([]);
+    expect(subscriberSnapshots).toEqual([{ resolverCount: 0, siblingCount: 1 }]);
+    expect(resolverStore.has(0 as EntityIndex)).toBe(false);
+    expect(siblingStore.has(0 as EntityIndex)).toBe(true);
+    expect(runtime.entityStore.alive[0]).toBe(1);
+    expect(runtime.entityStore.indexById["unit/a"]).toBe(0);
+    expect(runtime.entityStore.freeList).toEqual([]);
+  });
+
+  it("cleanup удаляет entity без ENTITY_DESPAWNED edge и очищает group indexes", () => {
+    const actor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "ACTIVE" },
+        ACTIVE: { EXPIRE: "EXPIRED" },
+        EXPIRED: {},
+      },
+      initialState: "__INIT",
+      initialContext: { hp: i32() },
+      spawnSchema: { hp: i32() },
+      despawnOn: "EXPIRED",
+      reducer(
+        _slice: unknown,
+        action: { readonly type: string },
+        { self, payloadFor }: { readonly self: any; payloadFor(entity: EntityIndex): { readonly hp: number } },
+      ) {
+        if (action.type !== "ENTITY_SPAWNED") return;
+        for (const entity of self.indices) self.hp[entity] = payloadFor(entity).hp;
+      },
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createStage8SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE8: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: { actor: { hp: payload.hp } },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+    const store = entityAccess<typeof machines>(manager).get("actor");
+
+    spawnStage8Entity(manager, "unit/solo", 7);
+    manager.transition({ type: "EXPIRE" });
+
+    const runtime = getEntityRuntimeState(manager.entities);
+    expect(store.count).toBe(0);
+    expect(store.has(0 as EntityIndex)).toBe(false);
+    expect(store.hp[0 as EntityIndex]).toBe(0);
+    expect(runtime.actorRowsByGroupTag.unit).toBeUndefined();
+    expect(runtime.entityStore.entitiesByGroupTag.unit).toBeUndefined();
+    expect(runtime.entityStore.groupTagPosition[0]).toBe(-1);
+    expect(runtime.entityStore.freeList).toEqual([0]);
+  });
+
+  it("despawn lifecycle пропускает terminal attached row и затем очищает ее вместе с entity", () => {
+    const lifecycleCalls: string[] = [];
+    const terminalActor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "ACTIVE" },
+        ACTIVE: { EXPIRE: "__RESOLVED" },
+      },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+    } as const;
+    const cleanupActor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "ACTIVE" },
+        ACTIVE: { EXPIRE: "EXPIRED" },
+        EXPIRED: { ENTITY_DESPAWNED: "CLEANED" },
+        CLEANED: {},
+      },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+      despawnOn: "EXPIRED",
+      reducer(_slice: unknown, action: { readonly type: string }, { self }: { readonly self: any }) {
+        if (action.type !== "ENTITY_DESPAWNED") return;
+        for (const entity of self.indices) lifecycleCalls.push(self.entityId(entity));
+      },
+    } as const;
+    const machines = { terminalActor, cleanupActor };
+    const spawnEvents = createStage8SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE8: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: { terminalActor: {}, cleanupActor: {} },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+
+    spawnStage8Entity(manager, "unit/a", 1);
+    manager.transition({ type: "EXPIRE" });
+
+    const access = entityAccess<typeof machines>(manager);
+    expect(lifecycleCalls).toEqual(["unit/a"]);
+    expect(access.get("terminalActor").count).toBe(0);
+    expect(access.get("cleanupActor").count).toBe(0);
+    expect(getEntityRuntimeState(manager.entities).entityStore.alive[0]).toBe(0);
+  });
+
+  it("валидирует despawnOn при init и компилирует его в despawnStateMask", () => {
+    const metadata = compileEntityTemplate("actor", {
+      config: {
+        __INIT: { ENTITY_SPAWNED: "ACTIVE" },
+        ACTIVE: { EXPIRE: "EXPIRED" },
+        EXPIRED: {},
+      },
+      initialContext: {},
+      spawnSchema: {},
+      despawnOn: ["EXPIRED"],
+    });
+    expect(metadata.despawnStateMask[metadata.stateCodeByName.EXPIRED]).toBe(1);
+    expect(metadata.despawnStateMask[metadata.stateCodeByName.ACTIVE]).toBe(0);
+
+    const nonPublicError = expectLiteFsmError(
+      () =>
+        compileEntityTemplate("actor", {
+          config: {
+            __INIT: { ENTITY_SPAWNED: "ACTIVE" },
+            ACTIVE: {},
+            "*": {},
+          },
+          initialContext: {},
+          spawnSchema: {},
+          despawnOn: "*",
+        }),
+      "LITE_FSM_INVALID_STORAGE_CONFIG",
+    );
+    expect(nonPublicError.message).toContain("non-public state '*'");
+
+    const unknownError = expectLiteFsmError(
+      () =>
+        MachineManager(
+          { actor: { ...createEntityTemplate(), despawnOn: "MISSING" } as never },
+          { plugins: [entitiesPlugin()] as const },
+        ),
+      "LITE_FSM_INVALID_STORAGE_CONFIG",
+    );
+    expect(unknownError.message).toContain("despawnOn");
+    expect(unknownError.message).toContain("MISSING");
+
+    const specialError = expectLiteFsmError(
+      () =>
+        MachineManager(
+          { actor: { ...createEntityTemplate(), despawnOn: "__RESOLVED" } as never },
+          { plugins: [entitiesPlugin()] as const },
+        ),
+      "LITE_FSM_INVALID_STORAGE_CONFIG",
+    );
+    expect(specialError.message).toContain("special state '__RESOLVED'");
+
+    const shapeError = expectLiteFsmError(
+      () =>
+        MachineManager(
+          { actor: { ...createEntityTemplate(), despawnOn: [1] } as never },
+          { plugins: [entitiesPlugin()] as const },
+        ),
+      "LITE_FSM_INVALID_STORAGE_CONFIG",
+    );
+    expect(shapeError.message).toContain("state name");
+
+    const instanceError = expectLiteFsmError(
+      () =>
+        MachineManager(
+          {
+            actor: {
+              storage: "instance",
+              config: { READY: {} },
+              initialState: "READY",
+              initialContext: {},
+              despawnOn: "READY",
+            } as never,
+          },
+          { plugins: [entitiesPlugin()] as const },
+        ),
+      "LITE_FSM_INVALID_STORAGE_CONFIG",
+    );
+    expect(instanceError.message).toContain('storage: "entity"');
+
+    const runtime = createEntityRuntimeState(
+      [{ key: "actor", kind: "entity", data: compileEntityTemplate("actor", createEntityTemplate()) }],
+      {} as never,
+    );
+    const transaction = prepareEntityTransaction({ runtime: new Map<string, unknown>() }, runtime);
+    expect(scheduleEntityDespawn(transaction, 0 as EntityIndex)).toBe(false);
+  });
+});
+
+describe("@lite-fsm/entities — этап 9 effects и transition helpers", () => {
+  const createStage9SpawnEvents = () =>
+    defineSpawnEvents({
+      SPAWN_STAGE9: spawnEvent<{ readonly id: string; readonly groupTag: string }>(),
+    });
+
+  const spawnStage9Entity = (
+    manager: {
+      transition(action: {
+        readonly type: "SPAWN_STAGE9";
+        readonly payload: { readonly id: string; readonly groupTag: string };
+      }): unknown;
+    },
+    id: string,
+    groupTag = "unit",
+  ) => {
+    manager.transition({ type: "SPAWN_STAGE9", payload: { id, groupTag } });
+  };
+
+  it("enter-state effect вызывается один раз на batch после subscribers и middleware post-next", () => {
+    const order: string[] = [];
+    const actor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "READY" },
+        READY: { TICK: "READY" },
+      },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+      effects: {
+        READY: ({ self }: { readonly self: { readonly indices: readonly EntityIndex[]; entityId(entity: EntityIndex): string } }) => {
+          order.push(`effect:${self.indices.map((entity) => self.entityId(entity)).join(",")}`);
+        },
+      },
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createStage9SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE9: (payload) => [
+        { id: `${payload.id}/a`, groupTag: payload.groupTag, actors: { actor: {} } },
+        { id: `${payload.id}/b`, groupTag: payload.groupTag, actors: { actor: {} } },
+      ],
+    });
+    type Stage9BatchEvent =
+      | { readonly type: "TICK" }
+      | { readonly type: "SPAWN_STAGE9"; readonly payload: { readonly id: string; readonly groupTag: string } };
+    const middleware: Middleware<any, Stage9BatchEvent> =
+      () => (next) => (action) => {
+        order.push("middleware:before");
+        const result = next(action);
+        order.push("middleware:after");
+        return result;
+      };
+    const manager = MachineManager(machines, {
+      middleware: [middleware],
+      plugins: [entitiesPlugin({ spawn })] as const,
+    });
+    manager.onTransition((_prev, _next, action) => {
+      order.push(`subscriber:${action.type}`);
+    });
+
+    manager.transition({ type: "TICK" });
+    expect(order).toEqual(["middleware:before", "subscriber:TICK", "middleware:after"]);
+    order.length = 0;
+
+    spawnStage9Entity(manager, "unit");
+
+    expect(order).toEqual([
+      "middleware:before",
+      "subscriber:SPAWN_STAGE9",
+      "middleware:after",
+      "effect:unit/a,unit/b",
+    ]);
+  });
+
+  it("effects используют final state после reducer и не запускаются для steady/rollback/despawnOn rows", () => {
+    const effects: string[] = [];
+    const actor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "READY" },
+        READY: {
+          TICK: "READY",
+          STOP: "STOPPED",
+          ROLLBACK: "STOPPED",
+          OVERRIDE: "STOPPED",
+          EXPIRE: "EXPIRED",
+        },
+        STOPPED: {},
+        ALT: {},
+        EXPIRED: {},
+      },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+      despawnOn: "EXPIRED",
+      reducer(_slice: unknown, action: { readonly type: string }, { self }: { readonly self: any }) {
+        for (const entity of self.indices) {
+          if (action.type === "ROLLBACK") self.stateCode[entity] = self.prevStateCode[entity];
+          if (action.type === "OVERRIDE") self.stateCode[entity] = self.states.ALT;
+        }
+      },
+      effects: {
+        STOPPED: ({ self }: { readonly self: { readonly indices: readonly EntityIndex[]; entityId(entity: EntityIndex): string } }) => {
+          effects.push(`STOPPED:${self.entityId(self.indices[0])}`);
+        },
+        ALT: ({ self }: { readonly self: { readonly indices: readonly EntityIndex[]; entityId(entity: EntityIndex): string } }) => {
+          effects.push(`ALT:${self.entityId(self.indices[0])}`);
+        },
+        EXPIRED: () => {
+          effects.push("EXPIRED");
+        },
+      },
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createStage9SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE9: (payload) => ({ id: payload.id, groupTag: payload.groupTag, actors: { actor: {} } }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+    const store = entityAccess<typeof machines>(manager).get("actor");
+
+    spawnStage9Entity(manager, "unit/steady");
+    manager.transition({ type: "TICK" });
+    manager.transition({ type: "ROLLBACK" });
+    expect(effects).toEqual([]);
+    expect(store.state(0 as EntityIndex)).toBe("READY");
+
+    manager.transition({ type: "OVERRIDE" });
+    expect(effects).toEqual(["ALT:unit/steady"]);
+    expect(store.state(0 as EntityIndex)).toBe("ALT");
+
+    spawnStage9Entity(manager, "unit/stop");
+    manager.transition({ type: "STOP", meta: { entityId: "unit/stop" } } as never);
+    expect(effects).toEqual(["ALT:unit/steady", "STOPPED:unit/stop"]);
+
+    spawnStage9Entity(manager, "unit/despawn");
+    manager.transition({ type: "EXPIRE", meta: { entityId: "unit/despawn" } } as never);
+    expect(effects).toEqual(["ALT:unit/steady", "STOPPED:unit/stop"]);
+    expect(store.has(2 as EntityIndex)).toBe(false);
+  });
+
+  it("sync throw из entity effect сообщает onError и сохраняет committed state", () => {
+    const errors: unknown[] = [];
+    const actor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: {} },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+      effects: {
+        READY: () => {
+          throw new Error("sync entity effect failed");
+        },
+      },
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createStage9SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE9: (payload) => ({ id: payload.id, groupTag: payload.groupTag, actors: { actor: {} } }),
+    });
+    const manager = MachineManager(machines, {
+      plugins: [entitiesPlugin({ spawn })] as const,
+      onError: (error) => errors.push(error),
+    });
+    const store = entityAccess<typeof machines>(manager).get("actor");
+
+    expect(() => spawnStage9Entity(manager, "unit/sync")).not.toThrow();
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toBeInstanceOf(Error);
+    expect((errors[0] as Error).message).toBe("sync entity effect failed");
+    expect(store.state(0 as EntityIndex)).toBe("READY");
+  });
+
+  it("async rejection из entity effect сообщает onError без unhandled flow и сохраняет committed state", async () => {
+    const errors: unknown[] = [];
+    const actor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { TICK: "READY" } },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+      effects: {
+        READY: async () => {
+          await Promise.resolve();
+          throw new Error("async entity effect failed");
+        },
+      },
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createStage9SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE9: (payload) => ({ id: payload.id, groupTag: payload.groupTag, actors: { actor: {} } }),
+    });
+    const manager = MachineManager(machines, {
+      plugins: [entitiesPlugin({ spawn })] as const,
+      onError: (error) => errors.push(error),
+    });
+    const store = entityAccess<typeof machines>(manager).get("actor");
+
+    expect(() => spawnStage9Entity(manager, "unit/async")).not.toThrow();
+    expect(store.state(0 as EntityIndex)).toBe("READY");
+    expect(errors).toEqual([]);
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toBeInstanceOf(Error);
+    expect((errors[0] as Error).message).toBe("async entity effect failed");
+    expect(() => manager.transition({ type: "TICK" })).not.toThrow();
+    expect(store.state(0 as EntityIndex)).toBe("READY");
+  });
+
+  it("async effect сохраняет captured scope, self.has видит stale row, а scoped entities валидирует get/maybe", async () => {
+    let resume!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      resume = resolve;
+    });
+    const observations: string[] = [];
+    const mainActor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "READY" },
+        READY: { EXPIRE: "DEAD" },
+        DEAD: {},
+      },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+      despawnOn: "DEAD",
+      effects: {
+        READY: async ({ self, entities }: { readonly self: any; readonly entities: EntityAccess<any> }) => {
+          const entity = self.indices[0];
+          const sibling = entities.get("siblingActor" as never);
+          observations.push(`before:${self.has(entity)}:${sibling.has(entity)}`);
+          await gate;
+          observations.push(`after:${self.has(entity)}:${entities.maybe("siblingActor" as never).has(entity)}`);
+          try {
+            entities.get("siblingActor" as never);
+          } catch (error) {
+            observations.push(`get-error:${(error as LiteFsmError).code}:${(error as Error).message.includes("unit/a")}`);
+          }
+        },
+      },
+    } as const;
+    const siblingActor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: {} },
+      initialState: "__INIT",
+      initialContext: { value: i32() },
+      spawnSchema: {},
+    } as const;
+    const machines = { mainActor, siblingActor };
+    const spawnEvents = createStage9SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE9: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: { mainActor: {}, siblingActor: {} },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+
+    spawnStage9Entity(manager, "unit/a");
+    expect(observations).toEqual(["before:true:true"]);
+    manager.transition({ type: "EXPIRE", meta: { entityId: "unit/a" } } as never);
+    resume();
+    await Promise.resolve();
+
+    expect(observations).toEqual([
+      "before:true:true",
+      "after:false:false",
+      "get-error:LITE_FSM_INVALID_STORAGE_RUNTIME:true",
+    ]);
+  });
+
+  it("scoped entities.get сообщает source actor, event type, requested key и entity id", () => {
+    const mainActor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: {} },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+      effects: {
+        READY: ({ entities }: { readonly entities: EntityAccess<any> }) => {
+          entities.get("siblingActor" as never);
+        },
+      },
+    } as const;
+    const siblingActor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: {} },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+    } as const;
+    const machines = { mainActor, siblingActor };
+    const spawnEvents = createStage9SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE9: (payload) => ({ id: payload.id, groupTag: payload.groupTag, actors: { mainActor: {} } }),
+    });
+    const errors: unknown[] = [];
+    const manager = MachineManager(machines, {
+      plugins: [entitiesPlugin({ spawn })] as const,
+      onError: (error) => errors.push(error),
+    });
+
+    expect(() => spawnStage9Entity(manager, "unit/a")).not.toThrow();
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toBeInstanceOf(LiteFsmError);
+    const error = errors[0] as Error;
+    expect(error.message).toContain("source actor 'mainActor'");
+    expect(error.message).toContain("SPAWN_STAGE9");
+    expect(error.message).toContain("siblingActor");
+    expect(error.message).toContain("unit/a");
+  });
+
+  it("transition.entity/tag/actor routes через core semantics и transition.entity dedupe-ит ids", () => {
+    const commanderActor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "IDLE" }, IDLE: { COMMAND: "ACTIVE" }, ACTIVE: {} },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+      effects: {
+        ACTIVE: ({ transition }: { readonly transition: any }) => {
+          transition.entity(["target/a", "missing", "target/a", "target/b"], { type: "HIT" });
+          transition.tag("enemy", { type: "TAG_HIT" });
+          transition.actor(["instanceActor/0", "missing"], { type: "ACTOR_HIT" });
+        },
+      },
+    } as const;
+    const targetActor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { HIT: "READY", TAG_HIT: "READY", ACTOR_HIT: "READY" } },
+      initialState: "__INIT",
+      initialContext: { hit: i32(), tagHit: i32(), actorHit: i32() },
+      spawnSchema: {},
+      reducer(_slice: unknown, action: { readonly type: string }, { self }: { readonly self: any }) {
+        for (const entity of self.indices) {
+          if (action.type === "HIT") self.hit[entity] += 1;
+          if (action.type === "TAG_HIT") self.tagHit[entity] += 1;
+          if (action.type === "ACTOR_HIT") self.actorHit[entity] += 1;
+        }
+      },
+    } as const;
+    const instanceActor = {
+      storage: "instance",
+      groupTag: "enemy",
+      config: { __INIT: { SPAWN_INSTANCE: "READY" }, READY: { TAG_HIT: "READY", ACTOR_HIT: "READY" } },
+      initialState: "__INIT",
+      initialContext: { tagHit: 0, actorHit: 0 },
+      reducer: (slice: { readonly context: { readonly tagHit: number; readonly actorHit: number } }, action: { readonly type: string }, meta: { readonly nextState: "READY" }) => ({
+        state: meta.nextState,
+        context: {
+          tagHit: slice.context.tagHit + (action.type === "TAG_HIT" ? 1 : 0),
+          actorHit: slice.context.actorHit + (action.type === "ACTOR_HIT" ? 1 : 0),
+        },
+      }),
+    } as const;
+    const machines = { commanderActor, targetActor, instanceActor };
+    const spawnEvents = createStage9SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE9: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: payload.id.startsWith("target/")
+          ? { targetActor: {} }
+          : { commanderActor: {} },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+    const target = entityAccess<typeof machines>(manager).get("targetActor");
+
+    spawnStage9Entity(manager, "target/a", "enemy");
+    spawnStage9Entity(manager, "target/b", "ally");
+    spawnStage9Entity(manager, "commander/a", "commander");
+    manager.transition({ type: "SPAWN_INSTANCE" } as never);
+    manager.transition({ type: "COMMAND", meta: { entityId: "commander/a" } } as never);
+
+    const instanceRows = Object.values(manager.getState().instanceActor);
+    expect(target.hit[0 as EntityIndex]).toBe(1);
+    expect(target.hit[1 as EntityIndex]).toBe(1);
+    expect(target.tagHit[0 as EntityIndex]).toBe(1);
+    expect(target.tagHit[1 as EntityIndex]).toBe(0);
+    expect(target.actorHit[0 as EntityIndex]).toBe(0);
+    expect(target.actorHit[1 as EntityIndex]).toBe(0);
+    expect(instanceRows).toHaveLength(1);
+    expect(instanceRows[0].context).toEqual({ tagHit: 1, actorHit: 1 });
+  });
+
+  it("transition.despawn удаляет captured rows, entity ids unknown/already deleted являются no-op", () => {
+    const despawnerActor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { DESPAWN: "ACTIVE" }, ACTIVE: {} },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+      effects: {
+        ACTIVE: ({ self, transition }: { readonly self: { readonly indices: readonly EntityIndex[] }; readonly transition: any }) => {
+          transition.despawn("missing");
+          transition.despawn(self.indices);
+          transition.despawn("unit/a");
+        },
+      },
+    } as const;
+    const machines = { despawnerActor };
+    const spawnEvents = createStage9SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE9: (payload) => ({ id: payload.id, groupTag: payload.groupTag, actors: { despawnerActor: {} } }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+    const store = entityAccess<typeof machines>(manager).get("despawnerActor");
+
+    spawnStage9Entity(manager, "unit/a");
+    manager.transition({ type: "DESPAWN", meta: { entityId: "unit/a" } } as never);
+
+    expect(store.has(0 as EntityIndex)).toBe(false);
+    expect(getEntityRuntimeState(manager.entities).entityStore.indexById["unit/a"]).toBeUndefined();
+  });
+
+  it("transition.despawn отклоняет raw EntityIndex array вне self.indices", () => {
+    const errors: string[] = [];
+    const actor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { RUN: "ACTIVE" }, ACTIVE: {} },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+      effects: {
+        ACTIVE: ({ transition }: { readonly transition: any }) => {
+          try {
+            transition.despawn([0 as EntityIndex]);
+          } catch (error) {
+            errors.push((error as Error).message);
+          }
+        },
+      },
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createStage9SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE9: (payload) => ({ id: payload.id, groupTag: payload.groupTag, actors: { actor: {} } }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+
+    spawnStage9Entity(manager, "unit/a");
+    manager.transition({ type: "RUN" });
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("self.indices");
+    expect(entityAccess<typeof machines>(manager).get("actor").has(0 as EntityIndex)).toBe(true);
+  });
+
+  it("transition helpers валидируют runtime inputs и condition() бросает clear error", () => {
+    const observations: string[] = [];
+    const actor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { RUN: "ACTIVE" }, ACTIVE: {} },
+      initialState: "__INIT",
+      initialContext: { value: i32({ default: 7 }) },
+      spawnSchema: {},
+      effects: {
+        ACTIVE: ({ self, transition, condition }: { readonly self: any; readonly transition: any; readonly condition: () => unknown }) => {
+          const entity = self.indices[0];
+          observations.push(`value:${self.value[entity]}`);
+          observations.push(`outside:${self.has(999 as EntityIndex)}`);
+          try {
+            self.entityId(999 as EntityIndex);
+          } catch (error) {
+            observations.push(`entityId:${(error as Error).message.includes("outside current entity effect scope")}`);
+          }
+          for (const run of [
+            () => transition.entity([1], { type: "NOOP" }),
+            () => transition.actor([1], { type: "NOOP" }),
+            () => transition.despawn(1),
+            () => condition(),
+          ]) {
+            try {
+              run();
+            } catch (error) {
+              observations.push((error as LiteFsmError).code);
+            }
+          }
+          transition({ type: "NOOP" });
+          transition.unscoped({ type: "NOOP" });
+          transition.group("missing", { type: "NOOP" });
+          transition.entity("missing", { type: "NOOP" });
+          transition.despawn(self.entityId(entity));
+        },
+      },
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createStage9SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE9: (payload) => ({ id: payload.id, groupTag: payload.groupTag, actors: { actor: {} } }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+    const store = entityAccess<typeof machines>(manager).get("actor");
+
+    spawnStage9Entity(manager, "unit/a");
+    manager.transition({ type: "RUN" });
+
+    expect(observations).toEqual([
+      "value:7",
+      "outside:false",
+      "entityId:true",
+      "LITE_FSM_INVALID_STORAGE_RUNTIME",
+      "LITE_FSM_INVALID_STORAGE_RUNTIME",
+      "LITE_FSM_INVALID_STORAGE_RUNTIME",
+      "LITE_FSM_INVALID_STORAGE_RUNTIME",
+    ]);
+    expect(store.has(0 as EntityIndex)).toBe(false);
+  });
+
+  it("explicit despawn options проверяют captured generation в transaction prepare", () => {
+    const runtime = createEntityRuntimeState(
+      [{ key: "actor", kind: "entity", data: compileEntityTemplate("actor", createEntityTemplate()) }],
+      {} as never,
+    );
+    const options = createEntityDespawnOptions({
+      mode: "scope",
+      entries: [{ entity: 0 as EntityIndex, generation: 1, id: "unit/a" }],
+    } as never);
+    const error = expectLiteFsmError(
+      () => prepareEntityTransaction({ runtime: new Map<string, unknown>(), options } as never, runtime),
+      "LITE_FSM_INVALID_STORAGE_RUNTIME",
+    );
+    expect(error.message).toContain("stale entity effect scope");
+
+    const previousEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    try {
+      expect(() =>
+        prepareEntityTransaction({ runtime: new Map<string, unknown>(), options } as never, runtime),
+      ).not.toThrow();
+    } finally {
+      if (previousEnv === undefined) {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = previousEnv;
+      }
+    }
+
+    const idsOptions = createEntityDespawnOptions({ mode: "ids", ids: ["missing"] } as never);
+    const idsTransaction = prepareEntityTransaction(
+      { runtime: new Map<string, unknown>(), options: idsOptions } as never,
+      runtime,
+    );
+    expect(idsTransaction.scheduledDespawns).toEqual([]);
+
+    const actorStore = runtime.actorStores.actor;
+    scheduleEntityEffectBatch(undefined, actorStore, 0, [0 as EntityIndex]);
+    scheduleEntityEffectBatch(idsTransaction, actorStore, 0, []);
+    scheduleEntityEffectBatch(idsTransaction, actorStore, 0, [0 as EntityIndex]);
+    expect(idsTransaction.effectBatches).toEqual([]);
+    scheduleEntityReactionBatch(undefined, actorStore, 0, [0 as EntityIndex]);
+    scheduleEntityReactionBatch(idsTransaction, actorStore, undefined, [0 as EntityIndex]);
+    scheduleEntityReactionBatch(idsTransaction, actorStore, 0, []);
+    scheduleEntityReactionBatch(idsTransaction, actorStore, 0, [0 as EntityIndex]);
+    expect(idsTransaction.reactionBatches).toEqual([]);
+  });
+
+  it("effect runtime helpers пропускают stale candidates и missing invocation targets", () => {
+    const actorWithoutEffects = compileEntityTemplate("actor", createEntityTemplate());
+    const runtime = createEntityRuntimeState(
+      [{ key: "actor", kind: "entity", data: actorWithoutEffects }],
+      {} as never,
+    );
+    const carrier = { runtime: new Map<string, unknown>() };
+    const transaction = prepareEntityTransaction(carrier, runtime);
+    const actorStore = runtime.actorStores.actor;
+    transaction.effectBatches.push({ store: actorStore, stateCode: 0, indices: [0 as EntityIndex] });
+
+    expect(
+      resolveEntityEffectInvocations(runtime, {
+        action: { type: "TEST" },
+        dispatch: carrier,
+      }),
+    ).toEqual([]);
+
+    const actorWithEffect = compileEntityTemplate("actor", {
+      ...createEntityTemplate(),
+      effects: { READY: () => undefined },
+    });
+    const runtimeWithEffect = createEntityRuntimeState(
+      [{ key: "actor", kind: "entity", data: actorWithEffect }],
+      {} as never,
+    );
+    const carrierWithEffect = { runtime: new Map<string, unknown>() };
+    const transactionWithEffect = prepareEntityTransaction(carrierWithEffect, runtimeWithEffect);
+    const storeWithEffect = runtimeWithEffect.actorStores.actor;
+    ensureEntityCapacity(runtimeWithEffect.entityStore, 3);
+    ensureActorCapacity(storeWithEffect, 3);
+    storeWithEffect.presence[1] = 1;
+    storeWithEffect.presence[2] = 1;
+    storeWithEffect.stateCode[1] = 0;
+    storeWithEffect.stateCode[2] = 0;
+    runtimeWithEffect.entityStore.alive[2] = 1;
+    runtimeWithEffect.entityStore.ids[2] = "";
+    transactionWithEffect.effectBatches.push({
+      store: storeWithEffect,
+      stateCode: 0,
+      indices: [0 as EntityIndex, 1 as EntityIndex, 2 as EntityIndex],
+    });
+
+    expect(
+      resolveEntityEffectInvocations(runtimeWithEffect, {
+        action: { type: "TEST" },
+        dispatch: carrierWithEffect,
+      }),
+    ).toEqual([]);
+
+    const manager = {
+      getDependencies: () => ({}),
+      transition: (action: unknown) => action,
+    };
+    const invocation = {
+      storeKey: "missing",
+      stateCode: 0,
+      indices: [],
+      scope: { sourceActor: "actor", eventType: "TEST", entries: [] },
+    };
+    invokeEntityEffect(runtimeWithEffect, invocation, { action: { type: "TEST" }, manager } as never);
+    invokeEntityEffect(
+      runtime,
+      { ...invocation, storeKey: "actor" },
+      { action: { type: "TEST" }, manager } as never,
+    );
+  });
+
+  it("stale transition.despawn(self.indices) бросает в dev и no-op в production", async () => {
+    const runCase = async (nodeEnv: string | undefined) => {
+      const previousEnv = process.env.NODE_ENV;
+      if (nodeEnv === undefined) {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = nodeEnv;
+      }
+      let resume!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        resume = resolve;
+      });
+      const observations: string[] = [];
+      const actor = {
+        storage: "entity",
+        config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { EXPIRE: "DEAD" }, DEAD: {} },
+        initialState: "__INIT",
+        initialContext: {},
+        spawnSchema: {},
+        despawnOn: "DEAD",
+        effects: {
+          READY: async ({ self, transition }: { readonly self: { readonly indices: readonly EntityIndex[] }; readonly transition: any }) => {
+            await gate;
+            try {
+              transition.despawn(self.indices);
+              observations.push("no-op");
+            } catch (error) {
+              observations.push((error as LiteFsmError).code);
+            }
+          },
+        },
+      } as const;
+      const machines = { actor };
+      const spawnEvents = createStage9SpawnEvents();
+      const spawn = defineEntitySpawn(machines, spawnEvents)({
+        SPAWN_STAGE9: (payload) => ({ id: payload.id, groupTag: payload.groupTag, actors: { actor: {} } }),
+      });
+      const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+
+      try {
+        spawnStage9Entity(manager, "unit/a");
+        manager.transition({ type: "EXPIRE", meta: { entityId: "unit/a" } } as never);
+        resume();
+        await Promise.resolve();
+        return observations;
+      } finally {
+        if (previousEnv === undefined) {
+          delete process.env.NODE_ENV;
+        } else {
+          process.env.NODE_ENV = previousEnv;
+        }
+      }
+    };
+
+    await expect(runCase(undefined)).resolves.toEqual(["LITE_FSM_INVALID_STORAGE_RUNTIME"]);
+    await expect(runCase("production")).resolves.toEqual(["no-op"]);
+  });
+
+  it("валидирует unsupported entity effect features при init", () => {
+    const wildcardError = expectLiteFsmError(
+      () =>
+        MachineManager(
+          {
+            actor: {
+              ...createEntityTemplate(),
+              effects: { "*": () => undefined },
+            } as never,
+          },
+          { plugins: [entitiesPlugin()] as const },
+        ),
+      "LITE_FSM_INVALID_STORAGE_CONFIG",
+    );
+    expect(wildcardError.message).toContain("wildcard");
+
+    const unknownStateError = expectLiteFsmError(
+      () =>
+        MachineManager(
+          {
+            actor: {
+              ...createEntityTemplate(),
+              effects: { MISSING: () => undefined },
+            } as never,
+          },
+          { plugins: [entitiesPlugin()] as const },
+        ),
+      "LITE_FSM_INVALID_STORAGE_CONFIG",
+    );
+    expect(unknownStateError.message).toContain("MISSING");
+
+    const valueError = expectLiteFsmError(
+      () =>
+        MachineManager(
+          {
+            actor: {
+              ...createEntityTemplate(),
+              effects: { READY: 1 },
+            } as never,
+          },
+          { plugins: [entitiesPlugin()] as const },
+        ),
+      "LITE_FSM_INVALID_STORAGE_CONFIG",
+    );
+    expect(valueError.message).toContain("must be a function");
+
+    const shapeError = expectLiteFsmError(
+      () =>
+        MachineManager(
+          {
+            actor: {
+              ...createEntityTemplate(),
+              effects: 1,
+            } as never,
+          },
+          { plugins: [entitiesPlugin()] as const },
+        ),
+      "LITE_FSM_INVALID_STORAGE_CONFIG",
+    );
+    expect(shapeError.message).toContain("effects must be a plain object");
+  });
+});
+
+describe("@lite-fsm/entities — этап 10 reactions и reaction error semantics", () => {
+  const createStage10SpawnEvents = () =>
+    defineSpawnEvents({
+      SPAWN_STAGE10: spawnEvent<{ readonly id: string; readonly groupTag: string; readonly value: number }>(),
+    });
+
+  const spawnStage10Entity = (
+    manager: {
+      transition(action: {
+        readonly type: "SPAWN_STAGE10";
+        readonly payload: { readonly id: string; readonly groupTag: string; readonly value: number };
+      }): unknown;
+    },
+    id: string,
+    value: number,
+    groupTag = "unit",
+  ) => {
+    manager.transition({ type: "SPAWN_STAGE10", payload: { id, groupTag, value } });
+  };
+
+  it("reaction вызывается один раз на template для accepted event и видит committed reducer state", () => {
+    const movementReactions: string[] = [];
+    const sensorReactions: string[] = [];
+    const userDepsCalls: string[] = [];
+    const movementActor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "READY" },
+        READY: { TICK: "READY", STEADY: "READY" },
+      },
+      initialState: "__INIT",
+      initialContext: { x: i32() },
+      spawnSchema: { value: i32() },
+      reducer(
+        _slice: unknown,
+        action: { readonly type: string },
+        { self, payloadFor }: { readonly self: any; payloadFor(entity: EntityIndex): { readonly value: number } },
+      ) {
+        for (const entity of self.indices) {
+          if (action.type === "ENTITY_SPAWNED") self.x[entity] = payloadFor(entity).value;
+          if (action.type === "TICK") self.x[entity] += 1;
+        }
+      },
+      reactions: {
+        TICK: ({ self, entities, api }: { readonly self: any; readonly entities: EntityAccess<any>; readonly api: { record(value: string): void } }) => {
+          const sensor = entities.get("sensorActor" as never);
+          movementReactions.push(
+            self.indices
+              .map((entity: EntityIndex) => `${self.entityId(entity)}:${self.x[entity]}:${sensor.marker[entity]}`)
+              .join("|"),
+          );
+          api.record("movement");
+        },
+        STEADY: ({ self }: { readonly self: any }) => {
+          movementReactions.push(`steady:${self.indices.map((entity: EntityIndex) => self.entityId(entity)).join(",")}`);
+        },
+      },
+    } as const;
+    const sensorActor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "READY" },
+        READY: { TICK: "READY" },
+      },
+      initialState: "__INIT",
+      initialContext: { marker: i32() },
+      spawnSchema: { value: i32() },
+      reducer(
+        _slice: unknown,
+        action: { readonly type: string },
+        { self, payloadFor }: { readonly self: any; payloadFor(entity: EntityIndex): { readonly value: number } },
+      ) {
+        for (const entity of self.indices) {
+          if (action.type === "ENTITY_SPAWNED") self.marker[entity] = payloadFor(entity).value * 10;
+        }
+      },
+      reactions: {
+        TICK: ({ self }: { readonly self: any }) => {
+          sensorReactions.push(`sensor:${self.indices.map((entity: EntityIndex) => self.entityId(entity)).join(",")}`);
+        },
+      },
+    } as const;
+    const machines = { movementActor, sensorActor };
+    const spawnEvents = createStage10SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE10: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: {
+          movementActor: { value: payload.value },
+          sensorActor: { value: payload.value },
+        },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+    manager.setDependencies({ api: { record: (value: string) => userDepsCalls.push(value) } } as never);
+
+    spawnStage10Entity(manager, "unit/a", 2);
+    spawnStage10Entity(manager, "unit/b", 3);
+    manager.transition({ type: "TICK" });
+    manager.transition({ type: "STEADY" });
+
+    expect(movementReactions).toEqual(["unit/a:3:20|unit/b:4:30", "steady:unit/a,unit/b"]);
+    expect(sensorReactions).toEqual(["sensor:unit/a,unit/b"]);
+    expect(userDepsCalls).toEqual(["movement"]);
+  });
+
+  it("ENTITY_DESPAWNED reaction читает columns до cleanup и исходный event не получает удаленные rows", () => {
+    const lifecycleReactions: string[] = [];
+    const originalReactions: string[] = [];
+    const effects: string[] = [];
+    const actor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "ACTIVE" },
+        ACTIVE: { IGNORE: "IGNORED", EXPIRE: "EXPIRED" },
+        IGNORED: { EXPIRE: "DEAD" },
+        EXPIRED: { ENTITY_DESPAWNED: "CLEANED" },
+        DEAD: {},
+        CLEANED: {},
+      },
+      initialState: "__INIT",
+      initialContext: { hp: i32() },
+      spawnSchema: { value: i32() },
+      despawnOn: ["EXPIRED", "DEAD"] as const,
+      reducer(
+        _slice: unknown,
+        action: { readonly type: string },
+        { self, payloadFor }: { readonly self: any; payloadFor(entity: EntityIndex): { readonly value: number } },
+      ) {
+        for (const entity of self.indices) {
+          if (action.type === "ENTITY_SPAWNED") self.hp[entity] = payloadFor(entity).value;
+        }
+      },
+      reactions: {
+        EXPIRE: ({ self }: { readonly self: any }) => {
+          originalReactions.push(self.indices.map((entity: EntityIndex) => self.entityId(entity)).join(","));
+        },
+        ENTITY_DESPAWNED: ({ self }: { readonly self: any }) => {
+          lifecycleReactions.push(
+            self.indices.map((entity: EntityIndex) => `${self.entityId(entity)}:${self.hp[entity]}`).join(","),
+          );
+        },
+      },
+      effects: {
+        EXPIRED: () => effects.push("EXPIRED"),
+        DEAD: () => effects.push("DEAD"),
+      },
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createStage10SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE10: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: { actor: { value: payload.value } },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+    const store = entityAccess<typeof machines>(manager).get("actor");
+    const subscriberSnapshots: Array<{ readonly count: number; readonly hasA: boolean; readonly hasB: boolean }> = [];
+    manager.onTransition((_prev, _next, action) => {
+      if (action.type !== "EXPIRE") return;
+      subscriberSnapshots.push({
+        count: store.count,
+        hasA: store.has(0 as EntityIndex),
+        hasB: store.has(1 as EntityIndex),
+      });
+    });
+
+    spawnStage10Entity(manager, "unit/a", 10);
+    spawnStage10Entity(manager, "unit/b", 20);
+    manager.transition({ type: "IGNORE", meta: { entityId: "unit/b" } } as never);
+    manager.transition({ type: "EXPIRE" });
+
+    expect(lifecycleReactions).toEqual(["unit/a:10"]);
+    expect(originalReactions).toEqual([]);
+    expect(subscriberSnapshots).toEqual([{ count: 0, hasA: false, hasB: false }]);
+    expect(effects).toEqual([]);
+    expect(store.count).toBe(0);
+    expect(store.hp[0 as EntityIndex]).toBe(0);
+    expect(store.hp[1 as EntityIndex]).toBe(0);
+    expect(getEntityRuntimeState(manager.entities).entityStore.alive[0]).toBe(0);
+    expect(getEntityRuntimeState(manager.entities).entityStore.alive[1]).toBe(0);
+  });
+
+  it("reaction errors идут в onError, не меняют return value и не блокируют subscribers", async () => {
+    const errors: unknown[] = [];
+    const observations: string[] = [];
+    let promiseSettled = false;
+    const failingActor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { TICK: "READY" } },
+      initialState: "__INIT",
+      initialContext: { value: i32() },
+      spawnSchema: { value: i32() },
+      reducer(
+        _slice: unknown,
+        action: { readonly type: string },
+        { self, payloadFor }: { readonly self: any; payloadFor(entity: EntityIndex): { readonly value: number } },
+      ) {
+        for (const entity of self.indices) {
+          if (action.type === "ENTITY_SPAWNED") self.value[entity] = payloadFor(entity).value;
+          if (action.type === "TICK") self.value[entity] += 1;
+        }
+      },
+      reactions: {
+        TICK: (deps: { readonly transition?: unknown }) => {
+          observations.push(`transition:${typeof deps.transition}`);
+          throw new Error("sync reaction failed");
+        },
+      },
+    } as const;
+    const promiseActor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { TICK: "READY" } },
+      initialState: "__INIT",
+      initialContext: { value: i32() },
+      spawnSchema: { value: i32() },
+      reducer(
+        _slice: unknown,
+        action: { readonly type: string },
+        { self, payloadFor }: { readonly self: any; payloadFor(entity: EntityIndex): { readonly value: number } },
+      ) {
+        for (const entity of self.indices) {
+          if (action.type === "ENTITY_SPAWNED") self.value[entity] = payloadFor(entity).value;
+          if (action.type === "TICK") self.value[entity] += 1;
+        }
+      },
+      reactions: {
+        TICK: () =>
+          Promise.resolve().then(() => {
+            promiseSettled = true;
+          }),
+      },
+    } as const;
+    const machines = { failingActor, promiseActor };
+    const spawnEvents = createStage10SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE10: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: {
+          failingActor: { value: payload.value },
+          promiseActor: { value: payload.value },
+        },
+      }),
+    });
+    const manager = MachineManager(machines, {
+      plugins: [entitiesPlugin({ spawn })] as const,
+      onError: (error) => errors.push(error),
+    });
+    const failingStore = entityAccess<typeof machines>(manager).get("failingActor");
+    const promiseStore = entityAccess<typeof machines>(manager).get("promiseActor");
+    manager.onTransition((_prev, _next, action) => {
+      if (action.type === "TICK") {
+        observations.push(`subscriber:${failingStore.value[0 as EntityIndex]}:${promiseSettled}`);
+      }
+    });
+
+    spawnStage10Entity(manager, "unit/a", 5);
+    const result = manager.transition({ type: "TICK" });
+
+    expect(result).toEqual({ type: "TICK" });
+    expect(observations).toEqual(["transition:undefined", "subscriber:6:false"]);
+    expect(failingStore.value[0 as EntityIndex]).toBe(6);
+    expect(promiseStore.value[0 as EntityIndex]).toBe(6);
+    expect(errors).toHaveLength(2);
+    expect((errors[0] as Error).message).toBe("sync reaction failed");
+    expect(errors[1]).toBeInstanceOf(LiteFsmError);
+    expect((errors[1] as Error).message).toContain("sync-only");
+
+    await Promise.resolve();
+
+    expect(promiseSettled).toBe(true);
+    expect(errors).toHaveLength(2);
+  });
+
+  it("reaction self helpers проверяют captured scope и generation", () => {
+    const observations: string[] = [];
+    let runtime!: ReturnType<typeof getEntityRuntimeState>;
+    const actor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { TICK: "READY" } },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: { value: i32() },
+      reactions: {
+        TICK: ({ self }: { readonly self: any }) => {
+          const entity = self.indices[0] as EntityIndex;
+          observations.push(`outside:${self.has(999 as EntityIndex)}`);
+          try {
+            self.entityId(999 as EntityIndex);
+          } catch (error) {
+            observations.push(`entityId:${(error as Error).message.includes("reaction scope")}`);
+          }
+          runtime.entityStore.generation[entity] += 1;
+          observations.push(`stale:${self.has(entity)}`);
+          runtime.entityStore.generation[entity] -= 1;
+          runtime.actorStores.actor.presence[entity] = 0;
+          observations.push(`missing:${self.has(entity)}`);
+          runtime.actorStores.actor.presence[entity] = 1;
+        },
+      },
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createStage10SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE10: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: { actor: { value: payload.value } },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+    runtime = getEntityRuntimeState(manager.entities);
+
+    spawnStage10Entity(manager, "unit/a", 1);
+    manager.transition({ type: "TICK" });
+
+    expect(observations).toEqual(["outside:false", "entityId:true", "stale:false", "missing:false"]);
+    expect(runtime.entityStore.generation[0]).toBe(1);
+  });
+
+  it("reaction runtime helpers пропускают missing transaction, missing reaction и empty scope", () => {
+    const calls: string[] = [];
+    const runtime = createEntityRuntimeState(
+      [
+        {
+          key: "actor",
+          kind: "entity",
+          data: compileEntityTemplate("actor", {
+            ...createEntityTemplate(),
+            reactions: { TICK: () => calls.push("tick") },
+          }),
+        },
+      ],
+      {} as never,
+    );
+    const dispatch = {
+      runtime: new Map<string, unknown>(),
+      reportError(error: unknown) {
+        calls.push(`error:${String(error)}`);
+      },
+    };
+    const ctx = {
+      action: { type: "TICK" },
+      manager: { getDependencies: () => ({}) },
+      dispatch,
+    };
+    const store = runtime.actorStores.actor;
+
+    runEntityReactions(runtime, ctx);
+    runEntityReactionBatches(
+      runtime,
+      [{ store, eventCode: runtime.eventCodeByType.ENTITY_SPAWNED, indices: [0 as EntityIndex] }],
+      ctx,
+    );
+    runEntityReactionBatches(
+      runtime,
+      [{ store, eventCode: runtime.eventCodeByType.TICK, indices: [0 as EntityIndex] }],
+      ctx,
+    );
+    ensureEntityCapacity(runtime.entityStore, 1);
+    ensureActorCapacity(store, 1);
+    runtime.entityStore.alive[0] = 1;
+    runtime.entityStore.ids[0] = "";
+    store.presence[0] = 1;
+    runEntityReactionBatches(
+      runtime,
+      [{ store, eventCode: runtime.eventCodeByType.TICK, indices: [0 as EntityIndex] }],
+      ctx,
+    );
+
+    expect(calls).toEqual([]);
+  });
+
+  it("валидирует reactions при init", () => {
+    const instanceError = expectLiteFsmError(
+      () =>
+        MachineManager(
+          {
+            actor: {
+              storage: "instance",
+              config: { READY: { TICK: "READY" } },
+              initialState: "READY",
+              initialContext: {},
+              reactions: { TICK: () => undefined },
+            } as never,
+          },
+          { plugins: [entitiesPlugin()] as const },
+        ),
+      "LITE_FSM_INVALID_STORAGE_CONFIG",
+    );
+    expect(instanceError.message).toContain("reactions");
+    expect(instanceError.message).toContain('storage: "entity"');
+
+    const unknownEventError = expectLiteFsmError(
+      () =>
+        MachineManager(
+          {
+            actor: {
+              ...createEntityTemplate(),
+              reactions: { MISSING: () => undefined },
+            } as never,
+          },
+          { plugins: [entitiesPlugin()] as const },
+        ),
+      "LITE_FSM_INVALID_STORAGE_CONFIG",
+    );
+    expect(unknownEventError.message).toContain("MISSING");
+    expect(unknownEventError.message).toContain("not accepted");
+
+    const valueError = expectLiteFsmError(
+      () =>
+        MachineManager(
+          {
+            actor: {
+              ...createEntityTemplate(),
+              reactions: { TICK: 1 },
+            } as never,
+          },
+          { plugins: [entitiesPlugin()] as const },
+        ),
+      "LITE_FSM_INVALID_STORAGE_CONFIG",
+    );
+    expect(valueError.message).toContain("must be a function");
+
+    const shapeError = expectLiteFsmError(
+      () =>
+        MachineManager(
+          {
+            actor: {
+              ...createEntityTemplate(),
+              reactions: 1,
+            } as never,
+          },
+          { plugins: [entitiesPlugin()] as const },
+        ),
+      "LITE_FSM_INVALID_STORAGE_CONFIG",
+    );
+    expect(shapeError.message).toContain("reactions must be a plain object");
+  });
+});
+
+describe("@lite-fsm/entities — этап 11 snapshot.storage.entity", () => {
+  const createStage11SpawnEvents = () =>
+    defineSpawnEvents({
+      SPAWN_STAGE11: spawnEvent<{
+        readonly id: string;
+        readonly groupTag: string;
+        readonly x: number;
+        readonly hp: number;
+        readonly flags: number;
+        readonly name: string;
+      }>(),
+    });
+
+  const createStage11Machines = () => {
+    const movementActor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "READY" },
+        READY: { MOVE: "READY", STOP: "STOPPED", EXPIRE: "DEAD" },
+        STOPPED: { MOVE: "READY" },
+        DEAD: {},
+      },
+      initialState: "__INIT",
+      initialContext: {
+        x: f32(),
+        hp: i16(),
+        flags: u8(),
+        name: string(),
+      },
+      spawnSchema: {
+        x: f32(),
+        hp: i16(),
+        flags: u8(),
+        name: string(),
+      },
+      despawnOn: "DEAD",
+      reducer(
+        _slice: unknown,
+        action: { readonly type: string },
+        {
+          self,
+          payloadFor,
+        }: {
+          readonly self: any;
+          payloadFor(entity: EntityIndex): { readonly x: number; readonly hp: number; readonly flags: number; readonly name: string };
+        },
+      ) {
+        for (const entity of self.indices) {
+          if (action.type === "ENTITY_SPAWNED") {
+            const payload = payloadFor(entity);
+            self.x[entity] = payload.x;
+            self.hp[entity] = payload.hp;
+            self.flags[entity] = payload.flags;
+            self.name[entity] = payload.name;
+          }
+          if (action.type === "MOVE") {
+            self.x[entity] += 1;
+            self.hp[entity] += 1;
+          }
+        }
+      },
+    } as const;
+    const sensorActor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { MOVE: "READY" } },
+      initialState: "__INIT",
+      initialContext: { marker: i32() },
+      spawnSchema: { hp: i16() },
+      reducer(
+        _slice: unknown,
+        action: { readonly type: string },
+        { self, payloadFor }: { readonly self: any; payloadFor(entity: EntityIndex): { readonly hp: number } },
+      ) {
+        for (const entity of self.indices) {
+          if (action.type === "ENTITY_SPAWNED") self.marker[entity] = payloadFor(entity).hp * 10;
+          if (action.type === "MOVE") self.marker[entity] += 1;
+        }
+      },
+    } as const;
+    const counter = createCounter();
+    return { counter, movementActor, sensorActor } as const;
+  };
+
+  const createStage11Manager = () => {
+    const machines = createStage11Machines();
+    const spawnEvents = createStage11SpawnEvents();
+    let recipeCalls = 0;
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE11: (payload) => {
+        recipeCalls += 1;
+        return {
+          id: payload.id,
+          groupTag: payload.groupTag,
+          actors: {
+            movementActor: {
+              x: payload.x,
+              hp: payload.hp,
+              flags: payload.flags,
+              name: payload.name,
+            },
+            sensorActor: { hp: payload.hp },
+          },
+        };
+      },
+    });
+
+    return {
+      machines,
+      manager: MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const }),
+      recipeCalls: () => recipeCalls,
+    };
+  };
+
+  const spawnStage11Entity = (
+    manager: ReturnType<typeof createStage11Manager>["manager"],
+    id: string,
+    groupTag: string,
+    hp: number,
+  ) => {
+    manager.transition({
+      type: "SPAWN_STAGE11",
+      payload: { id, groupTag, x: hp / 10, hp, flags: hp % 255, name: id },
+    });
+  };
+
+  const entityStorageSnapshot = (manager: ReturnType<typeof createStage11Manager>["manager"]) =>
+    JSON.parse(JSON.stringify(manager.dehydrate().storage?.entity)) as any;
+
+  it("dehydrate JSON hydrate восстанавливает rows, columns, versions, freeList и routing", () => {
+    const source = createStage11Manager();
+    spawnStage11Entity(source.manager, "unit/a", "enemy", 10);
+    spawnStage11Entity(source.manager, "unit/b", "enemy", 20);
+    source.manager.transition({ type: "MOVE", meta: { entityId: "unit/b" } } as never);
+    source.manager.transition({ type: "EXPIRE", meta: { entityId: "unit/a" } } as never);
+
+    const snapshot = JSON.parse(JSON.stringify(source.manager.dehydrate())) as any;
+    const storage = snapshot.storage?.entity as any;
+    expect(snapshot.machines.movementActor).toMatchObject({
+      storage: "entity",
+      count: 1,
+      capacity: 2,
+    });
+    expect(snapshot.machines.movementActor.version).toBeGreaterThan(0);
+    expect(snapshot.machines.movementActor).not.toHaveProperty("columns");
+    expect(storage.entityStore.freeList).toEqual([0]);
+    expect(storage.entityStore.generation).toEqual([1, 1]);
+    expect(storage.entityStore.version).toBeGreaterThan(0);
+    expect(storage.actors.movementActor.rowVersion).toHaveLength(2);
+    expect(storage.actors.movementActor.columns.name).toEqual(["", "unit/b"]);
+    expect(source.manager.getSnapshot()).not.toHaveProperty("storage");
+    storage.actors.movementActor.rowVersion[1] = 999;
+
+    const target = createStage11Manager();
+    const delivered: string[] = [];
+    target.manager.onTransition((_prev, _next, action) => {
+      delivered.push(action.type);
+    });
+    const beforeCalls = target.recipeCalls();
+
+    target.manager.hydrate(snapshot);
+
+    const runtime = getEntityRuntimeState(target.manager.entities);
+    const movement = entityAccess<typeof target.machines>(target.manager).get("movementActor");
+    const sensor = entityAccess<typeof target.machines>(target.manager).get("sensorActor");
+    expect(delivered).toEqual([HYDRATE_ACTION_TYPE]);
+    expect(target.recipeCalls()).toBe(beforeCalls);
+    expect(movement.count).toBe(1);
+    expect(movement.has(0 as EntityIndex)).toBe(false);
+    expect(movement.has(1 as EntityIndex)).toBe(true);
+    expect(movement.state(1 as EntityIndex)).toBe("READY");
+    expect(movement.x[1 as EntityIndex]).toBeCloseTo(3);
+    expect(movement.hp[1 as EntityIndex]).toBe(21);
+    expect(movement.flags[1 as EntityIndex]).toBe(20);
+    expect(movement.name[1 as EntityIndex]).toBe("unit/b");
+    expect(sensor.marker[1 as EntityIndex]).toBe(201);
+    expect(runtime.entityStore.indexById["unit/b"]).toBe(1);
+    expect(runtime.entityStore.entitiesByGroupTag.enemy).toEqual([1]);
+    expect(runtime.entityStore.freeList).toEqual([0]);
+    expect(runtime.actorRowsByEntity[1].map((row) => row.store.templateKey).sort()).toEqual([
+      "movementActor",
+      "sensorActor",
+    ]);
+    expect(runtime.actorRowsByGroupTag.enemy.map((row) => row.store.templateKey).sort()).toEqual([
+      "movementActor",
+      "sensorActor",
+    ]);
+    expect(runtime.actorStores.movementActor.rowVersion[1]).toBeGreaterThan(999);
+    expect(runtime.actorStores.movementActor.version).toBeGreaterThan(storage.actors.movementActor.version);
+
+    target.manager.transition({ type: "MOVE", meta: { entityId: "unit/b" } } as never);
+    target.manager.transition({ type: "MOVE", meta: { groupTag: "enemy" } });
+    expect(movement.x[1 as EntityIndex]).toBeCloseTo(5);
+    expect(sensor.marker[1 as EntityIndex]).toBe(203);
+
+    spawnStage11Entity(target.manager, "unit/c", "enemy", 30);
+    expect(runtime.entityStore.indexById["unit/c"]).toBe(0);
+    expect(runtime.entityStore.generation[0]).toBe(2);
+  });
+
+  it("dehydrate filters для machines и storage независимы", () => {
+    const { manager } = createStage11Manager();
+    spawnStage11Entity(manager, "unit/a", "enemy", 10);
+    manager.transition({ type: "INC" });
+
+    const full = manager.dehydrate();
+    const machineFiltered = manager.dehydrate({ machines: ["counter"] });
+    const storageFiltered = manager.dehydrate({ storage: ["entity"] });
+    const withoutStorage = manager.dehydrate({ storage: [] });
+    const onlyEntityStorage = manager.dehydrate({ machines: [], storage: ["entity"] });
+    const fullMachines = full.machines as Record<string, unknown>;
+    const storageFilteredMachines = storageFiltered.machines as Record<string, unknown>;
+    const withoutStorageMachines = withoutStorage.machines as Record<string, unknown>;
+
+    expect(full.storage?.entity).toBeDefined();
+    expect(fullMachines.counter).toEqual({ state: "READY", context: { count: 1 } });
+    expect(fullMachines.movementActor).toEqual(manager.getState().movementActor);
+    expect(machineFiltered.machines).toEqual({ counter: { state: "READY", context: { count: 1 } } });
+    expect(machineFiltered.storage?.entity).toBeDefined();
+    expect(storageFilteredMachines.counter).toEqual({ state: "READY", context: { count: 1 } });
+    expect(storageFilteredMachines.movementActor).toEqual(manager.getState().movementActor);
+    expect(storageFiltered.storage?.entity).toBeDefined();
+    expect(withoutStorage.storage).toBeUndefined();
+    expect(withoutStorageMachines.movementActor).toEqual(manager.getState().movementActor);
+    expect(onlyEntityStorage).toEqual({
+      schemaVersion: undefined,
+      machines: {},
+      storage: { entity: full.storage?.entity },
+    });
+  });
+
+  it("storage-only hydrate уведомляет subscribers и не меняет storage: \"instance\"", () => {
+    const source = createStage11Manager();
+    spawnStage11Entity(source.manager, "unit/a", "enemy", 10);
+    source.manager.transition({ type: "INC" });
+    const storage = source.manager.dehydrate().storage?.entity;
+
+    const target = createStage11Manager();
+    const delivered: string[] = [];
+    target.manager.onTransition((_prev, _next, action) => {
+      delivered.push(action.type);
+    });
+
+    target.manager.hydrate({ machines: {}, storage: { entity: storage } });
+
+    expect(delivered).toEqual([HYDRATE_ACTION_TYPE]);
+    expect(target.manager.getState().counter.context.count).toBe(0);
+    expect(entityAccess<typeof target.machines>(target.manager).get("movementActor").count).toBe(1);
+  });
+
+  it("dehydrate нормализует sparse строковые массивы в plain JSON arrays", () => {
+    const { manager } = createStage11Manager();
+    const runtime = getEntityRuntimeState(manager.entities);
+    ensureEntityCapacity(runtime.entityStore, 1);
+
+    const snapshot = manager.dehydrate().storage?.entity as any;
+
+    expect(snapshot.entityStore.ids).toEqual([""]);
+    expect(snapshot.entityStore.groupTagByIndex).toEqual([""]);
+  });
+
+  it("hydrate без storage.entity сохраняет columns и канонизирует lightweight slices", () => {
+    const { manager, machines } = createStage11Manager();
+    spawnStage11Entity(manager, "unit/a", "enemy", 10);
+    const movement = entityAccess<typeof machines>(manager).get("movementActor");
+    const beforeState = manager.getState().movementActor;
+
+    manager.hydrate({
+      machines: {
+        movementActor: {
+          storage: "entity",
+          version: 999,
+          count: 999,
+          capacity: 999,
+          columns: { x: [999] },
+        },
+      },
+    } as never);
+
+    expect(manager.getState().movementActor).toBe(beforeState);
+    expect(movement.count).toBe(1);
+    expect(movement.x[0 as EntityIndex]).toBe(1);
+  });
+
+  it("getHydratedState preview валидирует storage.entity и не мутирует runtime state", () => {
+    const source = createStage11Manager();
+    spawnStage11Entity(source.manager, "unit/incoming", "enemy", 30);
+    const snapshot = source.manager.dehydrate();
+
+    const target = createStage11Manager();
+    spawnStage11Entity(target.manager, "unit/current", "ally", 10);
+    const movement = entityAccess<typeof target.machines>(target.manager).get("movementActor");
+    const runtime = getEntityRuntimeState(target.manager.entities);
+    const currentVersion = runtime.actorStores.movementActor.version;
+
+    const preview = target.manager.getHydratedState(snapshot);
+
+    expect(preview.movementActor.count).toBe(1);
+    expect(preview.movementActor.capacity).toBe(1);
+    expect(preview.movementActor.version).toBeGreaterThan(currentVersion);
+    expect(movement.name[0 as EntityIndex]).toBe("unit/current");
+    expect(runtime.entityStore.indexById["unit/current"]).toBe(0);
+    expect(runtime.entityStore.indexById["unit/incoming"]).toBeUndefined();
+  });
+
+  it("hydrate replace повышает entityStore.version выше текущей и удаленной versions", () => {
+    const source = createStage11Manager();
+    spawnStage11Entity(source.manager, "unit/incoming", "enemy", 30);
+    const storage = entityStorageSnapshot(source.manager);
+    storage.entityStore.version = 1;
+
+    const target = createStage11Manager();
+    spawnStage11Entity(target.manager, "unit/current-a", "ally", 10);
+    spawnStage11Entity(target.manager, "unit/current-b", "ally", 20);
+    spawnStage11Entity(target.manager, "unit/current-c", "ally", 30);
+    const runtime = getEntityRuntimeState(target.manager.entities);
+    const currentVersion = runtime.entityStore.version;
+
+    target.manager.hydrate({ machines: {}, storage: { entity: storage } });
+
+    expect(currentVersion).toBeGreaterThan(storage.entityStore.version);
+    expect(runtime.entityStore.version).toBeGreaterThan(currentVersion);
+    expect(runtime.entityStore.version).toBeGreaterThan(storage.entityStore.version);
+  });
+
+  it("legacy snapshot без generation и rowVersion восстанавливает freeList и свежие rowVersion", () => {
+    const source = createStage11Manager();
+    spawnStage11Entity(source.manager, "unit/a", "enemy", 10);
+    spawnStage11Entity(source.manager, "unit/b", "enemy", 20);
+    source.manager.transition({ type: "EXPIRE", meta: { entityId: "unit/a" } } as never);
+    const storage = entityStorageSnapshot(source.manager);
+    delete storage.entityStore.generation;
+    storage.entityStore.freeList = [];
+    delete storage.actors.movementActor.rowVersion;
+    delete storage.actors.sensorActor.rowVersion;
+
+    const target = createStage11Manager();
+    target.manager.hydrate({ machines: {}, storage: { entity: storage } });
+
+    const runtime = getEntityRuntimeState(target.manager.entities);
+    expect(Array.from(runtime.entityStore.generation)).toEqual([0, 0]);
+    expect(runtime.entityStore.freeList).toEqual([0]);
+    expect(runtime.actorStores.movementActor.rowVersion[1]).toBeGreaterThan(0);
+    expect(runtime.actorStores.sensorActor.rowVersion[1]).toBeGreaterThan(0);
+  });
+
+  it("invalid snapshot.storage.entity бросает до mutation", () => {
+    const source = createStage11Manager();
+    spawnStage11Entity(source.manager, "unit/a", "enemy", 10);
+    spawnStage11Entity(source.manager, "unit/b", "enemy", 20);
+    source.manager.transition({ type: "EXPIRE", meta: { entityId: "unit/a" } } as never);
+    const valid = entityStorageSnapshot(source.manager);
+
+    const cases = [
+      ["root object", () => null, "storage.entity must be an object"],
+      ["ids array", (snapshot: any) => (snapshot.entityStore.ids = "bad"), "ids must be an array"],
+      ["capacity integer", (snapshot: any) => (snapshot.entityStore.capacity = 1.5), "capacity must be an integer"],
+      ["count negative", (snapshot: any) => (snapshot.entityStore.count = -1), "count must be a non-negative integer"],
+      ["version uint32", (snapshot: any) => (snapshot.entityStore.version = 0xffffffff), "version must fit Uint32"],
+      ["alive value", (snapshot: any) => (snapshot.entityStore.alive[1] = 2), "alive[1] must be 0 or 1"],
+      ["ids length", (snapshot: any) => snapshot.entityStore.ids.pop(), "ids length"],
+      ["ids item", (snapshot: any) => (snapshot.entityStore.ids[1] = 1), "ids[1] must be a string"],
+      ["freeList", (snapshot: any) => (snapshot.entityStore.freeList = []), "freeList"],
+      ["freeList range", (snapshot: any) => (snapshot.entityStore.freeList = [99]), "out of range"],
+      ["freeList live", (snapshot: any) => (snapshot.entityStore.freeList = [1]), "live entity"],
+      ["freeList duplicate", (snapshot: any) => (snapshot.entityStore.freeList = [0, 0]), "duplicate entity index"],
+      ["empty live id", (snapshot: any) => (snapshot.entityStore.ids[1] = ""), "non-empty"],
+      ["empty groupTag", (snapshot: any) => (snapshot.entityStore.groupTagByIndex[1] = ""), "groupTag"],
+      ["entity count mismatch", (snapshot: any) => (snapshot.entityStore.count = 0), "live entity count"],
+      ["entity count capacity", (snapshot: any) => (snapshot.entityStore.count = 3), "count cannot exceed capacity"],
+      [
+        "duplicate",
+        (snapshot: any) => {
+          snapshot.entityStore.alive[0] = 1;
+          snapshot.entityStore.ids[0] = snapshot.entityStore.ids[1];
+          snapshot.entityStore.groupTagByIndex[0] = "enemy";
+          snapshot.entityStore.count = 2;
+          snapshot.entityStore.freeList = [];
+          snapshot.actors.movementActor.presence[0] = 1;
+          snapshot.actors.sensorActor.presence[0] = 1;
+          snapshot.actors.movementActor.count = 2;
+          snapshot.actors.sensorActor.count = 2;
+        },
+        "duplicate",
+      ],
+      ["schema", (snapshot: any) => (snapshot.actors.movementActor.schema.columns.x = "i32"), "schema"],
+      [
+        "schema keys length",
+        (snapshot: any) => {
+          delete snapshot.actors.movementActor.schema.columns.hp;
+        },
+        "keys",
+      ],
+      [
+        "schema keys value",
+        (snapshot: any) => {
+          delete snapshot.actors.movementActor.schema.columns.hp;
+          snapshot.actors.movementActor.schema.columns.extra = "i16";
+        },
+        "keys",
+      ],
+      ["schema states", (snapshot: any) => (snapshot.actors.movementActor.schema.states[0] = "OTHER"), "states"],
+      ["column", (snapshot: any) => (snapshot.actors.movementActor.columns.x[1] = "bad"), "finite number"],
+      ["i16 integer", (snapshot: any) => (snapshot.actors.movementActor.columns.hp[1] = 1.5), "integer"],
+      ["i16 range", (snapshot: any) => (snapshot.actors.movementActor.columns.hp[1] = 40000), "Int16"],
+      ["i32 range", (snapshot: any) => (snapshot.actors.sensorActor.columns.marker[1] = 999999999999), "Int32"],
+      ["u8 range", (snapshot: any) => (snapshot.actors.movementActor.columns.flags[1] = 999), "Uint8"],
+      ["string column", (snapshot: any) => (snapshot.actors.movementActor.columns.name[1] = 1), "must be a string"],
+      ["presence", (snapshot: any) => snapshot.actors.movementActor.presence.pop(), "presence length"],
+      [
+        "presence missing entity",
+        (snapshot: any) => {
+          snapshot.actors.movementActor.presence[0] = 1;
+          snapshot.actors.movementActor.count = 2;
+        },
+        "missing entity",
+      ],
+      ["stateCode", (snapshot: any) => (snapshot.actors.movementActor.stateCode[1] = 99), "stateCode"],
+      [
+        "terminal stateCode",
+        (snapshot: any) => (snapshot.actors.movementActor.stateCode[1] = ENTITY_RESOLVED_STATE_CODE),
+        "terminal stateCode",
+      ],
+      ["stateCode int16", (snapshot: any) => (snapshot.actors.movementActor.stateCode[1] = 40000), "Int16"],
+      ["rowVersion", (snapshot: any) => snapshot.actors.movementActor.rowVersion.pop(), "rowVersion length"],
+      ["actor capacity", (snapshot: any) => (snapshot.actors.movementActor.capacity = 3), "capacity"],
+      ["actor count capacity", (snapshot: any) => (snapshot.actors.movementActor.count = 3), "count cannot exceed capacity"],
+      ["actor count mismatch", (snapshot: any) => (snapshot.actors.movementActor.count = 0), "present row count"],
+      [
+        "live entity without rows",
+        (snapshot: any) => {
+          snapshot.actors.movementActor.presence[1] = 0;
+          snapshot.actors.sensorActor.presence[1] = 0;
+          snapshot.actors.movementActor.count = 0;
+          snapshot.actors.sensorActor.count = 0;
+        },
+        "no actor rows",
+      ],
+      ["formatVersion", (snapshot: any) => (snapshot.formatVersion = 2), "formatVersion"],
+    ] as const;
+
+    for (const [name, mutate, message] of cases) {
+      const target = createStage11Manager();
+      spawnStage11Entity(target.manager, "unit/current", "ally", 30);
+      const before = target.manager.dehydrate();
+      const snapshot = JSON.parse(JSON.stringify(valid));
+      const mutated = mutate(snapshot);
+      const payload = name === "root object" ? mutated : snapshot;
+
+      let error: LiteFsmError;
+      try {
+        error = expectLiteFsmError(
+          () => target.manager.hydrate({ machines: {}, storage: { entity: payload } }),
+          "LITE_FSM_INVALID_HYDRATION_ENVELOPE",
+        );
+      } catch (assertionError) {
+        throw new Error(`${name}: ${(assertionError as Error).message}`);
+      }
+
+      expect(error.message).toContain(message);
+      expect(target.manager.dehydrate()).toEqual(before);
+      expect(entityAccess<typeof target.machines>(target.manager).get("movementActor").name[0 as EntityIndex]).toBe(
+        "unit/current",
+      );
+    }
   });
 });

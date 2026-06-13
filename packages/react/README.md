@@ -78,7 +78,17 @@ function Counter() {
 - `useTransition` - returns `manager.transition`.
 - `useManager` - returns the current manager from context.
 - `FSMHydrationBoundary` and `useHydrateSnapshot` - React hydration helpers for snapshots.
+- `useStorageHydrationPreview` - generic raw `snapshot.storage[kind]` preview для plugin packages.
 - `defineMachine` - creates a standalone shared machine hook.
+
+## Storage Preview Bridge
+
+`useStorageHydrationPreview(storageKind)` возвращает `{ hasPreview, preview,
+hasServerPreview, serverPreview }`. Payload имеет тип `unknown`; plugin package
+сам валидирует свой `snapshot.storage[kind]`. `FSMHydrationBoundary` наследует
+storage preview от parent boundary, если child snapshot не содержит этот
+`storageKind`, и заменяет его, если содержит. API не импортирует plugin packages
+и не дает доступа к мутации storage runtime.
 
 ## Documentation
 

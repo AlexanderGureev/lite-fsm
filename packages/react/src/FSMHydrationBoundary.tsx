@@ -15,6 +15,8 @@ import type {
 import {
   FSMHydrationOverlayProvider,
   FSMServerSnapshotProvider,
+  NO_STORAGE_HYDRATION_PREVIEW,
+  readSnapshotStoragePreview,
   useHydrationOverlay,
   useServerSnapshot,
 } from "./hydrationOverlay";
@@ -99,6 +101,8 @@ export const FSMHydrationBoundary = <S extends MachineStore, P extends AnyEvent 
     () => manager.getHydratedState(snapshot, { baseState: serverBaseState, strategy: hydrateStrategy }),
     [hydrateStrategy, manager, serverBaseState, snapshot],
   );
+  const hasOwnStoragePreview = snapshot.storage !== undefined && Object.keys(snapshot.storage).length > 0;
+  const boundaryStoragePreviewActive = !dispatchCompleted && !hydrationCommitted && hasOwnStoragePreview;
 
   useIsomorphicLayoutEffect(() => {
     const alreadyDispatched = matchesCompletedDispatch(
@@ -137,10 +141,26 @@ export const FSMHydrationBoundary = <S extends MachineStore, P extends AnyEvent 
     }
   }, [baseState, hasOverlay, hydrateStrategy, manager, snapshot, transitionActions]);
 
-  const overlay = React.useMemo(() => ({ getState: () => previewState }), [previewState]);
-  const serverSnapshotOverlay = React.useMemo(() => ({ getState: () => serverPreviewState }), [serverPreviewState]);
+  const overlay = React.useMemo(
+    () => ({
+      getState: () => previewState,
+      getStoragePreview: (storageKind: string) =>
+        boundaryStoragePreviewActive
+          ? readSnapshotStoragePreview(snapshot, parentOverlay?.getStoragePreview, storageKind)
+          : (parentOverlay?.getStoragePreview(storageKind) ?? NO_STORAGE_HYDRATION_PREVIEW),
+    }),
+    [boundaryStoragePreviewActive, parentOverlay, previewState, snapshot],
+  );
+  const serverSnapshotOverlay = React.useMemo(
+    () => ({
+      getState: () => serverPreviewState,
+      getStoragePreview: (storageKind: string) =>
+        readSnapshotStoragePreview(snapshot, parentServerSnapshot?.getStoragePreview, storageKind),
+    }),
+    [parentServerSnapshot, serverPreviewState, snapshot],
+  );
 
-  const inner = hasOverlay ? (
+  const inner = hasOverlay || boundaryStoragePreviewActive ? (
     <FSMHydrationOverlayProvider value={overlay}>{children}</FSMHydrationOverlayProvider>
   ) : (
     children

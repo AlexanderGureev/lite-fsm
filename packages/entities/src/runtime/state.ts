@@ -6,6 +6,7 @@ import {
   ENTITY_INIT_STATE_CODE,
   type EntityTemplateMetadata,
 } from "./compile";
+import type { EntityReactRuntime } from "./react";
 import type { EntityIndex } from "../plugin";
 
 type EntityPublicStateSlice = {
@@ -70,6 +71,7 @@ export type EntityRuntimeState = {
   actorRowsByGroupTag: Record<string, EntityActorRowRef[]>;
   routingScratchVersion: number;
   readonly access: EntityAccess<MachineStore>;
+  react?: EntityReactRuntime;
 };
 
 const runtimeByManager = new WeakMap<object, EntityRuntimeState>();
@@ -279,6 +281,12 @@ export const refreshActorPublicSlice = (store: ColumnarActorStore): void => {
   store.publicSlice = createPublicSlice(store);
 };
 
+const rebuildAcceptStateBuckets = (store: ColumnarActorStore): void => {
+  store.acceptStateBucketsByEventCode = store.metadata.acceptStateCodesByEventCode.map((stateCodes) =>
+    stateCodes.flatMap((stateCode) => (stateCode >= 0 ? [store.stateBuckets[stateCode]] : [])),
+  );
+};
+
 export const addEntityToGroupBucket = (store: EntityStore, entity: EntityIndex, groupTag: string): void => {
   const bucket = store.entitiesByGroupTag[groupTag] ?? [];
   if (bucket.length === 0) store.entitiesByGroupTag[groupTag] = bucket;
@@ -300,6 +308,38 @@ export const addActorRowOwnership = (
   const groupRows = runtime.actorRowsByGroupTag[groupTag] ?? [];
   if (groupRows.length === 0) runtime.actorRowsByGroupTag[groupTag] = groupRows;
   groupRows.push(row);
+};
+
+const removeActorRowRef = (rows: EntityActorRowRef[] | undefined, store: ColumnarActorStore, entity: EntityIndex): boolean => {
+  /* v8 ignore next -- defensive ownership invariant: live rows are stored in both entity and group indexes. */
+  if (!rows) return false;
+
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index];
+    if (row.store !== store || row.entity !== entity) continue;
+
+    const last = rows.pop();
+    if (last !== undefined && last !== row) rows[index] = last;
+    return true;
+  }
+
+  /* v8 ignore next -- defensive ownership invariant: live rows are stored in both entity and group indexes. */
+  return false;
+};
+
+const removeActorRowOwnership = (
+  runtime: EntityRuntimeState,
+  store: ColumnarActorStore,
+  entity: EntityIndex,
+): void => {
+  const entityRows = runtime.actorRowsByEntity[entity];
+  removeActorRowRef(entityRows, store, entity);
+
+  const groupTag = runtime.entityStore.groupTagByIndex[entity];
+  const groupRows = runtime.actorRowsByGroupTag[groupTag];
+  if (!removeActorRowRef(groupRows, store, entity) || groupRows.length > 0) return;
+
+  delete runtime.actorRowsByGroupTag[groupTag];
 };
 
 const removeActorFromStateBucket = (store: ColumnarActorStore, entity: EntityIndex, stateCode: number): void => {
@@ -337,6 +377,74 @@ export const moveActorStateBucket = (
   addActorToStateBucket(store, entity, nextCode);
 };
 
+const removeEntityFromGroupBucket = (store: EntityStore, entity: EntityIndex): void => {
+  const groupTag = store.groupTagByIndex[entity];
+  const bucket = store.entitiesByGroupTag[groupTag];
+  const position = store.groupTagPosition[entity];
+  /* v8 ignore next -- defensive group index invariant for live entity cleanup. */
+  if (!bucket || position < 0) return;
+
+  const last = bucket.pop();
+  if (last !== undefined && last !== entity) {
+    bucket[position] = last;
+    store.groupTagPosition[last] = position;
+  }
+  if (bucket.length === 0) delete store.entitiesByGroupTag[groupTag];
+  store.groupTagPosition[entity] = -1;
+};
+
+export const removeActorRow = (
+  runtime: EntityRuntimeState,
+  store: ColumnarActorStore,
+  entity: EntityIndex,
+): boolean => {
+  /* v8 ignore next -- defensive: cleanup is called for attached rows selected from presence indexes. */
+  if (store.presence[entity] !== 1) return false;
+
+  moveActorStateBucket(store, entity, store.stateCode[entity], ENTITY_INIT_STATE_CODE);
+  removeActorRowOwnership(runtime, store, entity);
+  store.presence[entity] = 0;
+  store.stateCode[entity] = ENTITY_INIT_STATE_CODE;
+  store.prevStateCode[entity] = ENTITY_INIT_STATE_CODE;
+  store.rowVersion[entity] = 0;
+  store.count -= 1;
+  store.version += 1;
+  writeInitialColumnValues(store, entity);
+  refreshActorPublicSlice(store);
+  return true;
+};
+
+export const removeEntityIfEmpty = (runtime: EntityRuntimeState, entity: EntityIndex): boolean => {
+  const rows = runtime.actorRowsByEntity[entity];
+  if (rows && rows.length > 0) return false;
+
+  const store = runtime.entityStore;
+  /* v8 ignore next -- defensive: entity cleanup is scheduled only for live entity indices. */
+  if (store.alive[entity] !== 1) return false;
+
+  const id = store.ids[entity];
+  removeEntityFromGroupBucket(store, entity);
+  delete store.indexById[id];
+  store.ids[entity] = "";
+  store.alive[entity] = 0;
+  store.groupTagByIndex[entity] = "";
+  store.freeList.push(entity);
+  store.count -= 1;
+  store.version += 1;
+  runtime.actorRowsByEntity[entity] = [];
+  return true;
+};
+
+export const removeEntityRows = (runtime: EntityRuntimeState, entity: EntityIndex): boolean => {
+  const rows = runtime.actorRowsByEntity[entity];
+  /* v8 ignore next -- defensive: despawn cleanup is scheduled while attached rows still exist. */
+  if (!rows || rows.length === 0) return removeEntityIfEmpty(runtime, entity);
+
+  const attachedRows = rows.slice();
+  for (const row of attachedRows) removeActorRow(runtime, row.store, entity);
+  return removeEntityIfEmpty(runtime, entity);
+};
+
 export const createPublicInitialState = (
   runtime: EntityRuntimeState,
   template: StorageTemplate<EntityTemplateMetadata>,
@@ -364,4 +472,48 @@ export const restorePublicSlices = (
   }
 
   return restored;
+};
+
+export const rebuildEntityRuntimeIndexes = (runtime: EntityRuntimeState): void => {
+  const entityStore = runtime.entityStore;
+  entityStore.indexById = Object.create(null) as Record<string, EntityIndex>;
+  entityStore.entitiesByGroupTag = Object.create(null) as Record<string, EntityIndex[]>;
+  entityStore.groupTagPosition = new Int32Array(entityStore.capacity);
+  entityStore.groupTagPosition.fill(-1);
+  entityStore.count = 0;
+
+  runtime.actorRowsByEntity = Array.from({ length: entityStore.capacity }, () => [] as EntityActorRowRef[]);
+  runtime.actorRowsByGroupTag = Object.create(null) as Record<string, EntityActorRowRef[]>;
+  runtime.routingScratchVersion = 0;
+
+  for (const store of Object.values(runtime.actorStores)) {
+    store.count = 0;
+    store.stateBuckets = createScratchByState(store.metadata.publicStates);
+    store.statePosition = new Int32Array(store.capacity);
+    store.statePosition.fill(-1);
+    store.acceptedScratch = [];
+    store.routingScratchVersion = 0;
+    rebuildAcceptStateBuckets(store);
+  }
+
+  for (let entity = 0; entity < entityStore.capacity; entity += 1) {
+    if (entityStore.alive[entity] !== 1) continue;
+
+    const index = entity as EntityIndex;
+    entityStore.indexById[entityStore.ids[entity]] = index;
+    addEntityToGroupBucket(entityStore, index, entityStore.groupTagByIndex[entity]);
+    entityStore.count += 1;
+  }
+
+  for (const store of Object.values(runtime.actorStores)) {
+    for (let entity = 0; entity < store.capacity; entity += 1) {
+      if (store.presence[entity] !== 1) continue;
+
+      const index = entity as EntityIndex;
+      addActorToStateBucket(store, index, store.stateCode[entity]);
+      addActorRowOwnership(runtime, store, index, entityStore.groupTagByIndex[entity]);
+      store.count += 1;
+    }
+    refreshActorPublicSlice(store);
+  }
 };

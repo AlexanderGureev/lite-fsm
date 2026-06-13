@@ -1,10 +1,11 @@
 import { LiteFsmError } from "@lite-fsm/core";
 import type { AnyEvent, ReadonlyManagerAction } from "@lite-fsm/core";
 
+import type { EntityIndex } from "../plugin";
 import type { EntitySpawnDescriptor } from "../spawn";
 import { hasSpawnRecipe, runSpawnRecipe } from "../spawn";
 import type { EntitySpawnSchema } from "../schema";
-import type { EntityRuntimeState } from "./state";
+import type { ColumnarActorStore, EntityRuntimeState } from "./state";
 
 type RuntimeCarrier = {
   readonly runtime: Map<string, unknown>;
@@ -24,9 +25,44 @@ export type StagedEntitySpawn = {
 export type EntityDispatchTransaction = {
   readonly runtime: EntityRuntimeState;
   stagedSpawns: readonly StagedEntitySpawn[];
+  scheduledDespawns: EntityIndex[];
+  despawnScheduled: Uint8Array;
+  terminalRows: EntityActorTerminalRow[];
+  effectBatches: EntityEffectBatch[];
+  reactionBatches: EntityReactionBatch[];
 };
 
+export type EntityActorTerminalRow = {
+  readonly store: ColumnarActorStore;
+  readonly entity: EntityIndex;
+};
+
+export type EntityEffectBatch = {
+  readonly store: ColumnarActorStore;
+  readonly stateCode: number;
+  readonly indices: readonly EntityIndex[];
+};
+
+export type EntityReactionBatch = {
+  readonly store: ColumnarActorStore;
+  readonly eventCode: number;
+  readonly indices: readonly EntityIndex[];
+};
+
+export type CapturedEntityScopeEntry = {
+  readonly entity: EntityIndex;
+  readonly generation: number;
+  readonly id: string;
+};
+
+type ExplicitDespawnRequest =
+  | { readonly mode: "ids"; readonly ids: readonly string[] }
+  | { readonly mode: "scope"; readonly entries: readonly CapturedEntityScopeEntry[] };
+
 const ENTITY_TRANSACTION_KEY = "@lite-fsm/entities/transaction";
+const ENTITY_DESPAWN_OPTIONS_KEY = Symbol.for("@lite-fsm/entities/despawn-options");
+
+export const ENTITY_DESPAWN_ACTION_TYPE = "LITE_FSM_ENTITY_DESPAWN";
 
 const hasOwn = (value: object, key: PropertyKey): boolean => Object.prototype.hasOwnProperty.call(value, key);
 
@@ -36,12 +72,69 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> =>
 const runtimeError = (reason: string): LiteFsmError =>
   new LiteFsmError("LITE_FSM_INVALID_STORAGE_RUNTIME", `[lite-fsm/entities] invalid entity spawn: ${reason}.`);
 
+const entityRuntimeError = (reason: string): LiteFsmError =>
+  new LiteFsmError("LITE_FSM_INVALID_STORAGE_RUNTIME", `[lite-fsm/entities] ${reason}.`);
+
+const isDev = (): boolean =>
+  (globalThis as { process?: { env?: { NODE_ENV?: string } } }).process?.env?.NODE_ENV !== "production";
+
+const getExplicitDespawnRequest = (options: unknown): ExplicitDespawnRequest | undefined => {
+  if (options === null || typeof options !== "object") return undefined;
+  return (options as { readonly [ENTITY_DESPAWN_OPTIONS_KEY]?: ExplicitDespawnRequest })[ENTITY_DESPAWN_OPTIONS_KEY];
+};
+
+export const createEntityDespawnOptions = (request: ExplicitDespawnRequest): object => ({
+  [ENTITY_DESPAWN_OPTIONS_KEY]: request,
+});
+
+const scheduleEntityDespawnById = (transaction: EntityDispatchTransaction, id: string): void => {
+  const entity = transaction.runtime.entityStore.indexById[id];
+  if (entity === undefined) return;
+  scheduleEntityDespawn(transaction, entity);
+};
+
+const scheduleCapturedEntityDespawn = (
+  transaction: EntityDispatchTransaction,
+  entry: CapturedEntityScopeEntry,
+): void => {
+  const store = transaction.runtime.entityStore;
+  const stale = store.alive[entry.entity] !== 1 || store.generation[entry.entity] !== entry.generation;
+  if (!stale) {
+    scheduleEntityDespawn(transaction, entry.entity);
+    return;
+  }
+
+  if (isDev()) {
+    throw entityRuntimeError(
+      `stale entity effect scope cannot despawn entity '${entry.id}' at index ${entry.entity}`,
+    );
+  }
+};
+
+const stageExplicitDespawns = (transaction: EntityDispatchTransaction, options: unknown): void => {
+  const request = getExplicitDespawnRequest(options);
+  if (!request) return;
+
+  if (request.mode === "ids") {
+    for (const id of request.ids) scheduleEntityDespawnById(transaction, id);
+    return;
+  }
+
+  for (const entry of request.entries) scheduleCapturedEntityDespawn(transaction, entry);
+};
+
 export const prepareEntityTransaction = (carrier: RuntimeCarrier, runtime: EntityRuntimeState): EntityDispatchTransaction => {
   const transaction: EntityDispatchTransaction = {
     runtime,
     stagedSpawns: [],
+    scheduledDespawns: [],
+    despawnScheduled: new Uint8Array(0),
+    terminalRows: [],
+    effectBatches: [],
+    reactionBatches: [],
   };
   carrier.runtime.set(ENTITY_TRANSACTION_KEY, transaction);
+  stageExplicitDespawns(transaction, (carrier as { readonly options?: unknown }).options);
   return transaction;
 };
 
@@ -187,4 +280,56 @@ export const getStagedSpawns = (carrier: RuntimeCarrier): readonly StagedEntityS
   /* v8 ignore next 2 -- reduceBucket is called after prepareAction for the same storage runtime. */
   if (!transaction) return [];
   return transaction.stagedSpawns;
+};
+
+const ensureDespawnScheduleCapacity = (transaction: EntityDispatchTransaction, capacity: number): void => {
+  if (transaction.despawnScheduled.length >= capacity) return;
+
+  const next = new Uint8Array(capacity);
+  next.set(transaction.despawnScheduled);
+  transaction.despawnScheduled = next;
+};
+
+export const scheduleEntityDespawn = (
+  transaction: EntityDispatchTransaction,
+  entity: EntityIndex,
+): boolean => {
+  if (transaction.runtime.entityStore.alive[entity] !== 1) return false;
+
+  ensureDespawnScheduleCapacity(transaction, entity + 1);
+  if (transaction.despawnScheduled[entity] === 1) return false;
+
+  transaction.despawnScheduled[entity] = 1;
+  transaction.scheduledDespawns.push(entity);
+  return true;
+};
+
+export const consumeScheduledDespawns = (transaction: EntityDispatchTransaction): readonly EntityIndex[] => {
+  const scheduled = transaction.scheduledDespawns;
+  transaction.scheduledDespawns = [];
+  for (const entity of scheduled) transaction.despawnScheduled[entity] = 0;
+  return scheduled;
+};
+
+export const scheduleEntityEffectBatch = (
+  transaction: EntityDispatchTransaction | undefined,
+  store: ColumnarActorStore,
+  stateCode: number,
+  indices: readonly EntityIndex[],
+): void => {
+  if (!transaction || indices.length === 0 || !store.metadata.effectsByStateCode[stateCode]) return;
+
+  transaction.effectBatches.push({ store, stateCode, indices: indices.slice() });
+};
+
+export const scheduleEntityReactionBatch = (
+  transaction: EntityDispatchTransaction | undefined,
+  store: ColumnarActorStore,
+  eventCode: number | undefined,
+  indices: readonly EntityIndex[],
+): void => {
+  if (!transaction || eventCode === undefined || indices.length === 0) return;
+  if (!store.metadata.reactionsByEventCode[eventCode]) return;
+
+  transaction.reactionBatches.push({ store, eventCode, indices: indices.slice() });
 };

@@ -154,6 +154,7 @@ type CreateMachineStructuralInputKey =
   | "initialContext"
   | "reducer"
   | "effects"
+  | "reactions"
   | "persistence"
   | "groupTag"
   | "hydrate"
@@ -333,6 +334,23 @@ type ExtensionEffects<
   [key in EffectStateName<C>]?: MachineEffect<key, C, P, D>;
 };
 
+type ExtensionReactions<
+  P extends AnyEvent,
+  D extends AnyRecord,
+> = {
+  [EventType in P["type"]]?: (deps: D) => unknown;
+};
+
+type ExtensionReactionsInput<
+  InputShape extends object,
+  P extends AnyEvent,
+  D extends AnyRecord,
+> = "reactions" extends keyof InputShape
+  ? {
+      reactions?: ExtensionReactions<P, D>;
+    }
+  : {};
+
 type ExtensionFallbackInput<
   Input extends object,
   Key extends string,
@@ -376,6 +394,11 @@ type ExtensionCreateMachineInput<
         ExtensionInvocationDeps<D, Extension, ConcreteStorageInput<StorageKind, StorageInput>>
       >;
     }
+  > &
+  ExtensionReactionsInput<
+    InputShape,
+    Events,
+    ExtensionReactionDeps<Extension, ConcreteStorageInput<StorageKind, StorageInput>>
   > &
   ExactExtensionInput<Cfg, InputShape, StorageInput>;
 

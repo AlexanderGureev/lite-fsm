@@ -23,6 +23,14 @@ import type {
   LiteFsmEntityLifecycleEvents,
   SpawnEventsFrom,
 } from "@lite-fsm/entities";
+import { useEntityCount, useEntityList, useEntitySnapshot } from "@lite-fsm/entities/react";
+import type {
+  EntityListOptions,
+  EntityRowSnapshot,
+  TypedUseEntityCountHook,
+  TypedUseEntityListHook,
+  TypedUseEntitySnapshotHook,
+} from "@lite-fsm/entities/react";
 import type {
   FSMEvent,
   LiteFsmPlugin,
@@ -792,5 +800,563 @@ describe("@lite-fsm/entities — этап 6 route meta и reducer helpers types"
       },
       storage: [storage],
     });
+  });
+});
+
+describe("@lite-fsm/entities — этап 8 despawnOn types", () => {
+  type AppEvent = FSMEvent<"TICK"> | FSMEvent<"EXPIRE">;
+  const entityPlugin = entitiesPlugin();
+  const plugins = [entityPlugin] as const;
+  const createAppMachine: TypedCreateMachineFn<AppEvent, {}, typeof plugins> = createMachine;
+  const readonlyDespawnStates = ["expired"] as const;
+
+  test("despawnOn принимает state name и readonly array state names", () => {
+    createAppMachine({
+      storage: "entity",
+      initialState: "__INIT",
+      initialContext: {
+        hp: i32(),
+      },
+      spawnSchema: {},
+      config: {
+        __INIT: { ENTITY_SPAWNED: "alive" },
+        alive: { EXPIRE: "expired", TICK: "alive" },
+        expired: {},
+      },
+      despawnOn: "expired",
+    });
+
+    createAppMachine({
+      storage: "entity",
+      initialState: "__INIT",
+      initialContext: {
+        hp: i32(),
+      },
+      spawnSchema: {},
+      config: {
+        __INIT: { ENTITY_SPAWNED: "alive" },
+        alive: { EXPIRE: "expired", TICK: "alive" },
+        expired: {},
+      },
+      despawnOn: readonlyDespawnStates,
+    });
+
+  });
+
+  test("manager.despawn не входит в public manager API", () => {
+    const actor = createAppMachine({
+      storage: "entity",
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+      config: {
+        __INIT: { ENTITY_SPAWNED: "alive" },
+        alive: { TICK: "alive" },
+      },
+    });
+    const manager = MachineManager({ actor }, { plugins });
+
+    // @ts-expect-error!
+    manager.despawn("unit/a");
+  });
+});
+
+describe("@lite-fsm/entities — этап 9 entity effect deps types", () => {
+  type AppEvent =
+    | FSMEvent<"TICK">
+    | FSMEvent<"WAKE">
+    | FSMEvent<"HIT">
+    | FSMEvent<"SPAWN_INSTANCE">;
+  const basePlugin = entitiesPlugin();
+  const basePlugins = [basePlugin] as const;
+  const createBaseMachine: TypedCreateMachineFn<AppEvent, {}, typeof basePlugins> = createMachine;
+
+  const movementActor = createBaseMachine({
+    storage: "entity",
+    initialState: "__INIT",
+    initialContext: {
+      x: f32(),
+      name: string(),
+    },
+    spawnSchema: {},
+    config: {
+      __INIT: { ENTITY_SPAWNED: "alive" },
+      alive: { TICK: "alive", WAKE: "active" },
+      active: { HIT: "active" },
+    },
+  });
+
+  const healthActor = createBaseMachine({
+    storage: "entity",
+    initialState: "__INIT",
+    initialContext: {
+      hp: i32(),
+    },
+    spawnSchema: {},
+    config: {
+      __INIT: { ENTITY_SPAWNED: "alive" },
+      alive: { TICK: "alive" },
+    },
+  });
+
+  const domainMachine = createBaseMachine({
+    config: {
+      idle: { TICK: "idle" },
+    },
+    initialState: "idle",
+    initialContext: {},
+  });
+
+  const instanceActor = createBaseMachine({
+    storage: "instance",
+    initialState: "__INIT",
+    initialContext: {},
+    config: {
+      __INIT: { SPAWN_INSTANCE: "ready" },
+      ready: { HIT: "ready" },
+    },
+  });
+
+  const machines = { movementActor, healthActor, domainMachine, instanceActor };
+  type AppMachines = typeof machines;
+  type AppDeps = {
+    readonly entities?: EntityAccess<AppMachines>;
+  };
+  const createStrictMachine: TypedCreateMachineFn<AppEvent, AppDeps, EntitiesPlugin<AppDeps>> = createMachine;
+
+  test("AppDeps.entities включает strict keys для scoped entities в entity effect", () => {
+    const access = null as unknown as EntityAccess<AppMachines>;
+
+    access.get("movementActor");
+    access.get("healthActor");
+
+    // @ts-expect-error!
+    access.get("domainMachine");
+
+    createStrictMachine({
+      storage: "entity",
+      initialState: "__INIT",
+      initialContext: {
+        x: f32(),
+        name: string(),
+      },
+      spawnSchema: {},
+      config: {
+        __INIT: { ENTITY_SPAWNED: "alive" },
+        alive: { TICK: "alive", WAKE: "active" },
+        active: { HIT: "active" },
+      },
+      effects: {
+        active: ({ self, entities, transition }) => {
+          const entity = self.indices[0];
+          const movement = entities.get("movementActor");
+          const health = entities.maybe("healthActor");
+
+          expect(self.indices).type.toBe<readonly EntityIndex[]>();
+          expect(self.x[entity]).type.toBe<number>();
+          expect(self.name[entity]).type.toBe<string>();
+          expect(self.stateCode[entity]).type.toBe<number>();
+          expect(self.prevStateCode[entity]).type.toBe<number>();
+          expect(self.rowVersion[entity]).type.toBe<number>();
+          expect(self.presence[entity]).type.toBe<number>();
+          expect(self.states.active).type.toBe<number>();
+          expect(self.has(entity)).type.toBe<boolean>();
+          expect(self.entityId(entity)).type.toBe<string>();
+          expect(movement.x[entity]).type.toBe<number>();
+          expect(health.hp[entity]).type.toBe<number>();
+
+          transition({ type: "TICK" });
+          transition.entity("unit/a", { type: "HIT" });
+          transition.entity(["unit/a", "unit/b"] as const, { type: "HIT" });
+          transition.tag("enemy", { type: "HIT" });
+          transition.tag(["enemy", "ally"] as const, { type: "HIT" });
+          transition.actor("instanceActor/0", { type: "HIT" });
+          transition.actor(["instanceActor/0"] as const, { type: "HIT" });
+          transition.despawn("unit/a");
+          transition.despawn(["unit/a", "unit/b"] as const);
+          transition.despawn(self.indices);
+
+          // @ts-expect-error!
+          transition.despawn(entity);
+          // @ts-expect-error!
+          entities.get("domainMachine");
+          // @ts-expect-error!
+          entities.get("instanceActor");
+          // @ts-expect-error!
+          self.x[entity] = 1;
+        },
+      },
+    });
+  });
+
+  test("entity-specific helpers недоступны вне storage: \"entity\" effects", () => {
+    createStrictMachine({
+      config: {
+        idle: { TICK: "idle" },
+      },
+      initialState: "idle",
+      initialContext: {},
+      effects: {
+        idle: ({ transition }) => {
+          transition({ type: "TICK" });
+
+          // @ts-expect-error!
+          transition.entity("unit/a", { type: "HIT" });
+          // @ts-expect-error!
+          transition.despawn("unit/a");
+        },
+      },
+    });
+
+    createStrictMachine({
+      storage: "instance",
+      initialState: "__INIT",
+      initialContext: {},
+      config: {
+        __INIT: { SPAWN_INSTANCE: "ready" },
+        ready: { HIT: "ready" },
+      },
+      effects: {
+        ready: ({ transition }) => {
+          transition.actor("instanceActor/0", { type: "HIT" });
+
+          // @ts-expect-error!
+          transition.entity("unit/a", { type: "HIT" });
+          // @ts-expect-error!
+          transition.despawn("unit/a");
+        },
+      },
+    });
+  });
+
+  test("отсутствие AppDeps.entities оставляет runtime entities, но отклоняет string keys", () => {
+    const createWithoutEntities: TypedCreateMachineFn<AppEvent, {}, EntitiesPlugin<{}>> = createMachine;
+
+    createWithoutEntities({
+      storage: "entity",
+      initialState: "__INIT",
+      initialContext: {
+        x: f32(),
+      },
+      spawnSchema: {},
+      config: {
+        __INIT: { ENTITY_SPAWNED: "alive" },
+        alive: { TICK: "alive" },
+      },
+      effects: {
+        alive: ({ entities, transition, self }) => {
+          transition.despawn(self.indices);
+
+          // @ts-expect-error!
+          entities.get("movementActor");
+          // @ts-expect-error!
+          entities.maybe("movementActor");
+        },
+      },
+    });
+  });
+});
+
+describe("@lite-fsm/entities — этап 10 entity reaction deps types", () => {
+  type AppEvent = FSMEvent<"TICK"> | FSMEvent<"HIT"> | FSMEvent<"SPAWN_INSTANCE">;
+  const basePlugin = entitiesPlugin();
+  const basePlugins = [basePlugin] as const;
+  const createBaseMachine: TypedCreateMachineFn<AppEvent, {}, typeof basePlugins> = createMachine;
+
+  const movementActor = createBaseMachine({
+    storage: "entity",
+    initialState: "__INIT",
+    initialContext: {
+      x: f32(),
+      name: string(),
+    },
+    spawnSchema: {},
+    config: {
+      __INIT: { ENTITY_SPAWNED: "alive" },
+      alive: { TICK: "alive", ENTITY_DESPAWNED: "gone" },
+      gone: {},
+    },
+  });
+
+  const healthActor = createBaseMachine({
+    storage: "entity",
+    initialState: "__INIT",
+    initialContext: {
+      hp: i32(),
+    },
+    spawnSchema: {},
+    config: {
+      __INIT: { ENTITY_SPAWNED: "alive" },
+      alive: { TICK: "alive" },
+    },
+  });
+
+  const domainMachine = createBaseMachine({
+    config: {
+      idle: { TICK: "idle" },
+    },
+    initialState: "idle",
+    initialContext: {},
+  });
+
+  const instanceActor = createBaseMachine({
+    storage: "instance",
+    initialState: "__INIT",
+    initialContext: {},
+    config: {
+      __INIT: { SPAWN_INSTANCE: "ready" },
+      ready: { HIT: "ready" },
+    },
+  });
+
+  const machines = { movementActor, healthActor, domainMachine, instanceActor };
+  type AppMachines = typeof machines;
+  type AppDeps = {
+    readonly api: { readonly sync: () => void };
+    readonly entities?: EntityAccess<AppMachines>;
+  };
+  const createStrictMachine: TypedCreateMachineFn<AppEvent, AppDeps, EntitiesPlugin<AppDeps>> = createMachine;
+
+  test("reactions принимаются на entity templates и получают read-only self со scoped entities", () => {
+    createStrictMachine({
+      storage: "entity",
+      initialState: "__INIT",
+      initialContext: {
+        x: f32(),
+        name: string(),
+      },
+      spawnSchema: {},
+      config: {
+        __INIT: { ENTITY_SPAWNED: "alive" },
+        alive: { TICK: "alive", ENTITY_DESPAWNED: "gone" },
+        gone: {},
+      },
+      reactions: {
+        TICK: (deps) => {
+          const entity = deps.self.indices[0];
+          const movement = deps.entities.get("movementActor");
+          const health = deps.entities.maybe("healthActor");
+
+          deps.api.sync();
+          expect(deps.action.type).type.toBe<string>();
+          expect(deps.self.indices).type.toBe<readonly EntityIndex[]>();
+          expect(deps.self.x[entity]).type.toBe<number>();
+          expect(deps.self.name[entity]).type.toBe<string>();
+          expect(deps.self.stateCode[entity]).type.toBe<number>();
+          expect(deps.self.prevStateCode[entity]).type.toBe<number>();
+          expect(deps.self.rowVersion[entity]).type.toBe<number>();
+          expect(deps.self.presence[entity]).type.toBe<number>();
+          expect(deps.self.states.alive).type.toBe<number>();
+          expect(deps.self.has(entity)).type.toBe<boolean>();
+          expect(deps.self.entityId(entity)).type.toBe<string>();
+          expect(movement.x[entity]).type.toBe<number>();
+          expect(health.hp[entity]).type.toBe<number>();
+
+          // @ts-expect-error!
+          deps.transition({ type: "TICK" });
+          // @ts-expect-error!
+          deps.transition.despawn("unit/a");
+          // @ts-expect-error!
+          deps.entities.get("domainMachine");
+          // @ts-expect-error!
+          deps.entities.get("instanceActor");
+          // @ts-expect-error!
+          deps.self.x[entity] = 1;
+          // @ts-expect-error!
+          movement.x[entity] = 1;
+        },
+        ENTITY_DESPAWNED: ({ self }) => {
+          expect(self.indices).type.toBe<readonly EntityIndex[]>();
+        },
+      },
+    });
+  });
+
+  test("reactions отклоняются для storage: \"instance\"", () => {
+    createStrictMachine({
+      storage: "instance",
+      initialState: "__INIT",
+      initialContext: {},
+      config: {
+        __INIT: { SPAWN_INSTANCE: "ready" },
+        ready: { HIT: "ready" },
+      },
+      // @ts-expect-error!
+      reactions: {
+        HIT: () => undefined,
+      },
+    });
+  });
+
+  test("отсутствие AppDeps.entities отклоняет string keys в reaction entities", () => {
+    const createWithoutEntities: TypedCreateMachineFn<
+      AppEvent,
+      { readonly api: { readonly sync: () => void } },
+      EntitiesPlugin<{ readonly api: { readonly sync: () => void } }>
+    > = createMachine;
+
+    createWithoutEntities({
+      storage: "entity",
+      initialState: "__INIT",
+      initialContext: {
+        x: f32(),
+      },
+      spawnSchema: {},
+      config: {
+        __INIT: { ENTITY_SPAWNED: "alive" },
+        alive: { TICK: "alive" },
+      },
+      reactions: {
+        TICK: ({ api, entities }) => {
+          api.sync();
+
+          // @ts-expect-error!
+          entities.get("movementActor");
+          // @ts-expect-error!
+          entities.maybe("movementActor");
+        },
+      },
+    });
+  });
+});
+
+describe("@lite-fsm/entities/react — этап 12 hook types", () => {
+  type AppEvent = FSMEvent<"TICK"> | FSMEvent<"SPAWN_INSTANCE">;
+  const plugin = entitiesPlugin();
+  const plugins = [plugin] as const;
+  const createAppMachine: TypedCreateMachineFn<AppEvent, {}, typeof plugins> = createMachine;
+
+  const movementActor = createAppMachine({
+    storage: "entity",
+    initialState: "__INIT",
+    initialContext: {
+      x: f32(),
+      name: string(),
+    },
+    spawnSchema: {},
+    config: {
+      __INIT: { ENTITY_SPAWNED: "alive" },
+      alive: { TICK: "gone" },
+      gone: { TICK: "alive" },
+    },
+  });
+
+  const healthActor = createAppMachine({
+    storage: "entity",
+    initialState: "__INIT",
+    initialContext: {
+      hp: i32(),
+    },
+    spawnSchema: {},
+    config: {
+      __INIT: { ENTITY_SPAWNED: "alive" },
+      alive: { TICK: "alive" },
+    },
+  });
+
+  const domainMachine = createAppMachine({
+    config: {
+      idle: { TICK: "idle" },
+    },
+    initialState: "idle",
+    initialContext: {},
+  });
+
+  const instanceActor = createAppMachine({
+    storage: "instance",
+    initialState: "__INIT",
+    initialContext: {},
+    config: {
+      __INIT: { SPAWN_INSTANCE: "ready" },
+      ready: {},
+    },
+  });
+
+  const machines = { movementActor, healthActor, domainMachine, instanceActor };
+  type AppMachines = typeof machines;
+
+  test("typed aliases ограничивают templateKey entity actor keys", () => {
+    const useSnapshot: TypedUseEntitySnapshotHook<AppMachines> = <Key extends Parameters<
+      TypedUseEntitySnapshotHook<AppMachines>
+    >[0]>(
+      templateKey: Key,
+      entityId: EntityId | null | undefined,
+    ) => useEntitySnapshot<AppMachines, Key>(templateKey, entityId);
+    const useCount: TypedUseEntityCountHook<AppMachines> = <Key extends Parameters<
+      TypedUseEntityCountHook<AppMachines>
+    >[0]>(
+      templateKey: Key,
+      options?: EntityListOptions,
+    ) => useEntityCount<AppMachines, Key>(templateKey, options);
+    const useList: TypedUseEntityListHook<AppMachines> = <Key extends Parameters<
+      TypedUseEntityListHook<AppMachines>
+    >[0]>(
+      templateKey: Key,
+      options?: EntityListOptions,
+    ) => useEntityList<AppMachines, Key>(templateKey, options);
+
+    const snapshot = useSnapshot("movementActor", "unit/a");
+    const nullableSnapshot = useSnapshot("movementActor", null);
+    const undefinedSnapshot = useSnapshot("movementActor", undefined);
+    const healthSnapshot = useSnapshot("healthActor", "unit/a" as EntityId);
+    const count = useCount("movementActor", { groupTag: "enemy" });
+    const list = useList("movementActor", { groupTag: "enemy" });
+    const options = { groupTag: "enemy" } satisfies EntityListOptions;
+
+    expect(snapshot).type.toBe<
+      EntityRowSnapshot<
+        {
+          readonly x: number;
+          readonly name: string;
+        },
+        "alive" | "gone"
+      > | undefined
+    >();
+    expect(nullableSnapshot).type.toBe<
+      EntityRowSnapshot<
+        {
+          readonly x: number;
+          readonly name: string;
+        },
+        "alive" | "gone"
+      > | undefined
+    >();
+    expect(undefinedSnapshot).type.toBe<typeof nullableSnapshot>();
+    expect(healthSnapshot).type.toBe<EntityRowSnapshot<{ readonly hp: number }, "alive"> | undefined>();
+    expect(count).type.toBe<number>();
+    expect(list).type.toBe<readonly EntityId[]>();
+    expect(options.groupTag).type.toBe<string>();
+
+    // @ts-expect-error!
+    useSnapshot("domainMachine", "unit/a");
+    // @ts-expect-error!
+    useSnapshot("instanceActor", "unit/a");
+    // @ts-expect-error!
+    useSnapshot("movementActor", 0 as EntityIndex);
+    // @ts-expect-error!
+    useCount("domainMachine");
+    // @ts-expect-error!
+    useList("movementActor", { groupTag: ["enemy"] });
+  });
+
+  test("untyped hooks сохраняют публичные return contracts без EntityIndex input", () => {
+    const snapshot = useEntitySnapshot<AppMachines, "movementActor">("movementActor", "unit/a");
+    const list = useEntityList<AppMachines, "movementActor">("movementActor");
+    const count = useEntityCount<AppMachines, "movementActor">("movementActor");
+
+    expect(snapshot).type.toBe<
+      EntityRowSnapshot<
+        {
+          readonly x: number;
+          readonly name: string;
+        },
+        "alive" | "gone"
+      > | undefined
+    >();
+    expect(list).type.toBe<readonly EntityId[]>();
+    expect(count).type.toBe<number>();
+
+    // @ts-expect-error!
+    useEntitySnapshot<AppMachines>("movementActor", 0 as EntityIndex);
   });
 });

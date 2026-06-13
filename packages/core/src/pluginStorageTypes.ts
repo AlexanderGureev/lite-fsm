@@ -35,8 +35,8 @@ export type StorageRuntimeExtension = {
   readonly observedEvents?: AnyEvent;
   readonly routeMeta?: object;
   readonly reducerContext?: object | TypeOnlyDependentObjectField | StorageDependentField<StorageDependentTypeLambda>;
-  readonly effectDeps?: object | TypeOnlyDependentObjectField;
-  readonly reactionDeps?: object | TypeOnlyDependentObjectField;
+  readonly effectDeps?: object | TypeOnlyDependentObjectField | StorageDependentField<StorageDependentTypeLambda>;
+  readonly reactionDeps?: object | TypeOnlyDependentObjectField | StorageDependentField<StorageDependentTypeLambda>;
   readonly resultMetadata?: object | TypeOnlyDependentObjectField;
   readonly publicState?: unknown | TypeOnlyDependentPublicStateField;
   readonly runtimeState?: unknown;
@@ -51,8 +51,8 @@ export type StorageMachineTypingExtension = {
   readonly input?: object;
   readonly internalEvents?: AnyEvent;
   readonly reducerContext?: object | TypeOnlyDependentObjectField | StorageDependentField<StorageDependentTypeLambda>;
-  readonly effectDeps?: object | TypeOnlyDependentObjectField;
-  readonly reactionDeps?: object | TypeOnlyDependentObjectField;
+  readonly effectDeps?: object | TypeOnlyDependentObjectField | StorageDependentField<StorageDependentTypeLambda>;
+  readonly reactionDeps?: object | TypeOnlyDependentObjectField | StorageDependentField<StorageDependentTypeLambda>;
   readonly resultMetadata?: object | TypeOnlyDependentObjectField;
   readonly publicState?: unknown | TypeOnlyDependentPublicStateField;
 };

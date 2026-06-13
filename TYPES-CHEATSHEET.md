@@ -7,8 +7,9 @@
 | Импорт                       | Типы                                                                                                                                                                                                                                                                                              |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `@lite-fsm/core`             | весь `types.ts` + `interfaces.ts`: `FSMEvent`, `MachineConfig`, `CFG`, `MachineReducer`, `MachineEffect`, `MachineManagerSnapshot`, `MachinesState`, `MachineEvents`, `MachineDependencies`, `IMachineManager`, `Middleware`, actor types, snapshot types, `ReadonlyManagerAction`, helpers; plugin helper/value/context types для `definePlugin().create(...)`, `LiteFsmPlugin`, `LiteFsmStorageRuntimeDefinition`, `StorageManagerContext`, `StorageRuntimeExtension`, `StorageDependentField`, `StorageDependentTypeLambda`, `StorageTemplate`, public `Storage*Context` |
-| `@lite-fsm/entities`         | alpha: `EntityId`, `EntityIndex`, `EntityAccess<AppMachines>`, `EntityMachineExtension`, `EntityReducerContext`, `EntityReducerSelf`, `LiteFsmEntityLifecycleEvents`, `SpawnEventsFrom`; runtime exports `entitiesPlugin()`, `defineSpawnEvents`, `defineEntitySpawn`, `spawnEvent`, `f32`, `i16`, `i32`, `u8`, `string`, `optional` |
-| `@lite-fsm/react`            | `FSMContextType`, `FSMContextProviderProps`, `FSMPersistLifecycle`, `FSMHydrationBoundaryProps`, typed hook aliases                                                                                                                                                                               |
+| `@lite-fsm/entities`         | alpha: `EntityId`, `EntityIndex`, `EntityAccess<AppMachines>`, `EntityMachineExtension`, `EntityReducerContext`, `EntityReducerSelf`, `LiteFsmEntityLifecycleEvents`, `SpawnEventsFrom`; runtime exports `entitiesPlugin()`, `defineSpawnEvents`, `defineEntitySpawn`, `spawnEvent`, `f32`, `i16`, `i32`, `u8`, `string`, `optional`; entity effects/reactions и `snapshot.storage.entity` типизируются через extension/core envelope |
+| `@lite-fsm/entities/react`   | alpha: `EntityRowSnapshot`, `EntityListOptions`, `TypedUseEntitySnapshotHook`, `TypedUseEntityCountHook`, `TypedUseEntityListHook`                                                                                                                                                                |
+| `@lite-fsm/react`            | `FSMContextType`, `FSMContextProviderProps`, `FSMPersistLifecycle`, `FSMHydrationBoundaryProps`, `FSMStorageHydrationPreview`, typed hook aliases                                                                                                                                                  |
 | `@lite-fsm/persist`          | `MaybePromise`, `PersistedRecord`, `PersistStorage`, `PersistStatus`, `PersistRestoreSettledResult`, `PersistManagerOptions`, `PersistController`                                                                                                                                                 |
 | `@lite-fsm/persist/react`    | runtime hooks only: `usePersistStatuses`, `useIsPersistRestoring`                                                                                                                                                                                                                                 |
 | `@lite-fsm/middleware`       | только runtime middleware                                                                                                                                                                                                                                                                         |
@@ -85,12 +86,16 @@ const movementActor = createMachine({
   },
   config: {
     __INIT: { ENTITY_SPAWNED: "active" },
-    active: { TICK: "active" },
+    active: { TICK: "expired" },
+    expired: {},
   },
+  despawnOn: "expired",
 });
 ```
 
 `LiteFsmEntityLifecycleEvents` равен `{ type: "ENTITY_SPAWNED" } | { type: "ENTITY_DESPAWNED" }`. `EntityMachineExtension.internalEvents` добавляет эти события только в `storage: "entity"` config/reducer type surface. Они не входят в пользовательский `AppEvent`, не выводятся в `MachineEvents<typeof machines>` и не принимаются public `manager.transition(...)`, если приложение не добавило их вручную в свой public union. Runtime все равно запрещает public dispatch этих names.
+
+`EntityMachineExtension.input` включает `despawnOn?: string | readonly string[]`. Поле доступно только для `storage: "entity"` и описывает public states, после которых runtime удаляет всю entity в том же dispatch. Runtime валидирует, что states существуют в `config` и не являются `__INIT`, `__RESOLVED`, `__REJECTED` или `__CANCELLED`. Terminal states удаляют только текущую row и не означают entity despawn. Public `manager.despawn(...)` не входит в тип менеджера.
 
 `__INIT` entity template должен быть transition map и может объявлять только `ENTITY_SPAWNED`. Custom event edge из `__INIT` является ошибкой инициализации. `storage: "instance"` продолжает поддерживать обычные custom `__INIT` events.
 
@@ -105,6 +110,31 @@ type MovementSlice = AppState["movementActor"];
 ```
 
 Phantom metadata переносит `initialContext` и `spawnSchema` внутри lightweight slice. Runtime не создает phantom поля. Public state union actor template для `EntityAccess<AppMachines>` выводится из machine definitions.
+
+`MachineManagerSnapshot<typeof machines>` сохраняет entity durable payload в
+top-level `storage?: Record<string, unknown>`. Для entity runtime ключ
+`storage.entity` содержит validated JSON-compatible payload, но `@lite-fsm/entities`
+не экспортирует отдельный low-level snapshot handler type. Типы
+`machines[entityActorKey]` остаются lightweight slices из
+`EntityMachineExtension.publicState`; columns, ids, `generation`, `freeList`,
+presence и `rowVersion` не появляются в `MachinesState<typeof machines>`.
+
+```ts
+const snapshot = manager.dehydrate();
+
+snapshot.machines.movementActor.storage; // "entity"
+snapshot.storage?.entity; // unknown payload, валидируется entity runtime
+manager.getSnapshot().machines.movementActor.count; // lightweight runtime slice
+// @ts-expect-error getSnapshot() не содержит top-level storage
+manager.getSnapshot().storage;
+```
+
+`dehydrate({ machines })` и `dehydrate({ storage })` имеют независимые filters:
+`machines` влияет только на `snapshot.machines`, `storage: []` отключает
+storage payloads, а `{ machines: [], storage: ["entity"] }` оставляет только
+`storage.entity`. `hydrate(...)` и `getHydratedState(...)` принимают общий core
+`MachineManagerSnapshot` envelope; schema compatibility и column payload types
+проверяются runtime.
 
 `EntityAccess<AppMachines>` выводит actor keys, columns и public state union из machine definitions и включает только templates с `storage: "entity"`:
 
@@ -164,9 +194,114 @@ type MovementReducerContext = EntityReducerContext<
 >;
 ```
 
+`EntityMachineExtension.effectDeps` добавляет deps только в effects
+`storage: "entity"` templates. `self` является readonly batch view: `indices`,
+`states`, `presence`, `rowVersion`, `stateCode`, `prevStateCode`, typed readonly
+columns, `has(entity)` и `entityId(entity)`. `entities` имеет тип
+`EntityAccess<AppMachines>`, если `AppDeps` содержит
+`entities?: EntityAccess<AppMachines>`; без этого поля runtime accessor
+присутствует, но `entities.get(...)` и `entities.maybe(...)` принимают ключ
+`never`.
+
+```ts
+type AppMachines = typeof machines;
+type AppDeps = {
+  entities?: EntityAccess<AppMachines>;
+};
+
+const createMachine: TypedCreateMachineFn<AppEvent, AppDeps, EntitiesPlugin<AppDeps>> = createLiteFsmMachine;
+
+const aiActor = createMachine({
+  storage: "entity",
+  initialState: "__INIT",
+  initialContext: { alert: f32() },
+  spawnSchema: {},
+  config: {
+    __INIT: { ENTITY_SPAWNED: "idle" },
+    idle: { WAKE: "active" },
+    active: {},
+  },
+  effects: {
+    active: ({ self, entities, transition }) => {
+      const movement = entities.maybe("movementActor");
+
+      for (const entity of self.indices) {
+        if (!self.has(entity) || !movement.has(entity)) continue;
+        transition.entity(self.entityId(entity), { type: "SYNC_POSITION" });
+      }
+
+      transition.tag("enemy", { type: "WAKE" });
+      transition.actor("uiActor/0", { type: "WAKE" });
+      transition.despawn(self.indices);
+    },
+  },
+});
+```
+
+`transition.entity(entityId | readonly entityId[], action)` и
+`transition.despawn(entityId | readonly entityId[] | self.indices)` доступны
+только в entity effects. `transition.despawn(entityIndex)` не принимается:
+числовые indices доступны только captured списком `self.indices`. В domain и
+`storage: "instance"` effects entity-specific helpers не входят в тип
+`transition`. `transition.tag(...)` и `transition.actor(...)` сохраняют core
+actor effect typing; `transition.tag(...)` использует `meta.groupTag`, а не
+`meta.entityId`.
+
+`EntityMachineExtension.input` также принимает `reactions?: { [eventType]:
+(deps) => unknown }` только для `storage: "entity"`. `reactionDeps` включает
+`action`, readonly `self`, scoped `entities` и user deps из `AppDeps`, но не
+включает `transition` или `condition`. Lifecycle event names доступны в keys
+`reactions`, если template `config` принимает соответствующий internal event.
+`AppDeps.entities?: EntityAccess<AppMachines>` задает strict keys для
+`entities.get(...)` и `entities.maybe(...)`; без этого поля ключи имеют тип
+`never`.
+
+```ts
+const syncActor = createMachine({
+  storage: "entity",
+  initialState: "__INIT",
+  initialContext: { spriteId: string() },
+  spawnSchema: {},
+  config: {
+    __INIT: { ENTITY_SPAWNED: "visible" },
+    visible: { POSITION_CHANGED: "visible", ENTITY_DESPAWNED: "removed" },
+    removed: {},
+  },
+  reactions: {
+    POSITION_CHANGED: ({ self, entities, renderer }) => {
+      const movement = entities.get("movementActor");
+      const entity = self.indices[0];
+
+      renderer.sync(self.spriteId[entity], movement.x[entity], movement.y[entity]);
+    },
+    ENTITY_DESPAWNED: ({ self }) => {
+      self.indices;
+    },
+  },
+});
+```
+
 `entitiesPlugin()` добавляет route meta key `entityId`. При подключенном plugin `manager.transition(...)` принимает `meta.entityId?: string | readonly string[]`; без plugin этот meta key недоступен на уровне TypeScript. Core keys `actorId`, `groupId` и `groupTag` остаются доступны. Entity storage runtime объявляет `routeMetaKeys: ["entityId"]`, поэтому storage binding требует совместимый resolver `routeMeta.entityId` в `definePlugin().create(...)`.
 
-На текущем этапе `@lite-fsm/entities` не экспортирует React types.
+`@lite-fsm/entities/react` экспортирует read-only hook types для React layer:
+
+```ts
+import type {
+  EntityListOptions,
+  EntityRowSnapshot,
+  TypedUseEntityCountHook,
+  TypedUseEntityListHook,
+  TypedUseEntitySnapshotHook,
+} from "@lite-fsm/entities/react";
+import { useEntitySnapshot } from "@lite-fsm/entities/react";
+
+type AppMachines = typeof machines;
+
+const useAppEntitySnapshot: TypedUseEntitySnapshotHook<AppMachines> = (templateKey, entityId) =>
+  useEntitySnapshot<AppMachines, typeof templateKey>(templateKey, entityId);
+```
+
+`EntityRowSnapshot<Context, State>` имеет форму `{ entityId: EntityId; groupTag: string; state: State; context: Context }`. `TypedUseEntitySnapshotHook<AppMachines>` принимает только entity actor keys, принимает `EntityId | null | undefined` и возвращает `EntityRowSnapshot<EntityContext, StateUnion> | undefined`. `TypedUseEntityCountHook<AppMachines>` возвращает `number`; `TypedUseEntityListHook<AppMachines>` возвращает `readonly EntityId[]`. `EntityListOptions` содержит только `groupTag?: string`. Hook types не принимают raw `EntityIndex` как публичный row identifier.
 
 ## События
 
@@ -252,7 +387,7 @@ Wrapper выбирает storage-specific input по `cfg.storage`. `storage: "i
 
 Storage author описывает type-level machine contract через `defineStorageRuntime<Extension>().create(...)`. `Extension` не содержит поле `storage`: builder добавляет kind из literal `kind`. Machine-facing поля `input`, `internalEvents`, `reducerContext`, `effectDeps`, `reactionDeps`, `resultMetadata` и `publicState` участвуют в `TypedCreateMachineFn<P, D, typeof plugins>`; runtime-only поля типизируют callbacks storage runtime.
 
-`resultMetadata`, `reducerContext`, `effectDeps`, `reactionDeps` и `publicState` могут быть fixed object types или dependent function signatures от concrete storage input. Core применяет dependent field только на type level:
+`resultMetadata`, `reducerContext`, `effectDeps`, `reactionDeps` и `publicState` могут быть fixed object types или dependent function signatures от concrete storage input. Для deps/result types, которым нужен весь concrete storage input, можно использовать `StorageDependentField<Lambda>`. Core применяет dependent field только на type level:
 
 ```ts
 type EntityStorageExtension = {
@@ -261,6 +396,7 @@ type EntityStorageExtension = {
     initialState: "__INIT";
     initialContext: AnyRecord;
     spawnSchema: AnyRecord;
+    despawnOn?: string | readonly string[];
   };
   resultMetadata: <Input extends EntityStorageExtension["input"]>(input: Input) => {
     entityContextSchema: Input["initialContext"];
@@ -761,6 +897,7 @@ const logger: Middleware<AppState, AppEvent> = (api) => (next) => (action) => ne
 | `FSMPersistLifecycle`                                     | `{ start(): () => void }`                                                                                                                                          |
 | `FSMContextProviderProps<S, P>`                           | `PropsWithChildren<{ machineManager; getServerSnapshot?; persist?: readonly FSMPersistLifecycle[] }>`                                                              |
 | `FSMHydrationBoundaryProps<S, P>`                         | `PropsWithChildren<{ snapshot: MachineManagerSnapshot<S>; strategy?: HydrateStrategy; transitionAfterHydrate?: ManagerAction<P> \| readonly ManagerAction<P>[] }>` |
+| `FSMStorageHydrationPreview`                              | `{ hasPreview: boolean; preview: unknown \| undefined; hasServerPreview: boolean; serverPreview: unknown \| undefined }`                                           |
 | `TypedUseManagerHook<S, P>` · `TypedUseMachineHook<S, P>` | `() => IMachineManager<S, P>`                                                                                                                                      |
 | `TypedUseSelectorHook<S>`                                 | `<R>(selector: (state: MachinesState<S>) => R, equalityFn?) => R`                                                                                                  |
 | `TypedUseTransitionHook<P>`                               | `() => (payload: ManagerAction<P>) => ManagerAction<P>`                                                                                                            |
@@ -776,7 +913,7 @@ export const useSelector: TypedUseSelectorHook<Store> = baseUseSelector;
 export const useTransition: TypedUseTransitionHook<Event> = baseUseTransition;
 ```
 
-`TypedUseSelectorHook<S>` принимает `MachineStore`, не computed `MachinesState<S>`. `getServerSnapshot` — root state shape `MachinesState<S>`, не dehydrated envelope; custom функция должна возвращать стабильный snapshot для SSR/hydration pass. `transitionAfterHydrate` принимает plain manager action или readonly array actions и выполняется только на клиенте после boundary hydrate. `persist` принимает только readonly array lifecycle entries; `@lite-fsm/persist/react` читает массив статусов через provider context, а lifecycle-only entry представлен как `null`. `@lite-fsm/react` не импортирует `@lite-fsm/persist`.
+`TypedUseSelectorHook<S>` принимает `MachineStore`, не computed `MachinesState<S>`. `getServerSnapshot` — root state shape `MachinesState<S>`, не dehydrated envelope; custom функция должна возвращать стабильный snapshot для SSR/hydration pass. `transitionAfterHydrate` принимает plain manager action или readonly array actions и выполняется только на клиенте после boundary hydrate. `useStorageHydrationPreview(storageKind)` возвращает `FSMStorageHydrationPreview`; оба payload поля имеют тип `unknown`, чтобы plugin packages сами валидировали `snapshot.storage[kind]`. `persist` принимает только readonly array lifecycle entries; `@lite-fsm/persist/react` читает массив статусов через provider context, а lifecycle-only entry представлен как `null`. `@lite-fsm/react` не импортирует `@lite-fsm/persist` или `@lite-fsm/entities`.
 
 ### React `defineMachine`
 

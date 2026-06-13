@@ -4,8 +4,9 @@ export default defineConfig({
   clean: true,
   entry: {
     index: "src/index.ts",
+    react: "src/react/index.ts",
   },
-  external: ["@lite-fsm/core"],
+  external: ["@lite-fsm/core", "@lite-fsm/react", "react"],
   format: ["esm", "cjs"],
   outDir: "dist",
   outExtension({ format }) {

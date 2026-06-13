@@ -22,12 +22,25 @@
         "types": "./dist/index.d.cts",
         "default": "./dist/index.cjs"
       }
+    },
+    "./react": {
+      "import": {
+        "types": "./dist/react/index.d.ts",
+        "default": "./dist/react.js"
+      },
+      "require": {
+        "types": "./dist/react/index.d.cts",
+        "default": "./dist/react.cjs"
+      }
     }
   },
   "typesVersions": {
     "*": {
       "*": [
         "dist/index.d.ts"
+      ],
+      "react": [
+        "dist/react/index.d.ts"
       ]
     }
   },
@@ -56,5 +69,17 @@
   },
   "dependencies": {
     "@lite-fsm/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "@lite-fsm/react": "workspace:*",
+    "react": ">=18.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@lite-fsm/react": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    }
   }
 }
