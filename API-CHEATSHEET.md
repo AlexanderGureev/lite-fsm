@@ -26,8 +26,14 @@
 `@lite-fsm/entities` подключается только явным импортом и не входит в core bundle. Пакет предоставляет `entitiesPlugin()`, schema descriptors, storage-specific typing для actor templates с `storage: "entity"`, type-only lifecycle events, public spawn events и root accessor `manager.entities`.
 
 ```ts
-import { MachineManager } from "@lite-fsm/core";
+import { createMachine as createLiteFsmMachine, MachineManager, type TypedCreateMachineFn } from "@lite-fsm/core";
 import { defineEntitySpawn, defineSpawnEvents, entitiesPlugin, f32, optional, spawnEvent, string } from "@lite-fsm/entities";
+import type { EntitiesPlugin } from "@lite-fsm/entities";
+
+type AppEvent = { type: "TICK" };
+type AppDeps = {};
+
+export const createMachine: TypedCreateMachineFn<AppEvent, AppDeps, EntitiesPlugin<AppDeps>> = createLiteFsmMachine;
 
 const manager = MachineManager(machines, {
   plugins: [entitiesPlugin()],
@@ -37,7 +43,7 @@ const manager = MachineManager(machines, {
 Entity actor template проходит init-time validation при создании `MachineManager`:
 
 ```ts
-const movementActor = createEntityMachine({
+const movementActor = createMachine({
   storage: "entity",
   initialState: "__INIT",
   initialContext: {

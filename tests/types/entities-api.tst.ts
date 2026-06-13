@@ -18,6 +18,7 @@ import type {
   EntityId,
   EntityIndex,
   EntityMachineExtension,
+  EntitiesPlugin,
   EntityReducerContext,
   LiteFsmEntityLifecycleEvents,
   SpawnEventsFrom,
@@ -40,12 +41,17 @@ type DescriptorColumn<Descriptor> = Descriptor extends { readonly columnType?: i
 type DescriptorSpawnValue<Descriptor> = Descriptor extends { readonly spawnType?: infer Spawn } ? Spawn : never;
 
 describe("@lite-fsm/entities — этап 1 public types", () => {
-  test("entitiesPlugin возвращает LiteFsmPlugin", () => {
+  test("entitiesPlugin возвращает runtime plugin, а EntitiesPlugin является type-only source", () => {
+    type AppDeps = { readonly api: { readonly load: () => Promise<void> } };
     const plugin = entitiesPlugin();
-    const typedPlugin = entitiesPlugin<{ readonly api: { readonly load: () => Promise<void> } }>();
 
     expect(plugin).type.toBeAssignableTo<LiteFsmPlugin<"@lite-fsm/entities">>();
-    expect(typedPlugin).type.toBe<typeof plugin>();
+    expect(plugin).type.toBeAssignableTo<EntitiesPlugin<unknown, never>>();
+
+    type _PluginSource = Assert<EntitiesPlugin<AppDeps> extends LiteFsmPlugin<"@lite-fsm/entities"> ? true : false>;
+
+    // @ts-expect-error!
+    entitiesPlugin<AppDeps>();
   });
 
   test("EntityId совместим со строкой", () => {
@@ -95,12 +101,10 @@ describe("@lite-fsm/entities — этап 2 schema descriptors и machine extens
     });
   });
 
-  test('wrapper с plugin source принимает storage: "entity"', () => {
+  test('wrapper с EntitiesPlugin<AppDeps> принимает storage: "entity"', () => {
     type AppEvent = FSMEvent<"TICK">;
     type AppDeps = { readonly api: { readonly load: () => Promise<void> } };
-    const entityPlugin = entitiesPlugin<AppDeps>();
-    const plugins = [entityPlugin] as const;
-    const createAppMachine: TypedCreateMachineFn<AppEvent, AppDeps, typeof plugins> = createMachine;
+    const createAppMachine: TypedCreateMachineFn<AppEvent, AppDeps, EntitiesPlugin<AppDeps>> = createMachine;
     const initialContext = {
       x: f32(),
       y: f32(),
@@ -369,6 +373,7 @@ describe("@lite-fsm/entities — этап 4 lifecycle events types", () => {
 
 describe("@lite-fsm/entities — этап 5 spawn API types", () => {
   type AppEvent = FSMEvent<"TICK">;
+  type AppDeps = { readonly api: { readonly load: () => Promise<void> } };
   const spawnEvents = defineSpawnEvents({
     SPAWN_PROJECTILE: spawnEvent<{
       readonly id: string;
@@ -379,9 +384,7 @@ describe("@lite-fsm/entities — этап 5 spawn API types", () => {
   });
   type SpawnEvents = SpawnEventsFrom<typeof spawnEvents>;
   type AppEventsWithSpawn = AppEvent | SpawnEvents;
-  const entityPlugin = entitiesPlugin();
-  const plugins = [entityPlugin] as const;
-  const createAppMachine: TypedCreateMachineFn<AppEventsWithSpawn, {}, typeof plugins> = createMachine;
+  const createAppMachine: TypedCreateMachineFn<AppEventsWithSpawn, AppDeps, EntitiesPlugin<AppDeps>> = createMachine;
   const movementInitialContext = {
     x: f32(),
     label: string(),
@@ -596,7 +599,23 @@ describe("@lite-fsm/entities — этап 5 spawn API types", () => {
       SPAWN_EMPTY: () => [],
     });
     const spawnPlugin = entitiesPlugin({ spawn });
+    const createSpawnMachine: TypedCreateMachineFn<AppEventsWithSpawn, {}, typeof spawnPlugin> = createMachine;
     const manager = MachineManager(machines, { plugins: [spawnPlugin] as const });
+
+    createSpawnMachine({
+      storage: "entity",
+      initialState: "__INIT",
+      initialContext: {
+        x: f32(),
+      },
+      spawnSchema: {
+        x: f32(),
+      },
+      config: {
+        __INIT: { ENTITY_SPAWNED: "alive" },
+        alive: { TICK: "alive", SPAWN_PROJECTILE: "alive" },
+      },
+    });
 
     manager.transition({ type: "TICK" });
     manager.transition({ type: "SPAWN_PROJECTILE", payload: { id: "projectile/a", x: 1, label: null } });
@@ -606,6 +625,8 @@ describe("@lite-fsm/entities — этап 5 spawn API types", () => {
     manager.transition({ type: "SPAWN_PROJECTILE", payload: { id: "projectile/a", x: "bad", label: null } });
     // @ts-expect-error!
     manager.transition({ type: "ENTITY_SPAWNED" });
+    // @ts-expect-error!
+    entitiesPlugin<AppDeps>({ spawn });
   });
 
   test("machine AppEvents не получает spawn events автоматически", () => {

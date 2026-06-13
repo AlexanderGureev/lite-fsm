@@ -52,25 +52,26 @@
 | `EntityId`                  | alias `string`; публичный id entity                                       |
 | `EntityIndex`               | branded `number`; runtime index, не plain input type пользовательского API |
 | `EntityAccess<AppMachines>` | typed root accessor для `manager.entities`                                |
+| `EntitiesPlugin<AppDeps, PluginEvents>` | type-only plugin source для `TypedCreateMachineFn` и manager events от runtime `spawn` |
 | `EntityMachineExtension`    | machine-facing extension для `storage: "entity"` через plugin source      |
 | `EntityReducerContext<ContextSchema, SpawnSchema>` | reducer context с `self` и `payloadFor(entity)` для entity actor template |
 | `EntityReducerSelf<ContextSchema>` | batch self API: `indices`, direct columns, `stateCode`, `prevStateCode`, `has`, `entityId` |
 | `LiteFsmEntityLifecycleEvents` | internal lifecycle union для `storage: "entity"` templates               |
 | `SpawnEventsFrom<typeof spawnEvents>` | discriminated union public spawn events                                  |
 
-`EntityMachineExtension` подключается к `TypedCreateMachineFn` только через `typeof entitiesPlugin()` или tuple plugins. Передача `EntityMachineExtension` третьим generic напрямую не является поддерживаемым plugin source.
+`EntityMachineExtension` подключается к `TypedCreateMachineFn` через `EntitiesPlugin<AppDeps>` или реальные runtime plugin values `typeof plugin`/`typeof plugins`. Передача `EntityMachineExtension` третьим generic напрямую не является поддерживаемым plugin source.
 
 ```ts
 import { createMachine as createLiteFsmMachine, type TypedCreateMachineFn } from "@lite-fsm/core";
-import { defineEntitySpawn, defineSpawnEvents, entitiesPlugin, f32, optional, spawnEvent, string } from "@lite-fsm/entities";
-import type { EntityReducerContext, SpawnEventsFrom } from "@lite-fsm/entities";
+import { f32, optional, string } from "@lite-fsm/entities";
+import type { EntitiesPlugin } from "@lite-fsm/entities";
 
 type AppEvent = { type: "TICK" };
-const plugins = [entitiesPlugin()] as const;
+type AppDeps = {};
 
-export const createEntityMachine: TypedCreateMachineFn<AppEvent, {}, typeof plugins> = createLiteFsmMachine;
+export const createMachine: TypedCreateMachineFn<AppEvent, AppDeps, EntitiesPlugin<AppDeps>> = createLiteFsmMachine;
 
-const movementActor = createEntityMachine({
+const movementActor = createMachine({
   storage: "entity",
   initialState: "__INIT",
   initialContext: {

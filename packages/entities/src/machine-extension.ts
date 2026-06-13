@@ -22,22 +22,25 @@ export type EntityMachineExtension<
   ContextSchema extends EntityContextSchema = EntityContextSchema,
   SpawnSchema extends EntitySpawnSchema = EntitySpawnSchema,
   Config extends object = object,
-> = {
-  readonly storage: "entity";
-  readonly internalEvents: LiteFsmEntityLifecycleEvents;
-  readonly input: EntityMachineInput<ContextSchema, SpawnSchema, Config>;
-  readonly reducerContext: StorageDependentField<EntityReducerContextLambda>;
-  readonly resultMetadata: <Input extends EntityMachineInput<ContextSchema, SpawnSchema, Config>>(input: Input) => {
-    readonly entityContextSchema: Input["initialContext"];
-    readonly entitySpawnSchema: Input["spawnSchema"];
-  };
-  readonly publicState: <Input extends EntityMachineInput<ContextSchema, SpawnSchema, Config>>(
-    input: Input,
-  ) => EntityMachinePublicState<{
-    readonly entityContextSchema: Input["initialContext"];
-    readonly entitySpawnSchema: Input["spawnSchema"];
-  }>;
-};
+  AppDeps = unknown,
+> = AppDeps extends unknown
+  ? {
+      readonly storage: "entity";
+      readonly internalEvents: LiteFsmEntityLifecycleEvents;
+      readonly input: EntityMachineInput<ContextSchema, SpawnSchema, Config>;
+      readonly reducerContext: StorageDependentField<EntityReducerContextLambda>;
+      readonly resultMetadata: <Input extends EntityMachineInput<ContextSchema, SpawnSchema, Config>>(input: Input) => {
+        readonly entityContextSchema: Input["initialContext"];
+        readonly entitySpawnSchema: Input["spawnSchema"];
+      };
+      readonly publicState: <Input extends EntityMachineInput<ContextSchema, SpawnSchema, Config>>(
+        input: Input,
+      ) => EntityMachinePublicState<{
+        readonly entityContextSchema: Input["initialContext"];
+        readonly entitySpawnSchema: Input["spawnSchema"];
+      }>;
+    }
+  : never;
 
 export type EntityMachineStateMetadata<
   ContextSchema extends EntityContextSchema,

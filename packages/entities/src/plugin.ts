@@ -35,21 +35,23 @@ export type EntityIndex = number & { readonly [entityIndexBrand]: "EntityIndex" 
 type EntityPluginOptions<Spawn extends AnyEntitySpawnDescriptor> = {
   readonly spawn: Spawn;
 };
-type EntityStorageRuntimeExtension = Omit<EntityMachineExtension, "storage" | "publicState"> & {
-  readonly publicState: ReturnType<typeof createEntityPublicInitialState>;
+type EntityStorageRuntimeExtension = Omit<EntityMachineExtension, "storage"> & {
   readonly runtimeState: EntityRuntimeState;
   readonly templateData: EntityTemplateMetadata;
 };
-type EntityStorageDefinition = LiteFsmStorageRuntimeDefinition<"entity", EntityMachineExtension>;
+type EntityStorageDefinition<AppDeps = unknown> = LiteFsmStorageRuntimeDefinition<
+  "entity",
+  EntityMachineExtension<EntityContextSchema, EntitySpawnSchema, object, AppDeps>
+>;
 type EntityManagerDefinition = {
   readonly entities: <S extends MachineStore>(ctx: ManagerRuntimeContext<AnyEvent, S>) => EntityAccess<S>;
 };
-type EntitiesPlugin<PluginEvents extends AnyEvent = never> = LiteFsmPlugin<
+export type EntitiesPlugin<AppDeps = unknown, PluginEvents extends AnyEvent = never> = LiteFsmPlugin<
   "@lite-fsm/entities",
   PluginEvents,
   {
     readonly name: "@lite-fsm/entities";
-    readonly storage: readonly [EntityStorageDefinition];
+    readonly storage: readonly [EntityStorageDefinition<AppDeps>];
     readonly manager: EntityManagerDefinition;
   }
 >;
@@ -87,7 +89,7 @@ const validateEntityTemplate = (key: string, machine: Record<string, unknown>): 
   assertEntityInitLifecycleConfig(key, machine.config);
 };
 
-const entityStorageRuntime = defineStorageRuntime<EntityStorageRuntimeExtension>().create({
+const entityStorageRuntime: EntityStorageDefinition<unknown> = defineStorageRuntime<EntityStorageRuntimeExtension>().create({
   kind: ENTITY_STORAGE_KIND,
   reduceScope: "bucket",
   validateTemplate({ key, machine }) {
@@ -126,7 +128,7 @@ const entityStorageRuntime = defineStorageRuntime<EntityStorageRuntimeExtension>
 
 const createEntitiesPlugin = <PluginEvents extends AnyEvent>(
   spawn: AnyEntitySpawnDescriptor | undefined,
-): EntitiesPlugin<PluginEvents> =>
+): EntitiesPlugin<unknown, PluginEvents> =>
   definePlugin<PluginEvents>().create({
     name: ENTITY_PLUGIN_NAME,
     storage: [entityStorageRuntime],
@@ -142,7 +144,7 @@ const createEntitiesPlugin = <PluginEvents extends AnyEvent>(
         return getEntityRuntimeState(ctx).access as EntityAccess<S>;
       },
     },
-  }) as unknown as EntitiesPlugin<PluginEvents>;
+  });
 
 const resolveEntityPluginSpawn = (options: unknown): AnyEntitySpawnDescriptor | undefined => {
   if (options === undefined) return undefined;
@@ -158,11 +160,11 @@ const resolveEntityPluginSpawn = (options: unknown): AnyEntitySpawnDescriptor | 
   );
 };
 
-export function entitiesPlugin<AppDeps = unknown>(): EntitiesPlugin;
-export function entitiesPlugin<const Spawn extends AnyEntitySpawnDescriptor>(
+export function entitiesPlugin(): EntitiesPlugin<unknown, never>;
+export function entitiesPlugin <const Spawn extends AnyEntitySpawnDescriptor>(
   options: EntityPluginOptions<Spawn>,
-): EntitiesPlugin<EntitySpawnPluginEvents<Spawn>>;
-export function entitiesPlugin(options?: unknown): EntitiesPlugin<AnyEvent> {
+): EntitiesPlugin<unknown, EntitySpawnPluginEvents<Spawn>>;
+export function entitiesPlugin(options?: unknown): EntitiesPlugin<unknown, AnyEvent> {
   const spawn = resolveEntityPluginSpawn(options);
   return createEntitiesPlugin(spawn);
 }

@@ -31,6 +31,7 @@ import {
 } from "@lite-fsm/entities";
 import type {
   EntityAccess,
+  EntitiesPlugin,
   EntityId,
   EntityIndex,
   EntityMachineExtension,
@@ -43,13 +44,29 @@ import type {
 
 `EntityId` является публичной строкой. `EntityIndex` является branded number для
 внутренних runtime структур и не предназначен для пользовательского input API.
-`EntityMachineExtension` подключается к `TypedCreateMachineFn` только через plugin
-source: `typeof entitiesPlugin()` или tuple plugins.
+`EntityMachineExtension` подключается к `TypedCreateMachineFn` через
+`EntitiesPlugin<AppDeps>` или реальные runtime plugin values `typeof plugin` /
+`typeof plugins`.
 
 ## Schema descriptors
 
 ```ts
-const movementActor = createEntityMachine({
+import {
+  createMachine as createLiteFsmMachine,
+  type TypedCreateMachineFn,
+} from "@lite-fsm/core";
+import type { EntitiesPlugin } from "@lite-fsm/entities";
+
+type AppEvent = { readonly type: "TICK" };
+type AppDeps = {};
+
+export const createMachine: TypedCreateMachineFn<
+  AppEvent,
+  AppDeps,
+  EntitiesPlugin<AppDeps>
+> = createLiteFsmMachine;
+
+const movementActor = createMachine({
   storage: "entity",
   initialState: "__INIT",
   initialContext: {

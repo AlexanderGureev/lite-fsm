@@ -233,9 +233,8 @@ const managerWithSpawn = MachineManager(machines, {
 
 Контракт:
 
-- `entitiesPlugin(...)` является generic factory.
+- `entitiesPlugin(...)` является runtime factory; dependency type не передается в этот вызов.
 - `entitiesPlugin()` разрешен и устанавливает entity storage/runtime без public spawn events.
-- `entitiesPlugin<AppDeps>()` использует `AppDeps` только на уровне типов для entity effect/reaction deps; runtime behavior совпадает с `entitiesPlugin()`.
 - `entitiesPlugin({ spawn })` включает public spawn events.
 - `spawn` должен быть результатом `defineEntitySpawn(machines, spawnEvents)`.
 - Plugin `PluginEvents` для spawn transition events выводятся из `spawnEvents`, сохраненного в `spawn`.
@@ -255,18 +254,14 @@ const managerWithSpawn = MachineManager(machines, {
 ```ts
 import {
   createMachine as createLiteFsmMachine,
-  type ActorPublicState,
   type TypedCreateMachineFn,
 } from "@lite-fsm/core";
-import { entitiesPlugin } from "@lite-fsm/entities";
-
-const entityPlugin = entitiesPlugin<AppDeps>();
-const entityPlugins = [entityPlugin] as const;
+import type { EntitiesPlugin } from "@lite-fsm/entities";
 
 export const createMachine: TypedCreateMachineFn<
   AppEvents,
   AppDeps,
-  typeof entityPlugins
+  EntitiesPlugin<AppDeps>
 > = createLiteFsmMachine;
 ```
 
@@ -349,12 +344,13 @@ type EntityMachinePublicState<Metadata> = {
 
 Контракт:
 
-- Extension подключается к `TypedCreateMachineFn` только через plugin source: `typeof entityPlugin` или tuple `typeof plugins`.
+- Extension подключается к `TypedCreateMachineFn` через type-only plugin source `EntitiesPlugin<AppDeps>` или через реальные runtime plugin values `typeof plugin`/`typeof plugins`.
 - Передача `EntityMachineExtension` третьим параметром типа в `TypedCreateMachineFn` не поддерживается.
-- `entitiesPlugin<AppDeps>()` принимает `AppDeps` только на уровне типов, чтобы `EntityEffectDeps`/`EntityReactionDeps` могли извлечь `EntityAccess<AppMachines>` из `AppDeps.entities`.
+- `EntitiesPlugin<AppDeps>` переносит `AppDeps` только на уровне типов, чтобы будущие `EntityEffectDeps`/`EntityReactionDeps` могли извлечь `EntityAccess<AppMachines>` из `AppDeps.entities`.
 - `AppDeps` может ссылаться на `AppState = MachinesState<typeof machines>` по существующему self-reference pattern для `getState`.
 - `AppDeps` может ссылаться на `AppMachines = typeof machines` для строгой типизации `entities`.
-- Для bootstrap с `defineEntitySpawn(machines, spawnEvents)` typed wrapper может использовать `entitiesPlugin<AppDeps>()` как источник типизации до создания `spawn`; runtime manager после этого использует `entitiesPlugin({ spawn })`, чтобы TypeScript вывел точные spawn events из значения `spawn`. `entitiesPlugin<AppDeps>({ spawn })` не поддерживается как shorthand, потому что TypeScript не умеет одновременно задать первый type argument и вывести следующий generic из `options.spawn` без потери точности `manager.transition(...)`.
+- Для bootstrap с `defineEntitySpawn(machines, spawnEvents)` typed wrapper использует `EntitiesPlugin<AppDeps>` до создания `spawn`.
+- Runtime manager после этого использует `entitiesPlugin({ spawn })`, чтобы TypeScript вывел точные spawn events из значения `spawn`. Dependency type живет только в type-only source и не требует runtime plugin value только для типизации.
 - Extension не меняет global `createMachine` typing.
 - Extension не добавляет lifecycle events в public `AppEvents`.
 - Extension сохраняет `initialContext` и `spawnSchema` как phantom metadata в result type каждого entity actor template.
@@ -1586,7 +1582,7 @@ Type tests:
 #### Типовой контракт этапа
 
 - Public API и public types в cheatsheets соответствуют реализованным exports.
-- README показывает typed wrapper с plugin source `typeof entityPlugin` или `typeof plugins`, а не передачу `EntityMachineExtension` третьим параметром типа.
+- README показывает typed wrapper с plugin source `EntitiesPlugin<AppDeps>`, а не runtime plugin value только для типизации и не передачу `EntityMachineExtension` третьим параметром типа.
 - README показывает `defineSpawnEvents`, `spawnEvent`, `SpawnEventsFrom`, `defineEntitySpawn`, `entitiesPlugin({ spawn })` и `manager.entities`.
 - README показывает `AppDeps` с `getState?: () => AppState` и `entities?: EntityAccess<AppMachines>`.
 - README показывает `manager.setDependencies({ entities: manager.entities, ... })` только для domain/process effects, которым нужен root entity access.

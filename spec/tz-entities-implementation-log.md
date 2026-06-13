@@ -26,7 +26,7 @@
 - Активное ТЗ: `spec/tz-entities-implementation.md`
 - Активный этап: Этап 6 — Columnar reduce pipeline, numeric event/state codes, buckets, routing и hot path guarantees
 - Статус: `not started`
-- Следующее действие: можно начинать этап 6.
+- Следующее действие: можно начинать этап 6 после завершенного корректирующего ТЗ.
 
 ## Сводка по этапам
 
@@ -271,3 +271,12 @@
 
 - Статус: `not started`
 - Записи: нет.
+
+### 2026-06-13 — Корректирующее ТЗ перед этапом 6
+
+- Статус: `done`.
+- Scope: `spec/tz-entities-plugin-source-api-correction.md` исправляет public API `@lite-fsm/entities` после этапа 5 и до начала этапа 6.
+- Причина: старый bootstrap через `entitiesPlugin<AppDeps>()` должен быть заменен на type-only source `EntitiesPlugin<AppDeps>` для `TypedCreateMachineFn`, а runtime manager должен использовать `entitiesPlugin({ spawn })`.
+- Итог: `EntitiesPlugin<AppDeps>` стал documented type-only source, runtime `entitiesPlugin(...)` не переносит dependency type, docs/cheatsheets/specs синхронизированы.
+- Проверки: финальный gate корректирующего ТЗ пройден; docs build не запускался по запрету.
+- Следующее действие: можно начинать основной этап 6.
