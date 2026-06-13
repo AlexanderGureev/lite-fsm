@@ -2,13 +2,13 @@ import { describe, expect, test } from "tstyche";
 import { createMachine, definePlugin, defineStorageRuntime } from "@lite-fsm/core";
 import type {
   FSMEvent,
+  LiteFsmStorageRuntimeDefinition,
   ManagerAction,
-  PluginMachineExtensions,
   ReadonlyManagerAction,
   TypedCreateMachineFn,
 } from "@lite-fsm/core";
 
-import type { Assert, IsNever } from "./_helpers";
+import type { Assert } from "./_helpers";
 
 type AppEvent = FSMEvent<"LOAD"> | FSMEvent<"RESET">;
 type CacheInternalEvent = FSMEvent<"CACHE_INVALIDATED", { readonly key: string }>;
@@ -33,6 +33,8 @@ type CacheExtension = {
   };
 };
 type CacheMachineExtension = CacheExtension & { readonly storage: "cache" };
+type StorageMachineExtensionOf<Definition> =
+  Definition extends LiteFsmStorageRuntimeDefinition<any, infer Extension> ? Extension : never;
 
 const cacheStorage = defineStorageRuntime<CacheExtension>().create({
   kind: "cache",
@@ -103,43 +105,60 @@ describe("plugin system — этап 7 storage types", () => {
     expect(sessionStorage.kind).type.toBe<"session">();
 
     type _CacheExtension = Assert<
-      PluginMachineExtensions<typeof cachePlugin> extends CacheMachineExtension
-        ? CacheMachineExtension extends PluginMachineExtensions<typeof cachePlugin>
+      StorageMachineExtensionOf<typeof cacheStorage> extends CacheMachineExtension
+        ? CacheMachineExtension extends StorageMachineExtensionOf<typeof cacheStorage>
           ? true
           : false
         : false
     >;
     type _DefaultExtension = Assert<
-      PluginMachineExtensions<typeof multiStoragePlugin> extends
+      StorageMachineExtensionOf<typeof cacheStorage> | StorageMachineExtensionOf<typeof sessionStorage> extends
         | CacheMachineExtension
         | { readonly storage: "session" }
-        ? (CacheMachineExtension | { readonly storage: "session" }) extends PluginMachineExtensions<
-            typeof multiStoragePlugin
-          >
+        ? (CacheMachineExtension | { readonly storage: "session" }) extends
+            | StorageMachineExtensionOf<typeof cacheStorage>
+            | StorageMachineExtensionOf<typeof sessionStorage>
           ? true
           : false
         : false
     >;
-    type _NoStorage = Assert<IsNever<PluginMachineExtensions<typeof noStoragePlugin>>>;
   });
 
-  test("PluginMachineExtensions одинаково принимает tuple и union", () => {
-    type TupleExtensions = PluginMachineExtensions<readonly [typeof cachePlugin, typeof multiStoragePlugin]>;
-    type UnionExtensions = PluginMachineExtensions<typeof cachePlugin | typeof multiStoragePlugin>;
+  test("TypedCreateMachineFn одинаково принимает plugin tuple и union", () => {
+    type TupleCreateMachine = TypedCreateMachineFn<
+      AppEvent,
+      AppDeps,
+      readonly [typeof cachePlugin, typeof multiStoragePlugin]
+    >;
+    type UnionCreateMachine = TypedCreateMachineFn<AppEvent, AppDeps, typeof cachePlugin | typeof multiStoragePlugin>;
 
-    expect<TupleExtensions>().type.toBeAssignableTo<UnionExtensions>();
-    expect<UnionExtensions>().type.toBeAssignableTo<TupleExtensions>();
+    expect<TupleCreateMachine>().type.toBeAssignableTo<UnionCreateMachine>();
+    expect<UnionCreateMachine>().type.toBeAssignableTo<TupleCreateMachine>();
   });
 
-  test("plugin с несколькими storage definitions дает union extensions", () => {
-    type Extensions = PluginMachineExtensions<typeof multiStoragePlugin>;
+  test("plugin с несколькими storage definitions дает union storage typing", () => {
+    const createAppMachine: TypedCreateMachineFn<AppEvent, AppDeps, typeof multiStoragePlugin> = createMachine;
 
-    expect<Extensions>().type.toBe<CacheMachineExtension | { readonly storage: "session" }>();
+    const cacheMachine = createAppMachine({
+      storage: "cache",
+      ttl: 60,
+      config: { IDLE: { LOAD: "IDLE" } },
+      initialState: "IDLE",
+      initialContext: { token: "" },
+    });
+    const sessionMachine = createAppMachine({
+      storage: "session",
+      config: { IDLE: { LOAD: "IDLE" } },
+      initialState: "IDLE",
+      initialContext: {},
+    });
+
+    expect(cacheMachine.storage).type.toBe<"cache">();
+    expect(sessionMachine.storage).type.toBe<"session">();
   });
 
   test("TypedCreateMachineFn принимает declared storage kind и отклоняет unknown", () => {
-    type Extensions = PluginMachineExtensions<typeof multiStoragePlugin>;
-    const createAppMachine: TypedCreateMachineFn<AppEvent, AppDeps, Extensions> = createMachine;
+    const createAppMachine: TypedCreateMachineFn<AppEvent, AppDeps, typeof multiStoragePlugin> = createMachine;
 
     const cacheMachine = createAppMachine({
       storage: "cache",

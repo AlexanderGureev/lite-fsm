@@ -2,8 +2,8 @@ import { describe, expect, test } from "tstyche";
 import { createMachine, defineStorageRuntime, MachineManager } from "@lite-fsm/core";
 import type {
   EffectDeps,
+  LiteFsmStorageRuntimeDefinition,
   ManagerAction,
-  PluginMachineExtensions,
   PluginManagerEvents,
   PluginManagerExtensions,
   PluginRouteMeta,
@@ -27,6 +27,9 @@ import {
   type HostEvents,
 } from "../fixtures/plugin-system-documentation";
 
+type StorageMachineExtensionOf<Definition> =
+  Definition extends LiteFsmStorageRuntimeDefinition<any, infer Extension> ? Extension : never;
+
 describe("plugin system documentation fixture", () => {
   test("helper types принимают plugin union и runtime tuple", () => {
     type PluginTuple = readonly [AppPlugins];
@@ -46,8 +49,8 @@ describe("plugin system documentation fixture", () => {
       Equal<PluginScopedTransition<AppPlugins>, { readonly refresh: (cacheKey: string) => ManagerAction<CachePluginEvent> }>
     >;
     type _MachineExtensions = Assert<
-      ExpectedStorage extends PluginMachineExtensions<AppPlugins>
-        ? PluginMachineExtensions<AppPlugins> extends ExpectedStorage
+      ExpectedStorage extends StorageMachineExtensionOf<typeof documentCacheStorage>
+        ? StorageMachineExtensionOf<typeof documentCacheStorage> extends ExpectedStorage
           ? true
           : false
         : false

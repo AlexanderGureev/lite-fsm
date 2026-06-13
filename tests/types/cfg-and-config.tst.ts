@@ -220,8 +220,8 @@ describe("минимальные формы MachineConfig", () => {
       initialContext: { x: 1 },
     });
 
-    // @ts-expect-error!
     createMachine({
+      // @ts-expect-error!
       storage: "custom",
       config: { a: {} },
       initialState: "a",

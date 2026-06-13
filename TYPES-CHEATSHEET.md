@@ -105,40 +105,47 @@ const config = {
 | `persistence?`            | actor template only: `"runtime"` (default) \| `"snapshot"`  |
 
 Default `Snapshot`: domain → `StateType<C, T>`, actor hook payload → `DefaultActorSnapshot<C, T>`.
-Custom domain hooks переопределяют `Snapshot`: `SnapshotForMachine<M>`, `MachineManagerSnapshot<S>`, `dehydrate()` и `hydrate()` используют transport payload из `dehydrate` / `hydrate`, включая машины, созданные через `TypedCreateMachineFn<P, D, Extensions>`.
+Custom domain hooks переопределяют `Snapshot`: `SnapshotForMachine<M>`, `MachineManagerSnapshot<S>`, `dehydrate()` и `hydrate()` используют transport payload из `dehydrate` / `hydrate`, включая машины, созданные через `TypedCreateMachineFn<P, D, typeof plugins>`.
 Storage runtime payloads не меняют `SnapshotForMachine<M>`: они передаются отдельно через `MachineManagerSnapshot<S>["storage"]`.
-Отсутствие `storage` эквивалентно `storage: "instance"` в public `MachineManager`; custom storage kinds доступны через `TypedCreateMachineFn<P, D, PluginMachineExtensions<Plugins>>` и должны быть зарегистрированы plugin tuple в `MachineManager(..., { plugins })`. Standalone `Machine(...)` и `defineMachine().create(...)` поддерживают только отсутствие `storage` и `storage: "instance"`.
+Отсутствие `storage` эквивалентно `storage: "instance"` в public `MachineManager`; custom storage kinds доступны через `TypedCreateMachineFn<P, D, typeof plugins>` и должны быть зарегистрированы тем же plugin tuple в `MachineManager(..., { plugins })`. Standalone `Machine(...)` и `defineMachine().create(...)` поддерживают только отсутствие `storage` и `storage: "instance"`.
 
-## Machine runtime extensions
+## Plugin-aware `TypedCreateMachineFn`
 
-`MachineRuntimeExtension` описывает type-level расширение machine config для app wrappers. Core `createMachine<AppEvents>(...)` не читает plugin values и не получает plugin-specific fields автоматически. Public `defineStorageRuntime<Extension>().create(...)` принимает `Extension` без поля `storage` и возвращает normalized extension с `storage` из literal `kind`.
+`TypedCreateMachineFn<P, D, Plugins>` принимает plugin source как третий generic: один `LiteFsmPlugin`, union plugins, readonly tuple plugins или широкий `readonly LiteFsmPlugin[]`. Без третьего generic wrapper остается core-only и не принимает custom storage kinds.
+
+Plugin source не расширяет `P` и `D` автоматически. Приложение явно добавляет manager-level plugin events и scoped deps:
 
 ```ts
-type TestStorageExtension = {
-  storage: "test";
-  input: { test: { key: string } };
-  internalEvents: FSMEvent<"TEST_INTERNAL">;
-  reducerContext: { testKey: string };
-  effectDeps: { testClock: () => number };
-  reactionDeps: { testReaction: () => string };
-  resultMetadata: { storage: "test" };
-  publicState: { state: "READY"; context: { key: string } };
-};
+const plugins = [cachePlugin] as const;
 
-export const createAppMachine: TypedCreateMachineFn<AppEvents, AppDeps, TestStorageExtension> = createMachine;
+type MachineEvents = AppEvents | PluginManagerEvents<typeof plugins>;
+type MachineDeps = EffectDeps<AppDeps, typeof plugins>;
+
+export const createAppMachine: TypedCreateMachineFn<MachineEvents, MachineDeps, typeof plugins> = createMachine;
 ```
 
-| Ключ `MachineRuntimeExtension` | Назначение                                                                             |
-| ------------------------------ | -------------------------------------------------------------------------------------- |
-| `storage`                      | storage kind, обязательный для любого непустого extension                              |
-| `input`                        | storage-specific поля и переопределения input (`initialContext`, `reducer`, `effects`) |
-| `internalEvents`               | события, допустимые в `config` / reducer / effects без добавления в `AppEvents`        |
-| `reducerContext`               | дополнительные поля третьего аргумента reducer для этого storage kind                  |
-| `effectDeps` · `reactionDeps`  | storage-specific deps на type-level; сохраняются в `MachineRuntimeMetadata<M>`         |
-| `resultMetadata`               | типовая metadata результата для plugin helpers (`MachineResultMetadata<M>`)            |
-| `publicState`                  | override фрагмента `MachinesState<S>[key]`                                             |
+Wrapper выбирает storage-specific input по `cfg.storage`. `storage: "instance"` остается core kind и не требует plugin storage. `MachineEvents<S>` выводит только public `P`; storage `internalEvents` разрешены в `config`, reducer и effects конкретной machine, но не становятся допустимыми public `manager.transition(...)`. Прямой public `createMachine<AppEvents>(...)` остается core-only API.
 
-`TypedCreateMachineFn<AppEvents, AppDeps, Extensions>` принимает union extensions. Каждый непустой extension обязан задавать `storage`; storage-less extension отклоняется типами, чтобы не создавать мертвую ветку inference. Выбор storage-specific input идёт по `cfg.storage`. `storage: "instance"` остаётся явным core kind и не требует extension. `MachineEvents<S>` выводит только public `AppEvents`; `internalEvents` не становятся допустимыми public `manager.transition(...)`. Прямой value `createMachine` остаётся совместимым с wrapper для assignability; plugin-specific overload у прямого вызова не считается публичным способом фиксации extensions.
+Storage author описывает type-level machine contract через `defineStorageRuntime<Extension>().create(...)`. `Extension` не содержит поле `storage`: builder добавляет kind из literal `kind`. Machine-facing поля `input`, `internalEvents`, `reducerContext`, `effectDeps`, `reactionDeps`, `resultMetadata` и `publicState` участвуют в `TypedCreateMachineFn<P, D, typeof plugins>`; runtime-only поля типизируют callbacks storage runtime.
+
+`resultMetadata`, `reducerContext`, `effectDeps`, `reactionDeps` и `publicState` могут быть fixed object types или dependent function signatures от concrete storage input. Core применяет dependent field только на type level:
+
+```ts
+type EntityStorageExtension = {
+  input: {
+    storage: "entity";
+    initialState: "__INIT";
+    initialContext: AnyRecord;
+    spawnSchema: AnyRecord;
+  };
+  resultMetadata: <Input extends EntityStorageExtension["input"]>(input: Input) => {
+    entityContextSchema: Input["initialContext"];
+    entitySpawnSchema: Input["spawnSchema"];
+  };
+};
+```
+
+`input` остается fixed object shape и дает contextual typing storage-specific fields. `internalEvents` остается fixed field. Dependent field signatures не создаются и не вызываются в runtime.
 
 ## `MachineReducer<C, P, T>`
 
@@ -230,8 +237,8 @@ type AppDeps = MachineDependencies<Store>;
 | `MachinesState<S>`          | состояние менеджера по карте машин                           |
 | `MachineEvents<S>`          | union событий всех машин                                     |
 | `MachineDependencies<S>`    | intersection custom deps всех effects                        |
-| `MachineRuntimeMetadata<M>` | типовая metadata машины, созданной через extension wrapper   |
-| `MachineResultMetadata<M>`  | `resultMetadata` из `MachineRuntimeExtension`, иначе `{}`    |
+| `MachineRuntimeMetadata<M>` | type-only metadata машины, созданной через plugin-aware wrapper |
+| `MachineResultMetadata<M>`  | `resultMetadata` из storage extension, иначе `{}`               |
 
 `MachineEvents<{}>` → `never`. `MachineDependencies<{}>` → `{}`. Если extension задаёт `publicState`, `MachinesState<S>` использует этот тип вместо core `{ state, context }` / actor record shape.
 
@@ -259,7 +266,6 @@ Plugin keys имеют плоский namespace. Core не добавляет pr
 | `PluginScopedDeps<Plugins>`              | поля из `scopedDeps` по ключам section и return types builder-ов                                 |
 | `PluginScopedTransition<Plugins>`        | методы из `scopedTransition` по ключам section и return types builder-ов                         |
 | `PluginManagerExtensions<Plugins, S = MachineStore>` | поля returned manager по ключам `manager`; generic manager factories инстанцируются текущим store |
-| `PluginMachineExtensions<Plugins>`       | union normalized machine extensions из storage definitions; для plugins без storage возвращает `never` |
 | `EffectDeps<AppDeps, Plugins>`           | `AppDeps` плюс `PluginScopedDeps<Plugins>` и `transition: PluginScopedTransition<Plugins>`       |
 | `LiteFsmPlugin<Name, PluginEvents, Definition>` | opaque тип value, возвращаемого `definePlugin().create(...)`; используйте для exported constants и factory return types |
 | `LiteFsmStorageRuntimeDefinition<Kind, MachineExtension, RouteMetaRequirements>` | opaque тип value, возвращаемого `defineStorageRuntime().create(...)`; третий generic хранит type-level требования storage к `routeMeta` |
@@ -276,7 +282,7 @@ Helpers принимают plugin union и runtime tuple; tuple нормализ
 
 Guarded phases для nested `transition(...)`: `plugin.intercept`, `storage.prepareAction`, `storage.beforeReduce`, `storage.acceptsEvent`, `storage.reduce`, `storage.reduceBucket`, `storage.commit`, `storage.reactions` и `hook.*`. Guard error пробрасывается из текущего `manager.transition(...)`, не вызывает `onError` автоматически и не стартует вложенный dispatch. Subscriber и effect callbacks остаются public safe boundary для reentrant dispatch; explicit scheduler API в этом релизе отсутствует. Для текущего action используйте return protocol callback и `ctx.dispatch.runtime`.
 
-`defineStorageRuntime<Extension>().create(...)` связывает advanced storage runtime contract и type-level machine extension. `Extension` не содержит `storage`; builder добавляет `storage: Kind`, где `Kind` берется из literal `kind`. Machine-facing поля `input`, `internalEvents`, `reducerContext`, `effectDeps`, `reactionDeps`, `resultMetadata` и `publicState` входят в `PluginMachineExtensions<Plugins>`. Runtime-only поля `runtimeState`, `templateData`, `snapshotData`, `invocation`, `identity`, `observedEvents` и `routeMeta` типизируют callbacks storage runtime и не входят в `PluginMachineExtensions<Plugins>`.
+`defineStorageRuntime<Extension>().create(...)` связывает advanced storage runtime contract и type-level machine typing. `Extension` не содержит `storage`; builder добавляет storage kind из literal `kind`. Machine-facing поля `input`, `internalEvents`, `reducerContext`, `effectDeps`, `reactionDeps`, `resultMetadata` и `publicState` доступны машинам только через plugin-aware `TypedCreateMachineFn<P, D, typeof plugins>`. Runtime-only поля `runtimeState`, `templateData`, `snapshotData`, `invocation`, `identity`, `observedEvents` и `routeMeta` типизируют callbacks storage runtime и не входят в machine result metadata.
 
 Public `compileTemplate(ctx)` возвращает только `void | { data?: TemplateData }`; `key`, `kind` и unknown fields в result не принимаются runtime validation. `ctx.template.data` и `ctx.templates` используют `Extension["templateData"]`, `ctx.state` использует `Extension["runtimeState"]`, `ctx.invocation` использует `Extension["invocation"]`, `ctx.snapshot` в hydrate использует `Extension["snapshotData"]`. Если `Extension["observedEvents"]` задан, storage callbacks с action (`prepareAction`, `beforeReduce`, `acceptsEvent`, `reduce`, `reduceBucket`, `commit`, `effects.resolveInvocations`, `effects.invoke`, `identity.resolve`, `reactions.run`) получают `ctx.action` и `ctx.originalAction` как `ReadonlyManagerAction<Extension["observedEvents"]>`; без `observedEvents` сохраняется `ReadonlyManagerAction<AnyEvent>`.
 
@@ -406,11 +412,11 @@ const persist = persistManager(manager, {
 
 `originId?: string` (без `#`) и кастомные `generateActorId` / `generateGroupId` обеспечивают изоляцию id между менеджерами в P2P / multi-tab / шарды-сценариях. Подробнее — в гайде [Распределенный спавн](/guide/actors#распределенный-спавн).
 
-`MachineDependencies<S>` берёт пользовательские зависимости из `MachineConfig` / `TypedCreateMachineFn<P, D, Extensions>` и signatures `effects`, исключая runtime deps менеджера и актора.
+`MachineDependencies<S>` берёт пользовательские зависимости из `MachineConfig` / `TypedCreateMachineFn<P, D, typeof plugins>` и signatures `effects`, исключая runtime deps менеджера и актора.
 
 ## Typed factory aliases
 
-`Typed*Fn` фиксируют `P`/`D` один раз для всего приложения. `TypedCreateMachineFn` дополнительно может фиксировать storage-specific `MachineRuntimeExtension`.
+`Typed*Fn` фиксируют `P`/`D` один раз для всего приложения. `TypedCreateMachineFn` дополнительно принимает plugin source и включает storage-specific machine typing из plugin storage definitions.
 
 ```ts
 export const defineConfig: TypedCreateConfigFn<AppEvent> = createConfig;
@@ -423,7 +429,7 @@ export const defineEffect: TypedCreateEffectFn<AppEvent, Deps> = createEffect;
 | ---------------------------------------- | ------------------------------------------------------------------ |
 | `TypedCreateConfigFn<P>`                 | union событий для `CFG`                                            |
 | `TypedCreateReducerFn<P>`                | `action` в reducer                                                 |
-| `TypedCreateMachineFn<P, D, Extensions>` | union событий, deps эффектов и optional machine runtime extensions |
+| `TypedCreateMachineFn<P, D, Plugins>`    | union событий, deps эффектов и optional plugin-aware storage typing |
 | `TypedCreateEffectFn<P, D>`              | union событий и deps эффектов                                      |
 
 ## Alpha graph IR

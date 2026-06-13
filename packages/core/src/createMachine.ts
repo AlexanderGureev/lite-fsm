@@ -2,7 +2,7 @@
 // тип формируются в createMachine.types.ts. Сам runtime не делает копирования или валидации —
 // плоская passthrough к downstream factories (Machine, MachineManager).
 
-import type { AnyEvent, AnyRecord, CFG, MachineRuntimeExtension } from "./types";
+import type { AnyEvent, AnyRecord, CFG } from "./types";
 import type {
   ConfigKeys,
   ConfigTargetStates,
@@ -20,7 +20,6 @@ const createMachineImpl = <
   T extends AnyRecord = {},
   Snapshot = unknown,
   Persistence = undefined,
-  _Extension extends MachineRuntimeExtension = {},
 >(
   cfg: CoreCreateMachineInput<C, T, P, D, Snapshot, Persistence>,
 ): CoreCreateMachineResult<C, T, P, D, Snapshot, Persistence> =>

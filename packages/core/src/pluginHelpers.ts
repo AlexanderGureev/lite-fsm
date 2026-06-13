@@ -1,10 +1,11 @@
 // Derived helper types for plugin consumers. App code использует их, чтобы из tuple plugins
-// получить events, route meta, scoped deps, manager extensions и machine extensions.
+// получить events, route meta, scoped deps и manager extensions.
 
 import type { LiteFsmStorageRuntimeDefinition } from "./pluginStorage";
 import type { LiteFsmPlugin } from "./plugin";
 import type { AnyEvent, CoreActionMeta, MachinesState, MachineStore } from "./types";
 import type { ManagerRuntimeContext } from "./pluginTypes";
+import type { StorageMachineTypingExtension } from "./pluginStorageTypes";
 
 // === Utility types ===========================================================
 
@@ -115,7 +116,7 @@ type ManagerExtensionsForPlugin<Plugin, S extends MachineStore> =
     ? { [Key in keyof Manager]: ManagerFactoryReturn<Manager[Key], S> }
     : {};
 
-type MachineExtensionsForPlugin<Plugin> =
+type StorageTypingExtensionsForPlugin<Plugin> =
   PluginDefinitionOf<Plugin> extends { readonly storage?: infer Storage extends readonly unknown[] }
     ? Storage[number] extends LiteFsmStorageRuntimeDefinition<any, infer MachineExtension>
       ? MachineExtension
@@ -190,9 +191,11 @@ export type PluginManagerEvents<Plugin> =
       : never
     : never;
 
-export type PluginMachineExtensions<Plugin> =
+export type StorageTypingExtensionsForPluginSource<Plugin> =
   PluginMember<Plugin> extends infer Member
     ? Member extends LiteFsmPlugin<any, any, any>
-      ? MachineExtensionsForPlugin<Member>
+      ? StorageTypingExtensionsForPlugin<Member> extends StorageMachineTypingExtension
+        ? StorageTypingExtensionsForPlugin<Member>
+        : never
       : never
     : never;

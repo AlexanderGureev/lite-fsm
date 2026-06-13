@@ -4,13 +4,13 @@ import type {
   EffectDeps,
   FSMEvent,
   IMachineManager,
+  LiteFsmStorageRuntimeDefinition,
   MachineConfig,
   MachineManagerOptions,
   MachinesState,
   Middleware,
   ManagerAction,
   ManagerFromPlugins,
-  PluginMachineExtensions,
   PluginManagerEvents,
   PluginManagerExtensions,
   PluginRouteMeta,
@@ -30,6 +30,8 @@ type Config = { idle: { PING: "ready" }; ready: { PONG: "idle" } };
 type Context = { id: string };
 type Machine = MachineConfig<Config, Context, AppEvent>;
 type Store = { machine: Machine };
+type StorageMachineExtensionOf<Definition> =
+  Definition extends LiteFsmStorageRuntimeDefinition<any, infer Extension> ? Extension : never;
 
 const machine: Machine = {
   config: { idle: { PING: "ready" }, ready: { PONG: "idle" } },
@@ -155,7 +157,7 @@ describe("definePlugin().create(...)", () => {
     >;
   });
 
-  test("выводит storage machine extension из defineStorageRuntime", () => {
+  test("выводит storage machine extension из defineStorageRuntime value", () => {
     type Expected = {
       readonly input: {
         readonly initialContext: { readonly value: number };
@@ -165,7 +167,7 @@ describe("definePlugin().create(...)", () => {
       readonly storage: "cache";
     };
 
-    type _MachineExtension = Assert<Equal<PluginMachineExtensions<typeof storagePlugin>, Expected>>;
+    type _MachineExtension = Assert<Equal<StorageMachineExtensionOf<typeof cacheStorage>, Expected>>;
   });
 });
 

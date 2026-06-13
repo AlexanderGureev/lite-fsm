@@ -2,8 +2,8 @@ import { describe, expect, test } from "tstyche";
 import { createMachine, definePlugin, defineStorageRuntime, MachineManager } from "@lite-fsm/core";
 import type {
   FSMEvent,
+  LiteFsmStorageRuntimeDefinition,
   ManagerAction,
-  PluginMachineExtensions,
   PluginManagerEvents,
   TypedCreateMachineFn,
 } from "@lite-fsm/core";
@@ -27,6 +27,8 @@ type CacheExtension = {
   };
 };
 type CacheMachineExtension = CacheExtension & { readonly storage: "cache" };
+type StorageMachineExtensionOf<Definition> =
+  Definition extends LiteFsmStorageRuntimeDefinition<any, infer Extension> ? Extension : never;
 
 const cacheStorage = defineStorageRuntime<CacheExtension>().create({
   kind: "cache",
@@ -65,8 +67,8 @@ const cachePlugin = definePlugin<CacheEvent>().create({
 describe("plugin system — этап 8 storage types", () => {
   test("definePlugin storage section выводит machine extension из storage definition", () => {
     type _CacheExtension = Assert<
-      PluginMachineExtensions<typeof cachePlugin> extends CacheMachineExtension
-        ? CacheMachineExtension extends PluginMachineExtensions<typeof cachePlugin>
+      StorageMachineExtensionOf<typeof cacheStorage> extends CacheMachineExtension
+        ? CacheMachineExtension extends StorageMachineExtensionOf<typeof cacheStorage>
           ? true
           : false
         : false
@@ -75,11 +77,7 @@ describe("plugin system — этап 8 storage types", () => {
   });
 
   test("MachineManager сохраняет tuple inference после storage plugin", () => {
-    const createAppMachine: TypedCreateMachineFn<
-      AppEvent,
-      {},
-      PluginMachineExtensions<typeof cachePlugin>
-    > = createMachine;
+    const createAppMachine: TypedCreateMachineFn<AppEvent, {}, typeof cachePlugin> = createMachine;
     const machines = {
       cache: createAppMachine({
         storage: "cache",

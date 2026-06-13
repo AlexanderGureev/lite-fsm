@@ -3,7 +3,6 @@ import type {
   EffectDeps,
   FSMEvent,
   ManagerAction,
-  PluginMachineExtensions,
   PluginManagerEvents,
   PluginRouteMeta,
   TypedCreateMachineFn,
@@ -272,11 +271,7 @@ export type DocumentationManager = {
   readonly cache: { readonly refresh: (cacheKey: string) => ManagerAction<CachePluginEvent> };
 };
 
-export const createAppMachine: TypedCreateMachineFn<
-  AppEvents,
-  AppDeps,
-  PluginMachineExtensions<AppPlugins>
-> = createMachine;
+export const createAppMachine: TypedCreateMachineFn<AppEvents, AppDeps, AppPlugins> = createMachine;
 
 const createDocumentMachine = () =>
   createAppMachine({

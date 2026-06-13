@@ -57,7 +57,6 @@ import type {
   MachineResultMetadata,
   MachineRuntimeSnapshot,
   MachineRuntimeSnapshotForMachine,
-  MachineRuntimeExtension,
   MachineRuntimeMetadata,
   MachineSliceState,
   MachineSnapshot,
@@ -71,7 +70,6 @@ import type {
   ReadonlyManagerAction,
   Middleware,
   MiddlewareApi,
-  PluginMachineExtensions,
   LiteFsmPlugin,
   LiteFsmStorageRuntimeDefinition,
   PluginManagerEvents,
@@ -134,10 +132,16 @@ type _NoStorageDispatchContext = import("@lite-fsm/core").StorageDispatchContext
 type _NoStorageActionStageResult = import("@lite-fsm/core").StorageActionStageResult;
 // @ts-expect-error!
 type _NoStorageReduceResult = import("@lite-fsm/core").StorageReduceResult;
+// @ts-expect-error!
+type _NoMachineRuntimeExtension = import("@lite-fsm/core").MachineRuntimeExtension;
+// @ts-expect-error!
+type _NoPluginMachineExtensions = import("@lite-fsm/core").PluginMachineExtensions;
 
 type Ping = FSMEvent<"PING", { id: string }>;
 type Done = FSMEvent<"DONE">;
 type StorageInternal = FSMEvent<"STORAGE_INTERNAL">;
+type StorageMachineExtensionOf<Definition> =
+  Definition extends LiteFsmStorageRuntimeDefinition<any, infer Extension> ? Extension : never;
 type Event = Ping | Done;
 type DomainCfg = { idle: { PING: "busy" }; busy: { DONE: "idle" }; "*": { DONE: "idle" } };
 type ActorCfg = { __INIT: { PING: "pending" }; pending: { DONE: "__RESOLVED" } };
@@ -228,19 +232,6 @@ describe("canary поверхности экспорта core-типов", () =>
     type _Cfg = Assert<Equal<keyof CFG<DomainCfg, Event>, keyof DomainCfg>>;
     type _StateType = Assert<Equal<StateType<DomainCfg, Ctx>, { state: "idle" | "busy"; context: Ctx }>>;
     type _MachineState = Assert<Equal<MachineState<DomainCfg, Ctx>, StateType<DomainCfg, Ctx>>>;
-    type _MachineRuntimeExtensionKeys = Assert<
-      Equal<
-        keyof MachineRuntimeExtension,
-        | "storage"
-        | "input"
-        | "internalEvents"
-        | "reducerContext"
-        | "effectDeps"
-        | "reactionDeps"
-        | "resultMetadata"
-        | "publicState"
-      >
-    >;
     type _ReducerInput = Assert<
       Equal<MachineReducerInputState<ActorCfg, Ctx>, { state: "__INIT" | "pending" | ActorTerminalState; context: Ctx }>
     >;
@@ -484,7 +475,6 @@ describe("canary поверхности экспорта core-типов", () =>
     type _PluginScopedTransition = Assert<
       Equal<PluginScopedTransition<TestPlugin>, { readonly finish: () => ManagerAction<Ping> }>
     >;
-    type _PluginMachineExtensions = Assert<Equal<PluginMachineExtensions<TestPlugin>, never>>;
     type _EffectDeps = Assert<
       EffectDeps<Deps, readonly [TestPlugin]> extends Deps & {
         readonly trace: () => string;
@@ -742,10 +732,11 @@ describe("canary поверхности экспорта core-типов", () =>
       name: "typed-storage-plugin",
       storage: [typedStorage],
     });
+    expect(typedStoragePlugin.name).type.toBe<"typed-storage-plugin">();
 
     type _TypedStorageMachineExtension = Assert<
       Equal<
-        PluginMachineExtensions<typeof typedStoragePlugin>,
+        StorageMachineExtensionOf<typeof typedStorage>,
         {
           readonly storage: "typed-storage";
           readonly input: CacheStorageExtension["input"];
@@ -761,7 +752,7 @@ describe("canary поверхности экспорта core-типов", () =>
     type _NoRuntimeOnlyMachineFields = Assert<
       Equal<
         Extract<
-          keyof PluginMachineExtensions<typeof typedStoragePlugin>,
+          keyof StorageMachineExtensionOf<typeof typedStorage>,
           "observedEvents" | "routeMeta" | "runtimeState" | "templateData" | "snapshotData" | "invocation" | "identity"
         >,
         never

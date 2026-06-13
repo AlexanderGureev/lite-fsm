@@ -30,17 +30,6 @@ export type ReadonlyManagerAction<Events extends AnyEvent, Meta extends object =
   ManagerAction<Events, Meta>
 >;
 
-export type MachineRuntimeExtension = {
-  readonly storage?: string;
-  readonly input?: object;
-  readonly internalEvents?: AnyEvent;
-  readonly reducerContext?: object;
-  readonly effectDeps?: object;
-  readonly reactionDeps?: object;
-  readonly resultMetadata?: object;
-  readonly publicState?: unknown;
-};
-
 export type ActorMeta = {
   actorId: string;
   groupId: string;

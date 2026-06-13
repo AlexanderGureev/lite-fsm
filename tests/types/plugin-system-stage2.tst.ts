@@ -6,13 +6,13 @@ import type {
   FSMEvent,
   ManagerAction,
   ManagerFromPlugins,
-  PluginMachineExtensions,
   PluginManagerEvents,
   PluginManagerExtensions,
   PluginRouteMeta,
   PluginScopedDeps,
   PluginScopedTransition,
   ReadonlyManagerAction,
+  TypedCreateMachineFn,
 } from "@lite-fsm/core";
 
 import type { Assert, Equal } from "./_helpers";
@@ -199,9 +199,26 @@ describe("plugin helper types — этап 2", () => {
     });
   });
 
-  test("PluginMachineExtensions остается never до typed storage definitions", () => {
-    type _Single = Assert<Equal<PluginMachineExtensions<typeof observingPlugin>, never>>;
-    type _Tuple = Assert<Equal<PluginMachineExtensions<readonly [typeof observingPlugin]>, never>>;
+  test("plugin без storage definitions оставляет TypedCreateMachineFn core-only", () => {
+    const createAppMachine: TypedCreateMachineFn<AppEvent, {}, typeof observingPlugin> = createMachine;
+
+    createAppMachine({
+      config: {
+        idle: { APP_EVENT: "idle" },
+      },
+      initialState: "idle",
+      initialContext: {},
+    });
+
+    createAppMachine({
+      // @ts-expect-error!
+      storage: "custom",
+      config: {
+        idle: { APP_EVENT: "idle" },
+      },
+      initialState: "idle",
+      initialContext: {},
+    });
   });
 
   test("PluginManagerExtensions остается public helper с одним plugin input", () => {

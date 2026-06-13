@@ -15,21 +15,35 @@ import type {
 
 // === Storage runtime extension ===============================================
 
+type TypeOnlyDependentObjectField = (...args: any[]) => object;
+type TypeOnlyDependentPublicStateField = (...args: any[]) => unknown;
+
 export type StorageRuntimeExtension = {
   readonly input?: object;
   readonly internalEvents?: AnyEvent;
   readonly observedEvents?: AnyEvent;
   readonly routeMeta?: object;
-  readonly reducerContext?: object;
-  readonly effectDeps?: object;
-  readonly reactionDeps?: object;
-  readonly resultMetadata?: object;
-  readonly publicState?: unknown;
+  readonly reducerContext?: object | TypeOnlyDependentObjectField;
+  readonly effectDeps?: object | TypeOnlyDependentObjectField;
+  readonly reactionDeps?: object | TypeOnlyDependentObjectField;
+  readonly resultMetadata?: object | TypeOnlyDependentObjectField;
+  readonly publicState?: unknown | TypeOnlyDependentPublicStateField;
   readonly runtimeState?: unknown;
   readonly templateData?: unknown;
   readonly snapshotData?: unknown;
   readonly invocation?: unknown;
   readonly identity?: Readonly<Record<string, unknown>>;
+};
+
+export type StorageMachineTypingExtension = {
+  readonly storage?: string;
+  readonly input?: object;
+  readonly internalEvents?: AnyEvent;
+  readonly reducerContext?: object | TypeOnlyDependentObjectField;
+  readonly effectDeps?: object | TypeOnlyDependentObjectField;
+  readonly reactionDeps?: object | TypeOnlyDependentObjectField;
+  readonly resultMetadata?: object | TypeOnlyDependentObjectField;
+  readonly publicState?: unknown | TypeOnlyDependentPublicStateField;
 };
 
 export type StorageTemplate<TemplateData = unknown> = {
@@ -223,7 +237,9 @@ type ExtensionRuntimeState<Extension extends StorageRuntimeExtension> = Extensio
 type ExtensionPublicState<Extension extends StorageRuntimeExtension> = Extension extends {
   readonly publicState?: infer PublicState;
 }
-  ? PublicState
+  ? PublicState extends (...args: any[]) => infer Result
+    ? Result
+    : PublicState
   : unknown;
 
 type ExtensionSnapshotData<Extension extends StorageRuntimeExtension> = Extension extends {

@@ -1,6 +1,12 @@
 import { describe, expect, test } from "tstyche";
-import { definePlugin, defineStorageRuntime, MachineManager } from "@lite-fsm/core";
-import type { FSMEvent, LiteFsmPlugin, MachineConfig, PluginMachineExtensions } from "@lite-fsm/core";
+import { createMachine, definePlugin, defineStorageRuntime, MachineManager } from "@lite-fsm/core";
+import type {
+  FSMEvent,
+  LiteFsmPlugin,
+  LiteFsmStorageRuntimeDefinition,
+  MachineConfig,
+  TypedCreateMachineFn,
+} from "@lite-fsm/core";
 
 import type { Assert, Equal } from "./_helpers";
 
@@ -40,6 +46,8 @@ type ExpectedStageThreeMachineExtension = {
   readonly storage: "stage-three-storage";
 };
 type RuntimeOnlyStorageKeys = "runtimeState" | "templateData" | "snapshotData" | "invocation" | "identity";
+type StorageMachineExtensionOf<Definition> =
+  Definition extends LiteFsmStorageRuntimeDefinition<any, infer Extension> ? Extension : never;
 
 const appMachine: AppMachine = {
   config: { idle: { APP_EVENT: "idle" } },
@@ -139,15 +147,30 @@ describe("MachineManager plugins — этап 3", () => {
     manager.tools;
   });
 
-  test("PluginMachineExtensions выводит только machine-facing storage поля", () => {
-    type Extensions = PluginMachineExtensions<typeof storagePlugin>;
+  test("storage definition выводит только machine-facing storage поля", () => {
+    type Extensions = StorageMachineExtensionOf<typeof stageThreeStorage>;
 
     type _StorageExtension = Assert<Equal<Extensions, ExpectedStageThreeMachineExtension>>;
     type _MachineFacingKeys = Assert<Equal<keyof Extensions, keyof ExpectedStageThreeMachineExtension>>;
   });
 
-  test("PluginMachineExtensions не раскрывает runtime-only storage поля", () => {
-    type Extensions = PluginMachineExtensions<typeof storagePlugin>;
+  test("TypedCreateMachineFn получает storage typing из plugin source", () => {
+    const createAppMachine: TypedCreateMachineFn<AppEvent, {}, typeof storagePlugin> = createMachine;
+    const machine = createAppMachine({
+      storage: "stage-three-storage",
+      ttl: 60,
+      config: {
+        idle: { APP_EVENT: "idle", STORAGE_INTERNAL: "idle" },
+      },
+      initialState: "idle",
+      initialContext: { id: "app" },
+    });
+
+    expect(machine.storage).type.toBe<"stage-three-storage">();
+  });
+
+  test("storage definition не раскрывает runtime-only storage поля", () => {
+    type Extensions = StorageMachineExtensionOf<typeof stageThreeStorage>;
 
     type _NoRuntimeOnlyKeys = Assert<Equal<Extract<keyof Extensions, RuntimeOnlyStorageKeys>, never>>;
   });

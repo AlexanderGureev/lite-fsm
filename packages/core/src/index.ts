@@ -24,7 +24,6 @@ export type {
   EffectDeps,
   LiteFsmPlugin,
   ManagerRuntimeContext,
-  PluginMachineExtensions,
   PluginManagerEvents,
   PluginManagerExtensions,
   PluginRouteMeta,

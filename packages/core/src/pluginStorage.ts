@@ -12,8 +12,8 @@ import type {
   StorageRouteMetaKeys,
   StorageRuntimeExtension,
   StorageRuntimeBuilder,
+  StorageMachineTypingExtension,
 } from "./pluginStorageTypes";
-import type { MachineRuntimeExtension } from "./types";
 
 // === Storage runtime value marker ============================================
 
@@ -29,7 +29,7 @@ type LiteFsmStorageRuntimePayload = {
 
 export type LiteFsmStorageRuntimeDefinition<
   Kind extends string = string,
-  MachineExtension extends MachineRuntimeExtension = MachineRuntimeExtension,
+  MachineExtension extends StorageMachineTypingExtension = StorageMachineTypingExtension,
   RouteMetaRequirements extends object = object,
 > = {
   readonly kind: Kind;

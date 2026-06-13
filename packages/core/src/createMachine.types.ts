@@ -1,6 +1,6 @@
 // Type-only API для createMachine. Runtime реализация и публичный value экспортируются
 // из createMachine.ts; здесь живут все type aliases вокруг inference: input/result форм,
-// захвата literal persistence, валидации MachineRuntimeExtension и storage-specific overload'ов.
+// захвата literal persistence, валидации internal storage extensions и storage-specific overload'ов.
 
 import type {
   AnyEvent,
@@ -16,12 +16,14 @@ import type {
   ManagerAction,
   MachineReducerInputState,
   MachineReducerState,
-  MachineRuntimeExtension,
   StateName,
   StateType,
   TransitionNextState,
   WILDCARD,
 } from "./types";
+import type { LiteFsmPlugin } from "./plugin";
+import type { StorageTypingExtensionsForPluginSource } from "./pluginHelpers";
+import type { StorageMachineTypingExtension } from "./pluginStorageTypes";
 
 // === Дефолтный снимок =======================================================
 //
@@ -106,7 +108,9 @@ export type CoreCreateMachineInput<
         ActorPersistenceInput<C, T, Snapshot> & { persistence?: Persistence | ActorPersistence }
     : MachineConfig<C, T, P, D, Snapshot>;
 
-type ExtensionWithStorage<Extensions extends MachineRuntimeExtension> =
+type PluginSource = LiteFsmPlugin<any, any, any> | readonly LiteFsmPlugin<any, any, any>[];
+
+type ExtensionWithStorage<Extensions extends StorageMachineTypingExtension> =
   Extensions extends unknown
     ? "storage" extends keyof Extensions
       ? NonNullable<Extensions["storage"]> extends string
@@ -115,16 +119,16 @@ type ExtensionWithStorage<Extensions extends MachineRuntimeExtension> =
       : never
     : never;
 
-type ExtensionStorageKind<Extension extends MachineRuntimeExtension> =
+type ExtensionStorageKind<Extension extends StorageMachineTypingExtension> =
   "storage" extends keyof Extension ? NonNullable<Extension["storage"]> & string : never;
 
-type ExtensionStorageValues<Extensions extends MachineRuntimeExtension> =
+type ExtensionStorageValues<Extensions extends StorageMachineTypingExtension> =
   Extensions extends unknown ? ExtensionStorageKind<Extensions> : never;
 
-type ExtensionForStorage<Extensions extends MachineRuntimeExtension, Storage extends string> =
+type ExtensionForStorage<Extensions extends StorageMachineTypingExtension, Storage extends string> =
   Extensions extends unknown ? (ExtensionStorageKind<Extensions> extends Storage ? Extensions : never) : never;
 
-type ExtensionInput<Extension extends MachineRuntimeExtension> =
+type ExtensionDeclaredInput<Extension extends StorageMachineTypingExtension> =
   "input" extends keyof Extension
     ? NonNullable<Extension["input"]> extends infer Input
       ? Input extends object
@@ -133,7 +137,112 @@ type ExtensionInput<Extension extends MachineRuntimeExtension> =
       : {}
     : {};
 
-type ExtensionInternalEvents<Extension extends MachineRuntimeExtension> =
+type ExtensionInput<Extension extends StorageMachineTypingExtension> = Omit<ExtensionDeclaredInput<Extension>, "storage">;
+
+type ConcreteStorageInput<StorageKind extends string, Input extends object> = Prettify<
+  { readonly storage: StorageKind } & Input
+>;
+
+type CreateMachineStructuralInputKey =
+  | "storage"
+  | "config"
+  | "initialState"
+  | "initialContext"
+  | "reducer"
+  | "effects"
+  | "persistence"
+  | "groupTag"
+  | "hydrate"
+  | "dehydrate";
+
+type ExactExtensionInput<Input extends object, InputShape extends object, StorageInput extends object> = StorageInput & {
+  readonly [Key in Exclude<keyof Input, keyof InputShape | CreateMachineStructuralInputKey>]-?: never;
+};
+
+type ResolvedExtensionInput<Input extends object, InputShape extends object> = {
+  readonly [Key in keyof InputShape]: Key extends keyof Input ? Input[Key] : InputShape[Key];
+};
+
+type ExtensionCreateMachineCfg<Storage extends string> = {
+  readonly storage: Storage;
+  readonly config: object;
+  readonly initialState: string;
+  readonly initialContext: unknown;
+};
+
+type CfgIdentity<Cfg extends object> = { readonly [Key in keyof Cfg]: Cfg[Key] };
+
+type CfgConfig<Cfg extends object> =
+  Cfg extends { readonly config: infer Config extends object } ? Config : Record<string, never>;
+
+type CfgContext<Cfg extends object, T extends AnyRecord, StorageInput extends object> =
+  StorageInput extends { readonly initialContext: infer Context extends AnyRecord }
+    ? Context
+    : Cfg extends { readonly initialContext: infer Context extends AnyRecord }
+      ? Context
+      : T;
+
+type ResolveDependentResultByName<Key extends PropertyKey, Value, ConcreteInput extends object> =
+  Key extends keyof ConcreteInput
+    ? ConcreteInput[Key]
+    : Key extends `${string}Context${string}` | `${string}context${string}`
+      ? ConcreteInput extends { readonly initialContext: infer Context }
+        ? Context
+        : Value
+      : Key extends
+            | `${string}Spawn${string}`
+            | `${string}spawn${string}`
+            | `${string}Payload${string}`
+            | `${string}payload${string}`
+        ? ConcreteInput extends { readonly spawnSchema: infer Spawn }
+          ? Spawn
+          : Value
+        : Value;
+
+type ResolveDependentResultValue<Key extends PropertyKey, Value, ConcreteInput extends object> =
+  Value extends (...args: infer Args) => infer Result
+    ? (...args: Args) => ResolveDependentResultByName<Key, Result, ConcreteInput>
+    : ResolveDependentResultByName<Key, Value, ConcreteInput>;
+
+type ResolveDependentResult<Result, ConcreteInput extends object> =
+  Result extends object
+    ? { readonly [Key in keyof Result]: ResolveDependentResultValue<Key, Result[Key], ConcreteInput> }
+    : Result;
+
+type ApplyExtensionField<Field, ConcreteInput extends object> =
+  Field extends { <Input extends ConcreteInput>(input: Input): infer Result }
+    ? ResolveDependentResult<Result, ConcreteInput>
+    : Field extends (input: ConcreteInput) => infer Result
+      ? ResolveDependentResult<Result, ConcreteInput>
+      : Field;
+
+type ExtensionObjectField<
+  Extension extends StorageMachineTypingExtension,
+  Key extends keyof StorageMachineTypingExtension,
+  ConcreteInput extends object,
+> =
+  Key extends keyof Extension
+    ? ApplyExtensionField<NonNullable<Extension[Key]>, ConcreteInput> extends infer Result
+      ? Result extends object
+        ? Result
+        : {}
+      : {}
+    : {};
+
+type ExtensionAnyRecordField<
+  Extension extends StorageMachineTypingExtension,
+  Key extends keyof StorageMachineTypingExtension,
+  ConcreteInput extends object,
+> =
+  Key extends keyof Extension
+    ? ApplyExtensionField<NonNullable<Extension[Key]>, ConcreteInput> extends infer Result
+      ? Result extends AnyRecord
+        ? Result
+        : {}
+      : {}
+    : {};
+
+type ExtensionInternalEvents<Extension extends StorageMachineTypingExtension> =
   "internalEvents" extends keyof Extension
     ? NonNullable<Extension["internalEvents"]> extends infer Events
       ? Events extends AnyEvent
@@ -142,80 +251,68 @@ type ExtensionInternalEvents<Extension extends MachineRuntimeExtension> =
       : never
     : never;
 
-type ExtensionReducerContext<Extension extends MachineRuntimeExtension> =
-  "reducerContext" extends keyof Extension
-    ? NonNullable<Extension["reducerContext"]> extends infer Context
-      ? Context extends object
-        ? Context
-        : {}
-      : {}
-    : {};
+type ExtensionReducerContext<
+  Extension extends StorageMachineTypingExtension,
+  ConcreteInput extends object,
+> = ExtensionObjectField<Extension, "reducerContext", ConcreteInput>;
 
-type ExtensionEffectDeps<Extension extends MachineRuntimeExtension> =
-  "effectDeps" extends keyof Extension
-    ? NonNullable<Extension["effectDeps"]> extends infer Deps
-      ? Deps extends AnyRecord
-        ? Deps
-        : {}
-      : {}
-    : {};
+type ExtensionEffectDeps<
+  Extension extends StorageMachineTypingExtension,
+  ConcreteInput extends object,
+> = ExtensionAnyRecordField<Extension, "effectDeps", ConcreteInput>;
 
-type ExtensionReactionDeps<Extension extends MachineRuntimeExtension> =
-  "reactionDeps" extends keyof Extension
-    ? NonNullable<Extension["reactionDeps"]> extends infer Deps
-      ? Deps extends AnyRecord
-        ? Deps
-        : {}
-      : {}
-    : {};
+type ExtensionReactionDeps<
+  Extension extends StorageMachineTypingExtension,
+  ConcreteInput extends object,
+> = ExtensionAnyRecordField<Extension, "reactionDeps", ConcreteInput>;
 
-type ExtensionResultMetadata<Extension extends MachineRuntimeExtension> =
-  "resultMetadata" extends keyof Extension
-    ? NonNullable<Extension["resultMetadata"]> extends infer Metadata
-      ? Metadata extends object
-        ? Metadata
-        : {}
-      : {}
-    : {};
+type ExtensionResultMetadata<
+  Extension extends StorageMachineTypingExtension,
+  ConcreteInput extends object,
+> = ExtensionObjectField<Extension, "resultMetadata", ConcreteInput>;
 
-type ExtensionPublicState<Extension extends MachineRuntimeExtension> =
+type ExtensionPublicState<Extension extends StorageMachineTypingExtension, ConcreteInput extends object> =
   "publicState" extends keyof Extension
-    ? Extension["publicState"]
+    ? ApplyExtensionField<NonNullable<Extension["publicState"]>, ConcreteInput>
     : never;
 
-type HasExtensionResultMetadata<Extension extends MachineRuntimeExtension> =
+type HasExtensionResultMetadata<Extension extends StorageMachineTypingExtension> =
   "resultMetadata" extends keyof Extension ? true : false;
 
-type HasExtensionPublicState<Extension extends MachineRuntimeExtension> =
+type HasExtensionPublicState<Extension extends StorageMachineTypingExtension> =
   "publicState" extends keyof Extension ? true : false;
 
-type HasExtensionEffectDeps<Extension extends MachineRuntimeExtension> =
+type HasExtensionEffectDeps<Extension extends StorageMachineTypingExtension> =
   "effectDeps" extends keyof Extension ? true : false;
 
-type HasExtensionReactionDeps<Extension extends MachineRuntimeExtension> =
+type HasExtensionReactionDeps<Extension extends StorageMachineTypingExtension> =
   "reactionDeps" extends keyof Extension ? true : false;
 
-type ExtensionDefaultContext<Extension extends MachineRuntimeExtension> =
+type ExtensionDefaultContext<Extension extends StorageMachineTypingExtension> =
   ExtensionInput<Extension> extends { initialContext: infer Context extends AnyRecord } ? Context : AnyRecord;
 
-type ExtensionContext<T extends AnyRecord, Extension extends MachineRuntimeExtension> =
-  ExtensionInput<Extension> extends { initialContext: infer Context extends AnyRecord } ? Context : T;
+type ExtensionContext<T extends AnyRecord, Input extends object> =
+  Input extends { initialContext: infer Context extends AnyRecord } ? Context : T;
 
-type ExtensionEvents<P extends AnyEvent, Extension extends MachineRuntimeExtension> =
+type ExtensionEvents<P extends AnyEvent, Extension extends StorageMachineTypingExtension> =
   P | ExtensionInternalEvents<Extension>;
 
-type ExtensionInvocationDeps<D extends AnyRecord, Extension extends MachineRuntimeExtension> =
-  D & ExtensionEffectDeps<Extension> & ExtensionReactionDeps<Extension>;
+type ExtensionInvocationDeps<
+  D extends AnyRecord,
+  Extension extends StorageMachineTypingExtension,
+  ConcreteInput extends object,
+> = D & ExtensionEffectDeps<Extension, ConcreteInput> & ExtensionReactionDeps<Extension, ConcreteInput>;
 
 type ExtensionReducer<
   C extends object,
   T extends AnyRecord,
   P extends AnyEvent,
-  Extension extends MachineRuntimeExtension,
+  Extension extends StorageMachineTypingExtension,
+  ConcreteInput extends object,
 > = (
   state: MachineReducerInputState<C, T>,
   payload: P,
-  meta: { nextState: TransitionNextState<C>; config: C } & ExtensionReducerContext<Extension>,
+  meta: { nextState: TransitionNextState<C>; config: C } & ExtensionReducerContext<Extension, ConcreteInput>,
 ) => MachineReducerState<C, T> | void;
 
 type ExtensionEffects<
@@ -233,43 +330,75 @@ type ExtensionFallbackInput<
 > = Key extends keyof Input ? {} : Fallback;
 
 type ExtensionCreateMachineInput<
+  Cfg extends object,
   C extends object,
   T extends AnyRecord,
   P extends AnyEvent,
   D extends AnyRecord,
   Snapshot,
   Persistence,
-  Extension extends MachineRuntimeExtension,
-  Input extends object = ExtensionInput<Extension>,
-  Context extends AnyRecord = ExtensionContext<T, Extension>,
+  Extension extends StorageMachineTypingExtension,
+  InputShape extends object = ExtensionInput<Extension>,
+  StorageInput extends object = ResolvedExtensionInput<Cfg, InputShape>,
+  Context extends AnyRecord = ExtensionContext<T, StorageInput>,
   Events extends AnyEvent = ExtensionEvents<P, Extension>,
   StorageKind extends string = ExtensionStorageKind<Extension>,
-> = Omit<
+> = CfgIdentity<Cfg> &
+  Omit<
   CoreCreateMachineInput<C, Context, P, D, Snapshot, Persistence>,
-  "storage" | "config" | "initialContext" | "reducer" | "effects" | keyof Input
+  "storage" | "config" | "initialContext" | "reducer" | "effects" | keyof InputShape
 > & {
   storage: StorageKind;
   config: C & CFG<C, Events, ConfigKeys<C>, ConfigTargetStates<C>>;
-} & ExtensionFallbackInput<Input, "initialContext", { initialContext: Context }> &
-  ExtensionFallbackInput<Input, "reducer", { reducer?: ExtensionReducer<C, Context, ManagerAction<Events>, Extension> }> &
-  ExtensionFallbackInput<Input, "effects", { effects?: ExtensionEffects<C, Events, ExtensionInvocationDeps<D, Extension>> }> &
-  Input;
+} & ExtensionFallbackInput<InputShape, "initialContext", { initialContext: Context }> &
+  ExtensionFallbackInput<
+    InputShape,
+    "reducer",
+    { reducer?: ExtensionReducer<C, Context, ManagerAction<Events>, Extension, ConcreteStorageInput<StorageKind, StorageInput>> }
+  > &
+  ExtensionFallbackInput<
+    InputShape,
+    "effects",
+    {
+      effects?: ExtensionEffects<
+        C,
+        Events,
+        ExtensionInvocationDeps<D, Extension, ConcreteStorageInput<StorageKind, StorageInput>>
+      >;
+    }
+  > &
+  ExactExtensionInput<Cfg, InputShape, StorageInput>;
 
-type ExtensionRuntimeMetadata<Extension extends MachineRuntimeExtension, P extends AnyEvent> = {
+type ExtensionRuntimeMetadata<
+  Extension extends StorageMachineTypingExtension,
+  P extends AnyEvent,
+  ConcreteInput extends object,
+> = {
   readonly storage: ExtensionStorageKind<Extension>;
   readonly publicEvents: P;
 } & (HasExtensionResultMetadata<Extension> extends true
-  ? { readonly resultMetadata: ExtensionResultMetadata<Extension> }
+  ? { readonly resultMetadata: ExtensionResultMetadata<Extension, ConcreteInput> }
   : {}) &
-  (HasExtensionEffectDeps<Extension> extends true ? { readonly effectDeps: ExtensionEffectDeps<Extension> } : {}) &
-  (HasExtensionReactionDeps<Extension> extends true ? { readonly reactionDeps: ExtensionReactionDeps<Extension> } : {}) &
-  (HasExtensionPublicState<Extension> extends true ? { readonly publicState: ExtensionPublicState<Extension> } : {});
+  (HasExtensionEffectDeps<Extension> extends true
+    ? { readonly effectDeps: ExtensionEffectDeps<Extension, ConcreteInput> }
+    : {}) &
+  (HasExtensionReactionDeps<Extension> extends true
+    ? { readonly reactionDeps: ExtensionReactionDeps<Extension, ConcreteInput> }
+    : {}) &
+  (HasExtensionPublicState<Extension> extends true
+    ? { readonly publicState: ExtensionPublicState<Extension, ConcreteInput> }
+    : {});
 
 // Phantom markers: см. контракт «Phantom type-only keys» в types.ts. Эти поля
 // никогда не существуют в runtime value, нужны только для inference в helper-типах
 // `MachineRuntimeMetadata` / `MachineDeclaredDependencies`.
-type RuntimeResultPhantom<Extension extends MachineRuntimeExtension, P extends AnyEvent, D extends AnyRecord> = {
-  readonly __liteFsmRuntime?: ExtensionRuntimeMetadata<Extension, P>;
+type RuntimeResultPhantom<
+  Extension extends StorageMachineTypingExtension,
+  P extends AnyEvent,
+  D extends AnyRecord,
+  ConcreteInput extends object,
+> = {
+  readonly __liteFsmRuntime?: ExtensionRuntimeMetadata<Extension, P, ConcreteInput>;
   readonly __liteFsmDependencies?: D;
 };
 
@@ -280,20 +409,21 @@ type ExtensionCreateMachineResult<
   D extends AnyRecord,
   Snapshot,
   Persistence,
-  Extension extends MachineRuntimeExtension,
-  Context extends AnyRecord = ExtensionContext<T, Extension>,
+  Extension extends StorageMachineTypingExtension,
+  StorageInput extends object = ExtensionInput<Extension>,
+  Context extends AnyRecord = ExtensionContext<T, StorageInput>,
 > = Prettify<
   Omit<
     CoreCreateMachineResult<C, Context, P, D, Snapshot, Persistence>,
     "storage" | keyof ExtensionInput<Extension>
-  > & { storage: ExtensionStorageKind<Extension> } & ExtensionInput<Extension> &
-    RuntimeResultPhantom<Extension, P, D>
+  > & { storage: ExtensionStorageKind<Extension> } & StorageInput &
+    RuntimeResultPhantom<Extension, P, D, ConcreteStorageInput<ExtensionStorageKind<Extension>, StorageInput>>
 >;
 
-type InvalidMachineRuntimeExtensionKeys<Extensions extends MachineRuntimeExtension> =
-  Extensions extends unknown ? Exclude<keyof Extensions, keyof MachineRuntimeExtension> : never;
+type InvalidStorageTypingExtensionKeys<Extensions extends StorageMachineTypingExtension> =
+  Extensions extends unknown ? Exclude<keyof Extensions, keyof StorageMachineTypingExtension> : never;
 
-type MissingMachineRuntimeExtensionStorageKeys<Extensions extends MachineRuntimeExtension> =
+type MissingStorageTypingExtensionKeys<Extensions extends StorageMachineTypingExtension> =
   Extensions extends unknown
     ? [keyof Extensions] extends [never]
       ? never
@@ -302,11 +432,15 @@ type MissingMachineRuntimeExtensionStorageKeys<Extensions extends MachineRuntime
         : keyof Extensions
     : never;
 
-type ValidMachineRuntimeExtensions<Extensions extends MachineRuntimeExtension> = [
-  InvalidMachineRuntimeExtensionKeys<Extensions> | MissingMachineRuntimeExtensionStorageKeys<Extensions>,
+type ValidStorageTypingExtensions<Extensions extends StorageMachineTypingExtension> = [
+  InvalidStorageTypingExtensionKeys<Extensions> | MissingStorageTypingExtensionKeys<Extensions>,
 ] extends [never]
   ? Extensions
   : never;
+
+type PluginStorageTypingExtensions<Plugins extends PluginSource> = ValidStorageTypingExtensions<
+  StorageTypingExtensionsForPluginSource<Plugins>
+>;
 
 type CoreTypedCreateMachineFn<P extends AnyEvent = AnyEvent, D extends AnyRecord = {}> = <
   C extends CFG<C, P, ConfigKeys<C>, ConfigTargetStates<C>>,
@@ -323,7 +457,7 @@ type CoreTypedCreateMachineFn<P extends AnyEvent = AnyEvent, D extends AnyRecord
 interface ExtensionTypedCreateMachineFnHolder<
   P extends AnyEvent,
   D extends AnyRecord,
-  Extensions extends MachineRuntimeExtension,
+  Extensions extends StorageMachineTypingExtension,
 > {
   call<
     Storage extends ExtensionStorageValues<ExtensionWithStorage<Extensions>>,
@@ -331,12 +465,17 @@ interface ExtensionTypedCreateMachineFnHolder<
       ExtensionWithStorage<Extensions>,
       Storage
     >,
-    C extends object = Record<string, never>,
+    const Cfg extends ExtensionCreateMachineCfg<Storage> = ExtensionCreateMachineCfg<Storage>,
+    InputShape extends object = ExtensionInput<Extension>,
+    StorageInput extends object = ResolvedExtensionInput<Cfg, InputShape>,
+    C extends object = CfgConfig<Cfg>,
     T extends AnyRecord = ExtensionDefaultContext<Extension>,
-    Snapshot = DefaultSnapshotForConfig<C, ExtensionContext<T, Extension>>,
+    Context extends AnyRecord = CfgContext<Cfg, T, StorageInput>,
+    Snapshot = DefaultSnapshotForConfig<C, Context>,
     Persistence extends CapturedPersistence = undefined,
   >(
     cfg: ExtensionCreateMachineInput<
+      Cfg,
       C,
       T,
       P,
@@ -344,30 +483,30 @@ interface ExtensionTypedCreateMachineFnHolder<
       Snapshot,
       Persistence,
       Extension,
-      ExtensionInput<Extension>,
-      ExtensionContext<T, Extension>,
+      InputShape,
+      StorageInput,
+      Context,
       ExtensionEvents<P, Extension>,
       Storage
     >,
-  ): ExtensionCreateMachineResult<C, T, P, D, Snapshot, Persistence, Extension>;
+  ): ExtensionCreateMachineResult<C, T, P, D, Snapshot, Persistence, Extension, StorageInput, Context>;
 }
 
 type ExtensionTypedCreateMachineFn<
   P extends AnyEvent,
   D extends AnyRecord,
-  Extensions extends MachineRuntimeExtension,
+  Extensions extends StorageMachineTypingExtension,
 > = ExtensionTypedCreateMachineFnHolder<P, D, Extensions>["call"];
 
 export type TypedCreateMachineFn<
   P extends AnyEvent = AnyEvent,
   D extends AnyRecord = {},
-  Extensions extends MachineRuntimeExtension = {},
-> = [ValidMachineRuntimeExtensions<Extensions>] extends [never]
-  ? never
-  : [keyof ValidMachineRuntimeExtensions<Extensions>] extends [never]
+  Plugins extends PluginSource = never,
+> = [Plugins] extends [never]
+  ? CoreTypedCreateMachineFn<P, D>
+  : [PluginStorageTypingExtensions<Plugins>] extends [never]
     ? CoreTypedCreateMachineFn<P, D>
-    : CoreTypedCreateMachineFn<P, D> &
-        ExtensionTypedCreateMachineFn<P, D, ValidMachineRuntimeExtensions<Extensions>>;
+    : CoreTypedCreateMachineFn<P, D> & ExtensionTypedCreateMachineFn<P, D, PluginStorageTypingExtensions<Plugins>>;
 
 type DirectCreateMachineFn = <
   P extends AnyEvent = AnyEvent,
@@ -384,7 +523,8 @@ type AnyExtensionCreateMachineFn = {
   <
     P extends AnyEvent = AnyEvent,
     D extends AnyRecord = {},
-    Extensions extends MachineRuntimeExtension = never,
+    Plugins extends PluginSource = never,
+    Extensions extends StorageMachineTypingExtension = PluginStorageTypingExtensions<Plugins>,
     Storage extends ExtensionStorageValues<ExtensionWithStorage<Extensions>> = ExtensionStorageValues<
       ExtensionWithStorage<Extensions>
     >,
@@ -392,13 +532,31 @@ type AnyExtensionCreateMachineFn = {
       ExtensionWithStorage<Extensions>,
       Storage
     >,
-    C extends object = Record<string, never>,
+    const Cfg extends ExtensionCreateMachineCfg<Storage> = ExtensionCreateMachineCfg<Storage>,
+    InputShape extends object = ExtensionInput<Extension>,
+    StorageInput extends object = ResolvedExtensionInput<Cfg, InputShape>,
+    C extends object = CfgConfig<Cfg>,
     T extends AnyRecord = ExtensionDefaultContext<Extension>,
-    Snapshot = DefaultSnapshotForConfig<C, ExtensionContext<T, Extension>>,
+    Context extends AnyRecord = CfgContext<Cfg, T, StorageInput>,
+    Snapshot = DefaultSnapshotForConfig<C, Context>,
     Persistence extends CapturedPersistence = undefined,
   >(
-    cfg: ExtensionCreateMachineInput<C, T, P, D, Snapshot, Persistence, Extension, ExtensionInput<Extension>, ExtensionContext<T, Extension>, ExtensionEvents<P, Extension>, Storage>,
-  ): ExtensionCreateMachineResult<C, T, P, D, Snapshot, Persistence, Extension>;
+    cfg: ExtensionCreateMachineInput<
+      Cfg,
+      C,
+      T,
+      P,
+      D,
+      Snapshot,
+      Persistence,
+      Extension,
+      InputShape,
+      StorageInput,
+      Context,
+      ExtensionEvents<P, Extension>,
+      Storage
+    >,
+  ): ExtensionCreateMachineResult<C, T, P, D, Snapshot, Persistence, Extension, StorageInput, Context>;
 };
 
 export type CreateMachineFn = DirectCreateMachineFn & AnyExtensionCreateMachineFn;

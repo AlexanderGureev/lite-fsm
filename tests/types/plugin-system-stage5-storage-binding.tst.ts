@@ -3,8 +3,8 @@ import { definePlugin, defineStorageRuntime } from "@lite-fsm/core";
 import type {
   AnyEvent,
   FSMEvent,
+  LiteFsmStorageRuntimeDefinition,
   ManagerAction,
-  PluginMachineExtensions,
   PluginManagerEvents,
   PluginRouteMeta,
   ReadonlyManagerAction,
@@ -52,6 +52,9 @@ type UnknownRouteMetaStorageExtension = {
     readonly cacheKey: unknown;
   };
 };
+
+type StorageMachineExtensionOf<Definition> =
+  Definition extends LiteFsmStorageRuntimeDefinition<any, infer Extension> ? Extension : never;
 
 const cacheStorage = defineStorageRuntime<CacheStorageExtension>().create({
   kind: "cache",
@@ -297,7 +300,7 @@ describe("plugin system — этап 5 typed storage binding", () => {
     type _HostEventsExcluded = Assert<Equal<Extract<PluginManagerEvents<typeof cachePlugin>, HostEvent>, never>>;
     type _MachineExtension = Assert<
       Equal<
-        PluginMachineExtensions<typeof cachePlugin>,
+        StorageMachineExtensionOf<typeof cacheStorage>,
         {
           readonly storage: "cache";
           readonly input: CacheStorageExtension["input"];
@@ -308,7 +311,7 @@ describe("plugin system — этап 5 typed storage binding", () => {
     type _RuntimeOnly = Assert<
       Equal<
         Extract<
-          keyof PluginMachineExtensions<typeof cachePlugin>,
+          keyof StorageMachineExtensionOf<typeof cacheStorage>,
           "observedEvents" | "routeMeta" | "runtimeState" | "templateData" | "snapshotData" | "invocation" | "identity"
         >,
         never
@@ -318,10 +321,11 @@ describe("plugin system — этап 5 typed storage binding", () => {
 
   test("storage factory работает внутри configurable plugin factory", () => {
     const plugin = createConfigurablePlugin<ObservedEvent>();
+    type FactoryStorage = ReturnType<typeof createCacheStorage<ObservedEvent>>;
 
     type _MachineExtension = Assert<
       Equal<
-        PluginMachineExtensions<typeof plugin>,
+        StorageMachineExtensionOf<FactoryStorage>,
         {
           readonly storage: "factory-cache";
           readonly input: CacheStorageExtension["input"];

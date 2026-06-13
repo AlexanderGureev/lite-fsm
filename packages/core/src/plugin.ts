@@ -44,7 +44,6 @@ export type {
   EffectDeps,
   ManagerActionMeta,
   ManagerTransitionEvents,
-  PluginMachineExtensions,
   PluginManagerEvents,
   PluginManagerExtensions,
   PluginRouteMeta,

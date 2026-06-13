@@ -37,13 +37,23 @@ const plugin = definePlugin<PluginEvents, HostEvents>().create({
 | `PluginManagerExtensions<Plugins, S = MachineStore>` | Поля, добавленные через `manager`; второй generic задает store текущего менеджера |
 | `PluginScopedDeps<Plugins>` | Зависимости из `scopedDeps` |
 | `PluginScopedTransition<Plugins>` | Методы из `scopedTransition` |
-| `PluginMachineExtensions<Plugins>` | Поля storage runtime, доступные в описании машины |
 | `EffectDeps<AppDeps, Plugins>` | `AppDeps`, дополненные `scopedDeps` и `scopedTransition` |
 
 Для точного вывода типов передавайте список плагинов напрямую или сохраняйте его без расширения до общего `LiteFsmPlugin[]`:
 
 ```ts
 const manager = MachineManager(machines, { plugins: [plugin] });
+```
+
+Storage-specific machine typing подключается через app wrapper:
+
+```ts
+const plugins = [plugin] as const;
+
+type MachineEvents = AppEvents | PluginManagerEvents<typeof plugins>;
+type MachineDeps = EffectDeps<AppDeps, typeof plugins>;
+
+export const createAppMachine: TypedCreateMachineFn<MachineEvents, MachineDeps, typeof plugins> = createMachine;
 ```
 
 Расширение manager, параметризованное `MachineStore`, объявляется тем же runtime DSL. Типовой параметр нужен только в типе factory, если возвращаемое поле зависит от `MachinesState<S>`:
