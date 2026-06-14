@@ -2,6 +2,7 @@ import { LiteFsmError } from "@lite-fsm/core";
 import type { AnyEvent, ManagerAction } from "@lite-fsm/core";
 
 import type { EntityContextSchema, EntitySpawnSchema } from "../schema";
+import { ENTITY_DESPAWNED } from "./lifecycle";
 
 export const ENTITY_INIT_STATE = "__INIT";
 export const ENTITY_INIT_STATE_CODE = -1;
@@ -34,6 +35,7 @@ export type EntityTemplateMetadata = {
   readonly acceptStateCodesByEventCode: readonly (readonly number[])[];
   readonly stateSlotCount: number;
   readonly despawnStateMask: Uint8Array;
+  readonly despawnLifecycleStateMask: Uint8Array;
   readonly effectsByStateCode: readonly (EntityActorEffect | undefined)[];
   readonly reactionsByEventType: Readonly<Record<string, EntityActorReaction>>;
   readonly reactionsByEventCode: readonly (EntityActorReaction | undefined)[];
@@ -227,11 +229,30 @@ export const compileEntityTemplate = (
     acceptStateCodesByEventCode: [],
     stateSlotCount: publicStates.length + 1,
     despawnStateMask: compileDespawnStateMask(templateKey, config, stateCodeByName, machine.despawnOn),
+    despawnLifecycleStateMask: new Uint8Array(publicStates.length + 1),
     effectsByStateCode: compileEffectsByStateCode(templateKey, stateCodeByName, machine.effects),
     reactionsByEventType: compileReactionsByEventType(templateKey, eventTypes, machine.reactions),
     reactionsByEventCode: [],
     ...(typeof machine.reducer === "function" ? { reducer: machine.reducer as EntityActorReducer } : {}),
   };
+};
+
+const compileDespawnLifecycleStateMask = (
+  metadata: EntityTemplateMetadata,
+  eventCodeByType: Readonly<Record<string, number>>,
+  transitionTable: Int16Array,
+): Uint8Array => {
+  const mask = new Uint8Array(metadata.stateSlotCount);
+  const eventCode = eventCodeByType[ENTITY_DESPAWNED];
+  if (eventCode === undefined) return mask;
+  if (!metadata.reducer && !hasOwn(metadata.reactionsByEventType, ENTITY_DESPAWNED)) return mask;
+
+  const offset = eventCode * metadata.stateSlotCount;
+  for (let stateSlot = 0; stateSlot < metadata.stateSlotCount; stateSlot += 1) {
+    if (transitionTable[offset + stateSlot] !== ENTITY_NO_TRANSITION) mask[stateSlot] = 1;
+  }
+
+  return mask;
 };
 
 const compileTemplateWithEventCodes = (
@@ -284,6 +305,7 @@ const compileTemplateWithEventCodes = (
     transitionTable,
     transitionTargetByCell,
     acceptStateCodesByEventCode,
+    despawnLifecycleStateMask: compileDespawnLifecycleStateMask(metadata, eventCodeByType, transitionTable),
     reactionsByEventCode,
   };
 };

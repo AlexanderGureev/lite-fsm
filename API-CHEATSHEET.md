@@ -800,10 +800,10 @@ Entity-машина типизируется через `TypedCreateMachineFn<P,
 | Событие / опция              | Поведение                                                                 |
 | ---------------------------- | ------------------------------------------------------------------------- |
 | `ENTITY_SPAWNED`             | runtime диспатчит при создании строки; в этот момент доступен `payloadFor` |
-| `ENTITY_DESPAWNED`           | диспатчится перед удалением строки                                        |
+| `ENTITY_DESPAWNED`           | локальный hook для удаляемых строк актёра; reducer и `reactions.ENTITY_DESPAWNED` видят колонки до физического удаления |
 | `despawnOn: state \| state[]` | строка автоматически удаляется при входе в указанное состояние             |
 
-Публичный dispatch `ENTITY_SPAWNED` / `ENTITY_DESPAWNED` запрещён. Сущности создаются только через события спавна, удаляются через `despawnOn` или `transition.despawn(...)` в эффекте.
+Публичный dispatch `ENTITY_SPAWNED` / `ENTITY_DESPAWNED` запрещён. Сущности создаются только через события спавна, удаляются через `despawnOn` или `transition.despawn(...)` в эффекте. Финальную внешнюю синхронизацию выполняйте в `reactions.ENTITY_DESPAWNED`; state `effects` после перехода по `ENTITY_DESPAWNED` не являются cleanup contract.
 
 ### Reducer
 
@@ -812,7 +812,7 @@ Entity-машина типизируется через `TypedCreateMachineFn<P,
 | `self` / `payloadFor`                        | Что даёт                                                  |
 | -------------------------------------------- | --------------------------------------------------------- |
 | `self.indices`                               | `EntityIndex[]` строк текущего батча                      |
-| `self.<column>[entity]`                      | чтение и запись значения колонки                          |
+| `self.<column>[entity]`                      | чтение и запись значения колонки для строк из `self.indices` |
 | `self.states.<STATE>`                        | числовой код состояния                                    |
 | `self.stateCode[entity] = self.states.<S>`   | планирует переход строки в состояние `<S>`                |
 | `self.has(entity)` · `self.entityId(entity)` | наличие и строковый id строки                             |
@@ -871,7 +871,9 @@ const spawn = defineEntitySpawn(machines, spawnEvents)({
 | `entities().get(key)`   | представление шаблона: `count`, `version`, `has(entity)`, `state(entity)` и колонки только для чтения |
 | `entities().maybe(key)` | то же без строгих scoped-проверок доступа в dev                                                    |
 
-Строки индексируются по `EntityIndex` (`view.x[entity]`). Передавайте `manager.entities` в deps (`setDependencies({ entities: manager.entities })`), чтобы `reducer`/`effects`/`reactions` читали кросс-машинные колонки.
+Строки индексируются по `EntityIndex` (`view.x[entity]`). Читайте значения колонок только после `view.has(entity) === true`; колонки удалённых строк могут содержать устаревшие значения и не являются public state. `dehydrate()` сериализует удалённые слоты с defaults из `initialContext`, а не с runtime values. `version` actor store и entity store — monotonic invalidation token, не счетчик строк или отдельных мутаций.
+
+Передавайте `manager.entities` в deps (`setDependencies({ entities: manager.entities })`), чтобы `reducer`/`effects`/`reactions` читали кросс-машинные колонки.
 
 ### React
 

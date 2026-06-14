@@ -19,9 +19,8 @@ import {
   ensureActorCapacity,
   ensureEntityCapacity,
   moveActorStateBucket,
-  removeActorRow,
-  removeEntityIfEmpty,
-  removeEntityRows,
+  removeActorRowsForStore,
+  removeEntityRecords,
   refreshActorPublicSlice,
   writeInitialColumnValues,
   type ColumnarActorStore,
@@ -60,11 +59,24 @@ type ReducerBatch = {
 
 type ReduceAcceptedBatchOptions = {
   readonly scheduleDespawnOn?: boolean;
+  readonly scheduleEffects?: boolean;
   readonly scheduleReactions?: boolean;
+  readonly scheduleTerminal?: boolean;
   onAccepted?(accepted: readonly EntityIndex[]): void;
 };
 
 type LifecycleReactionContext = Pick<StorageReduceBucketContext<any>, "dispatch" | "manager">;
+
+type ActorRowRemovalBatch = {
+  readonly store: ColumnarActorStore;
+  readonly rows: EntityActorRowRef[];
+};
+
+type DespawnCleanupPlan = {
+  readonly lifecycleBatches: ReducerBatch[];
+  readonly removalBatches: ActorRowRemovalBatch[];
+  readonly entities: EntityIndex[];
+};
 
 type EntityStoreSnapshot = {
   readonly count: number;
@@ -290,15 +302,30 @@ const cloneIndexArrayRecord = (value: Record<string, EntityIndex[]>): Record<str
 
 const cloneIndexArrays = (value: readonly EntityIndex[][]): EntityIndex[][] => value.map((indices) => indices.slice());
 
-const cloneActorRowRefsByEntity = (value: readonly EntityActorRowRef[][]): EntityActorRowRef[][] =>
-  value.map((rows) => rows.slice());
+const cloneActorRowRef = (
+  row: EntityActorRowRef,
+  clones: Map<EntityActorRowRef, EntityActorRowRef>,
+): EntityActorRowRef => {
+  const clone = clones.get(row);
+  if (clone) return clone;
+
+  const next = { ...row };
+  clones.set(row, next);
+  return next;
+};
+
+const cloneActorRowRefsByEntity = (
+  value: readonly EntityActorRowRef[][],
+  clones: Map<EntityActorRowRef, EntityActorRowRef>,
+): EntityActorRowRef[][] => value.map((rows) => rows.map((row) => cloneActorRowRef(row, clones)));
 
 const cloneActorRowRefRecord = (
   value: Record<string, EntityActorRowRef[]>,
+  clones: Map<EntityActorRowRef, EntityActorRowRef>,
 ): Record<string, EntityActorRowRef[]> =>
   Object.assign(
     Object.create(null) as Record<string, EntityActorRowRef[]>,
-    Object.fromEntries(Object.entries(value).map(([key, rows]) => [key, rows.slice()])),
+    Object.fromEntries(Object.entries(value).map(([key, rows]) => [key, rows.map((row) => cloneActorRowRef(row, clones))])),
   );
 
 const cloneColumn = (column: EntityColumn): EntityColumn =>
@@ -336,14 +363,18 @@ const snapshotActorStore = (store: ColumnarActorStore): ActorStoreSnapshot => ({
   publicSlice: store.publicSlice,
 });
 
-const snapshotRuntime = (runtime: EntityRuntimeState): RuntimeMutationSnapshot => ({
-  entityStore: snapshotEntityStore(runtime.entityStore),
-  actorStores: Object.fromEntries(
-    Object.entries(runtime.actorStores).map(([templateKey, store]) => [templateKey, snapshotActorStore(store)]),
-  ),
-  actorRowsByEntity: cloneActorRowRefsByEntity(runtime.actorRowsByEntity),
-  actorRowsByGroupTag: cloneActorRowRefRecord(runtime.actorRowsByGroupTag),
-});
+const snapshotRuntime = (runtime: EntityRuntimeState): RuntimeMutationSnapshot => {
+  const rowRefClones = new Map<EntityActorRowRef, EntityActorRowRef>();
+
+  return {
+    entityStore: snapshotEntityStore(runtime.entityStore),
+    actorStores: Object.fromEntries(
+      Object.entries(runtime.actorStores).map(([templateKey, store]) => [templateKey, snapshotActorStore(store)]),
+    ),
+    actorRowsByEntity: cloneActorRowRefsByEntity(runtime.actorRowsByEntity, rowRefClones),
+    actorRowsByGroupTag: cloneActorRowRefRecord(runtime.actorRowsByGroupTag, rowRefClones),
+  };
+};
 
 const restoreEntityStore = (store: EntityStore, snapshot: EntityStoreSnapshot): void => {
   store.count = snapshot.count;
@@ -444,10 +475,10 @@ const reduceAcceptedBatch = (
 
   assertValidStateCodes(batch.store, accepted);
   markActorRowsTouched(batch.store, accepted);
-  scheduleEnteredStateEffects(transaction, batch.store, accepted);
+  if (options.scheduleEffects ?? true) scheduleEnteredStateEffects(transaction, batch.store, accepted);
   if (options.scheduleReactions) scheduleEntityReactionBatch(transaction, batch.store, batch.eventCode, accepted);
   if (options.scheduleDespawnOn ?? true) scheduleDespawnOnRows(transaction, batch.store, accepted);
-  scheduleTerminalRows(transaction, batch.store, accepted);
+  if (options.scheduleTerminal ?? true) scheduleTerminalRows(transaction, batch.store, accepted);
   updateActorStateBuckets(batch.store, accepted);
   options.onAccepted?.(accepted);
   return true;
@@ -551,21 +582,42 @@ const reduceStagedSpawnLifecycle = (
   return true;
 };
 
-const lifecycleTransitionCell = (store: ColumnarActorStore, eventCode: number, entity: EntityIndex): number => {
+const actorRowNeedsDespawnLifecycle = (store: ColumnarActorStore, entity: EntityIndex): boolean => {
   const stateSlot = store.stateCode[entity] + 1;
-  if (stateSlot < 0 || stateSlot >= store.metadata.stateSlotCount) return -1;
-  return eventCode * store.metadata.stateSlotCount + stateSlot;
+  return stateSlot >= 0 && store.metadata.despawnLifecycleStateMask[stateSlot] === 1;
 };
 
-const collectDespawnLifecycleBatches = (
+const appendActorRowRemoval = (
+  batches: Map<string, ActorRowRemovalBatch>,
+  row: EntityActorRowRef,
+): void => {
+  const batch = batches.get(row.store.templateKey) ?? { store: row.store, rows: [] };
+  batch.rows.push(row);
+  batches.set(row.store.templateKey, batch);
+};
+
+const appendDespawnLifecycle = (
+  batches: Map<string, { readonly store: ColumnarActorStore; readonly indices: EntityIndex[] }>,
+  row: EntityActorRowRef,
+): void => {
+  const batch = batches.get(row.store.templateKey) ?? { store: row.store, indices: [] };
+  batch.indices.push(row.entity);
+  batches.set(row.store.templateKey, batch);
+};
+
+const collectDespawnCleanupPlan = (
   runtime: EntityRuntimeState,
   entities: readonly EntityIndex[],
-): readonly ReducerBatch[] => {
+): DespawnCleanupPlan => {
   const eventCode = runtime.eventCodeByType[ENTITY_DESPAWNED];
-  if (eventCode === undefined) return [];
-
-  const batches = new Map<string, { readonly store: ColumnarActorStore; readonly indices: EntityIndex[] }>();
+  const lifecycleBatches = new Map<string, { readonly store: ColumnarActorStore; readonly indices: EntityIndex[] }>();
+  const removalBatches = new Map<string, ActorRowRemovalBatch>();
+  const liveEntities: EntityIndex[] = [];
   for (const entity of entities) {
+    /* v8 ignore next -- scheduled despawns are live when recorded; stale entries are defensive no-ops. */
+    if (runtime.entityStore.alive[entity] !== 1) continue;
+
+    liveEntities.push(entity);
     const rows = runtime.actorRowsByEntity[entity];
     /* v8 ignore next -- defensive ownership invariant: scheduled live entities keep an actorRowsByEntity entry. */
     if (!rows) continue;
@@ -574,37 +626,86 @@ const collectDespawnLifecycleBatches = (
       const { store } = row;
       /* v8 ignore next -- defensive ownership invariant: attached row refs point to present rows until cleanup. */
       if (store.presence[entity] !== 1) continue;
-      const cell = lifecycleTransitionCell(store, eventCode, entity);
-      if (cell < 0 || store.metadata.transitionTable[cell] === ENTITY_NO_TRANSITION) continue;
 
-      const batch = batches.get(store.templateKey) ?? { store, indices: [] };
-      batch.indices.push(entity);
-      batches.set(store.templateKey, batch);
+      appendActorRowRemoval(removalBatches, row);
+      if (eventCode !== undefined && actorRowNeedsDespawnLifecycle(store, entity)) {
+        appendDespawnLifecycle(lifecycleBatches, row);
+      }
     }
   }
 
-  return [...batches.values()].map((batch) => ({
-    store: batch.store,
-    indices: batch.indices,
-    action: despawnLifecycleAction,
-    eventCode,
-    accepted: true,
-  }));
+  return {
+    lifecycleBatches: [...lifecycleBatches.values()].map((batch) => ({
+      store: batch.store,
+      indices: batch.indices,
+      action: despawnLifecycleAction,
+      eventCode,
+      accepted: true,
+    })),
+    removalBatches: [...removalBatches.values()],
+    entities: liveEntities,
+  };
+};
+
+const findActorRowRef = (
+  runtime: EntityRuntimeState,
+  store: ColumnarActorStore,
+  entity: EntityIndex,
+): EntityActorRowRef | undefined => {
+  const rows = runtime.actorRowsByEntity[entity];
+  /* v8 ignore next -- terminal rows are recorded for attached rows. */
+  if (!rows) return undefined;
+
+  for (const row of rows) {
+    if (row.store === store) return row;
+  }
+
+  /* v8 ignore next -- defensive terminal cleanup invariant: terminal rows are recorded while refs are attached. */
+  return undefined;
+};
+
+const removeActorRowsFromBatches = (
+  runtime: EntityRuntimeState,
+  batches: readonly ActorRowRemovalBatch[],
+): boolean => {
+  let touched = false;
+  for (const batch of batches) {
+    const removed = removeActorRowsForStore(runtime, batch.store, batch.rows);
+    touched = touched || removed > 0;
+  }
+  return touched;
+};
+
+const removeEmptyEntityRecords = (runtime: EntityRuntimeState, entities: readonly EntityIndex[]): boolean => {
+  const emptyEntities: EntityIndex[] = [];
+  for (const entity of entities) {
+    const rows = runtime.actorRowsByEntity[entity];
+    if (rows && rows.length > 0) continue;
+    emptyEntities.push(entity);
+  }
+
+  return removeEntityRecords(runtime, emptyEntities) > 0;
 };
 
 const cleanupTerminalRows = (runtime: EntityRuntimeState, transaction: EntityDispatchTransaction): boolean => {
   if (transaction.terminalRows.length === 0) return false;
 
-  let touched = false;
+  const terminalEntities: EntityIndex[] = [];
+  const removalBatches = new Map<string, ActorRowRemovalBatch>();
   const terminalRows = transaction.terminalRows;
   transaction.terminalRows = [];
   for (const row of terminalRows) {
     if (!isTerminalStateCode(row.store.stateCode[row.entity])) continue;
-    removeActorRow(runtime, row.store, row.entity);
-    removeEntityIfEmpty(runtime, row.entity);
-    touched = true;
+
+    const ref = findActorRowRef(runtime, row.store, row.entity);
+    /* v8 ignore next -- defensive terminal cleanup invariant: terminal row refs remain attached until cleanup. */
+    if (!ref) continue;
+    appendActorRowRemoval(removalBatches, ref);
+    terminalEntities.push(row.entity);
   }
 
+  let touched = removeActorRowsFromBatches(runtime, [...removalBatches.values()]);
+  touched = removeEmptyEntityRecords(runtime, terminalEntities) || touched;
   return touched;
 };
 
@@ -619,11 +720,14 @@ const flushEntityLifecycleCleanup = (
   let touched = false;
   const despawns = consumeScheduledDespawns(transaction);
   if (despawns.length > 0) {
+    const cleanupPlan = collectDespawnCleanupPlan(runtime, despawns);
     const reactionBatches: EntityReactionBatch[] = [];
-    for (const batch of collectDespawnLifecycleBatches(runtime, despawns)) {
+    for (const batch of cleanupPlan.lifecycleBatches) {
       const reduced = reduceAcceptedBatch(runtime, batch, transaction, {
         scheduleDespawnOn: false,
+        scheduleEffects: false,
         scheduleReactions: false,
+        scheduleTerminal: false,
         onAccepted(accepted) {
           appendLifecycleReactionBatch(reactionBatches, batch.store, batch.eventCode, accepted);
         },
@@ -636,10 +740,10 @@ const flushEntityLifecycleCleanup = (
       dispatch: reactionContext.dispatch,
     });
 
-    for (const entity of despawns) {
-      const removed = removeEntityRows(runtime, entity);
-      touched = touched || removed;
-    }
+    const removedRows = removeActorRowsFromBatches(runtime, cleanupPlan.removalBatches);
+    const removedEntities = removeEntityRecords(runtime, cleanupPlan.entities) > 0;
+    if (removedRows) touched = true;
+    if (removedEntities) touched = true;
   }
 
   const removedTerminals = cleanupTerminalRows(runtime, transaction);

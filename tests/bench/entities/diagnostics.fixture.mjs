@@ -597,6 +597,7 @@ const createKernelStore = ({
       stateSlotCount: states.length + 1,
       transitionTable,
       despawnStateMask,
+      despawnLifecycleStateMask: new Uint8Array(states.length + 1),
       effectsByStateCode: Array.from({ length: states.length }),
       reactionsByEventCode: hasReaction ? [() => undefined] : [],
       reducer,
@@ -632,9 +633,16 @@ const createKernelRuntime = (stores, rowCount) => {
     groupTagByIndex[entity] = "unit";
     groupTagPosition[entity] = entity;
     entityBucket.push(entity);
+    const entityRows = actorRowsByEntity[entity];
     for (const store of stores) {
-      const row = { store, entity };
-      actorRowsByEntity[entity].push(row);
+      const row = {
+        store,
+        entity,
+        groupTag: "unit",
+        entityRowsPosition: entityRows.length,
+        groupRowsPosition: unitRows.length,
+      };
+      entityRows.push(row);
       unitRows.push(row);
     }
   }
@@ -647,7 +655,7 @@ const createKernelRuntime = (stores, rowCount) => {
       ids,
       alive,
       generation,
-      indexById: Object.create(null),
+      indexById: Object.fromEntries(ids.map((id, entity) => [id, entity])),
       groupTagByIndex,
       entitiesByGroupTag,
       groupTagPosition,
@@ -718,36 +726,31 @@ const moveStateBucket = (store, entity, previousCode, nextCode) => {
   store.statePosition[entity] = -1;
 };
 
-const removeRowRef = (rows, store, entity) => {
-  if (!rows) return false;
+const swapRemoveKernelRowRef = (rows, row, position, updateMovedPosition) => {
+  if (!rows || position < 0 || rows[position] !== row) return false;
 
-  for (let index = 0; index < rows.length; index += 1) {
-    const row = rows[index];
-    if (row.store !== store || row.entity !== entity) continue;
-
-    const last = rows.pop();
-    if (last !== undefined && last !== row) rows[index] = last;
-    return true;
+  const last = rows.pop();
+  if (last !== undefined && last !== row) {
+    rows[position] = last;
+    updateMovedPosition(last, position);
   }
 
-  return false;
+  return true;
 };
 
-const removeKernelActorRowOwnership = (runtime, store, entity) => {
-  const entityRows = runtime.actorRowsByEntity[entity];
-  removeRowRef(entityRows, store, entity);
+const removeKernelActorRowOwnership = (runtime, row) => {
+  const entityRows = runtime.actorRowsByEntity[row.entity];
+  swapRemoveKernelRowRef(entityRows, row, row.entityRowsPosition, (moved, position) => {
+    moved.entityRowsPosition = position;
+  });
+  row.entityRowsPosition = -1;
 
-  const groupTag = runtime.entityStore.groupTagByIndex[entity];
-  const groupRows = runtime.actorRowsByGroupTag[groupTag];
-  if (!removeRowRef(groupRows, store, entity) || groupRows.length > 0) return;
-
-  delete runtime.actorRowsByGroupTag[groupTag];
-};
-
-const writeInitialKernelColumns = (store, entity) => {
-  for (const column of Object.values(store.columns)) {
-    column[entity] = Array.isArray(column) ? "" : 0;
-  }
+  const groupRows = runtime.actorRowsByGroupTag[row.groupTag];
+  swapRemoveKernelRowRef(groupRows, row, row.groupRowsPosition, (moved, position) => {
+    moved.groupRowsPosition = position;
+  });
+  row.groupRowsPosition = -1;
+  if (groupRows && groupRows.length === 0) delete runtime.actorRowsByGroupTag[row.groupTag];
 };
 
 const refreshKernelPublicSlice = (store) => {
@@ -782,50 +785,103 @@ const scheduleDespawns = (runtime, store, indices) => {
   }
 };
 
-const removeKernelActorRow = (runtime, store, entity) => {
-  if (store.presence[entity] !== 1) return;
+const removeKernelActorRowsForStore = (runtime, store, rows) => {
+  let removed = 0;
 
-  moveStateBucket(store, entity, store.stateCode[entity], entityInitStateCode);
-  removeKernelActorRowOwnership(runtime, store, entity);
-  store.presence[entity] = 0;
-  store.stateCode[entity] = entityInitStateCode;
-  store.prevStateCode[entity] = entityInitStateCode;
-  store.rowVersion[entity] = 0;
-  store.count -= 1;
+  for (const row of rows) {
+    const entity = row.entity;
+    if (row.store !== store || store.presence[entity] !== 1) continue;
+
+    moveStateBucket(store, entity, store.stateCode[entity], entityInitStateCode);
+    removeKernelActorRowOwnership(runtime, row);
+    store.presence[entity] = 0;
+    store.stateCode[entity] = entityInitStateCode;
+    store.prevStateCode[entity] = entityInitStateCode;
+    store.rowVersion[entity] = 0;
+    removed += 1;
+  }
+
+  if (removed === 0) return 0;
+
+  store.count -= removed;
   store.version += 1;
-  writeInitialKernelColumns(store, entity);
-  refreshKernelPublicSlice(store);
+  return removed;
 };
 
-const removeKernelEntityIfEmpty = (runtime, entity) => {
-  const rows = runtime.actorRowsByEntity[entity];
-  if (rows && rows.length > 0) return;
-
+const removeKernelEntityRecords = (runtime, entities) => {
   const entityStore = runtime.entityStore;
-  if (entityStore.alive[entity] !== 1) return;
+  let removed = 0;
 
-  removeKernelEntityFromGroupBucket(runtime, entity);
-  delete entityStore.indexById[entityStore.ids[entity]];
-  entityStore.alive[entity] = 0;
-  entityStore.ids[entity] = "";
-  entityStore.groupTagByIndex[entity] = "";
-  entityStore.freeList.push(entity);
-  entityStore.count -= 1;
+  for (const entity of entities) {
+    if (entityStore.alive[entity] !== 1) continue;
+
+    removeKernelEntityFromGroupBucket(runtime, entity);
+    delete entityStore.indexById[entityStore.ids[entity]];
+    entityStore.alive[entity] = 0;
+    entityStore.ids[entity] = "";
+    entityStore.groupTagByIndex[entity] = "";
+    entityStore.freeList.push(entity);
+    runtime.actorRowsByEntity[entity] = [];
+    removed += 1;
+  }
+
+  if (removed === 0) return 0;
+
+  entityStore.count -= removed;
   entityStore.version += 1;
-  runtime.actorRowsByEntity[entity] = [];
+  return removed;
 };
 
-const flushKernelDespawns = (runtime) => {
+const consumeKernelScheduledDespawns = (runtime) => {
   const despawns = runtime.scheduledDespawns;
   runtime.scheduledDespawns = [];
 
+  for (const entity of despawns) runtime.despawnScheduled[entity] = 0;
+  return despawns;
+};
+
+const appendKernelActorRowRemoval = (batches, row) => {
+  const batch = batches.get(row.store.templateKey) ?? { store: row.store, rows: [] };
+  batch.rows.push(row);
+  batches.set(row.store.templateKey, batch);
+};
+
+const collectKernelDespawnCleanupPlan = (runtime) => {
+  const despawns = consumeKernelScheduledDespawns(runtime);
+  const removalBatches = new Map();
+  const liveEntities = [];
+
   for (const entity of despawns) {
-    runtime.despawnScheduled[entity] = 0;
+    if (runtime.entityStore.alive[entity] !== 1) continue;
+
     const rows = runtime.actorRowsByEntity[entity];
-    const attachedRows = rows.slice();
-    for (const row of attachedRows) removeKernelActorRow(runtime, row.store, entity);
-    removeKernelEntityIfEmpty(runtime, entity);
+    if (!rows) continue;
+
+    liveEntities.push(entity);
+    for (const row of rows) {
+      if (row.store.presence[entity] !== 1) continue;
+      appendKernelActorRowRemoval(removalBatches, row);
+    }
   }
+
+  return { removalBatches: [...removalBatches.values()], entities: liveEntities };
+};
+
+const removeKernelActorRowsFromBatches = (runtime, batches) => {
+  let removed = 0;
+  for (const batch of batches) removed += removeKernelActorRowsForStore(runtime, batch.store, batch.rows);
+  return removed;
+};
+
+const commitKernelPublicSlices = (runtime) => {
+  for (const store of runtime.stores) refreshKernelPublicSlice(store);
+};
+
+const flushKernelDespawns = (runtime) => {
+  const plan = collectKernelDespawnCleanupPlan(runtime);
+  const removedRows = removeKernelActorRowsFromBatches(runtime, plan.removalBatches);
+  const removedEntities = removeKernelEntityRecords(runtime, plan.entities);
+  if (removedRows > 0 || removedEntities > 0) commitKernelPublicSlices(runtime);
 };
 
 const reduceKernelBatch = (runtime, store, indices, action, { scheduleReactions = false } = {}) => {
@@ -927,6 +983,7 @@ const resetCleanupKernel = (runtime, store, rowCount) => {
   runtime.entityStore.count = rowCount;
   runtime.entityStore.freeList.length = 0;
   runtime.entityStore.entitiesByGroupTag.unit = [];
+  runtime.entityStore.indexById = Object.create(null);
   runtime.scheduledDespawns.length = 0;
   runtime.despawnScheduled.fill(0);
   runtime.entityStore.alive.fill(1);
@@ -941,13 +998,21 @@ const resetCleanupKernel = (runtime, store, rowCount) => {
 
   for (let entity = 0; entity < rowCount; entity += 1) {
     runtime.entityStore.ids[entity] = `entity/${entity}`;
+    runtime.entityStore.indexById[runtime.entityStore.ids[entity]] = entity;
     runtime.entityStore.groupTagByIndex[entity] = "unit";
     runtime.entityStore.groupTagPosition[entity] = entity;
     runtime.entityStore.entitiesByGroupTag.unit.push(entity);
-    runtime.actorRowsByEntity[entity] = [];
+    const entityRows = [];
+    runtime.actorRowsByEntity[entity] = entityRows;
     for (const actorStore of runtime.stores) {
-      const row = { store: actorStore, entity };
-      runtime.actorRowsByEntity[entity].push(row);
+      const row = {
+        store: actorStore,
+        entity,
+        groupTag: "unit",
+        entityRowsPosition: entityRows.length,
+        groupRowsPosition: runtime.actorRowsByGroupTag.unit.length,
+      };
+      entityRows.push(row);
       runtime.actorRowsByGroupTag.unit.push(row);
     }
     store.stateBuckets[0][entity] = entity;
@@ -994,7 +1059,7 @@ const createProjectileKernelRunner = (rowCount) => {
   };
 };
 
-const createCleanupKernelRunner = (rowCount) => {
+const createCleanupKernelFixture = (rowCount) => {
   const rows = createSoaRows(rowCount);
   const store = createKernelStore({
     templateKey: "projectileActor",
@@ -1006,11 +1071,72 @@ const createCleanupKernelRunner = (rowCount) => {
   });
   const runtime = createKernelRuntime([store], rowCount);
 
+  return { runtime, store };
+};
+
+const createCleanupKernelRunner = (rowCount) => {
+  const { runtime, store } = createCleanupKernelFixture(rowCount);
+
   return {
     beforeOperation: () => resetCleanupKernel(runtime, store, rowCount),
     run: () => {
       reduceKernelBatch(runtime, store, store.stateBuckets[0], tickAction);
       flushKernelDespawns(runtime);
+    },
+  };
+};
+
+const prepareKernelCleanupScheduleInput = (runtime, store, rowCount) => {
+  resetCleanupKernel(runtime, store, rowCount);
+  for (let entity = 0; entity < cleanupBatchSize; entity += 1) store.stateCode[entity] = 1;
+};
+
+const prepareKernelCleanupAfterSchedule = (runtime, store, rowCount) => {
+  resetCleanupKernel(runtime, store, rowCount);
+  reduceKernelBatch(runtime, store, store.stateBuckets[0], tickAction);
+};
+
+const createCleanupPhaseRunner = (rowCount, phase) => {
+  const { runtime, store } = createCleanupKernelFixture(rowCount);
+  let plan = { removalBatches: [], entities: [] };
+
+  return {
+    beforeOperation: () => {
+      if (phase === "schedule-despawn") {
+        prepareKernelCleanupScheduleInput(runtime, store, rowCount);
+        return;
+      }
+
+      prepareKernelCleanupAfterSchedule(runtime, store, rowCount);
+      if (phase === "lifecycle-plan") return;
+
+      plan = collectKernelDespawnCleanupPlan(runtime);
+      if (phase === "batch-remove-actor-rows") return;
+
+      removeKernelActorRowsFromBatches(runtime, plan.removalBatches);
+      if (phase === "remove-entity-records") return;
+
+      removeKernelEntityRecords(runtime, plan.entities);
+    },
+    run: () => {
+      if (phase === "schedule-despawn") {
+        scheduleDespawns(runtime, store, store.stateBuckets[0]);
+        return;
+      }
+      if (phase === "lifecycle-plan") {
+        plan = collectKernelDespawnCleanupPlan(runtime);
+        return;
+      }
+      if (phase === "batch-remove-actor-rows") {
+        removeKernelActorRowsFromBatches(runtime, plan.removalBatches);
+        return;
+      }
+      if (phase === "remove-entity-records") {
+        removeKernelEntityRecords(runtime, plan.entities);
+        return;
+      }
+
+      commitKernelPublicSlices(runtime);
     },
   };
 };
@@ -1077,6 +1203,41 @@ const layerDefinitions = [
     },
   },
   {
+    key: "cleanup-schedule-despawn",
+    label: "schedule despawn",
+    operationsPerSample: {
+      "despawn-on-cleanup": 20,
+    },
+  },
+  {
+    key: "cleanup-lifecycle-plan",
+    label: "despawn lifecycle plan",
+    operationsPerSample: {
+      "despawn-on-cleanup": 20,
+    },
+  },
+  {
+    key: "cleanup-batch-remove-actor-rows",
+    label: "batch remove actor rows",
+    operationsPerSample: {
+      "despawn-on-cleanup": 20,
+    },
+  },
+  {
+    key: "cleanup-remove-entity-records",
+    label: "remove entity records",
+    operationsPerSample: {
+      "despawn-on-cleanup": 20,
+    },
+  },
+  {
+    key: "cleanup-public-commit",
+    label: "public commit",
+    operationsPerSample: {
+      "despawn-on-cleanup": 20,
+    },
+  },
+  {
     key: "public-transition",
     label: "public manager.transition",
     operationsPerSample: {
@@ -1116,6 +1277,11 @@ const scenarioDefinitions = [
       "raw-soa": createCleanupRawSoaRunner,
       "semantic-soa": createCleanupSemanticSoaRunner,
       "raw-entity-kernel": createCleanupKernelRunner,
+      "cleanup-schedule-despawn": (rowCount) => createCleanupPhaseRunner(rowCount, "schedule-despawn"),
+      "cleanup-lifecycle-plan": (rowCount) => createCleanupPhaseRunner(rowCount, "lifecycle-plan"),
+      "cleanup-batch-remove-actor-rows": (rowCount) => createCleanupPhaseRunner(rowCount, "batch-remove-actor-rows"),
+      "cleanup-remove-entity-records": (rowCount) => createCleanupPhaseRunner(rowCount, "remove-entity-records"),
+      "cleanup-public-commit": (rowCount) => createCleanupPhaseRunner(rowCount, "public-commit"),
       "public-transition": (rowCount) => createProjectilePublicRunner(rowCount, "cleanup"),
     },
   },
@@ -1132,8 +1298,13 @@ const scenarioDefinitions = [
 ];
 
 const runLayer = (scenario, layer, rowCount) => {
-  const runner = scenario.createRunnerByLayer[layer.key](rowCount);
+  const createRunner = scenario.createRunnerByLayer[layer.key];
+  if (!createRunner) return undefined;
+
   const operationsPerSample = layer.operationsPerSample[scenario.key];
+  if (operationsPerSample === undefined) return undefined;
+
+  const runner = createRunner(rowCount);
   const summary = measure(runner, operationsPerSample);
 
   return {
@@ -1145,7 +1316,10 @@ const runLayer = (scenario, layer, rowCount) => {
 };
 
 const runScenario = (scenario, rowCount) => {
-  const layers = layerDefinitions.map((layer) => runLayer(scenario, layer, rowCount));
+  const layers = layerDefinitions.flatMap((layer) => {
+    const result = runLayer(scenario, layer, rowCount);
+    return result ? [result] : [];
+  });
   const rawSoa = layers.find((layer) => layer.key === "raw-soa");
 
   return {

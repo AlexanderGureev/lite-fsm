@@ -93,23 +93,67 @@ pnpm run bench:entities:record -- --runs 5 --label codex-baseline-2026-06-14 --i
 
 Затронутые места:
 
-- `packages/entities/src/runtime/reduce.ts`: `scheduleDespawnOnRows`, `collectDespawnLifecycleBatches`, `flushEntityLifecycleCleanup`.
-- `packages/entities/src/runtime/state.ts`: `removeActorRowOwnership`, `removeActorRow`, `removeEntityIfEmpty`, `removeEntityRows`.
+- `packages/entities/src/runtime/reduce.ts`: `scheduleDespawnOnRows`, cleanup plan, `flushEntityLifecycleCleanup`.
+- `packages/entities/src/runtime/state.ts`: `removeActorRowOwnership`, `removeActorRowsForStore`, `removeEntityRecords`.
 - `packages/entities/src/runtime/transaction.ts`: `scheduleEntityDespawn`, `consumeScheduledDespawns`.
 
-Что исправлять:
+Контракт решения:
 
-1. Добавить fast path для удаления, когда у затронутых templates нет `ENTITY_DESPAWNED` reducer/reaction/effect. В этом случае не нужно строить lifecycle batches и запускать `reduceAcceptedBatch` для `ENTITY_DESPAWNED`.
-2. Удалять строки батчами по store, а не entity-by-entity. Сейчас `removeEntityRows` делает `rows.slice()`, затем для каждой строки вызывает `removeActorRow`, линейно удаляет ownership refs и обновляет public slice на каждую строку.
-3. Обновлять `publicSlice`, `store.version` и `entityStore.version` один раз на batch, а не на каждую удаленную строку.
-4. Пересмотреть контракт очистки колонок при despawn. Текущий `writeInitialColumnValues` очищает все колонки удаленной строки. Если публичный контракт допускает чтение только через `has(entity)`, очистку можно убрать из hot path или перенести в debug/snapshot режим. Если контракт требует очистку, нужна batch-очистка по колонкам.
-5. Убрать `despawnScheduled: Uint8Array(0)` с ростом по требованию на каждый dispatch. Нужен переиспользуемый scratch в runtime с очисткой только затронутых индексов.
+1. Fast path удаляет строки без observable `ENTITY_DESPAWNED` work. Observable work — accepted `ENTITY_DESPAWNED` transition и reducer или `reactions.ENTITY_DESPAWNED`; state `effects` целевого состояния не являются cleanup contract.
+2. Cleanup строит план удаления и удаляет строки батчами по store через `removeActorRowsForStore`.
+3. `publicSlice`, `store.version` и `entityStore.version` обновляются один раз на затронутый batch.
+4. Контракт колонок удалённых строк: публичное чтение корректно только через `has(entity) === true`; runtime не обязан очищать колонки удаленной строки в hot path, а `dehydrate()` должен сериализовать удалённые слоты через defaults из `initialContext`.
+5. `despawnScheduled` использует переиспользуемый scratch runtime с очисткой только затронутых индексов.
 
 Критерий приемки:
 
 - `despawnOn cleanup / 50 000` должен сначала приблизиться к `raw entity kernel` уровня `1-2ms`, затем к `semantic SoA` уровня `0.3-0.6ms`.
 - RSD для `despawnOn cleanup / 50 000` должен опуститься ниже `15%`.
 - После изменения запускать `pnpm run bench:entities:record -- --runs 5 --label after-despawn-cleanup --include gate,diagnostics` и сравнивать с baseline.
+
+### Итог problem 1: despawnOn cleanup
+
+Команда:
+
+```bash
+pnpm run bench:entities:record -- --runs 5 --label after-despawn-cleanup --include gate,diagnostics
+pnpm run bench:entities:compare -- .bench/entities/codex-baseline-2026-06-14.json .bench/entities/after-despawn-cleanup.json
+```
+
+Артефакты:
+
+- [`after-despawn-cleanup.json`](../../.bench/entities/after-despawn-cleanup.json)
+- [`after-despawn-cleanup.md`](../../.bench/entities/after-despawn-cleanup.md)
+- [`after-despawn-cleanup-vs-codex-baseline-2026-06-14.md`](../../.bench/entities/after-despawn-cleanup-vs-codex-baseline-2026-06-14.md)
+
+Окружение итогового record: `2026-06-14T19:02:30.226Z`, Git `9f092b7109fd`, branch `entities`, status `dirty`, Node `v24.16.0`, CPU `Apple M1 Max`, package manager `pnpm/10.33.0`.
+
+| Сценарий | Строки | Baseline median | After median | Ratio к SoA до | Ratio к SoA после | Ускорение | RSD after |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `despawnOn cleanup` | 10 000 | 2.406ms | 0.241ms | 43.91x | 4.43x | 2.166ms (90.0%) | 11.7% |
+| `despawnOn cleanup` | 50 000 | 20.521ms | 1.098ms | 74.65x | 3.99x | 19.423ms (94.6%) | 0.9% |
+
+Итог: первый целевой диапазон `1-2ms` для `despawnOn cleanup / 50 000` достигнут: gate median `1.098ms`. RSD gate-сценария `50 000` ниже порога `15%` (`0.9%`). Соседние gate-сценарии не получили регрессий больше `10%`: compare не показывает ни одного public entity median regression выше порога.
+
+Diagnostics после обновления fixture содержит cleanup breakdown:
+
+| Фаза / слой | 10 000 median | 50 000 median | RSD 50 000 |
+| --- | ---: | ---: | ---: |
+| `schedule despawn` | 0.015ms | 0.073ms | 1.4% |
+| `despawn lifecycle plan` | 0.006ms | 0.010ms | 15.5% |
+| `batch remove actor rows` | 0.005ms | 0.007ms | 9.9% |
+| `remove entity records` | 0.005ms | 0.013ms | 14.1% |
+| `public commit` | 0.000ms | 0.001ms | 55.6% |
+| `raw entity kernel` | 0.196ms | 1.647ms | 1.4% |
+| `public manager.transition` | 0.247ms | 1.086ms | 1.1% |
+
+Вывод по problem 1: public cleanup path теперь близок к primary reducer path и проходит первый целевой диапазон. Batch cleanup phases сами по себе занимают малую часть времени; основная стоимость остается в полном reducer/kernel проходе по активному bucket. Diagnostics `raw entity kernel / 50 000` стал медленнее baseline из-за более точной batch-removal модели fixture, но gate public scenarios не регрессировали больше `10%`.
+
+Следующие приоритеты:
+
+1. Двигать `despawnOn cleanup / 50 000` от первого диапазона `1-2ms` к следующему диапазону `0.3-0.6ms`: сейчас лимитирующий слой — общий reducer/kernel проход.
+2. Профилировать `raw entity kernel` cleanup после перехода fixture на batch-removal модель, чтобы отделить цену полного bucket scan от цены удаления `128` строк.
+3. Сохранять контракт колонок удалённых строк: чтение только через `has(entity)`, snapshot sanitation через defaults, без возврата очистки колонок в hot path.
 
 ### 2. Ускорить reaction scope и `sprite sync reaction`
 

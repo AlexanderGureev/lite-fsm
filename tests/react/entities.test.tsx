@@ -535,7 +535,7 @@ describe("@lite-fsm/entities/react — SSR preview storage", () => {
     expect(html.replace(/<!--.*?-->/g, "")).toContain("child:unit/a:1");
   });
 
-  it("preview index игнорирует dead slots из storage.entity", () => {
+  it("preview index игнорирует удаленные слоты из storage.entity", () => {
     const source = createEntityManager();
     const client = createEntityManager();
     spawnEntity(source, "unit/a", "enemy", 1, "dead");

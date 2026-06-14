@@ -39,6 +39,7 @@ import {
   spawnEvent,
   type EntitiesPlugin,
   type EntityAccess,
+  type EntityIndex,
 } from "@lite-fsm/entities";
 
 type AppEvent = { readonly type: "TICK" };
@@ -103,8 +104,11 @@ manager.transition({ type: "TICK" });
 
 const view = manager.entities().get("movement");
 view.count; // 1
-view.x[0]; // 2 — колонки индексируются по EntityIndex
-view.state(0); // "active"
+const entity = 0 as EntityIndex;
+if (view.has(entity)) {
+  view.x[entity]; // 2 — колонки индексируются по EntityIndex
+  view.state(entity); // "active"
+}
 ```
 
 ## Модель данных: схемы и колонки
@@ -132,10 +136,12 @@ view.state(0); // "active"
 Машина-шаблон стартует из служебного состояния `__INIT`. Единственный разрешённый переход из него — по внутреннему событию `ENTITY_SPAWNED`.
 
 - `ENTITY_SPAWNED` — рантайм диспатчит автоматически при создании строки. В этот момент доступен `payloadFor(entity)`.
-- `ENTITY_DESPAWNED` — диспатчится перед удалением строки. Удобно для финальной очистки во внешних системах.
+- `ENTITY_DESPAWNED` — локальный hook для строк актёра, которые удаляются в текущем `transition`. Reducer и `reactions.ENTITY_DESPAWNED` видят колонки до физического удаления строки.
 - `despawnOn: "state"` (или массив состояний) — как только строка переходит в указанное состояние, рантайм автоматически удаляет её.
 
 Прямой публичный диспатч `ENTITY_SPAWNED`/`ENTITY_DESPAWNED` запрещён. Сущности создаются только через события спавна, а удаляются через `despawnOn` или `transition.despawn(...)` в эффекте.
+
+Финальную синхронизацию с внешними системами выполняйте в `reactions.ENTITY_DESPAWNED`. `effects`, связанные с целевым состоянием перехода по `ENTITY_DESPAWNED`, не являются контрактом cleanup.
 
 ## Reducer
 
@@ -230,6 +236,10 @@ const spawn = defineEntitySpawn(
 
 - `entities().get(key)` — представление шаблона: `count`, `version`, `has(entity)`, `state(entity)` и колонки только для чтения. Строки индексируются по `EntityIndex` (`view.x[entity]`).
 - `entities().maybe(key)` — то же, но без строгих проверок доступа в dev.
+
+Значение колонки является публичным состоянием только для живой строки: сначала проверяйте `view.has(entity) === true`. После `has(entity) === false` значения `view.<column>[entity]` могут оставаться устаревшими до повторного использования слота и не являются частью публичного контракта. `dehydrate()` не публикует runtime values удалённых слотов: в JSON для них записываются defaults из `initialContext`.
+
+`version` у entity store и actor store — монотонный invalidation token. Он меняется при видимом изменении хранилища, но точная величина инкремента не является счетчиком строк, событий или мутаций.
 
 ## React
 

@@ -14,6 +14,7 @@ import {
   type EntityColumn,
   type EntityRuntimeState,
   type EntityStore,
+  getInitialColumnValue,
 } from "./state";
 
 type EntityColumnKind = "f32" | "i16" | "i32" | "u8" | "string";
@@ -506,9 +507,18 @@ const serializeEntityStore = (store: EntityStore): EntityStoreSnapshot => ({
   version: store.version,
 });
 
-const serializeColumn = (column: EntityColumn, capacity: number): readonly unknown[] => {
-  if (Array.isArray(column)) return copyStringArray(column, capacity);
-  return Array.from(column);
+const serializeColumn = (
+  column: EntityColumn,
+  capacity: number,
+  presence: Uint8Array,
+  defaultValue: number | string,
+): readonly unknown[] => {
+  const serialized = Array.from({ length: capacity }, (_, entity) => {
+    if (presence[entity] !== 1) return defaultValue;
+    return column[entity] ?? defaultValue;
+  });
+
+  return serialized;
 };
 
 const serializeActorStore = (store: ColumnarActorStore): EntityActorSnapshot => {
@@ -526,7 +536,15 @@ const serializeActorStore = (store: ColumnarActorStore): EntityActorSnapshot => 
     prevStateCode: Array.from(store.prevStateCode),
     rowVersion: Array.from(store.rowVersion),
     columns: Object.fromEntries(
-      Object.entries(store.columns).map(([name, column]) => [name, serializeColumn(column, store.capacity)]),
+      Object.entries(store.columns).map(([name, column]) => [
+        name,
+        serializeColumn(
+          column,
+          store.capacity,
+          store.presence,
+          getInitialColumnValue(store.metadata.initialContext[name]),
+        ),
+      ]),
     ),
   };
 };

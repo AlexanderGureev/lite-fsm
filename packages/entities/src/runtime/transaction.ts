@@ -11,6 +11,11 @@ type RuntimeCarrier = {
   readonly runtime: Map<string, unknown>;
 };
 
+type EntityTransactionScratch = {
+  despawnScheduled: Uint8Array;
+  readonly despawnScheduledMarks: EntityIndex[];
+};
+
 export type StagedActorSpawn = {
   readonly templateKey: string;
   readonly payload: Record<string, unknown>;
@@ -23,6 +28,7 @@ export type StagedEntitySpawn = {
 };
 
 export type EntityDispatchTransaction = {
+  // Store versions are monotonic invalidation tokens; exact increments are not a transaction contract.
   readonly runtime: EntityRuntimeState;
   stagedSpawns: readonly StagedEntitySpawn[];
   scheduledDespawns: EntityIndex[];
@@ -63,6 +69,9 @@ const ENTITY_TRANSACTION_KEY = "@lite-fsm/entities/transaction";
 const ENTITY_DESPAWN_OPTIONS_KEY = Symbol.for("@lite-fsm/entities/despawn-options");
 
 export const ENTITY_DESPAWN_ACTION_TYPE = "LITE_FSM_ENTITY_DESPAWN";
+
+const emptyDespawnScheduled = new Uint8Array();
+const transactionScratchByRuntime = new WeakMap<EntityRuntimeState, EntityTransactionScratch>();
 
 const hasOwn = (value: object, key: PropertyKey): boolean => Object.prototype.hasOwnProperty.call(value, key);
 
@@ -123,12 +132,29 @@ const stageExplicitDespawns = (transaction: EntityDispatchTransaction, options: 
   for (const entry of request.entries) scheduleCapturedEntityDespawn(transaction, entry);
 };
 
+const getEntityTransactionScratch = (runtime: EntityRuntimeState): EntityTransactionScratch => {
+  const scratch = transactionScratchByRuntime.get(runtime);
+  if (scratch) return scratch;
+
+  const next = { despawnScheduled: emptyDespawnScheduled, despawnScheduledMarks: [] };
+  transactionScratchByRuntime.set(runtime, next);
+  return next;
+};
+
+const clearDespawnScheduledMarks = (scratch: EntityTransactionScratch): void => {
+  for (const entity of scratch.despawnScheduledMarks) scratch.despawnScheduled[entity] = 0;
+  scratch.despawnScheduledMarks.length = 0;
+};
+
 export const prepareEntityTransaction = (carrier: RuntimeCarrier, runtime: EntityRuntimeState): EntityDispatchTransaction => {
+  const scratch = getEntityTransactionScratch(runtime);
+  clearDespawnScheduledMarks(scratch);
+
   const transaction: EntityDispatchTransaction = {
     runtime,
     stagedSpawns: [],
     scheduledDespawns: [],
-    despawnScheduled: new Uint8Array(0),
+    despawnScheduled: scratch.despawnScheduled,
     terminalRows: [],
     effectBatches: [],
     reactionBatches: [],
@@ -287,6 +313,7 @@ const ensureDespawnScheduleCapacity = (transaction: EntityDispatchTransaction, c
 
   const next = new Uint8Array(capacity);
   next.set(transaction.despawnScheduled);
+  getEntityTransactionScratch(transaction.runtime).despawnScheduled = next;
   transaction.despawnScheduled = next;
 };
 
@@ -301,6 +328,7 @@ export const scheduleEntityDespawn = (
 
   transaction.despawnScheduled[entity] = 1;
   transaction.scheduledDespawns.push(entity);
+  getEntityTransactionScratch(transaction.runtime).despawnScheduledMarks.push(entity);
   return true;
 };
 
@@ -308,6 +336,7 @@ export const consumeScheduledDespawns = (transaction: EntityDispatchTransaction)
   const scheduled = transaction.scheduledDespawns;
   transaction.scheduledDespawns = [];
   for (const entity of scheduled) transaction.despawnScheduled[entity] = 0;
+  getEntityTransactionScratch(transaction.runtime).despawnScheduledMarks.length = 0;
   return scheduled;
 };
 

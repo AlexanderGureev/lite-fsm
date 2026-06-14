@@ -40,6 +40,9 @@ export type EntityStore = {
 export type EntityActorRowRef = {
   readonly store: ColumnarActorStore;
   readonly entity: EntityIndex;
+  readonly groupTag: string;
+  entityRowsPosition: number;
+  groupRowsPosition: number;
 };
 
 export type ColumnarActorStore = {
@@ -300,46 +303,54 @@ export const addActorRowOwnership = (
   entity: EntityIndex,
   groupTag: string,
 ): void => {
-  const row = { store, entity };
   const entityRows = runtime.actorRowsByEntity[entity] ?? [];
   if (entityRows.length === 0) runtime.actorRowsByEntity[entity] = entityRows;
-  entityRows.push(row);
 
   const groupRows = runtime.actorRowsByGroupTag[groupTag] ?? [];
   if (groupRows.length === 0) runtime.actorRowsByGroupTag[groupTag] = groupRows;
+
+  const row = {
+    store,
+    entity,
+    groupTag,
+    entityRowsPosition: entityRows.length,
+    groupRowsPosition: groupRows.length,
+  };
+  entityRows.push(row);
   groupRows.push(row);
 };
 
-const removeActorRowRef = (rows: EntityActorRowRef[] | undefined, store: ColumnarActorStore, entity: EntityIndex): boolean => {
-  /* v8 ignore next -- defensive ownership invariant: live rows are stored in both entity and group indexes. */
-  if (!rows) return false;
+const swapRemoveActorRowRef = (
+  rows: EntityActorRowRef[] | undefined,
+  row: EntityActorRowRef,
+  position: number,
+  updateMovedPosition: (moved: EntityActorRowRef, position: number) => void,
+): boolean => {
+  /* v8 ignore next -- defensive ownership invariant: live rows are stored in both ownership indexes. */
+  if (!rows || position < 0 || rows[position] !== row) return false;
 
-  for (let index = 0; index < rows.length; index += 1) {
-    const row = rows[index];
-    if (row.store !== store || row.entity !== entity) continue;
-
-    const last = rows.pop();
-    if (last !== undefined && last !== row) rows[index] = last;
-    return true;
+  const last = rows.pop();
+  if (last !== undefined && last !== row) {
+    rows[position] = last;
+    updateMovedPosition(last, position);
   }
 
-  /* v8 ignore next -- defensive ownership invariant: live rows are stored in both entity and group indexes. */
-  return false;
+  return true;
 };
 
-const removeActorRowOwnership = (
-  runtime: EntityRuntimeState,
-  store: ColumnarActorStore,
-  entity: EntityIndex,
-): void => {
-  const entityRows = runtime.actorRowsByEntity[entity];
-  removeActorRowRef(entityRows, store, entity);
+const removeActorRowOwnership = (runtime: EntityRuntimeState, row: EntityActorRowRef): void => {
+  const entityRows = runtime.actorRowsByEntity[row.entity];
+  swapRemoveActorRowRef(entityRows, row, row.entityRowsPosition, (moved, position) => {
+    moved.entityRowsPosition = position;
+  });
+  row.entityRowsPosition = -1;
 
-  const groupTag = runtime.entityStore.groupTagByIndex[entity];
-  const groupRows = runtime.actorRowsByGroupTag[groupTag];
-  if (!removeActorRowRef(groupRows, store, entity) || groupRows.length > 0) return;
-
-  delete runtime.actorRowsByGroupTag[groupTag];
+  const groupRows = runtime.actorRowsByGroupTag[row.groupTag];
+  swapRemoveActorRowRef(groupRows, row, row.groupRowsPosition, (moved, position) => {
+    moved.groupRowsPosition = position;
+  });
+  row.groupRowsPosition = -1;
+  if (groupRows && groupRows.length === 0) delete runtime.actorRowsByGroupTag[row.groupTag];
 };
 
 const removeActorFromStateBucket = (store: ColumnarActorStore, entity: EntityIndex, stateCode: number): void => {
@@ -393,56 +404,57 @@ const removeEntityFromGroupBucket = (store: EntityStore, entity: EntityIndex): v
   store.groupTagPosition[entity] = -1;
 };
 
-export const removeActorRow = (
+export const removeActorRowsForStore = (
   runtime: EntityRuntimeState,
   store: ColumnarActorStore,
-  entity: EntityIndex,
-): boolean => {
-  /* v8 ignore next -- defensive: cleanup is called for attached rows selected from presence indexes. */
-  if (store.presence[entity] !== 1) return false;
+  rows: readonly EntityActorRowRef[],
+): number => {
+  let removed = 0;
 
-  moveActorStateBucket(store, entity, store.stateCode[entity], ENTITY_INIT_STATE_CODE);
-  removeActorRowOwnership(runtime, store, entity);
-  store.presence[entity] = 0;
-  store.stateCode[entity] = ENTITY_INIT_STATE_CODE;
-  store.prevStateCode[entity] = ENTITY_INIT_STATE_CODE;
-  store.rowVersion[entity] = 0;
-  store.count -= 1;
+  for (const row of rows) {
+    const entity = row.entity;
+    if (row.store !== store || store.presence[entity] !== 1) continue;
+
+    removeActorFromStateBucket(store, entity, store.stateCode[entity]);
+    removeActorRowOwnership(runtime, row);
+    store.presence[entity] = 0;
+    store.stateCode[entity] = ENTITY_INIT_STATE_CODE;
+    store.prevStateCode[entity] = ENTITY_INIT_STATE_CODE;
+    store.rowVersion[entity] = 0;
+    removed += 1;
+  }
+
+  if (removed === 0) return 0;
+
+  store.count -= removed;
   store.version += 1;
-  writeInitialColumnValues(store, entity);
   refreshActorPublicSlice(store);
-  return true;
+  return removed;
 };
 
-export const removeEntityIfEmpty = (runtime: EntityRuntimeState, entity: EntityIndex): boolean => {
-  const rows = runtime.actorRowsByEntity[entity];
-  if (rows && rows.length > 0) return false;
-
+export const removeEntityRecords = (runtime: EntityRuntimeState, entities: readonly EntityIndex[]): number => {
   const store = runtime.entityStore;
-  /* v8 ignore next -- defensive: entity cleanup is scheduled only for live entity indices. */
-  if (store.alive[entity] !== 1) return false;
+  let removed = 0;
 
-  const id = store.ids[entity];
-  removeEntityFromGroupBucket(store, entity);
-  delete store.indexById[id];
-  store.ids[entity] = "";
-  store.alive[entity] = 0;
-  store.groupTagByIndex[entity] = "";
-  store.freeList.push(entity);
-  store.count -= 1;
+  for (const entity of entities) {
+    if (store.alive[entity] !== 1) continue;
+
+    const id = store.ids[entity];
+    removeEntityFromGroupBucket(store, entity);
+    delete store.indexById[id];
+    store.ids[entity] = "";
+    store.alive[entity] = 0;
+    store.groupTagByIndex[entity] = "";
+    store.freeList.push(entity);
+    runtime.actorRowsByEntity[entity] = [];
+    removed += 1;
+  }
+
+  if (removed === 0) return 0;
+
+  store.count -= removed;
   store.version += 1;
-  runtime.actorRowsByEntity[entity] = [];
-  return true;
-};
-
-export const removeEntityRows = (runtime: EntityRuntimeState, entity: EntityIndex): boolean => {
-  const rows = runtime.actorRowsByEntity[entity];
-  /* v8 ignore next -- defensive: despawn cleanup is scheduled while attached rows still exist. */
-  if (!rows || rows.length === 0) return removeEntityIfEmpty(runtime, entity);
-
-  const attachedRows = rows.slice();
-  for (const row of attachedRows) removeActorRow(runtime, row.store, entity);
-  return removeEntityIfEmpty(runtime, entity);
+  return removed;
 };
 
 export const createPublicInitialState = (

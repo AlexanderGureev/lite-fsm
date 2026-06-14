@@ -29,14 +29,18 @@ import {
   getEntityStateName,
   getEntityRuntimeState,
   moveActorStateBucket,
+  removeActorRowsForStore,
+  removeEntityRecords,
 } from "../../packages/entities/src/runtime/state";
 import {
   compileEntityRuntimeMetadata,
   ENTITY_RESOLVED_STATE_CODE,
 } from "../../packages/entities/src/runtime/compile";
 import { invokeEntityEffect, resolveEntityEffectInvocations } from "../../packages/entities/src/runtime/effects";
+import { reduceEntityBucket } from "../../packages/entities/src/runtime/reduce";
 import { collectEntityPublicReducerBatches } from "../../packages/entities/src/runtime/routing";
 import {
+  consumeScheduledDespawns,
   createEntityDespawnOptions,
   prepareEntityTransaction,
   scheduleEntityDespawn,
@@ -2137,7 +2141,7 @@ describe("@lite-fsm/entities — этап 6 reduce pipeline и routing", () => {
     const store = entityAccess<typeof machines>(manager).get("actor");
     expect(store.hits[0 as EntityIndex]).toBe(1);
     expect(store.hits[1 as EntityIndex]).toBe(0);
-    expect(actorStore.rowVersion[0]).toBe(beforeA + 1);
+    expect(actorStore.rowVersion[0]).toBeGreaterThan(beforeA);
     expect(actorStore.rowVersion[1]).toBe(beforeB);
   });
 
@@ -2477,6 +2481,783 @@ describe("@lite-fsm/entities — этап 6 reduce pipeline и routing", () => {
   });
 });
 
+describe("@lite-fsm/entities — despawn cleanup этап 2 indexed ownership", () => {
+  const createCleanupStage2SpawnEvents = () =>
+    defineSpawnEvents({
+      SPAWN_CLEANUP_STAGE2: spawnEvent<{
+        readonly id: string;
+        readonly groupTag: string;
+        readonly hp?: number;
+        readonly label?: string | null;
+      }>(),
+    });
+
+  const spawnCleanupStage2Entity = (
+    manager: {
+      transition(action: {
+        readonly type: "SPAWN_CLEANUP_STAGE2";
+        readonly payload: {
+          readonly id: string;
+          readonly groupTag: string;
+          readonly hp?: number;
+          readonly label?: string | null;
+        };
+      }): unknown;
+    },
+    id: string,
+    groupTag = "unit",
+    hp = 0,
+    label: string | null = null,
+  ) => {
+    manager.transition({ type: "SPAWN_CLEANUP_STAGE2", payload: { id, groupTag, hp, label } });
+  };
+
+  it("удаление actor row из большого actorRowsByGroupTag сохраняет routing после swap-remove", () => {
+    const actor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { PING: "READY" } },
+      initialState: "__INIT",
+      initialContext: { hits: i32() },
+      spawnSchema: {},
+      reducer(_slice: unknown, action: { readonly type: string }, { self }: { readonly self: any }) {
+        if (action.type !== "PING") return;
+        for (const entity of self.indices) self.hits[entity] += 1;
+      },
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createCleanupStage2SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_CLEANUP_STAGE2: (payload) => ({ id: payload.id, groupTag: payload.groupTag, actors: { actor: {} } }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+
+    for (let index = 0; index < 16; index += 1) spawnCleanupStage2Entity(manager, `unit/${index}`);
+
+    const runtime = getEntityRuntimeState(manager.entities());
+    const store = runtime.actorStores.actor;
+    const removedEntity = 3 as EntityIndex;
+    const removedRef = runtime.actorRowsByEntity[removedEntity][0];
+    const removedGroupPosition = removedRef.groupRowsPosition;
+    const movedEntity = runtime.actorRowsByGroupTag.unit[runtime.actorRowsByGroupTag.unit.length - 1].entity;
+
+    expect(removeActorRowsForStore(runtime, store, [removedRef])).toBe(1);
+
+    const movedRef = runtime.actorRowsByEntity[movedEntity][0];
+    expect(runtime.actorRowsByEntity[removedEntity]).toEqual([]);
+    expect(runtime.actorRowsByGroupTag.unit).toHaveLength(15);
+    expect(runtime.actorRowsByGroupTag.unit[removedGroupPosition]).toBe(movedRef);
+    expect(movedRef.groupRowsPosition).toBe(removedGroupPosition);
+    expect(removedRef.entityRowsPosition).toBe(-1);
+    expect(removedRef.groupRowsPosition).toBe(-1);
+    expect(removeActorRowsForStore(runtime, store, [removedRef])).toBe(0);
+
+    manager.transition({ type: "PING", meta: { groupTag: "unit" } });
+
+    const view = entityAccess<typeof machines>(manager).get("actor");
+    for (let entity = 0; entity < 16; entity += 1) {
+      expect(view.hits[entity as EntityIndex]).toBe(entity === removedEntity ? 0 : 1);
+    }
+  });
+
+  it("entity с несколькими actors удаляется из ownership indexes, stateBuckets и entity indexes", () => {
+    const actorA = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { PING: "READY" } },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+    } as const;
+    const actorB = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { PING: "READY" } },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+    } as const;
+    const machines = { actorA, actorB };
+    const spawnEvents = createCleanupStage2SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_CLEANUP_STAGE2: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: { actorA: {}, actorB: {} },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+
+    spawnCleanupStage2Entity(manager, "unit/target");
+    spawnCleanupStage2Entity(manager, "unit/survivor");
+
+    const runtime = getEntityRuntimeState(manager.entities());
+    const target = 0 as EntityIndex;
+    const survivor = 1 as EntityIndex;
+    const targetRows = runtime.actorRowsByEntity[target].slice();
+    for (const row of targetRows) removeActorRowsForStore(runtime, row.store, [row]);
+
+    expect(removeEntityRecords(runtime, [target])).toBe(1);
+
+    expect(runtime.actorRowsByEntity[target]).toEqual([]);
+    expect(runtime.actorRowsByEntity[survivor]).toHaveLength(2);
+    expect(runtime.actorRowsByGroupTag.unit.map((row) => row.entity).sort()).toEqual([survivor, survivor]);
+    expect(runtime.entityStore.entitiesByGroupTag.unit).toEqual([survivor]);
+    expect(runtime.entityStore.groupTagPosition[survivor]).toBe(0);
+    expect(runtime.entityStore.indexById["unit/target"]).toBeUndefined();
+    expect(runtime.entityStore.indexById["unit/survivor"]).toBe(survivor);
+
+    for (const store of [runtime.actorStores.actorA, runtime.actorStores.actorB]) {
+      const readyCode = store.metadata.stateCodeByName.READY;
+      expect(store.presence[target]).toBe(0);
+      expect(store.stateBuckets[readyCode]).toEqual([survivor]);
+      expect(store.statePosition[target]).toBe(-1);
+      expect(store.statePosition[survivor]).toBe(0);
+    }
+    expect(removeEntityRecords(runtime, [target])).toBe(0);
+  });
+
+  it("batch removal возвращает 0 если row не принадлежит requested store", () => {
+    const actorA = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: {} },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+    } as const;
+    const actorB = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: {} },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+    } as const;
+    const machines = { actorA, actorB };
+    const spawnEvents = createCleanupStage2SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_CLEANUP_STAGE2: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: { actorA: {} },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+
+    spawnCleanupStage2Entity(manager, "unit/a");
+
+    const runtime = getEntityRuntimeState(manager.entities());
+    const entity = 0 as EntityIndex;
+    const [actorARow] = runtime.actorRowsByEntity[entity];
+
+    expect(removeActorRowsForStore(runtime, runtime.actorStores.actorB, [actorARow])).toBe(0);
+    expect(runtime.actorRowsByEntity[entity]).toHaveLength(1);
+    expect(runtime.actorStores.actorA.presence[entity]).toBe(1);
+    expect(runtime.actorStores.actorB.count).toBe(0);
+  });
+
+  it("повторный spawn в освобожденный EntityIndex заново пишет defaults и spawn payload", () => {
+    const spawnedDefaults: string[] = [];
+    const actor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: {} },
+      initialState: "__INIT",
+      initialContext: {
+        hp: i32({ default: 5 }),
+        speed: f32({ default: 1 }),
+        label: string({ default: "idle" }),
+      },
+      spawnSchema: { hp: i32(), label: optional(string()) },
+      reducer(
+        _slice: unknown,
+        action: { readonly type: string },
+        { self, payloadFor }: { readonly self: any; payloadFor(entity: EntityIndex): { readonly hp: number; readonly label: string | null } },
+      ) {
+        if (action.type !== "ENTITY_SPAWNED") return;
+
+        for (const entity of self.indices) {
+          spawnedDefaults.push(`${self.hp[entity]}:${self.speed[entity]}:${self.label[entity]}`);
+          const payload = payloadFor(entity);
+          self.hp[entity] = payload.hp;
+          self.label[entity] = payload.label ?? "none";
+        }
+      },
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createCleanupStage2SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_CLEANUP_STAGE2: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: { actor: { hp: payload.hp ?? 0, label: payload.label ?? null } },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+
+    spawnCleanupStage2Entity(manager, "unit/a", "unit", 10, "first");
+
+    const runtime = getEntityRuntimeState(manager.entities());
+    const actorStore = runtime.actorStores.actor;
+    (actorStore.columns.hp as Int32Array)[0] = 99;
+    (actorStore.columns.speed as Float32Array)[0] = 7;
+    (actorStore.columns.label as string[])[0] = "stale";
+
+    const [row] = runtime.actorRowsByEntity[0];
+    expect(removeActorRowsForStore(runtime, actorStore, [row])).toBe(1);
+    expect(removeEntityRecords(runtime, [0 as EntityIndex])).toBe(1);
+    expect((actorStore.columns.hp as Int32Array)[0]).toBe(99);
+    expect((actorStore.columns.speed as Float32Array)[0]).toBe(7);
+    expect((actorStore.columns.label as string[])[0]).toBe("stale");
+
+    spawnCleanupStage2Entity(manager, "unit/b", "unit", 30, null);
+
+    const view = entityAccess<typeof machines>(manager).get("actor");
+    expect(runtime.entityStore.indexById["unit/b"]).toBe(0);
+    expect(spawnedDefaults).toEqual(["5:1:idle", "5:1:idle"]);
+    expect(view.hp[0 as EntityIndex]).toBe(30);
+    expect(view.speed[0 as EntityIndex]).toBe(1);
+    expect(view.label[0 as EntityIndex]).toBe("none");
+  });
+
+  it("store.version и entityStore.version растут как invalidation tokens при batch removal", () => {
+    const actor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { PING: "READY" } },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createCleanupStage2SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_CLEANUP_STAGE2: (payload) => ({ id: payload.id, groupTag: payload.groupTag, actors: { actor: {} } }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+
+    spawnCleanupStage2Entity(manager, "unit/a");
+    spawnCleanupStage2Entity(manager, "unit/b");
+    spawnCleanupStage2Entity(manager, "unit/c");
+
+    const runtime = getEntityRuntimeState(manager.entities());
+    const store = runtime.actorStores.actor;
+    const beforeStoreVersion = store.version;
+    const beforeEntityStoreVersion = runtime.entityStore.version;
+    const removedRows = [runtime.actorRowsByEntity[0][0], runtime.actorRowsByEntity[2][0]];
+
+    expect(removeActorRowsForStore(runtime, store, removedRows)).toBe(2);
+    expect(removeEntityRecords(runtime, [0 as EntityIndex, 2 as EntityIndex])).toBe(2);
+
+    expect(store.count).toBe(1);
+    expect(runtime.entityStore.count).toBe(1);
+    expect(store.version).toBeGreaterThan(beforeStoreVersion);
+    expect(store.publicSlice.version).toBe(store.version);
+    expect(runtime.entityStore.version).toBeGreaterThan(beforeEntityStoreVersion);
+  });
+});
+
+describe("@lite-fsm/entities — despawn cleanup этап 3 lifecycle pipeline", () => {
+  const createCleanupStage3SpawnEvents = () =>
+    defineSpawnEvents({
+      SPAWN_CLEANUP_STAGE3: spawnEvent<{
+        readonly id: string;
+        readonly groupTag: string;
+        readonly hp?: number;
+      }>(),
+    });
+
+  const spawnCleanupStage3Entity = (
+    manager: {
+      transition(action: {
+        readonly type: "SPAWN_CLEANUP_STAGE3";
+        readonly payload: {
+          readonly id: string;
+          readonly groupTag: string;
+          readonly hp?: number;
+        };
+      }): unknown;
+    },
+    id: string,
+    hp = 0,
+    groupTag = "unit",
+  ) => {
+    manager.transition({ type: "SPAWN_CLEANUP_STAGE3", payload: { id, groupTag, hp } });
+  };
+
+  it("fast path удаляет actor без ENTITY_DESPAWNED work и не очищает runtime columns удаленной строки", () => {
+    const subscriberSnapshots: Array<{ readonly count: number; readonly has: boolean }> = [];
+    const actor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "ACTIVE" },
+        ACTIVE: { EXPIRE: "EXPIRED" },
+        EXPIRED: {},
+      },
+      initialState: "__INIT",
+      initialContext: { hp: i32() },
+      spawnSchema: { hp: i32() },
+      despawnOn: "EXPIRED",
+      reducer(
+        _slice: unknown,
+        action: { readonly type: string },
+        { self, payloadFor }: { readonly self: any; payloadFor(entity: EntityIndex): { readonly hp: number } },
+      ) {
+        if (action.type !== "ENTITY_SPAWNED") return;
+        for (const entity of self.indices) self.hp[entity] = payloadFor(entity).hp;
+      },
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createCleanupStage3SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_CLEANUP_STAGE3: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: { actor: { hp: payload.hp ?? 0 } },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+    const store = entityAccess<typeof machines>(manager).get("actor");
+    manager.onTransition((_prev, _next, action) => {
+      if (action.type !== "EXPIRE") return;
+      subscriberSnapshots.push({ count: store.count, has: store.has(0 as EntityIndex) });
+    });
+
+    spawnCleanupStage3Entity(manager, "unit/a", 42);
+    manager.transition({ type: "EXPIRE" });
+
+    expect(subscriberSnapshots).toEqual([{ count: 0, has: false }]);
+    expect(store.has(0 as EntityIndex)).toBe(false);
+    expect(store.hp[0 as EntityIndex]).toBe(42);
+    expect(getEntityRuntimeState(manager.entities()).actorRowsByEntity[0]).toEqual([]);
+  });
+
+  it("stale scheduled cleanup entry остается no-op", () => {
+    const runtime = createEntityRuntimeState(
+      [{ key: "actor", kind: "entity", data: compileEntityTemplate("actor", createEntityTemplate()) }],
+      {} as never,
+    );
+    const carrier = { runtime: new Map<string, unknown>(), reportError: () => undefined };
+    const transaction = prepareEntityTransaction(carrier, runtime);
+    transaction.scheduledDespawns = [0 as EntityIndex];
+    transaction.despawnScheduled = new Uint8Array(1);
+
+    const result = reduceEntityBucket(runtime, {
+      action: { type: "NOOP" },
+      dispatch: carrier,
+      manager: {},
+    } as never);
+
+    expect(result).toEqual({ type: "skip" });
+    expect(transaction.scheduledDespawns).toEqual([]);
+    expect(runtime.entityStore.count).toBe(0);
+  });
+
+  it("ENTITY_DESPAWNED reducer читает columns и получает только lifecycle rows", () => {
+    const lifecycleReads: string[] = [];
+    const actor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "ACTIVE" },
+        ACTIVE: { IGNORE: "IGNORED", EXPIRE: "EXPIRED" },
+        IGNORED: { EXPIRE: "DEAD" },
+        EXPIRED: { ENTITY_DESPAWNED: "CLEANED" },
+        DEAD: {},
+        CLEANED: {},
+      },
+      initialState: "__INIT",
+      initialContext: { hp: i32() },
+      spawnSchema: { hp: i32() },
+      despawnOn: ["EXPIRED", "DEAD"] as const,
+      reducer(
+        _slice: unknown,
+        action: { readonly type: string },
+        { self, payloadFor }: { readonly self: any; payloadFor(entity: EntityIndex): { readonly hp: number } },
+      ) {
+        for (const entity of self.indices) {
+          if (action.type === "ENTITY_SPAWNED") self.hp[entity] = payloadFor(entity).hp;
+          if (action.type === "ENTITY_DESPAWNED") {
+            lifecycleReads.push(`${self.entityId(entity)}:${self.hp[entity]}:${self.has(entity)}`);
+          }
+        }
+      },
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createCleanupStage3SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_CLEANUP_STAGE3: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: { actor: { hp: payload.hp ?? 0 } },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+    const store = entityAccess<typeof machines>(manager).get("actor");
+
+    spawnCleanupStage3Entity(manager, "unit/a", 11);
+    spawnCleanupStage3Entity(manager, "unit/b", 22);
+    manager.transition({ type: "IGNORE", meta: { entityId: "unit/b" } } as never);
+    manager.transition({ type: "EXPIRE" });
+
+    expect(lifecycleReads).toEqual(["unit/a:11:true"]);
+    expect(store.has(0 as EntityIndex)).toBe(false);
+    expect(store.has(1 as EntityIndex)).toBe(false);
+  });
+
+  it("reactions.ENTITY_DESPAWNED читают columns до удаления", () => {
+    const lifecycleReactions: string[] = [];
+    const actor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "ACTIVE" },
+        ACTIVE: { EXPIRE: "EXPIRED" },
+        EXPIRED: { ENTITY_DESPAWNED: "CLEANED" },
+        CLEANED: {},
+      },
+      initialState: "__INIT",
+      initialContext: { hp: i32({ default: 13 }) },
+      spawnSchema: {},
+      despawnOn: "EXPIRED",
+      reactions: {
+        ENTITY_DESPAWNED: ({ self }: { readonly self: any }) => {
+          lifecycleReactions.push(
+            self.indices.map((entity: EntityIndex) => `${self.entityId(entity)}:${self.hp[entity]}`).join(","),
+          );
+        },
+      },
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createCleanupStage3SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_CLEANUP_STAGE3: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: { actor: {} },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+    const store = entityAccess<typeof machines>(manager).get("actor");
+
+    spawnCleanupStage3Entity(manager, "unit/a");
+    manager.transition({ type: "EXPIRE" });
+
+    expect(lifecycleReactions).toEqual(["unit/a:13"]);
+    expect(store.has(0 as EntityIndex)).toBe(false);
+  });
+
+  it("mixed cleanup wave держит fast rows живыми до lifecycle reaction и удаляет rows вместе", () => {
+    const observations: string[] = [];
+    const errors: unknown[] = [];
+    const lifecycleActor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "ACTIVE" },
+        ACTIVE: { EXPIRE: "EXPIRED" },
+        EXPIRED: { ENTITY_DESPAWNED: "CLEANED" },
+        CLEANED: {},
+      },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+      despawnOn: "EXPIRED",
+      reactions: {
+        ENTITY_DESPAWNED: ({ self, entities }: { readonly self: any; readonly entities: () => EntityAccess<any> }) => {
+          const fast = entities().get("fastActor" as never);
+          for (const entity of self.indices) {
+            observations.push(`${self.entityId(entity)}:${self.has(entity)}:${fast.has(entity)}:${fast.hp[entity]}`);
+          }
+        },
+      },
+    } as const;
+    const fastActor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "ACTIVE" },
+        ACTIVE: { EXPIRE: "EXPIRED" },
+        EXPIRED: {},
+      },
+      initialState: "__INIT",
+      initialContext: { hp: i32({ default: 77 }) },
+      spawnSchema: {},
+      despawnOn: "EXPIRED",
+    } as const;
+    const machines = { lifecycleActor, fastActor };
+    const spawnEvents = createCleanupStage3SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_CLEANUP_STAGE3: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: { lifecycleActor: {}, fastActor: {} },
+      }),
+    });
+    const manager = MachineManager(machines, {
+      plugins: [entitiesPlugin({ spawn })] as const,
+      onError: (error) => errors.push(error),
+    });
+    const access = entityAccess<typeof machines>(manager);
+
+    spawnCleanupStage3Entity(manager, "unit/a");
+    manager.transition({ type: "EXPIRE" });
+
+    expect(errors).toEqual([]);
+    expect(observations).toEqual(["unit/a:true:true:77"]);
+    expect(access.get("lifecycleActor").has(0 as EntityIndex)).toBe(false);
+    expect(access.get("fastActor").has(0 as EntityIndex)).toBe(false);
+    expect(getEntityRuntimeState(manager.entities()).entityStore.alive[0]).toBe(0);
+  });
+
+  it("original event reaction получает только rows, не удаленные через despawnOn", () => {
+    const lifecycleReactions: string[] = [];
+    const originalReactions: string[] = [];
+    const actor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "ACTIVE" },
+        ACTIVE: { SAFE: "SAFE", EXPIRE: "EXPIRED" },
+        SAFE: { EXPIRE: "SAFE" },
+        EXPIRED: { ENTITY_DESPAWNED: "CLEANED" },
+        CLEANED: {},
+      },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+      despawnOn: "EXPIRED",
+      reactions: {
+        EXPIRE: ({ self }: { readonly self: any }) => {
+          originalReactions.push(self.indices.map((entity: EntityIndex) => self.entityId(entity)).join(","));
+        },
+        ENTITY_DESPAWNED: ({ self }: { readonly self: any }) => {
+          lifecycleReactions.push(self.indices.map((entity: EntityIndex) => self.entityId(entity)).join(","));
+        },
+      },
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createCleanupStage3SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_CLEANUP_STAGE3: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: { actor: {} },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+
+    spawnCleanupStage3Entity(manager, "unit/a");
+    spawnCleanupStage3Entity(manager, "unit/b");
+    manager.transition({ type: "SAFE", meta: { entityId: "unit/b" } } as never);
+    manager.transition({ type: "EXPIRE" });
+
+    expect(lifecycleReactions).toEqual(["unit/a"]);
+    expect(originalReactions).toEqual(["unit/b"]);
+  });
+
+  it("пустой ENTITY_DESPAWNED transition остается fast path без lifecycle write и effects", () => {
+    const effects: string[] = [];
+    const actor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "ACTIVE" },
+        ACTIVE: { EXPIRE: "EXPIRED" },
+        EXPIRED: { ENTITY_DESPAWNED: "CLEANED" },
+        CLEANED: {},
+      },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+      despawnOn: "EXPIRED",
+      effects: {
+        CLEANED: () => effects.push("CLEANED"),
+      },
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createCleanupStage3SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_CLEANUP_STAGE3: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: { actor: {} },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+
+    spawnCleanupStage3Entity(manager, "unit/a");
+    const runtime = getEntityRuntimeState(manager.entities());
+    const beforeVersion = runtime.actorStores.actor.version;
+    manager.transition({ type: "EXPIRE" });
+
+    expect(runtime.actorStores.actor.version).toBeGreaterThan(beforeVersion);
+    expect(effects).toEqual([]);
+    expect(entityAccess<typeof machines>(manager).get("actor").has(0 as EntityIndex)).toBe(false);
+  });
+
+  it("state effects после ENTITY_DESPAWNED не являются cleanup contract, reaction выполняет финальную синхронизацию", () => {
+    const effects: string[] = [];
+    const reactions: string[] = [];
+    const actor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "ACTIVE" },
+        ACTIVE: { EXPIRE: "EXPIRED" },
+        EXPIRED: { ENTITY_DESPAWNED: "CLEANED" },
+        CLEANED: {},
+      },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+      despawnOn: "EXPIRED",
+      reactions: {
+        ENTITY_DESPAWNED: ({ self }: { readonly self: any }) => {
+          reactions.push(self.indices.map((entity: EntityIndex) => self.entityId(entity)).join(","));
+        },
+      },
+      effects: {
+        CLEANED: () => effects.push("CLEANED"),
+      },
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createCleanupStage3SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_CLEANUP_STAGE3: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: { actor: {} },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+
+    spawnCleanupStage3Entity(manager, "unit/a");
+    manager.transition({ type: "EXPIRE" });
+
+    expect(reactions).toEqual(["unit/a"]);
+    expect(effects).toEqual([]);
+  });
+
+  it("terminal cleanup использует batch removal и не удаляет row повторно", () => {
+    const actor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "ACTIVE" },
+        ACTIVE: { DONE: "__RESOLVED" },
+      },
+      initialState: "__INIT",
+      initialContext: { hp: i32({ default: 5 }) },
+      spawnSchema: {},
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createCleanupStage3SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_CLEANUP_STAGE3: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: { actor: {} },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+    const store = entityAccess<typeof machines>(manager).get("actor");
+
+    spawnCleanupStage3Entity(manager, "unit/a");
+    manager.transition({ type: "DONE" });
+    manager.transition({ type: "DONE" });
+
+    const runtime = getEntityRuntimeState(manager.entities());
+    expect(store.has(0 as EntityIndex)).toBe(false);
+    expect(store.hp[0 as EntityIndex]).toBe(5);
+    expect(runtime.actorRowsByEntity[0]).toEqual([]);
+    expect(runtime.entityStore.alive[0]).toBe(0);
+    expect(runtime.entityStore.freeList).toEqual([0]);
+  });
+
+  it("terminal cleanup удаляет только terminal row если у entity есть sibling actor", () => {
+    const siblingActor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "ACTIVE" },
+        ACTIVE: {},
+      },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+    } as const;
+    const terminalActor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "ACTIVE" },
+        ACTIVE: { DONE: "__RESOLVED" },
+      },
+      initialState: "__INIT",
+      initialContext: { hp: i32({ default: 9 }) },
+      spawnSchema: {},
+    } as const;
+    const machines = { siblingActor, terminalActor };
+    const spawnEvents = createCleanupStage3SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_CLEANUP_STAGE3: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: { siblingActor: {}, terminalActor: {} },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+    const access = entityAccess<typeof machines>(manager);
+
+    spawnCleanupStage3Entity(manager, "unit/a");
+    manager.transition({ type: "DONE" });
+
+    const runtime = getEntityRuntimeState(manager.entities());
+    expect(access.get("terminalActor").has(0 as EntityIndex)).toBe(false);
+    expect(access.get("terminalActor").hp[0 as EntityIndex]).toBe(9);
+    expect(access.get("siblingActor").has(0 as EntityIndex)).toBe(true);
+    expect(runtime.actorRowsByEntity[0]).toHaveLength(1);
+    expect(runtime.entityStore.alive[0]).toBe(1);
+    expect(runtime.entityStore.freeList).toEqual([]);
+  });
+
+  it("ошибка lifecycle reducer откатывает staged spawn snapshot", () => {
+    const actor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "ACTIVE" },
+        ACTIVE: { TRIGGER_STAGE3_ROLLBACK: "EXPIRED" },
+        EXPIRED: { ENTITY_DESPAWNED: "CLEANED" },
+        CLEANED: {},
+      },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+      despawnOn: "EXPIRED",
+      reducer(_slice: unknown, action: { readonly type: string }) {
+        if (action.type === "ENTITY_DESPAWNED") throw new Error("cleanup failed");
+      },
+    } as const;
+    const machines = { actor };
+    const spawnEvents = defineSpawnEvents({
+      SPAWN_STAGE3_ROLLBACK: spawnEvent<{ readonly id: string; readonly groupTag: string }>(),
+      TRIGGER_STAGE3_ROLLBACK: spawnEvent<{ readonly id: string; readonly groupTag: string }>(),
+    });
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE3_ROLLBACK: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: { actor: {} },
+      }),
+      TRIGGER_STAGE3_ROLLBACK: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: { actor: {} },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+    const store = entityAccess<typeof machines>(manager).get("actor");
+
+    manager.transition({ type: "SPAWN_STAGE3_ROLLBACK", payload: { id: "unit/a", groupTag: "unit" } });
+    expect(() =>
+      manager.transition({ type: "TRIGGER_STAGE3_ROLLBACK", payload: { id: "unit/b", groupTag: "unit" } }),
+    ).toThrow("cleanup failed");
+
+    const runtime = getEntityRuntimeState(manager.entities());
+    expect(store.count).toBe(1);
+    expect(store.has(0 as EntityIndex)).toBe(true);
+    expect(store.state(0 as EntityIndex)).toBe("ACTIVE");
+    expect(runtime.entityStore.indexById["unit/a"]).toBe(0);
+    expect(runtime.entityStore.indexById["unit/b"]).toBeUndefined();
+    expect(runtime.entityStore.count).toBe(1);
+  });
+});
+
 describe("@lite-fsm/entities — этап 8 despawnOn и lifecycle cleanup", () => {
   const createStage8SpawnEvents = () =>
     defineSpawnEvents({
@@ -2612,7 +3393,6 @@ describe("@lite-fsm/entities — этап 8 despawnOn и lifecycle cleanup", () 
     expect(cleanupStore.has(0 as EntityIndex)).toBe(false);
     expect(auditStore.has(0 as EntityIndex)).toBe(false);
     expect(ownerStore.has(1 as EntityIndex)).toBe(true);
-    expect(cleanupStore.hp[0 as EntityIndex]).toBe(0);
     expect(runtime.actorRowsByEntity[0]).toEqual([]);
     expect(runtime.entityStore.alive[0]).toBe(0);
     expect(runtime.entityStore.alive[1]).toBe(1);
@@ -2631,7 +3411,7 @@ describe("@lite-fsm/entities — этап 8 despawnOn и lifecycle cleanup", () 
     expect(cleanupStore.has(0 as EntityIndex)).toBe(true);
     expect(cleanupStore.hp[0 as EntityIndex]).toBe(30);
     expect(cleanupStore.hp[1 as EntityIndex]).toBe(20);
-    expect(runtime.actorStores.cleanupActor.rowVersion[0]).toBe(1);
+    expect(runtime.actorStores.cleanupActor.rowVersion[0]).toBeGreaterThan(0);
   });
 
   it("переход в __RESOLVED удаляет только terminal row и не despawn-ит entity", () => {
@@ -2734,7 +3514,6 @@ describe("@lite-fsm/entities — этап 8 despawnOn и lifecycle cleanup", () 
     const runtime = getEntityRuntimeState(manager.entities());
     expect(store.count).toBe(0);
     expect(store.has(0 as EntityIndex)).toBe(false);
-    expect(store.hp[0 as EntityIndex]).toBe(0);
     expect(runtime.actorRowsByGroupTag.unit).toBeUndefined();
     expect(runtime.entityStore.entitiesByGroupTag.unit).toBeUndefined();
     expect(runtime.entityStore.groupTagPosition[0]).toBe(-1);
@@ -2789,6 +3568,98 @@ describe("@lite-fsm/entities — этап 8 despawnOn и lifecycle cleanup", () 
     expect(access.get("terminalActor").count).toBe(0);
     expect(access.get("cleanupActor").count).toBe(0);
     expect(getEntityRuntimeState(manager.entities()).entityStore.alive[0]).toBe(0);
+  });
+
+  it("scheduleEntityDespawn дедуплицирует одну entity в одном dispatch", () => {
+    const runtime = createEntityRuntimeState(
+      [{ key: "actor", kind: "entity", data: compileEntityTemplate("actor", createEntityTemplate()) }],
+      {} as never,
+    );
+    ensureEntityCapacity(runtime.entityStore, 1);
+    runtime.entityStore.alive[0] = 1;
+
+    const transaction = prepareEntityTransaction({ runtime: new Map<string, unknown>() }, runtime);
+
+    expect(scheduleEntityDespawn(transaction, 0 as EntityIndex)).toBe(true);
+    expect(scheduleEntityDespawn(transaction, 0 as EntityIndex)).toBe(false);
+    expect(transaction.scheduledDespawns).toEqual([0]);
+    expect(consumeScheduledDespawns(transaction)).toEqual([0]);
+    expect(transaction.despawnScheduled[0]).toBe(0);
+  });
+
+  it("переиспользуемый despawn scratch сбрасывает stale mark между dispatch", () => {
+    const runtime = createEntityRuntimeState(
+      [{ key: "actor", kind: "entity", data: compileEntityTemplate("actor", createEntityTemplate()) }],
+      {} as never,
+    );
+    ensureEntityCapacity(runtime.entityStore, 1);
+    runtime.entityStore.alive[0] = 1;
+
+    const firstTransaction = prepareEntityTransaction({ runtime: new Map<string, unknown>() }, runtime);
+    expect(scheduleEntityDespawn(firstTransaction, 0 as EntityIndex)).toBe(true);
+
+    const secondTransaction = prepareEntityTransaction({ runtime: new Map<string, unknown>() }, runtime);
+
+    expect(secondTransaction.despawnScheduled).toBe(firstTransaction.despawnScheduled);
+    expect(secondTransaction.despawnScheduled[0]).toBe(0);
+    expect(scheduleEntityDespawn(secondTransaction, 0 as EntityIndex)).toBe(true);
+    expect(secondTransaction.scheduledDespawns).toEqual([0]);
+  });
+
+  it("ENTITY_DESPAWNED reducer metadata помечает принятую lifecycle work", () => {
+    const metadata = compileEntityRuntimeMetadata([
+      compileEntityTemplate("actor", {
+        config: {
+          __INIT: { ENTITY_SPAWNED: "ACTIVE" },
+          ACTIVE: { ENTITY_DESPAWNED: "CLEANED" },
+          CLEANED: {},
+        },
+        initialContext: {},
+        spawnSchema: {},
+        reducer: () => undefined,
+      }),
+    ]).metadataByKey.actor;
+
+    expect(metadata.despawnLifecycleStateMask[metadata.stateCodeByName.ACTIVE + 1]).toBe(1);
+    expect(metadata.despawnLifecycleStateMask[metadata.stateCodeByName.CLEANED + 1]).toBe(0);
+  });
+
+  it("ENTITY_DESPAWNED reaction metadata помечает принятую lifecycle work", () => {
+    const metadata = compileEntityRuntimeMetadata([
+      compileEntityTemplate("actor", {
+        config: {
+          __INIT: { ENTITY_SPAWNED: "ACTIVE" },
+          ACTIVE: { ENTITY_DESPAWNED: "CLEANED" },
+          CLEANED: {},
+        },
+        initialContext: {},
+        spawnSchema: {},
+        reactions: {
+          ENTITY_DESPAWNED: () => undefined,
+        },
+      }),
+    ]).metadataByKey.actor;
+
+    expect(metadata.despawnLifecycleStateMask[metadata.stateCodeByName.ACTIVE + 1]).toBe(1);
+  });
+
+  it("пустой ENTITY_DESPAWNED transition без reducer/reaction остается metadata для fast path", () => {
+    const metadata = compileEntityRuntimeMetadata([
+      compileEntityTemplate("actor", {
+        config: {
+          __INIT: { ENTITY_SPAWNED: "ACTIVE" },
+          ACTIVE: { ENTITY_DESPAWNED: "CLEANED" },
+          CLEANED: {},
+        },
+        initialContext: {},
+        spawnSchema: {},
+        effects: {
+          CLEANED: () => undefined,
+        },
+      }),
+    ]).metadataByKey.actor;
+
+    expect(metadata.despawnLifecycleStateMask[metadata.stateCodeByName.ACTIVE + 1]).toBe(0);
   });
 
   it("валидирует despawnOn при init и компилирует его в despawnStateMask", () => {
@@ -3828,8 +4699,8 @@ describe("@lite-fsm/entities — этап 10 reactions и reaction error semanti
     expect(subscriberSnapshots).toEqual([{ count: 0, hasA: false, hasB: false }]);
     expect(effects).toEqual([]);
     expect(store.count).toBe(0);
-    expect(store.hp[0 as EntityIndex]).toBe(0);
-    expect(store.hp[1 as EntityIndex]).toBe(0);
+    expect(store.has(0 as EntityIndex)).toBe(false);
+    expect(store.has(1 as EntityIndex)).toBe(false);
     expect(getEntityRuntimeState(manager.entities()).entityStore.alive[0]).toBe(0);
     expect(getEntityRuntimeState(manager.entities()).entityStore.alive[1]).toBe(0);
   });
@@ -4220,6 +5091,91 @@ describe("@lite-fsm/entities — этап 11 snapshot.storage.entity", () => {
 
   const entityStorageSnapshot = (manager: ReturnType<typeof createStage11Manager>["manager"]) =>
     JSON.parse(JSON.stringify(manager.dehydrate().storage?.entity)) as any;
+
+  it("dehydrate сериализует удаленные слоты через defaults из initialContext", () => {
+    const actor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "READY" },
+        READY: { EXPIRE: "DEAD" },
+        DEAD: {},
+      },
+      initialState: "__INIT",
+      initialContext: {
+        hp: i32({ default: 5 }),
+        speed: f32({ default: 1.5 }),
+        name: string({ default: "idle" }),
+      },
+      spawnSchema: {
+        hp: i32(),
+        speed: f32(),
+        name: string(),
+      },
+      despawnOn: "DEAD",
+      reducer(
+        _slice: unknown,
+        action: { readonly type: string },
+        {
+          self,
+          payloadFor,
+        }: {
+          readonly self: any;
+          payloadFor(entity: EntityIndex): { readonly hp: number; readonly speed: number; readonly name: string };
+        },
+      ) {
+        if (action.type !== "ENTITY_SPAWNED") return;
+
+        for (const entity of self.indices) {
+          const payload = payloadFor(entity);
+          self.hp[entity] = payload.hp;
+          self.speed[entity] = payload.speed;
+          self.name[entity] = payload.name;
+        }
+      },
+    } as const;
+    const machines = { actor };
+    const spawnEvents = defineSpawnEvents({
+      SPAWN_SNAPSHOT_DEFAULTS: spawnEvent<{
+        readonly id: string;
+        readonly hp: number;
+        readonly speed: number;
+        readonly name: string;
+      }>(),
+    });
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_SNAPSHOT_DEFAULTS: (payload) => ({
+        id: payload.id,
+        groupTag: "unit",
+        actors: {
+          actor: {
+            hp: payload.hp,
+            speed: payload.speed,
+            name: payload.name,
+          },
+        },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+
+    manager.transition({
+      type: "SPAWN_SNAPSHOT_DEFAULTS",
+      payload: { id: "unit/a", hp: 42, speed: 3.5, name: "stale" },
+    });
+    manager.transition({ type: "EXPIRE" });
+
+    const runtime = getEntityRuntimeState(manager.entities());
+    const view = entityAccess<typeof machines>(manager).get("actor");
+    const storage = manager.dehydrate().storage?.entity as any;
+
+    expect(view.has(0 as EntityIndex)).toBe(false);
+    expect((runtime.actorStores.actor.columns.hp as Int32Array)[0]).toBe(42);
+    expect((runtime.actorStores.actor.columns.speed as Float32Array)[0]).toBe(3.5);
+    expect((runtime.actorStores.actor.columns.name as string[])[0]).toBe("stale");
+    expect(storage.actors.actor.presence).toEqual([0]);
+    expect(storage.actors.actor.columns.hp).toEqual([5]);
+    expect(storage.actors.actor.columns.speed).toEqual([1.5]);
+    expect(storage.actors.actor.columns.name).toEqual(["idle"]);
+  });
 
   it("dehydrate JSON hydrate восстанавливает rows, columns, versions, freeList и routing", () => {
     const source = createStage11Manager();
