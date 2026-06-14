@@ -179,6 +179,61 @@ Diagnostics после обновления fixture содержит cleanup bre
 - Public `sprite sync reaction / 50 000` должен следовать за kernel и не добавлять больше `0.3ms`.
 - Поведение scoped `self.has`, `self.entityId`, `entities().get` должно остаться покрытым runtime tests.
 
+### Итог problem 2: reaction scope и sprite sync reaction
+
+Команды:
+
+```bash
+pnpm run bench:entities:record -- --runs 5 --label after-reaction-scope --include gate,diagnostics
+pnpm run bench:entities:compare -- .bench/entities/after-despawn-cleanup.json .bench/entities/after-reaction-scope.json
+pnpm run bench:entities:compare -- .bench/entities/codex-baseline-2026-06-14.json .bench/entities/after-reaction-scope.json
+```
+
+Артефакты:
+
+- [`after-reaction-scope.json`](../../.bench/entities/after-reaction-scope.json)
+- [`after-reaction-scope.md`](../../.bench/entities/after-reaction-scope.md)
+- [`after-reaction-scope-vs-after-despawn-cleanup.md`](../../.bench/entities/after-reaction-scope-vs-after-despawn-cleanup.md)
+- [`after-reaction-scope-vs-codex-baseline-2026-06-14.md`](../../.bench/entities/after-reaction-scope-vs-codex-baseline-2026-06-14.md)
+
+Окружение итогового record: `2026-06-14T20:53:31.896Z`, Git `ff6c39838767`, branch `entities`, status `dirty`, Node `v24.16.0`, CPU `Apple M1 Max`, package manager `pnpm/10.33.0`.
+
+Gate `sprite sync reaction` относительно `after-despawn-cleanup`:
+
+| Сценарий | Строки | Baseline median | After median | Ratio до | Ratio после | Ускорение | RSD after |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `sprite sync reaction` | 10 000 | 1.507ms | 0.893ms | 19.26x | 12.33x | 0.614ms (40.7%) | 2.2% |
+| `sprite sync reaction` | 50 000 | 8.259ms | 4.792ms | 16.85x | 9.77x | 3.467ms (42.0%) | 5.0% |
+
+Diagnostics `sprite sync reaction` относительно `after-despawn-cleanup`:
+
+| Слой | Строки | Baseline median | After median | Ratio к raw SoA до | Ratio к raw SoA после | Ускорение | RSD after |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `semantic SoA baseline` | 10 000 | 0.064ms | 0.065ms | 2.62x | 2.58x | -0.001ms (-1.5%) | 13.7% |
+| `raw entity kernel` | 10 000 | 1.001ms | 0.430ms | 41.06x | 17.61x | 0.571ms (57.1%) | 7.0% |
+| `public manager.transition` | 10 000 | 1.447ms | 0.904ms | 59.45x | 36.66x | 0.543ms (37.5%) | 1.1% |
+| `semantic SoA baseline` | 50 000 | 0.328ms | 0.336ms | 2.64x | 2.70x | -0.009ms (-2.6%) | 1.9% |
+| `raw entity kernel` | 50 000 | 7.916ms | 2.346ms | 63.17x | 18.87x | 5.570ms (70.4%) | 1.1% |
+| `public manager.transition` | 50 000 | 7.941ms | 4.753ms | 65.18x | 38.65x | 3.188ms (40.1%) | 2.4% |
+
+Breakdown `sprite sync reaction / 50 000` после reaction scope:
+
+| Фаза / слой | Median | RSD after |
+| --- | ---: | ---: |
+| `reduce entity batches` | 1.681ms | 0.8% |
+| `schedule reaction batch` | 0.000ms | 10.0% |
+| `collect reaction scope` | 0.433ms | 2.5% |
+| `create reaction deps` | 0.000ms | 16.9% |
+| `run user reaction` | 0.094ms | 0.5% |
+| `raw entity kernel` | 2.346ms | 1.1% |
+| `public manager.transition` | 4.753ms | 2.4% |
+
+Итог: problem 2 дал сильное ускорение reaction scope, но first gate не достигнут. `sprite sync reaction / 50 000 / raw entity kernel` остается выше порога `2ms` (`2.346ms`), а `public manager.transition` добавляет к kernel `2.407ms`, что выше лимита `0.3ms`. Stretch gate также не достигнут: kernel выше `1ms`, public ratio `9.77x` далек от бюджета `2.00x`.
+
+Breakdown показывает, что основная оставшаяся цена находится в общем reducer pipeline и public path: `reduce entity batches` занимает `1.681ms`, public overhead поверх kernel — `2.407ms`. Собственный reaction scope слой больше не доминирует: `collect reaction scope` занимает `0.433ms`, `run user reaction` — `0.094ms`, scheduling и deps creation находятся на уровне таймера.
+
+Соседние gate-сценарии не прошли порог регрессии относительно `after-despawn-cleanup`: `movement update` замедлился на `13.0%` / `13.2%`, `projectile lifetime update` — на `12.9%` / `14.6%` для `10 000` / `50 000` строк. `despawnOn cleanup` остался ниже порога (`6.4%` / `5.9%`). Diagnostics raw entity kernel для `movement` и `projectile` при этом изменился в пределах `0.2%`, поэтому основная регрессия видна в public path.
+
 ### 3. Сократить generic overhead `reduceAcceptedBatch` для простого `active -> active`
 
 Ожидаемый выигрыш: высокий для всех reducer-only сценариев. Текущий raw entity kernel на `50k` примерно в `4-5x` медленнее semantic SoA: `movement` `0.954ms` против `0.244ms`, `projectile` `0.886ms` против `0.193ms`.

@@ -6,16 +6,6 @@ import { isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  measuredIterations as gateMeasuredIterations,
-  runEntitiesBenchmarkProfile,
-  warmupIterations as gateWarmupIterations,
-} from "./composition-lite-fsm-entities.fixture.mjs";
-import {
-  measuredIterations as diagnosticsMeasuredIterations,
-  runEntitiesDiagnosticsBenchmark,
-  warmupIterations as diagnosticsWarmupIterations,
-} from "./diagnostics.fixture.mjs";
-import {
   aggregateDiagnosticsRuns,
   aggregateGateRuns,
   collectEnvironmentMetadata,
@@ -23,6 +13,20 @@ import {
   safeFilePart,
   safeTimestamp,
 } from "./reporting.mjs";
+
+// Benchmark fixtures import production dist runtime; set the mode before those imports.
+process.env.NODE_ENV = "production";
+
+const {
+  measuredIterations: gateMeasuredIterations,
+  runEntitiesBenchmarkProfile,
+  warmupIterations: gateWarmupIterations,
+} = await import("./composition-lite-fsm-entities.fixture.mjs");
+const {
+  measuredIterations: diagnosticsMeasuredIterations,
+  runEntitiesDiagnosticsBenchmark,
+  warmupIterations: diagnosticsWarmupIterations,
+} = await import("./diagnostics.fixture.mjs");
 
 const rootDir = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
 const defaultOutDir = ".bench/entities";

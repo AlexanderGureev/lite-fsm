@@ -417,6 +417,8 @@ const movement = createMachine({
 
 `payloadFor(entity)` валиден на `ENTITY_SPAWNED`. Запись `self.stateCode[entity] = self.states.<STATE>` планирует переход строки. Reducer и `reactions.ENTITY_DESPAWNED` могут читать колонки удаляемой строки до физического удаления; финальную внешнюю синхронизацию выполняйте через reaction, а не через state `effects` целевого состояния.
 
+`reactions` получают sync-only зависимости. `self.indices` имеет тип `readonly EntityIndex[]` и является представлением текущего вызова. `self`, `self.indices`, объект `deps` и представления из `entities()` нельзя сохранять или мутировать после завершения reaction.
+
 ### Доступ к колонкам
 
 | Тип                          | Форма / назначение                                                                                                                                                  |

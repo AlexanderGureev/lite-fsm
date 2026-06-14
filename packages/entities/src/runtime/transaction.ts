@@ -14,6 +14,8 @@ type RuntimeCarrier = {
 type EntityTransactionScratch = {
   despawnScheduled: Uint8Array;
   readonly despawnScheduledMarks: EntityIndex[];
+  readonly reactionIndexPool: EntityIndex[][];
+  reactionIndexPoolCursor: number;
 };
 
 export type StagedActorSpawn = {
@@ -52,6 +54,7 @@ export type EntityEffectBatch = {
 export type EntityReactionBatch = {
   readonly store: ColumnarActorStore;
   readonly eventCode: number;
+  readonly ownership: EntityReactionBatchOwnership;
   readonly indices: readonly EntityIndex[];
 };
 
@@ -64,6 +67,12 @@ export type CapturedEntityScopeEntry = {
 type ExplicitDespawnRequest =
   | { readonly mode: "ids"; readonly ids: readonly string[] }
   | { readonly mode: "scope"; readonly entries: readonly CapturedEntityScopeEntry[] };
+
+export type EntityReactionBatchOwnership = "borrowed" | "owned";
+
+type ScheduleEntityReactionBatchOptions = {
+  readonly ownership?: EntityReactionBatchOwnership;
+};
 
 const ENTITY_TRANSACTION_KEY = "@lite-fsm/entities/transaction";
 const ENTITY_DESPAWN_OPTIONS_KEY = Symbol.for("@lite-fsm/entities/despawn-options");
@@ -136,7 +145,12 @@ const getEntityTransactionScratch = (runtime: EntityRuntimeState): EntityTransac
   const scratch = transactionScratchByRuntime.get(runtime);
   if (scratch) return scratch;
 
-  const next = { despawnScheduled: emptyDespawnScheduled, despawnScheduledMarks: [] };
+  const next = {
+    despawnScheduled: emptyDespawnScheduled,
+    despawnScheduledMarks: [],
+    reactionIndexPool: [],
+    reactionIndexPoolCursor: 0,
+  };
   transactionScratchByRuntime.set(runtime, next);
   return next;
 };
@@ -146,9 +160,17 @@ const clearDespawnScheduledMarks = (scratch: EntityTransactionScratch): void => 
   scratch.despawnScheduledMarks.length = 0;
 };
 
+const resetReactionIndexPool = (scratch: EntityTransactionScratch): void => {
+  for (let index = 0; index < scratch.reactionIndexPoolCursor; index += 1) {
+    scratch.reactionIndexPool[index].length = 0;
+  }
+  scratch.reactionIndexPoolCursor = 0;
+};
+
 export const prepareEntityTransaction = (carrier: RuntimeCarrier, runtime: EntityRuntimeState): EntityDispatchTransaction => {
   const scratch = getEntityTransactionScratch(runtime);
   clearDespawnScheduledMarks(scratch);
+  resetReactionIndexPool(scratch);
 
   const transaction: EntityDispatchTransaction = {
     runtime,
@@ -351,14 +373,48 @@ export const scheduleEntityEffectBatch = (
   transaction.effectBatches.push({ store, stateCode, indices: indices.slice() });
 };
 
+const ownReactionIndices = (
+  transaction: EntityDispatchTransaction,
+  indices: readonly EntityIndex[],
+): readonly EntityIndex[] => {
+  const scratch = getEntityTransactionScratch(transaction.runtime);
+  const poolIndex = scratch.reactionIndexPoolCursor;
+  const owned = scratch.reactionIndexPool[poolIndex] ?? [];
+  scratch.reactionIndexPool[poolIndex] = owned;
+  scratch.reactionIndexPoolCursor += 1;
+
+  owned.length = indices.length;
+  for (let index = 0; index < indices.length; index += 1) owned[index] = indices[index];
+  return owned;
+};
+
+export const createEntityReactionBatch = (
+  transaction: EntityDispatchTransaction | undefined,
+  store: ColumnarActorStore,
+  eventCode: number | undefined,
+  indices: readonly EntityIndex[],
+  options: ScheduleEntityReactionBatchOptions = {},
+): EntityReactionBatch | undefined => {
+  if (!transaction || eventCode === undefined || indices.length === 0) return undefined;
+  if (!store.metadata.reactionsByEventCode[eventCode]) return undefined;
+
+  const ownership = options.ownership ?? "owned";
+  return {
+    store,
+    eventCode,
+    ownership,
+    indices: ownership === "borrowed" ? indices : ownReactionIndices(transaction, indices),
+  };
+};
+
 export const scheduleEntityReactionBatch = (
   transaction: EntityDispatchTransaction | undefined,
   store: ColumnarActorStore,
   eventCode: number | undefined,
   indices: readonly EntityIndex[],
+  options?: ScheduleEntityReactionBatchOptions,
 ): void => {
-  if (!transaction || eventCode === undefined || indices.length === 0) return;
-  if (!store.metadata.reactionsByEventCode[eventCode]) return;
-
-  transaction.reactionBatches.push({ store, eventCode, indices: indices.slice() });
+  if (!transaction) return;
+  const batch = createEntityReactionBatch(transaction, store, eventCode, indices, options);
+  if (batch) transaction.reactionBatches.push(batch);
 };

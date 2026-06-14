@@ -666,6 +666,13 @@ const createKernelRuntime = (stores, rowCount) => {
     actorRowsByEntity,
     actorRowsByGroupTag,
     reactionBatches: [],
+    reactionScopeScratch: {
+      markers: new Uint32Array(rowCount),
+      generation: new Uint32Array(rowCount),
+      touched: [],
+      compactIndices: [],
+      token: 0,
+    },
     scheduledDespawns: [],
     despawnScheduled: new Uint8Array(rowCount),
     checksum: 0,
@@ -884,6 +891,12 @@ const flushKernelDespawns = (runtime) => {
   if (removedRows > 0 || removedEntities > 0) commitKernelPublicSlices(runtime);
 };
 
+const scheduleKernelReactionBatch = (runtime, store, eventCode, indices) => {
+  const batch = { store, eventCode, ownership: "borrowed", indices };
+  runtime.reactionBatches.push(batch);
+  return batch;
+};
+
 const reduceKernelBatch = (runtime, store, indices, action, { scheduleReactions = false } = {}) => {
   let firstNextState;
   for (const entity of indices) {
@@ -923,7 +936,7 @@ const reduceKernelBatch = (runtime, store, indices, action, { scheduleReactions 
   }
 
   if (scheduleReactions && store.metadata.reactionsByEventCode[0]) {
-    runtime.reactionBatches.push({ store, eventCode: 0, indices: indices.slice() });
+    scheduleKernelReactionBatch(runtime, store, 0, indices);
   }
 
   scheduleDespawns(runtime, store, indices);
@@ -938,42 +951,121 @@ const reduceKernelBatch = (runtime, store, indices, action, { scheduleReactions 
   }
 };
 
+const cleanupKernelReactionScope = (scopeScratch) => {
+  for (const entity of scopeScratch.touched) {
+    scopeScratch.markers[entity] = 0;
+    scopeScratch.generation[entity] = 0;
+  }
+  scopeScratch.touched.length = 0;
+  scopeScratch.compactIndices.length = 0;
+};
+
+const nextKernelReactionScopeToken = (scopeScratch) => {
+  scopeScratch.token += 1;
+  if (scopeScratch.token >= 0xffffffff) {
+    scopeScratch.markers.fill(0);
+    scopeScratch.generation.fill(0);
+    scopeScratch.token = 1;
+  }
+  return scopeScratch.token;
+};
+
+const entityCanEnterKernelReactionScope = (runtime, store, entity) => {
+  if (store.presence[entity] !== 1 || runtime.entityStore.alive[entity] !== 1) return false;
+  const id = runtime.entityStore.ids[entity];
+  return id !== undefined && id.length > 0;
+};
+
+const captureKernelReactionScope = (runtime, store, indices) => {
+  const scopeScratch = runtime.reactionScopeScratch;
+  cleanupKernelReactionScope(scopeScratch);
+  const token = nextKernelReactionScopeToken(scopeScratch);
+  let compact;
+
+  for (let index = 0; index < indices.length; index += 1) {
+    const entity = indices[index];
+
+    if (!entityCanEnterKernelReactionScope(runtime, store, entity)) {
+      if (!compact) {
+        compact = scopeScratch.compactIndices;
+        compact.length = 0;
+        for (let copyIndex = 0; copyIndex < index; copyIndex += 1) compact.push(indices[copyIndex]);
+      }
+      continue;
+    }
+
+    scopeScratch.markers[entity] = token;
+    scopeScratch.generation[entity] = runtime.entityStore.generation[entity];
+    scopeScratch.touched.push(entity);
+    compact?.push(entity);
+  }
+
+  const scopedIndices = compact ?? indices;
+  if (scopedIndices.length === 0) {
+    cleanupKernelReactionScope(scopeScratch);
+    return undefined;
+  }
+
+  return {
+    indices: scopedIndices,
+    markers: scopeScratch.markers,
+    generation: scopeScratch.generation,
+    token,
+  };
+};
+
+const createKernelReactionDeps = (runtime, batch, scope, movementStore) => {
+  const entityIsInScope = (entity) => scope.markers[entity] === scope.token;
+  const entityHasCapturedGeneration = (entity) => runtime.entityStore.generation[entity] === scope.generation[entity];
+  const self = {
+    indices: scope.indices,
+    spriteId: batch.store.columns.spriteId,
+    has(entity) {
+      return (
+        entityIsInScope(entity) &&
+        entityHasCapturedGeneration(entity) &&
+        runtime.entityStore.alive[entity] === 1 &&
+        batch.store.presence[entity] === 1
+      );
+    },
+    entityId(entity) {
+      if (!entityIsInScope(entity) || !entityHasCapturedGeneration(entity)) {
+        throw new Error(`entity index ${entity} is outside current diagnostic reaction scope`);
+      }
+      const id = runtime.entityStore.ids[entity];
+      if (id !== undefined && id.length > 0) return id;
+      throw new Error(`entity index ${entity} has no diagnostic id`);
+    },
+  };
+  const entities = () => ({
+    get(key) {
+      if (key !== "movementActor") throw new Error(`unknown diagnostic actor '${key}'`);
+      return movementStore.columns;
+    },
+  });
+
+  return { self, entities };
+};
+
+const runKernelUserReaction = (runtime, deps) => {
+  const movement = deps.entities().get("movementActor");
+  let checksum = 0;
+
+  for (const entity of deps.self.indices) {
+    checksum += movement.x[entity] + movement.y[entity] + deps.self.spriteId[entity].length;
+  }
+  runtime.checksum += checksum;
+};
+
 const runKernelReactions = (runtime, movementStore) => {
   for (const batch of runtime.reactionBatches) {
-    const entries = [];
-    for (const entity of batch.indices) {
-      if (batch.store.presence[entity] !== 1 || runtime.entityStore.alive[entity] !== 1) continue;
-      const id = runtime.entityStore.ids[entity];
-      if (id === undefined || id.length === 0) continue;
-      entries.push({ entity, generation: runtime.entityStore.generation[entity], id });
+    const scope = captureKernelReactionScope(runtime, batch.store, batch.indices);
+    if (!scope) continue;
+    try {
+      runKernelUserReaction(runtime, createKernelReactionDeps(runtime, batch, scope, movementStore));
+    } finally {
+      cleanupKernelReactionScope(runtime.reactionScopeScratch);
     }
-    if (entries.length === 0) continue;
-
-    const entriesByEntity = new Map(entries.map((entry) => [entry.entity, entry]));
-    const self = {
-      indices: entries.map((entry) => entry.entity),
-      spriteId: batch.store.columns.spriteId,
-      has(entity) {
-        const entry = entriesByEntity.get(entity);
-        return Boolean(entry) && runtime.entityStore.alive[entity] === 1;
-      },
-      entityId(entity) {
-        return entriesByEntity.get(entity).id;
-      },
-    };
-    const entities = () => ({
-      get(key) {
-        if (key !== "movementActor") throw new Error(`unknown diagnostic actor '${key}'`);
-        return movementStore.columns;
-      },
-    });
-    const movement = entities().get("movementActor");
-    let checksum = 0;
-
-    for (const entity of self.indices) {
-      checksum += movement.x[entity] + movement.y[entity] + self.spriteId[entity].length;
-    }
-    runtime.checksum += checksum;
   }
 
   runtime.reactionBatches.length = 0;
@@ -1141,7 +1233,7 @@ const createCleanupPhaseRunner = (rowCount, phase) => {
   };
 };
 
-const createSpriteKernelRunner = (rowCount) => {
+const createSpriteKernelFixture = (rowCount) => {
   const rows = createSoaRows(rowCount);
   const movementStore = createKernelStore({
     templateKey: "movementActor",
@@ -1160,12 +1252,69 @@ const createSpriteKernelRunner = (rowCount) => {
   });
   const runtime = createKernelRuntime([movementStore, spriteStore], rowCount);
 
+  return { runtime, movementStore, spriteStore };
+};
+
+const createSpriteKernelRunner = (rowCount) => {
+  const { runtime, movementStore, spriteStore } = createSpriteKernelFixture(rowCount);
+
   return {
     run: () => {
       reduceKernelBatch(runtime, movementStore, movementStore.stateBuckets[0], tickAction, { scheduleReactions: true });
       reduceKernelBatch(runtime, spriteStore, spriteStore.stateBuckets[0], tickAction, { scheduleReactions: true });
       runKernelReactions(runtime, movementStore);
       flushKernelDespawns(runtime);
+    },
+    read: () => runtime.checksum,
+  };
+};
+
+const createSpriteKernelPhaseRunner = (rowCount, phase) => {
+  const { runtime, movementStore, spriteStore } = createSpriteKernelFixture(rowCount);
+  const indices = spriteStore.stateBuckets[0];
+  const batch = { store: spriteStore, eventCode: 0, indices };
+  let scheduledBatch;
+  let scope;
+  let deps;
+
+  return {
+    beforeOperation: () => {
+      runtime.reactionBatches.length = 0;
+
+      if (phase === "create-reaction-deps" || phase === "run-user-reaction") {
+        scope = captureKernelReactionScope(runtime, spriteStore, indices);
+      }
+      if (phase === "run-user-reaction") deps = createKernelReactionDeps(runtime, batch, scope, movementStore);
+    },
+    run: () => {
+      if (phase === "reduce-entity-batches") {
+        reduceKernelBatch(runtime, movementStore, movementStore.stateBuckets[0], tickAction);
+        reduceKernelBatch(runtime, spriteStore, spriteStore.stateBuckets[0], tickAction);
+        return;
+      }
+      if (phase === "schedule-reaction-batch") {
+        scheduledBatch = scheduleKernelReactionBatch(runtime, spriteStore, 0, indices);
+        runtime.checksum += scheduledBatch.indices.length;
+        runtime.reactionBatches.length = 0;
+        return;
+      }
+      if (phase === "collect-reaction-scope") {
+        scope = captureKernelReactionScope(runtime, spriteStore, indices);
+        runtime.checksum += scope?.indices.length ?? 0;
+        return;
+      }
+      if (phase === "create-reaction-deps") {
+        deps = createKernelReactionDeps(runtime, batch, scope, movementStore);
+        runtime.checksum += deps.self.indices.length;
+        return;
+      }
+
+      runKernelUserReaction(runtime, deps);
+    },
+    afterOperation: () => {
+      if (phase === "collect-reaction-scope" || phase === "create-reaction-deps" || phase === "run-user-reaction") {
+        cleanupKernelReactionScope(runtime.reactionScopeScratch);
+      }
     },
     read: () => runtime.checksum,
   };
@@ -1200,6 +1349,41 @@ const layerDefinitions = [
       "projectile-lifetime": 20,
       "despawn-on-cleanup": 5,
       "sprite-sync-reaction": 10,
+    },
+  },
+  {
+    key: "reduce-entity-batches",
+    label: "reduce entity batches",
+    operationsPerSample: {
+      "sprite-sync-reaction": 10,
+    },
+  },
+  {
+    key: "schedule-reaction-batch",
+    label: "schedule reaction batch",
+    operationsPerSample: {
+      "sprite-sync-reaction": 20,
+    },
+  },
+  {
+    key: "collect-reaction-scope",
+    label: "collect reaction scope",
+    operationsPerSample: {
+      "sprite-sync-reaction": 10,
+    },
+  },
+  {
+    key: "create-reaction-deps",
+    label: "create reaction deps",
+    operationsPerSample: {
+      "sprite-sync-reaction": 10,
+    },
+  },
+  {
+    key: "run-user-reaction",
+    label: "run user reaction",
+    operationsPerSample: {
+      "sprite-sync-reaction": 20,
     },
   },
   {
@@ -1292,6 +1476,11 @@ const scenarioDefinitions = [
       "raw-soa": createSpriteRawSoaRunner,
       "semantic-soa": createSpriteSemanticSoaRunner,
       "raw-entity-kernel": createSpriteKernelRunner,
+      "reduce-entity-batches": (rowCount) => createSpriteKernelPhaseRunner(rowCount, "reduce-entity-batches"),
+      "schedule-reaction-batch": (rowCount) => createSpriteKernelPhaseRunner(rowCount, "schedule-reaction-batch"),
+      "collect-reaction-scope": (rowCount) => createSpriteKernelPhaseRunner(rowCount, "collect-reaction-scope"),
+      "create-reaction-deps": (rowCount) => createSpriteKernelPhaseRunner(rowCount, "create-reaction-deps"),
+      "run-user-reaction": (rowCount) => createSpriteKernelPhaseRunner(rowCount, "run-user-reaction"),
       "public-transition": createSpritePublicRunner,
     },
   },

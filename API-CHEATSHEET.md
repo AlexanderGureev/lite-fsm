@@ -820,7 +820,7 @@ Entity-машина типизируется через `TypedCreateMachineFn<P,
 
 ### Effects и reactions
 
-`effects` объявляются по имени состояния (вход строк в это состояние), `reactions` — по типу события (после коммита транзакции). Effects диспатчат и удаляют сущности; reactions только читают и вызывают сайд-эффекты без dispatch.
+`effects` объявляются по имени состояния (вход строк в это состояние), `reactions` — по типу события (после коммита транзакции). Effects диспатчат и удаляют сущности; reactions синхронно обновляют внешние системы без dispatch.
 
 ```ts
 effects: {
@@ -843,6 +843,8 @@ reactions: {
 | `transition.despawn(ids \| indices)`   | удалить сущности                           |
 
 В аргументах: прикладные deps плюс `action`, `self` (и `transition` только в effects). `condition()` в entity-эффектах не поддерживается.
+
+В `reactions` `self.indices` — настоящий `readonly EntityIndex[]` текущей синхронной области. `self`, `self.indices`, объект `deps` и представления из `entities()` действуют только во время текущего вызова reaction; сохранять или мутировать эти представления нельзя.
 
 ### Спавн
 

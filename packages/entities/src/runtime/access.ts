@@ -70,9 +70,16 @@ export type EntityAccessScope = {
 };
 
 type ScopedEntitySelfOptions = {
-  readonly scopeName: "effect" | "reaction";
+  readonly scopeName: "effect";
   readonly indices: readonly EntityIndex[];
   readonly entries: readonly CapturedEntityScopeEntry[];
+};
+
+export type EntityReactionScope = {
+  readonly indices: readonly EntityIndex[];
+  readonly markers: Uint32Array;
+  readonly generation: Uint32Array;
+  readonly token: number;
 };
 
 const unknownEntityActor = (key: string): LiteFsmError =>
@@ -184,6 +191,24 @@ export const createEntityAccess = (runtime: EntityRuntimeState): EntityAccess<Ma
   } as EntityAccess<MachineStore>;
 };
 
+const outsideScopeError = (scopeName: "effect" | "reaction", entity: EntityIndex): LiteFsmError =>
+  new LiteFsmError(
+    "LITE_FSM_INVALID_STORAGE_RUNTIME",
+    `[lite-fsm/entities] entity index ${entity} is outside current entity ${scopeName} scope.`,
+  );
+
+const staleReactionScopeError = (entity: EntityIndex, reason: string): LiteFsmError =>
+  new LiteFsmError(
+    "LITE_FSM_INVALID_STORAGE_RUNTIME",
+    `[lite-fsm/entities] entity index ${entity} is stale in current entity reaction scope: ${reason}.`,
+  );
+
+const attachActorColumns = (self: Record<string, unknown>, store: ColumnarActorStore): void => {
+  for (const [name, column] of Object.entries(store.columns)) {
+    self[name] = column;
+  }
+};
+
 export const createScopedEntitySelf = (
   runtime: EntityRuntimeState,
   store: ColumnarActorStore,
@@ -205,19 +230,63 @@ export const createScopedEntitySelf = (
     entityId(entity: EntityIndex) {
       const entry = entriesByEntity.get(entity);
       if (entry) return entry.id;
-      throw new LiteFsmError(
-        "LITE_FSM_INVALID_STORAGE_RUNTIME",
-        `[lite-fsm/entities] entity index ${entity} is outside current entity ${options.scopeName} scope.`,
-      );
+      throw outsideScopeError(options.scopeName, entity);
     },
   };
 
-  for (const [name, column] of Object.entries(store.columns)) {
-    self[name] = column;
-  }
+  attachActorColumns(self, store);
 
   return self;
 };
+
+export const createReactionEntitySelf = (
+  runtime: EntityRuntimeState,
+  store: ColumnarActorStore,
+  scope: EntityReactionScope,
+): Record<string, unknown> => {
+  const entityIsInScope = (entity: EntityIndex): boolean => scope.markers[entity] === scope.token;
+  const entityHasCapturedGeneration = (entity: EntityIndex): boolean =>
+    runtime.entityStore.generation[entity] === scope.generation[entity];
+  const entityHasCurrentId = (entity: EntityIndex): boolean => {
+    const id = runtime.entityStore.ids[entity];
+    return id !== undefined && id.length > 0;
+  };
+
+  const self: Record<string, unknown> = {
+    indices: scope.indices,
+    states: store.metadata.stateCodeByName,
+    presence: store.presence,
+    stateCode: store.stateCode,
+    prevStateCode: store.prevStateCode,
+    rowVersion: store.rowVersion,
+    has(entity: EntityIndex) {
+      return (
+        entityIsInScope(entity) &&
+        entityHasCapturedGeneration(entity) &&
+        runtime.entityStore.alive[entity] === 1 &&
+        store.presence[entity] === 1 &&
+        entityHasCurrentId(entity)
+      );
+    },
+    entityId(entity: EntityIndex) {
+      if (!entityIsInScope(entity)) throw outsideScopeError("reaction", entity);
+      if (!entityHasCapturedGeneration(entity)) throw staleReactionScopeError(entity, "generation changed");
+      if (runtime.entityStore.alive[entity] !== 1) throw staleReactionScopeError(entity, "entity is not live");
+      if (store.presence[entity] !== 1) throw staleReactionScopeError(entity, "actor row is missing");
+
+      const id = runtime.entityStore.ids[entity];
+      if (id !== undefined && id.length > 0) return id;
+      throw staleReactionScopeError(entity, "entity id is missing");
+    },
+  };
+
+  attachActorColumns(self, store);
+
+  return self;
+};
+
+export const createReactionEntityAccess = (runtime: EntityRuntimeState): EntityAccess<MachineStore> =>
+  runtime.access as EntityAccess<MachineStore>;
 
 export const createScopedEntityAccess = (
   runtime: EntityRuntimeState,

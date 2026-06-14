@@ -4626,6 +4626,434 @@ describe("@lite-fsm/entities — этап 10 reactions и reaction error semanti
     expect(userDepsCalls).toEqual(["movement"]);
   });
 
+  it("ordinary unscoped single-bucket TICK reaction получает rows в прежнем порядке", () => {
+    const frames: string[] = [];
+    const arrayChecks: string[] = [];
+    const actor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { TICK: "READY" } },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: { value: i32() },
+      reactions: {
+        TICK: ({ self }: { readonly self: any }) => {
+          expect(Array.isArray(self.indices)).toBe(true);
+          const iterated: string[] = [];
+          for (const entity of self.indices) iterated.push(self.entityId(entity));
+
+          frames.push(self.indices.map((entity: EntityIndex) => self.entityId(entity)).join(","));
+          arrayChecks.push(`${self.indices.join("|")}:${iterated.join(",")}`);
+        },
+      },
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createStage10SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE10: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: { actor: { value: payload.value } },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+
+    spawnStage10Entity(manager, "unit/a", 1);
+    spawnStage10Entity(manager, "unit/b", 2);
+    spawnStage10Entity(manager, "unit/c", 3);
+    manager.transition({ type: "TICK" });
+
+    expect(frames).toEqual(["unit/a,unit/b,unit/c"]);
+    expect(arrayChecks).toEqual(["0|1|2:unit/a,unit/b,unit/c"]);
+  });
+
+  it("runtime deps перекрывают reserved user deps внутри reaction", () => {
+    const observations: string[] = [];
+    const userSelf = { marker: "user-self" };
+    const userEntities = () => ({ marker: "user-entities" });
+    const actor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { TICK: "READY" } },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: { value: i32() },
+      reactions: {
+        TICK: (deps: any) => {
+          const entity = deps.self.indices[0] as EntityIndex;
+          const access = deps.entities();
+          observations.push(`api:${deps.api}`);
+          observations.push(`action:${deps.action.type}`);
+          observations.push(`self:${deps.self === userSelf}:${deps.self.entityId(entity)}`);
+          observations.push(`entities:${deps.entities === userEntities}:${access.get("actor" as never).has(entity)}`);
+          observations.push(`transition:${typeof deps.transition}`);
+          observations.push(`condition:${typeof deps.condition}`);
+        },
+      },
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createStage10SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE10: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: { actor: { value: payload.value } },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+    manager.setDependencies({
+      action: { type: "USER_ACTION" },
+      api: "user-api",
+      condition: () => true,
+      entities: userEntities,
+      self: userSelf,
+      transition: () => "user-transition",
+    } as never);
+
+    spawnStage10Entity(manager, "unit/a", 1);
+    manager.transition({ type: "TICK" });
+
+    expect(observations).toEqual([
+      "api:user-api",
+      "action:TICK",
+      "self:false:unit/a",
+      "entities:false:true",
+      "transition:undefined",
+      "condition:undefined",
+    ]);
+  });
+
+  it("reaction entities().get использует root view для cross-actor rows и сохраняет unknown key error", () => {
+    const observations: string[] = [];
+    const sourceActor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { TICK: "READY" } },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: { value: i32() },
+      reactions: {
+        TICK: ({ self, entities }: { readonly self: any; readonly entities: () => EntityAccess<any> }) => {
+          const access = entities();
+          const sibling = access.get("siblingActor" as never);
+          const maybeSibling = access.maybe("siblingActor" as never);
+          observations.push(`provider:${entities() === access}`);
+          observations.push(`maybe:${maybeSibling === sibling}:${maybeSibling.has(self.indices[1] as EntityIndex)}`);
+          observations.push(
+            self.indices
+              .map((entity: EntityIndex) => `${self.entityId(entity)}:${sibling.has(entity)}:${sibling.marker[entity]}`)
+              .join("|"),
+          );
+
+          try {
+            access.get("missingActor" as never);
+          } catch (error) {
+            observations.push(
+              `unknown:${error instanceof LiteFsmError}:${(error as LiteFsmError).code}`,
+            );
+          }
+        },
+      },
+    } as const;
+    const siblingActor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: {} },
+      initialState: "__INIT",
+      initialContext: { marker: i32() },
+      spawnSchema: { value: i32() },
+      reducer(
+        _slice: unknown,
+        action: { readonly type: string },
+        { self, payloadFor }: { readonly self: any; payloadFor(entity: EntityIndex): { readonly value: number } },
+      ) {
+        if (action.type !== "ENTITY_SPAWNED") return;
+        for (const entity of self.indices) self.marker[entity] = payloadFor(entity).value * 10;
+      },
+    } as const;
+    const machines = { sourceActor, siblingActor };
+    const spawnEvents = createStage10SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE10: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors:
+          payload.id === "unit/a"
+            ? { sourceActor: { value: payload.value } }
+            : {
+                sourceActor: { value: payload.value },
+                siblingActor: { value: payload.value },
+              },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+
+    spawnStage10Entity(manager, "unit/a", 1);
+    spawnStage10Entity(manager, "unit/b", 2);
+    manager.transition({ type: "TICK" });
+
+    expect(observations).toEqual([
+      "provider:true",
+      "maybe:true:true",
+      "unit/a:false:0|unit/b:true:20",
+      "unknown:true:LITE_FSM_INVALID_STORAGE_RUNTIME",
+    ]);
+  });
+
+  it("reaction scheduling не копирует borrowed array и owned scope переживает reuse source", () => {
+    const frames: string[] = [];
+    const runtime = createEntityRuntimeState(
+      [
+        {
+          key: "actor",
+          kind: "entity",
+          data: compileEntityTemplate("actor", {
+            ...createEntityTemplate(),
+            reactions: {
+              TICK: ({ self }: { readonly self: any }) => {
+                frames.push(self.indices.map((entity: EntityIndex) => self.entityId(entity)).join(","));
+              },
+            },
+          }),
+        },
+      ],
+      {} as never,
+    );
+    const store = runtime.actorStores.actor;
+    ensureEntityCapacity(runtime.entityStore, 2);
+    ensureActorCapacity(store, 2);
+    runtime.entityStore.alive[0] = 1;
+    runtime.entityStore.alive[1] = 1;
+    runtime.entityStore.ids[0] = "unit/a";
+    runtime.entityStore.ids[1] = "unit/b";
+    store.presence[0] = 1;
+    store.presence[1] = 1;
+    const dispatch = {
+      runtime: new Map<string, unknown>(),
+      reportError(error: unknown) {
+        throw error;
+      },
+    };
+    const eventCode = runtime.eventCodeByType.TICK;
+
+    const borrowedTransaction = prepareEntityTransaction(dispatch, runtime);
+    const stableSource = [0 as EntityIndex, 1 as EntityIndex];
+    scheduleEntityReactionBatch(borrowedTransaction, store, eventCode, stableSource, { ownership: "borrowed" });
+    expect(borrowedTransaction.reactionBatches[0].ownership).toBe("borrowed");
+    expect(borrowedTransaction.reactionBatches[0].indices).toBe(stableSource);
+
+    const ownedDispatch = {
+      runtime: new Map<string, unknown>(),
+      reportError(error: unknown) {
+        throw error;
+      },
+    };
+    const ownedTransaction = prepareEntityTransaction(ownedDispatch, runtime);
+    const routedScratch = [0 as EntityIndex];
+    scheduleEntityReactionBatch(ownedTransaction, store, eventCode, routedScratch);
+    routedScratch[0] = 1 as EntityIndex;
+    runEntityReactionBatches(
+      runtime,
+      ownedTransaction.reactionBatches,
+      {
+        action: { type: "TICK" },
+        manager: { getDependencies: () => ({}) },
+        dispatch: ownedDispatch,
+      },
+    );
+
+    expect(ownedTransaction.reactionBatches[0].ownership).toBe("owned");
+    expect(ownedTransaction.reactionBatches[0].indices).not.toBe(routedScratch);
+    expect(frames).toEqual(["unit/a"]);
+  });
+
+  it("routed event через entityId получает правильный owned reaction scope", () => {
+    const frames: string[] = [];
+    const actor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { PING: "READY" } },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: { value: i32() },
+      reactions: {
+        PING: ({ self }: { readonly self: any }) => {
+          frames.push(self.indices.map((entity: EntityIndex) => self.entityId(entity)).join(","));
+        },
+      },
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createStage10SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE10: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: { actor: { value: payload.value } },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+
+    spawnStage10Entity(manager, "unit/a", 1);
+    spawnStage10Entity(manager, "unit/b", 2);
+    manager.transition({ type: "PING", meta: { entityId: "unit/a" } } as never);
+    manager.transition({ type: "PING", meta: { entityId: "unit/b" } } as never);
+
+    expect(frames).toEqual(["unit/a", "unit/b"]);
+  });
+
+  it("event из двух states одного actor получает merged owned reaction scope в прежнем порядке", () => {
+    const frames: string[] = [];
+    const actor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "READY" },
+        READY: { STOP: "STOPPED", PING: "READY" },
+        STOPPED: { PING: "STOPPED" },
+      },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: { value: i32() },
+      reactions: {
+        PING: ({ self }: { readonly self: any }) => {
+          frames.push(self.indices.map((entity: EntityIndex) => self.entityId(entity)).join(","));
+        },
+      },
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createStage10SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE10: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: { actor: { value: payload.value } },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+
+    spawnStage10Entity(manager, "unit/a", 1);
+    spawnStage10Entity(manager, "unit/b", 2);
+    manager.transition({ type: "STOP", meta: { entityId: "unit/b" } } as never);
+    manager.transition({ type: "PING" });
+
+    expect(frames).toEqual(["unit/a,unit/b"]);
+  });
+
+  it("lifecycle ENTITY_SPAWNED и ENTITY_DESPAWNED reactions получают корректный scope", () => {
+    const frames: string[] = [];
+    const actor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "ACTIVE" },
+        ACTIVE: { EXPIRE: "EXPIRED" },
+        EXPIRED: { ENTITY_DESPAWNED: "CLEANED" },
+        CLEANED: {},
+      },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: { value: i32() },
+      despawnOn: "EXPIRED",
+      reactions: {
+        ENTITY_SPAWNED: ({ self }: { readonly self: any }) => {
+          frames.push(`spawn:${self.indices.map((entity: EntityIndex) => self.entityId(entity)).join(",")}`);
+        },
+        ENTITY_DESPAWNED: ({ self }: { readonly self: any }) => {
+          frames.push(`despawn:${self.indices.map((entity: EntityIndex) => self.entityId(entity)).join(",")}`);
+        },
+      },
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createStage10SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE10: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: { actor: { value: payload.value } },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+
+    spawnStage10Entity(manager, "unit/a", 1);
+    spawnStage10Entity(manager, "unit/b", 2);
+    manager.transition({ type: "EXPIRE" });
+
+    expect(frames).toEqual(["spawn:unit/a", "spawn:unit/b", "despawn:unit/a,unit/b"]);
+  });
+
+  it("original event reaction не получает rows, удаленные через despawnOn", () => {
+    const originalFrames: string[] = [];
+    const lifecycleFrames: string[] = [];
+    const actor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "ACTIVE" },
+        ACTIVE: { SAFE: "SAFE", EXPIRE: "EXPIRED" },
+        SAFE: { EXPIRE: "SAFE" },
+        EXPIRED: { ENTITY_DESPAWNED: "CLEANED" },
+        CLEANED: {},
+      },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: { value: i32() },
+      despawnOn: "EXPIRED",
+      reactions: {
+        EXPIRE: ({ self }: { readonly self: any }) => {
+          originalFrames.push(self.indices.map((entity: EntityIndex) => self.entityId(entity)).join(","));
+        },
+        ENTITY_DESPAWNED: ({ self }: { readonly self: any }) => {
+          lifecycleFrames.push(self.indices.map((entity: EntityIndex) => self.entityId(entity)).join(","));
+        },
+      },
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createStage10SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE10: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: { actor: { value: payload.value } },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+
+    spawnStage10Entity(manager, "unit/a", 1);
+    spawnStage10Entity(manager, "unit/b", 2);
+    manager.transition({ type: "SAFE", meta: { entityId: "unit/b" } } as never);
+    manager.transition({ type: "EXPIRE" });
+
+    expect(lifecycleFrames).toEqual(["unit/a"]);
+    expect(originalFrames).toEqual(["unit/b"]);
+  });
+
+  it("identity transition с compiled despawnOn mask не отдает original reaction удаленные rows", () => {
+    const frames: string[] = [];
+    const actor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { TICK: "READY" } },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: { value: i32() },
+      reactions: {
+        TICK: ({ self }: { readonly self: any }) => {
+          frames.push(self.indices.map((entity: EntityIndex) => self.entityId(entity)).join(","));
+        },
+      },
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createStage10SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE10: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: { actor: { value: payload.value } },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+
+    spawnStage10Entity(manager, "unit/a", 1);
+    const runtime = getEntityRuntimeState(manager.entities());
+    const store = runtime.actorStores.actor;
+    store.metadata.despawnStateMask[store.metadata.stateCodeByName.READY] = 1;
+    manager.transition({ type: "TICK" });
+
+    expect(frames).toEqual([]);
+    expect(entityAccess<typeof machines>(manager).get("actor").has(0 as EntityIndex)).toBe(false);
+  });
+
   it("ENTITY_DESPAWNED reaction читает columns до cleanup и исходный event не получает удаленные rows", () => {
     const lifecycleReactions: string[] = [];
     const originalReactions: string[] = [];
@@ -4817,10 +5245,36 @@ describe("@lite-fsm/entities — этап 10 reactions и reaction error semanti
           }
           runtime.entityStore.generation[entity] += 1;
           observations.push(`stale:${self.has(entity)}`);
+          try {
+            self.entityId(entity);
+          } catch (error) {
+            observations.push(`staleEntityId:${(error as Error).message.includes("generation changed")}`);
+          }
           runtime.entityStore.generation[entity] -= 1;
           runtime.actorStores.actor.presence[entity] = 0;
           observations.push(`missing:${self.has(entity)}`);
+          try {
+            self.entityId(entity);
+          } catch (error) {
+            observations.push(`missingEntityId:${(error as Error).message.includes("actor row is missing")}`);
+          }
           runtime.actorStores.actor.presence[entity] = 1;
+          runtime.entityStore.alive[entity] = 0;
+          observations.push(`dead:${self.has(entity)}`);
+          try {
+            self.entityId(entity);
+          } catch (error) {
+            observations.push(`deadEntityId:${(error as Error).message.includes("entity is not live")}`);
+          }
+          runtime.entityStore.alive[entity] = 1;
+          runtime.entityStore.ids[entity] = "";
+          observations.push(`missingId:${self.has(entity)}`);
+          try {
+            self.entityId(entity);
+          } catch (error) {
+            observations.push(`missingIdEntityId:${(error as Error).message.includes("entity id is missing")}`);
+          }
+          runtime.entityStore.ids[entity] = "unit/a";
         },
       },
     } as const;
@@ -4839,7 +5293,18 @@ describe("@lite-fsm/entities — этап 10 reactions и reaction error semanti
     spawnStage10Entity(manager, "unit/a", 1);
     manager.transition({ type: "TICK" });
 
-    expect(observations).toEqual(["outside:false", "entityId:true", "stale:false", "missing:false"]);
+    expect(observations).toEqual([
+      "outside:false",
+      "entityId:true",
+      "stale:false",
+      "staleEntityId:true",
+      "missing:false",
+      "missingEntityId:true",
+      "dead:false",
+      "deadEntityId:true",
+      "missingId:false",
+      "missingIdEntityId:true",
+    ]);
     expect(runtime.entityStore.generation[0]).toBe(1);
   });
 
@@ -4852,7 +5317,11 @@ describe("@lite-fsm/entities — этап 10 reactions и reaction error semanti
           kind: "entity",
           data: compileEntityTemplate("actor", {
             ...createEntityTemplate(),
-            reactions: { TICK: () => calls.push("tick") },
+            reactions: {
+              TICK: ({ self }: { readonly self: any }) => {
+                calls.push(self.indices.map((entity: EntityIndex) => self.entityId(entity)).join(","));
+              },
+            },
           }),
         },
       ],
@@ -4874,12 +5343,12 @@ describe("@lite-fsm/entities — этап 10 reactions и reaction error semanti
     runEntityReactions(runtime, ctx);
     runEntityReactionBatches(
       runtime,
-      [{ store, eventCode: runtime.eventCodeByType.ENTITY_SPAWNED, indices: [0 as EntityIndex] }],
+      [{ store, eventCode: runtime.eventCodeByType.ENTITY_SPAWNED, ownership: "owned", indices: [0 as EntityIndex] }],
       ctx,
     );
     runEntityReactionBatches(
       runtime,
-      [{ store, eventCode: runtime.eventCodeByType.TICK, indices: [0 as EntityIndex] }],
+      [{ store, eventCode: runtime.eventCodeByType.TICK, ownership: "owned", indices: [0 as EntityIndex] }],
       ctx,
     );
     ensureEntityCapacity(runtime.entityStore, 1);
@@ -4889,11 +5358,43 @@ describe("@lite-fsm/entities — этап 10 reactions и reaction error semanti
     store.presence[0] = 1;
     runEntityReactionBatches(
       runtime,
-      [{ store, eventCode: runtime.eventCodeByType.TICK, indices: [0 as EntityIndex] }],
+      [{ store, eventCode: runtime.eventCodeByType.TICK, ownership: "owned", indices: [0 as EntityIndex] }],
+      ctx,
+    );
+    ensureEntityCapacity(runtime.entityStore, 2);
+    ensureActorCapacity(store, 2);
+    runtime.entityStore.alive[0] = 0;
+    runtime.entityStore.ids[0] = "unit/a";
+    store.presence[0] = 1;
+    runtime.entityStore.alive[1] = 1;
+    runtime.entityStore.ids[1] = "unit/b";
+    store.presence[1] = 1;
+    runEntityReactionBatches(
+      runtime,
+      [
+        {
+          store,
+          eventCode: runtime.eventCodeByType.TICK,
+          ownership: "owned",
+          indices: [0 as EntityIndex, 1 as EntityIndex],
+        },
+      ],
+      ctx,
+    );
+    runEntityReactionBatches(
+      runtime,
+      [
+        {
+          store,
+          eventCode: runtime.eventCodeByType.TICK,
+          ownership: "owned",
+          indices: [1 as EntityIndex, 0 as EntityIndex],
+        },
+      ],
       ctx,
     );
 
-    expect(calls).toEqual([]);
+    expect(calls).toEqual(["unit/b", "unit/b"]);
   });
 
   it("валидирует reactions при init", () => {

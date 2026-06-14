@@ -31,6 +31,7 @@ import {
 } from "./state";
 import {
   consumeScheduledDespawns,
+  createEntityReactionBatch,
   getEntityTransaction,
   getStagedSpawns,
   scheduleEntityDespawn,
@@ -38,6 +39,7 @@ import {
   scheduleEntityReactionBatch,
   type EntityDispatchTransaction,
   type EntityReactionBatch,
+  type EntityReactionBatchOwnership,
   type StagedEntitySpawn,
 } from "./transaction";
 import { runEntityReactionBatches } from "./reactions";
@@ -58,6 +60,7 @@ type ReducerBatch = {
 };
 
 type ReduceAcceptedBatchOptions = {
+  readonly allowBorrowedReactionBatch?: boolean;
   readonly scheduleDespawnOn?: boolean;
   readonly scheduleEffects?: boolean;
   readonly scheduleReactions?: boolean;
@@ -230,16 +233,65 @@ const scheduleEnteredStateEffects = (
 };
 
 const appendLifecycleReactionBatch = (
+  transaction: EntityDispatchTransaction | undefined,
   batches: EntityReactionBatch[],
   store: ColumnarActorStore,
   eventCode: number | undefined,
   indices: readonly EntityIndex[],
 ): void => {
-  /* v8 ignore next -- lifecycle callback is invoked only after an accepted event with a compiled event code. */
-  if (eventCode === undefined || indices.length === 0) return;
-  if (!store.metadata.reactionsByEventCode[eventCode]) return;
+  const batch = createEntityReactionBatch(transaction, store, eventCode, indices, { ownership: "owned" });
+  if (batch) batches.push(batch);
+};
 
-  batches.push({ store, eventCode, indices: indices.slice() });
+const isSingleStateBucketReactionSource = (
+  store: ColumnarActorStore,
+  eventCode: number,
+  indices: readonly EntityIndex[],
+): boolean => {
+  const buckets = store.acceptStateBucketsByEventCode[eventCode];
+  return buckets !== undefined && buckets.length === 1 && buckets[0] === indices;
+};
+
+const acceptedRowsUseIdentityTransitions = (
+  store: ColumnarActorStore,
+  eventCode: number,
+  indices: readonly EntityIndex[],
+): boolean => {
+  const offset = eventCode * store.metadata.stateSlotCount;
+  for (const entity of indices) {
+    const previousCode = store.prevStateCode[entity];
+    const stateSlot = previousCode + 1;
+    if (store.metadata.transitionTable[offset + stateSlot] !== previousCode) return false;
+  }
+  return true;
+};
+
+const acceptedRowsStayedInSourceState = (store: ColumnarActorStore, indices: readonly EntityIndex[]): boolean => {
+  for (const entity of indices) {
+    if (store.stateCode[entity] !== store.prevStateCode[entity]) return false;
+  }
+  return true;
+};
+
+const acceptedRowsNeedDespawnOn = (store: ColumnarActorStore, indices: readonly EntityIndex[]): boolean => {
+  for (const entity of indices) {
+    const stateCode = store.stateCode[entity];
+    if (stateCode >= 0 && store.metadata.despawnStateMask[stateCode] === 1) return true;
+  }
+  return false;
+};
+
+const chooseReactionBatchOwnership = (
+  store: ColumnarActorStore,
+  eventCode: number,
+  indices: readonly EntityIndex[],
+  options: ReduceAcceptedBatchOptions,
+): EntityReactionBatchOwnership => {
+  if (!options.allowBorrowedReactionBatch) return "owned";
+  if (!acceptedRowsUseIdentityTransitions(store, eventCode, indices)) return "owned";
+  if (!acceptedRowsStayedInSourceState(store, indices)) return "owned";
+  if ((options.scheduleDespawnOn ?? true) && acceptedRowsNeedDespawnOn(store, indices)) return "owned";
+  return "borrowed";
 };
 
 const createReducerSelf = (
@@ -476,7 +528,11 @@ const reduceAcceptedBatch = (
   assertValidStateCodes(batch.store, accepted);
   markActorRowsTouched(batch.store, accepted);
   if (options.scheduleEffects ?? true) scheduleEnteredStateEffects(transaction, batch.store, accepted);
-  if (options.scheduleReactions) scheduleEntityReactionBatch(transaction, batch.store, batch.eventCode, accepted);
+  if (options.scheduleReactions && batch.eventCode !== undefined) {
+    scheduleEntityReactionBatch(transaction, batch.store, batch.eventCode, accepted, {
+      ownership: chooseReactionBatchOwnership(batch.store, batch.eventCode, accepted, options),
+    });
+  }
   if (options.scheduleDespawnOn ?? true) scheduleDespawnOnRows(transaction, batch.store, accepted);
   if (options.scheduleTerminal ?? true) scheduleTerminalRows(transaction, batch.store, accepted);
   updateActorStateBuckets(batch.store, accepted);
@@ -568,7 +624,13 @@ const reduceStagedSpawnLifecycle = (
       {
         scheduleReactions: false,
         onAccepted(accepted) {
-          appendLifecycleReactionBatch(reactionBatches, batch.store, runtime.eventCodeByType[ENTITY_SPAWNED], accepted);
+          appendLifecycleReactionBatch(
+            transaction,
+            reactionBatches,
+            batch.store,
+            runtime.eventCodeByType[ENTITY_SPAWNED],
+            accepted,
+          );
         },
       },
     );
@@ -729,7 +791,7 @@ const flushEntityLifecycleCleanup = (
         scheduleReactions: false,
         scheduleTerminal: false,
         onAccepted(accepted) {
-          appendLifecycleReactionBatch(reactionBatches, batch.store, batch.eventCode, accepted);
+          appendLifecycleReactionBatch(transaction, reactionBatches, batch.store, batch.eventCode, accepted);
         },
       });
       touched = touched || reduced;
@@ -779,7 +841,12 @@ export const reduceEntityBucket = (
           accepted: batch.accepted,
         },
         transaction,
-        { scheduleReactions: true },
+        {
+          allowBorrowedReactionBatch:
+            ctx.dispatch.route.scope === "unscoped" &&
+            isSingleStateBucketReactionSource(batch.store, eventCode, batch.indices),
+          scheduleReactions: true,
+        },
       )) {
         touched = true;
       }
