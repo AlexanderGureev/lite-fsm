@@ -9,6 +9,7 @@ import {
 } from "./compile";
 import {
   rebuildEntityRuntimeIndexes,
+  rebindActorReducerSelf,
   restorePublicSlices,
   type ColumnarActorStore,
   type EntityColumn,
@@ -591,6 +592,7 @@ const applyActorStore = (target: ColumnarActorStore, source: ImportedActorStore)
   target.prevStateCode = source.prevStateCode;
   target.rowVersion = source.rowVersion;
   target.columns = source.columns;
+  rebindActorReducerSelf(target);
 };
 
 const applyImportedRuntime = (runtime: EntityRuntimeState, imported: ImportedRuntime): void => {

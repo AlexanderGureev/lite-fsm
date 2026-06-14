@@ -10,14 +10,17 @@ import {
   ENTITY_REJECTED_STATE_CODE,
   ENTITY_RESOLVED_STATE_CODE,
   getEntityStateName,
+  type EntityReducePlan,
 } from "./compile";
 import { ENTITY_DESPAWNED, ENTITY_SPAWNED } from "./lifecycle";
+import { restoreRuntimeMutation, snapshotRuntimeMutation } from "./mutation-snapshot";
 import { collectEntityPublicReducerBatches } from "./routing";
 import {
   addActorRowOwnership,
   addEntityToGroupBucket,
   ensureActorCapacity,
   ensureEntityCapacity,
+  getActorReducerSelf,
   moveActorStateBucket,
   removeActorRowsForStore,
   removeEntityRecords,
@@ -25,8 +28,6 @@ import {
   writeInitialColumnValues,
   type ColumnarActorStore,
   type EntityActorRowRef,
-  type EntityColumn,
-  type EntityStore,
   type EntityRuntimeState,
 } from "./state";
 import {
@@ -81,40 +82,16 @@ type DespawnCleanupPlan = {
   readonly entities: EntityIndex[];
 };
 
-type EntityStoreSnapshot = {
-  readonly count: number;
-  readonly capacity: number;
-  readonly ids: string[];
-  readonly indexById: Record<string, EntityIndex>;
-  readonly alive: Uint8Array;
-  readonly generation: Uint32Array;
-  readonly groupTagByIndex: string[];
-  readonly entitiesByGroupTag: Record<string, EntityIndex[]>;
-  readonly groupTagPosition: Int32Array;
-  readonly freeList: EntityIndex[];
-  readonly version: number;
+type PostProcessingFlags = {
+  readonly scheduleDespawnOn: boolean;
+  readonly scheduleEffects: boolean;
+  readonly scheduleTerminal: boolean;
 };
 
-type ActorStoreSnapshot = {
-  readonly capacity: number;
-  readonly count: number;
-  readonly version: number;
-  readonly presence: Uint8Array;
-  readonly stateCode: Int16Array;
-  readonly prevStateCode: Int16Array;
-  readonly rowVersion: Uint32Array;
-  readonly stateBuckets: EntityIndex[][];
-  readonly statePosition: Int32Array;
-  readonly acceptedScratch: EntityIndex[];
-  readonly columns: Record<string, EntityColumn>;
-  readonly publicSlice: ColumnarActorStore["publicSlice"];
-};
-
-type RuntimeMutationSnapshot = {
-  readonly entityStore: EntityStoreSnapshot;
-  readonly actorStores: Record<string, ActorStoreSnapshot>;
-  readonly actorRowsByEntity: EntityActorRowRef[][];
-  readonly actorRowsByGroupTag: Record<string, EntityActorRowRef[]>;
+type AcceptedRowsPostProcessing = {
+  readonly dirtyRows: readonly EntityIndex[] | undefined;
+  readonly enteredByState: ReadonlyMap<number, readonly EntityIndex[]> | undefined;
+  readonly cleanupRemovesAcceptedRows: boolean;
 };
 
 const spawnLifecycleAction: ManagerAction<AnyEvent> = { type: ENTITY_SPAWNED };
@@ -153,21 +130,17 @@ const resolveTransitionTarget = (
   return { accepted: true, nextState: getEntityStateName(store.metadata, nextCode) };
 };
 
-const assertValidStateCodes = (store: ColumnarActorStore, indices: readonly EntityIndex[]): void => {
-  for (const entity of indices) {
-    const code = store.stateCode[entity];
-    if (code === ENTITY_INIT_STATE_CODE || store.metadata.publicStates[code] !== undefined || isTerminalStateCode(code)) {
-      continue;
-    }
-    throw runtimeError(`actor '${store.templateKey}' reducer wrote invalid stateCode ${code} for entity ${entity}`);
-  }
-};
-
 const isTerminalStateCode = (code: number): boolean =>
   code === ENTITY_RESOLVED_STATE_CODE || code === ENTITY_REJECTED_STATE_CODE || code === ENTITY_CANCELLED_STATE_CODE;
 
-const markActorRowsTouched = (store: ColumnarActorStore, indices: readonly EntityIndex[]): void => {
-  for (const entity of indices) store.rowVersion[entity] += 1;
+const assertValidStateCode = (store: ColumnarActorStore, entity: EntityIndex, code: number): void => {
+  if (code === ENTITY_INIT_STATE_CODE || store.metadata.publicStates[code] !== undefined || isTerminalStateCode(code)) {
+    return;
+  }
+  throw runtimeError(`actor '${store.templateKey}' reducer wrote invalid stateCode ${code} for entity ${entity}`);
+};
+
+const markActorRowsTouched = (store: ColumnarActorStore): void => {
   store.version += 1;
   refreshActorPublicSlice(store);
 };
@@ -179,57 +152,108 @@ const updateActorStateBuckets = (store: ColumnarActorStore, indices: readonly En
   }
 };
 
-const scheduleDespawnOnRows = (
-  transaction: EntityDispatchTransaction | undefined,
-  store: ColumnarActorStore,
-  indices: readonly EntityIndex[],
-): void => {
-  /* v8 ignore next -- defensive invariant: reduceBucket receives a transaction from prepareAction. */
-  if (!transaction || store.metadata.despawnStateMask.length === 0) return;
-
-  for (const entity of indices) {
-    const stateCode = store.stateCode[entity];
-    if (stateCode < 0 || store.metadata.despawnStateMask[stateCode] !== 1) continue;
-    scheduleEntityDespawn(transaction, entity);
-  }
-};
-
-const scheduleTerminalRows = (
-  transaction: EntityDispatchTransaction | undefined,
-  store: ColumnarActorStore,
-  indices: readonly EntityIndex[],
-): void => {
-  /* v8 ignore next -- defensive invariant: reduceBucket receives a transaction from prepareAction. */
-  if (!transaction) return;
-
-  for (const entity of indices) {
-    if (!isTerminalStateCode(store.stateCode[entity])) continue;
-    transaction.terminalRows.push({ store, entity });
-  }
-};
-
 const scheduleEnteredStateEffects = (
   transaction: EntityDispatchTransaction | undefined,
   store: ColumnarActorStore,
-  indices: readonly EntityIndex[],
+  enteredByState: ReadonlyMap<number, readonly EntityIndex[]> | undefined,
 ): void => {
   /* v8 ignore next -- defensive invariant: reduceBucket receives a transaction from prepareAction. */
-  if (!transaction) return;
-
-  const enteredByState = new Map<number, EntityIndex[]>();
-  for (const entity of indices) {
-    const stateCode = store.stateCode[entity];
-    if (stateCode < 0 || stateCode === store.prevStateCode[entity]) continue;
-    if (!store.metadata.effectsByStateCode[stateCode]) continue;
-
-    const entered = enteredByState.get(stateCode) ?? [];
-    entered.push(entity);
-    enteredByState.set(stateCode, entered);
-  }
+  if (!transaction || !enteredByState) return;
 
   for (const [stateCode, entered] of enteredByState) {
     scheduleEntityEffectBatch(transaction, store, stateCode, entered);
   }
+};
+
+const hasStateEffects = (store: ColumnarActorStore): boolean => {
+  for (const effect of store.metadata.effectsByStateCode) {
+    if (effect) return true;
+  }
+  return false;
+};
+
+const hasDespawnOnStates = (store: ColumnarActorStore): boolean => {
+  for (let stateCode = 0; stateCode < store.metadata.despawnStateMask.length; stateCode += 1) {
+    if (store.metadata.despawnStateMask[stateCode] === 1) return true;
+  }
+  return false;
+};
+
+const getPostProcessingFlags = (
+  store: ColumnarActorStore,
+  plan: EntityReducePlan | undefined,
+  options: ReduceAcceptedBatchOptions,
+): PostProcessingFlags => {
+  const reducerMayOverrideState = store.metadata.reducer !== undefined;
+  return {
+    scheduleDespawnOn: (options.scheduleDespawnOn ?? true) && hasDespawnOnStates(store),
+    scheduleEffects:
+      (options.scheduleEffects ?? true) &&
+      (plan?.mayEnterEffectState === true || (reducerMayOverrideState && hasStateEffects(store))),
+    scheduleTerminal:
+      (options.scheduleTerminal ?? true) &&
+      (plan?.mayEnterTerminalState === true || reducerMayOverrideState),
+  };
+};
+
+const appendEnteredEffectRow = (
+  enteredByState: Map<number, EntityIndex[]> | undefined,
+  stateCode: number,
+  entity: EntityIndex,
+): Map<number, EntityIndex[]> => {
+  const next = enteredByState ?? new Map<number, EntityIndex[]>();
+  const entered = next.get(stateCode);
+  if (entered) {
+    entered.push(entity);
+    return next;
+  }
+
+  next.set(stateCode, [entity]);
+  return next;
+};
+
+const postProcessAcceptedRows = (
+  transaction: EntityDispatchTransaction | undefined,
+  store: ColumnarActorStore,
+  accepted: readonly EntityIndex[],
+  flags: PostProcessingFlags,
+): AcceptedRowsPostProcessing => {
+  let dirtyRows: EntityIndex[] | undefined;
+  let enteredByState: Map<number, EntityIndex[]> | undefined;
+  let cleanupRemovesAcceptedRows = false;
+
+  for (const entity of accepted) {
+    const stateCode = store.stateCode[entity];
+    assertValidStateCode(store, entity, stateCode);
+    store.rowVersion[entity] += 1;
+
+    const dirty = stateCode !== store.prevStateCode[entity];
+    let despawned = false;
+    if (flags.scheduleDespawnOn && stateCode >= 0 && store.metadata.despawnStateMask[stateCode] === 1) {
+      cleanupRemovesAcceptedRows = true;
+      despawned = true;
+      /* v8 ignore next -- defensive invariant: reduceBucket receives a transaction from prepareAction. */
+      if (transaction) scheduleEntityDespawn(transaction, entity);
+    }
+
+    if (!dirty) continue;
+
+    if (!dirtyRows) dirtyRows = [];
+    dirtyRows.push(entity);
+
+    if (flags.scheduleTerminal && isTerminalStateCode(stateCode)) {
+      cleanupRemovesAcceptedRows = true;
+      /* v8 ignore next -- defensive invariant: reduceBucket receives a transaction from prepareAction. */
+      if (transaction) transaction.terminalRows.push({ store, entity });
+      continue;
+    }
+
+    if (flags.scheduleEffects && !despawned && stateCode >= 0 && store.metadata.effectsByStateCode[stateCode]) {
+      enteredByState = appendEnteredEffectRow(enteredByState, stateCode, entity);
+    }
+  }
+
+  return { dirtyRows, enteredByState, cleanupRemovesAcceptedRows };
 };
 
 const appendLifecycleReactionBatch = (
@@ -252,75 +276,16 @@ const isSingleStateBucketReactionSource = (
   return buckets !== undefined && buckets.length === 1 && buckets[0] === indices;
 };
 
-const acceptedRowsUseIdentityTransitions = (
-  store: ColumnarActorStore,
-  eventCode: number,
-  indices: readonly EntityIndex[],
-): boolean => {
-  const offset = eventCode * store.metadata.stateSlotCount;
-  for (const entity of indices) {
-    const previousCode = store.prevStateCode[entity];
-    const stateSlot = previousCode + 1;
-    if (store.metadata.transitionTable[offset + stateSlot] !== previousCode) return false;
-  }
-  return true;
-};
-
-const acceptedRowsStayedInSourceState = (store: ColumnarActorStore, indices: readonly EntityIndex[]): boolean => {
-  for (const entity of indices) {
-    if (store.stateCode[entity] !== store.prevStateCode[entity]) return false;
-  }
-  return true;
-};
-
-const acceptedRowsNeedDespawnOn = (store: ColumnarActorStore, indices: readonly EntityIndex[]): boolean => {
-  for (const entity of indices) {
-    const stateCode = store.stateCode[entity];
-    if (stateCode >= 0 && store.metadata.despawnStateMask[stateCode] === 1) return true;
-  }
-  return false;
-};
-
 const chooseReactionBatchOwnership = (
-  store: ColumnarActorStore,
-  eventCode: number,
-  indices: readonly EntityIndex[],
+  plan: EntityReducePlan | undefined,
+  postProcessing: AcceptedRowsPostProcessing,
   options: ReduceAcceptedBatchOptions,
 ): EntityReactionBatchOwnership => {
   if (!options.allowBorrowedReactionBatch) return "owned";
-  if (!acceptedRowsUseIdentityTransitions(store, eventCode, indices)) return "owned";
-  if (!acceptedRowsStayedInSourceState(store, indices)) return "owned";
-  if ((options.scheduleDespawnOn ?? true) && acceptedRowsNeedDespawnOn(store, indices)) return "owned";
+  if (plan?.allDefaultTransitionsIdentity !== true) return "owned";
+  if (postProcessing.dirtyRows && postProcessing.dirtyRows.length > 0) return "owned";
+  if (postProcessing.cleanupRemovesAcceptedRows) return "owned";
   return "borrowed";
-};
-
-const createReducerSelf = (
-  runtime: EntityRuntimeState,
-  store: ColumnarActorStore,
-  indices: readonly EntityIndex[],
-): Record<string, unknown> => {
-  const self: Record<string, unknown> = {
-    indices,
-    states: store.metadata.stateCodeByName,
-    presence: store.presence,
-    stateCode: store.stateCode,
-    prevStateCode: store.prevStateCode,
-    rowVersion: store.rowVersion,
-    has(entity: EntityIndex) {
-      return store.presence[entity] === 1;
-    },
-    entityId(entity: EntityIndex) {
-      const id = runtime.entityStore.ids[entity];
-      if (id !== undefined) return id;
-      throw runtimeError(`unknown entity index ${entity}`);
-    },
-  };
-
-  for (const [name, column] of Object.entries(store.columns)) {
-    self[name] = column;
-  }
-
-  return self;
 };
 
 const createPayloadFor = (
@@ -343,132 +308,6 @@ const createPayloadFor = (
   };
 };
 
-const cloneIndexMap = (value: Record<string, EntityIndex>): Record<string, EntityIndex> =>
-  Object.assign(Object.create(null) as Record<string, EntityIndex>, value);
-
-const cloneIndexArrayRecord = (value: Record<string, EntityIndex[]>): Record<string, EntityIndex[]> =>
-  Object.assign(
-    Object.create(null) as Record<string, EntityIndex[]>,
-    Object.fromEntries(Object.entries(value).map(([key, indices]) => [key, indices.slice()])),
-  );
-
-const cloneIndexArrays = (value: readonly EntityIndex[][]): EntityIndex[][] => value.map((indices) => indices.slice());
-
-const cloneActorRowRef = (
-  row: EntityActorRowRef,
-  clones: Map<EntityActorRowRef, EntityActorRowRef>,
-): EntityActorRowRef => {
-  const clone = clones.get(row);
-  if (clone) return clone;
-
-  const next = { ...row };
-  clones.set(row, next);
-  return next;
-};
-
-const cloneActorRowRefsByEntity = (
-  value: readonly EntityActorRowRef[][],
-  clones: Map<EntityActorRowRef, EntityActorRowRef>,
-): EntityActorRowRef[][] => value.map((rows) => rows.map((row) => cloneActorRowRef(row, clones)));
-
-const cloneActorRowRefRecord = (
-  value: Record<string, EntityActorRowRef[]>,
-  clones: Map<EntityActorRowRef, EntityActorRowRef>,
-): Record<string, EntityActorRowRef[]> =>
-  Object.assign(
-    Object.create(null) as Record<string, EntityActorRowRef[]>,
-    Object.fromEntries(Object.entries(value).map(([key, rows]) => [key, rows.map((row) => cloneActorRowRef(row, clones))])),
-  );
-
-const cloneColumn = (column: EntityColumn): EntityColumn =>
-  Array.isArray(column) ? column.slice() : (column.slice() as EntityColumn);
-
-const cloneColumns = (columns: Record<string, EntityColumn>): Record<string, EntityColumn> =>
-  Object.fromEntries(Object.entries(columns).map(([name, column]) => [name, cloneColumn(column)]));
-
-const snapshotEntityStore = (store: EntityStore): EntityStoreSnapshot => ({
-  count: store.count,
-  capacity: store.capacity,
-  ids: store.ids.slice(),
-  indexById: cloneIndexMap(store.indexById),
-  alive: store.alive.slice(),
-  generation: store.generation.slice(),
-  groupTagByIndex: store.groupTagByIndex.slice(),
-  entitiesByGroupTag: cloneIndexArrayRecord(store.entitiesByGroupTag),
-  groupTagPosition: store.groupTagPosition.slice(),
-  freeList: store.freeList.slice(),
-  version: store.version,
-});
-
-const snapshotActorStore = (store: ColumnarActorStore): ActorStoreSnapshot => ({
-  capacity: store.capacity,
-  count: store.count,
-  version: store.version,
-  presence: store.presence.slice(),
-  stateCode: store.stateCode.slice(),
-  prevStateCode: store.prevStateCode.slice(),
-  rowVersion: store.rowVersion.slice(),
-  stateBuckets: cloneIndexArrays(store.stateBuckets),
-  statePosition: store.statePosition.slice(),
-  acceptedScratch: store.acceptedScratch.slice(),
-  columns: cloneColumns(store.columns),
-  publicSlice: store.publicSlice,
-});
-
-const snapshotRuntime = (runtime: EntityRuntimeState): RuntimeMutationSnapshot => {
-  const rowRefClones = new Map<EntityActorRowRef, EntityActorRowRef>();
-
-  return {
-    entityStore: snapshotEntityStore(runtime.entityStore),
-    actorStores: Object.fromEntries(
-      Object.entries(runtime.actorStores).map(([templateKey, store]) => [templateKey, snapshotActorStore(store)]),
-    ),
-    actorRowsByEntity: cloneActorRowRefsByEntity(runtime.actorRowsByEntity, rowRefClones),
-    actorRowsByGroupTag: cloneActorRowRefRecord(runtime.actorRowsByGroupTag, rowRefClones),
-  };
-};
-
-const restoreEntityStore = (store: EntityStore, snapshot: EntityStoreSnapshot): void => {
-  store.count = snapshot.count;
-  store.capacity = snapshot.capacity;
-  store.ids = snapshot.ids;
-  store.indexById = snapshot.indexById;
-  store.alive = snapshot.alive;
-  store.generation = snapshot.generation;
-  store.groupTagByIndex = snapshot.groupTagByIndex;
-  store.entitiesByGroupTag = snapshot.entitiesByGroupTag;
-  store.groupTagPosition = snapshot.groupTagPosition;
-  store.freeList = snapshot.freeList;
-  store.version = snapshot.version;
-};
-
-const restoreActorStore = (store: ColumnarActorStore, snapshot: ActorStoreSnapshot): void => {
-  store.capacity = snapshot.capacity;
-  store.count = snapshot.count;
-  store.version = snapshot.version;
-  store.presence = snapshot.presence;
-  store.stateCode = snapshot.stateCode;
-  store.prevStateCode = snapshot.prevStateCode;
-  store.rowVersion = snapshot.rowVersion;
-  store.stateBuckets = snapshot.stateBuckets;
-  store.statePosition = snapshot.statePosition;
-  store.acceptedScratch = snapshot.acceptedScratch;
-  store.acceptStateBucketsByEventCode = store.metadata.acceptStateCodesByEventCode.map((stateCodes) =>
-    stateCodes.flatMap((stateCode) => (stateCode >= 0 ? [store.stateBuckets[stateCode]] : [])),
-  );
-  store.columns = snapshot.columns;
-  store.publicSlice = snapshot.publicSlice;
-};
-
-const restoreRuntime = (runtime: EntityRuntimeState, snapshot: RuntimeMutationSnapshot): void => {
-  restoreEntityStore(runtime.entityStore, snapshot.entityStore);
-  for (const [templateKey, storeSnapshot] of Object.entries(snapshot.actorStores)) {
-    restoreActorStore(runtime.actorStores[templateKey], storeSnapshot);
-  }
-  runtime.actorRowsByEntity = snapshot.actorRowsByEntity;
-  runtime.actorRowsByGroupTag = snapshot.actorRowsByGroupTag;
-};
-
 const getAcceptedIndices = (batch: ReducerBatch): readonly EntityIndex[] => {
   if (batch.accepted) return batch.indices;
 
@@ -482,6 +321,9 @@ const getAcceptedIndices = (batch: ReducerBatch): readonly EntityIndex[] => {
 };
 
 const applyDefaultTransitions = (batch: ReducerBatch, accepted: readonly EntityIndex[]): string | undefined => {
+  const fastPathNextState = applyIdentityDefaultTransitions(batch, accepted);
+  if (fastPathNextState !== undefined) return fastPathNextState;
+
   let firstNextState: string | undefined;
 
   if (!batch.accepted) {
@@ -499,16 +341,52 @@ const applyDefaultTransitions = (batch: ReducerBatch, accepted: readonly EntityI
   return firstNextState;
 };
 
+const getSingleStateIdentitySource = (
+  batch: ReducerBatch,
+  accepted: readonly EntityIndex[],
+): number | undefined => {
+  if (!batch.accepted || batch.eventCode === undefined) return undefined;
+
+  const plan = batch.store.metadata.reducePlansByEventCode[batch.eventCode];
+  if (!plan?.allDefaultTransitionsIdentity) return undefined;
+  if (plan.acceptStateCodes.length !== 1) return undefined;
+
+  const sourceCode = plan.acceptStateCodes[0];
+  const buckets = batch.store.acceptStateBucketsByEventCode[batch.eventCode];
+  if (!buckets || buckets.length !== 1 || buckets[0] !== accepted) return undefined;
+
+  return sourceCode;
+};
+
+const applyIdentityDefaultTransitions = (
+  batch: ReducerBatch,
+  accepted: readonly EntityIndex[],
+): string | undefined => {
+  const sourceCode = getSingleStateIdentitySource(batch, accepted);
+  if (sourceCode === undefined) return undefined;
+
+  for (const entity of accepted) {
+    batch.store.prevStateCode[entity] = sourceCode;
+  }
+
+  return getEntityStateName(batch.store.metadata, sourceCode);
+};
+
+const getBatchReducePlan = (batch: ReducerBatch): EntityReducePlan | undefined => {
+  /* v8 ignore next -- accepted reducer batches are compiled event batches; this keeps lifecycle no-plan paths defensive. */
+  if (batch.eventCode === undefined) return undefined;
+  return batch.store.metadata.reducePlansByEventCode[batch.eventCode];
+};
+
 const reduceAcceptedBatch = (
-  runtime: EntityRuntimeState,
   batch: ReducerBatch,
   transaction: EntityDispatchTransaction | undefined,
   options: ReduceAcceptedBatchOptions = {},
 ): boolean => {
   const accepted = getAcceptedIndices(batch);
-  const firstNextState = applyDefaultTransitions(batch, accepted);
-
   if (accepted.length === 0) return false;
+
+  const firstNextState = applyDefaultTransitions(batch, accepted);
 
   const reducer = batch.store.metadata.reducer;
   if (reducer) {
@@ -519,23 +397,27 @@ const reduceAcceptedBatch = (
       {
         nextState,
         config: batch.store.metadata.config,
-        self: createReducerSelf(runtime, batch.store, accepted),
+        self: getActorReducerSelf(batch.store, accepted),
         payloadFor: createPayloadFor(batch.store, batch.payloadByEntity),
       },
     );
   }
 
-  assertValidStateCodes(batch.store, accepted);
-  markActorRowsTouched(batch.store, accepted);
-  if (options.scheduleEffects ?? true) scheduleEnteredStateEffects(transaction, batch.store, accepted);
+  const plan = getBatchReducePlan(batch);
+  const postProcessing = postProcessAcceptedRows(
+    transaction,
+    batch.store,
+    accepted,
+    getPostProcessingFlags(batch.store, plan, options),
+  );
+  markActorRowsTouched(batch.store);
+  scheduleEnteredStateEffects(transaction, batch.store, postProcessing.enteredByState);
   if (options.scheduleReactions && batch.eventCode !== undefined) {
     scheduleEntityReactionBatch(transaction, batch.store, batch.eventCode, accepted, {
-      ownership: chooseReactionBatchOwnership(batch.store, batch.eventCode, accepted, options),
+      ownership: chooseReactionBatchOwnership(plan, postProcessing, options),
     });
   }
-  if (options.scheduleDespawnOn ?? true) scheduleDespawnOnRows(transaction, batch.store, accepted);
-  if (options.scheduleTerminal ?? true) scheduleTerminalRows(transaction, batch.store, accepted);
-  updateActorStateBuckets(batch.store, accepted);
+  if (postProcessing.dirtyRows) updateActorStateBuckets(batch.store, postProcessing.dirtyRows);
   options.onAccepted?.(accepted);
   return true;
 };
@@ -612,7 +494,6 @@ const reduceStagedSpawnLifecycle = (
 
   for (const batch of spawnBatches) {
     reduceAcceptedBatch(
-      runtime,
       {
         store: batch.store,
         indices: batch.indices,
@@ -785,7 +666,7 @@ const flushEntityLifecycleCleanup = (
     const cleanupPlan = collectDespawnCleanupPlan(runtime, despawns);
     const reactionBatches: EntityReactionBatch[] = [];
     for (const batch of cleanupPlan.lifecycleBatches) {
-      const reduced = reduceAcceptedBatch(runtime, batch, transaction, {
+      const reduced = reduceAcceptedBatch(batch, transaction, {
         scheduleDespawnOn: false,
         scheduleEffects: false,
         scheduleReactions: false,
@@ -819,7 +700,7 @@ export const reduceEntityBucket = (
 ): { readonly type: "skip" } | void => {
   const staged = getStagedSpawns(ctx.dispatch);
   const transaction = getEntityTransaction(ctx.dispatch);
-  const snapshot = staged.length > 0 ? snapshotRuntime(runtime) : undefined;
+  const snapshot = staged.length > 0 ? snapshotRuntimeMutation(runtime) : undefined;
   const eventCode = runtime.eventCodeByType[ctx.action.type];
 
   try {
@@ -832,7 +713,6 @@ export const reduceEntityBucket = (
 
     for (const batch of collectEntityPublicReducerBatches(runtime, eventCode, ctx.dispatch.route)) {
       if (reduceAcceptedBatch(
-        runtime,
         {
           store: batch.store,
           indices: batch.indices,
@@ -856,7 +736,7 @@ export const reduceEntityBucket = (
     touched = touched || publicCleanup;
     return touched ? undefined : { type: "skip" };
   } catch (error) {
-    if (snapshot) restoreRuntime(runtime, snapshot);
+    if (snapshot) restoreRuntimeMutation(runtime, snapshot);
     throw error;
   }
 };

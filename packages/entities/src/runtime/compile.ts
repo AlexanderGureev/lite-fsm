@@ -21,6 +21,18 @@ type EntityActorReducer = (
 export type EntityActorEffect = (deps: Record<string, unknown>) => unknown;
 export type EntityActorReaction = (deps: Record<string, unknown>) => unknown;
 
+export type EntityReducePlan = {
+  readonly eventCode: number;
+  readonly acceptStateCodes: readonly number[];
+  readonly allDefaultTransitionsIdentity: boolean;
+  readonly hasNonIdentityDefaultTransition: boolean;
+  readonly mayEnterEffectState: boolean;
+  readonly hasDespawnOnStates: boolean;
+  readonly hasReaction: boolean;
+  readonly mayEnterTerminalState: boolean;
+  readonly requiresReducerCall: boolean;
+};
+
 export type EntityTemplateMetadata = {
   readonly templateKey: string;
   readonly config: Record<string, Record<string, string | null | undefined> | undefined>;
@@ -39,6 +51,7 @@ export type EntityTemplateMetadata = {
   readonly effectsByStateCode: readonly (EntityActorEffect | undefined)[];
   readonly reactionsByEventType: Readonly<Record<string, EntityActorReaction>>;
   readonly reactionsByEventCode: readonly (EntityActorReaction | undefined)[];
+  readonly reducePlansByEventCode: readonly EntityReducePlan[];
   readonly reducer?: EntityActorReducer;
 };
 
@@ -86,6 +99,16 @@ const getTargetStateCode = (
 };
 
 const stateSlotForCode = (code: number): number => code + 1;
+
+const isTerminalStateCode = (code: number): boolean =>
+  code === ENTITY_RESOLVED_STATE_CODE || code === ENTITY_REJECTED_STATE_CODE || code === ENTITY_CANCELLED_STATE_CODE;
+
+const hasDespawnOnStates = (despawnStateMask: Uint8Array): boolean => {
+  for (let stateCode = 0; stateCode < despawnStateMask.length; stateCode += 1) {
+    if (despawnStateMask[stateCode] === 1) return true;
+  }
+  return false;
+};
 
 const collectTemplateEventTypes = (
   config: Record<string, Record<string, string | null | undefined> | undefined>,
@@ -233,6 +256,7 @@ export const compileEntityTemplate = (
     effectsByStateCode: compileEffectsByStateCode(templateKey, stateCodeByName, machine.effects),
     reactionsByEventType: compileReactionsByEventType(templateKey, eventTypes, machine.reactions),
     reactionsByEventCode: [],
+    reducePlansByEventCode: [],
     ...(typeof machine.reducer === "function" ? { reducer: machine.reducer as EntityActorReducer } : {}),
   };
 };
@@ -253,6 +277,70 @@ const compileDespawnLifecycleStateMask = (
   }
 
   return mask;
+};
+
+const compileReducePlan = (
+  metadata: EntityTemplateMetadata,
+  eventCode: number,
+  transitionTable: Int16Array,
+  acceptStateCodes: readonly number[],
+  hasReaction: boolean,
+  templateHasDespawnOnStates: boolean,
+): EntityReducePlan => {
+  let allDefaultTransitionsIdentity = true;
+  let hasNonIdentityDefaultTransition = false;
+  let mayEnterEffectState = false;
+  let mayEnterTerminalState = false;
+  const offset = eventCode * metadata.stateSlotCount;
+
+  for (const sourceCode of acceptStateCodes) {
+    const targetCode = transitionTable[offset + stateSlotForCode(sourceCode)];
+
+    if (targetCode !== sourceCode) {
+      allDefaultTransitionsIdentity = false;
+      hasNonIdentityDefaultTransition = true;
+    }
+    if (targetCode >= 0 && targetCode !== sourceCode && metadata.effectsByStateCode[targetCode]) {
+      mayEnterEffectState = true;
+    }
+    if (isTerminalStateCode(targetCode)) mayEnterTerminalState = true;
+  }
+
+  return {
+    eventCode,
+    acceptStateCodes,
+    allDefaultTransitionsIdentity,
+    hasNonIdentityDefaultTransition,
+    mayEnterEffectState,
+    hasDespawnOnStates: templateHasDespawnOnStates,
+    hasReaction,
+    mayEnterTerminalState,
+    requiresReducerCall: metadata.reducer !== undefined,
+  };
+};
+
+const compileReducePlansByEventCode = (
+  metadata: EntityTemplateMetadata,
+  eventCount: number,
+  transitionTable: Int16Array,
+  acceptStateCodesByEventCode: readonly (readonly number[])[],
+  reactionsByEventCode: readonly (EntityActorReaction | undefined)[],
+): readonly EntityReducePlan[] => {
+  const templateHasDespawnOnStates = hasDespawnOnStates(metadata.despawnStateMask);
+  const plans: EntityReducePlan[] = [];
+
+  for (let eventCode = 0; eventCode < eventCount; eventCode += 1) {
+    plans[eventCode] = compileReducePlan(
+      metadata,
+      eventCode,
+      transitionTable,
+      acceptStateCodesByEventCode[eventCode],
+      reactionsByEventCode[eventCode] !== undefined,
+      templateHasDespawnOnStates,
+    );
+  }
+
+  return plans;
 };
 
 const compileTemplateWithEventCodes = (
@@ -307,6 +395,13 @@ const compileTemplateWithEventCodes = (
     acceptStateCodesByEventCode,
     despawnLifecycleStateMask: compileDespawnLifecycleStateMask(metadata, eventCodeByType, transitionTable),
     reactionsByEventCode,
+    reducePlansByEventCode: compileReducePlansByEventCode(
+      metadata,
+      eventCount,
+      transitionTable,
+      acceptStateCodesByEventCode,
+      reactionsByEventCode,
+    ),
   };
 };
 

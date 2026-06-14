@@ -897,46 +897,60 @@ const scheduleKernelReactionBatch = (runtime, store, eventCode, indices) => {
   return batch;
 };
 
-const reduceKernelBatch = (runtime, store, indices, action, { scheduleReactions = false } = {}) => {
+const collectKernelDefaultTransitions = (store, indices, eventCode = 0) => {
   let firstNextState;
   for (const entity of indices) {
-    if (!resolveTransitionTarget(store, entity, 0)) continue;
+    if (!resolveTransitionTarget(store, entity, eventCode)) continue;
     firstNextState ??= store.metadata.publicStates[store.stateCode[entity]];
   }
-  if (indices.length === 0) return;
+  return firstNextState;
+};
 
-  if (store.metadata.reducer) {
-    store.metadata.reducer(
-      { state: firstNextState, context: {} },
-      action,
-      {
-        nextState: firstNextState,
-        config: undefined,
-        self: createReducerSelf(runtime, store, indices),
-        payloadFor() {
-          throw new Error("payloadFor is not available in diagnostic kernel TICK");
-        },
+const firstKernelPublicState = (store, indices) => {
+  const entity = indices[0];
+  return entity === undefined ? undefined : store.metadata.publicStates[store.stateCode[entity]];
+};
+
+const runKernelUserReducer = (runtime, store, indices, action, firstNextState, reducerSelf) => {
+  if (!store.metadata.reducer) return;
+
+  store.metadata.reducer(
+    { state: firstNextState, context: {} },
+    action,
+    {
+      nextState: firstNextState,
+      config: undefined,
+      self: reducerSelf ?? createReducerSelf(runtime, store, indices),
+      payloadFor() {
+        throw new Error("payloadFor is not available in diagnostic kernel TICK");
       },
-    );
-  }
+    },
+  );
+};
 
+const validateKernelFinalStates = (store, indices) => {
   for (const entity of indices) {
     const code = store.stateCode[entity];
     if (code !== entityInitStateCode && store.metadata.publicStates[code] === undefined) {
       throw new Error(`invalid diagnostic stateCode ${code}`);
     }
   }
+};
+
+const markKernelRowsAndPublicSlice = (store, indices) => {
   for (const entity of indices) store.rowVersion[entity] += 1;
   store.version += 1;
+};
 
+const scheduleKernelLifecycleWork = (runtime, store, indices, { eventCode = 0, scheduleReactions = false } = {}) => {
   for (const entity of indices) {
     const stateCode = store.stateCode[entity];
     if (stateCode < 0 || stateCode === store.prevStateCode[entity]) continue;
     if (!store.metadata.effectsByStateCode[stateCode]) continue;
   }
 
-  if (scheduleReactions && store.metadata.reactionsByEventCode[0]) {
-    scheduleKernelReactionBatch(runtime, store, 0, indices);
+  if (scheduleReactions && store.metadata.reactionsByEventCode[eventCode]) {
+    scheduleKernelReactionBatch(runtime, store, eventCode, indices);
   }
 
   scheduleDespawns(runtime, store, indices);
@@ -944,11 +958,24 @@ const reduceKernelBatch = (runtime, store, indices, action, { scheduleReactions 
   for (const entity of indices) {
     if (store.stateCode[entity] >= -1) continue;
   }
+};
 
+const updateKernelStateBuckets = (store, indices) => {
   for (let index = indices.length - 1; index >= 0; index -= 1) {
     const entity = indices[index];
     moveStateBucket(store, entity, store.prevStateCode[entity], store.stateCode[entity]);
   }
+};
+
+const reduceKernelBatch = (runtime, store, indices, action, { scheduleReactions = false } = {}) => {
+  const firstNextState = collectKernelDefaultTransitions(store, indices, 0);
+  if (indices.length === 0) return;
+
+  runKernelUserReducer(runtime, store, indices, action, firstNextState);
+  validateKernelFinalStates(store, indices);
+  markKernelRowsAndPublicSlice(store, indices);
+  scheduleKernelLifecycleWork(runtime, store, indices, { eventCode: 0, scheduleReactions });
+  updateKernelStateBuckets(store, indices);
 };
 
 const cleanupKernelReactionScope = (scopeScratch) => {
@@ -1113,7 +1140,62 @@ const resetCleanupKernel = (runtime, store, rowCount) => {
   }
 };
 
-const createMovementKernelRunner = (rowCount) => {
+const createReducerPhaseRunner = (batches, phase) => {
+  let createdSelf;
+  let preparedBatches = [];
+
+  return {
+    beforeOperation: () => {
+      if (phase !== "run-user-reducer") return;
+
+      preparedBatches = batches.map((batch) => ({
+        ...batch,
+        firstNextState: firstKernelPublicState(batch.store, batch.indices),
+        self: createReducerSelf(batch.runtime, batch.store, batch.indices),
+      }));
+    },
+    run: () => {
+      if (phase === "collect-default-transitions") {
+        for (const batch of batches) collectKernelDefaultTransitions(batch.store, batch.indices, 0);
+        return;
+      }
+      if (phase === "create-reducer-self") {
+        for (const batch of batches) createdSelf = createReducerSelf(batch.runtime, batch.store, batch.indices);
+        return;
+      }
+      if (phase === "run-user-reducer") {
+        for (const batch of preparedBatches) {
+          runKernelUserReducer(
+            batch.runtime,
+            batch.store,
+            batch.indices,
+            tickAction,
+            batch.firstNextState,
+            batch.self,
+          );
+        }
+        return;
+      }
+      if (phase === "validate-final-states") {
+        for (const batch of batches) validateKernelFinalStates(batch.store, batch.indices);
+        return;
+      }
+      if (phase === "mark-rows-public-slice") {
+        for (const batch of batches) markKernelRowsAndPublicSlice(batch.store, batch.indices);
+        return;
+      }
+      if (phase === "schedule-lifecycle-work") {
+        for (const batch of batches) scheduleKernelLifecycleWork(batch.runtime, batch.store, batch.indices);
+        return;
+      }
+
+      for (const batch of batches) updateKernelStateBuckets(batch.store, batch.indices);
+    },
+    read: () => createdSelf?.indices.length ?? preparedBatches.length,
+  };
+};
+
+const createMovementKernelFixture = (rowCount) => {
   const rows = createSoaRows(rowCount);
   const store = createKernelStore({
     templateKey: "movementActor",
@@ -1124,6 +1206,12 @@ const createMovementKernelRunner = (rowCount) => {
   });
   const runtime = createKernelRuntime([store], rowCount);
 
+  return { runtime, store };
+};
+
+const createMovementKernelRunner = (rowCount) => {
+  const { runtime, store } = createMovementKernelFixture(rowCount);
+
   return {
     run: () => {
       reduceKernelBatch(runtime, store, store.stateBuckets[0], tickAction);
@@ -1132,7 +1220,12 @@ const createMovementKernelRunner = (rowCount) => {
   };
 };
 
-const createProjectileKernelRunner = (rowCount) => {
+const createMovementReducerPhaseRunner = (rowCount, phase) => {
+  const { runtime, store } = createMovementKernelFixture(rowCount);
+  return createReducerPhaseRunner([{ runtime, store, indices: store.stateBuckets[0] }], phase);
+};
+
+const createProjectileKernelFixture = (rowCount) => {
   const rows = createSoaRows(rowCount);
   const store = createKernelStore({
     templateKey: "projectileActor",
@@ -1143,12 +1236,23 @@ const createProjectileKernelRunner = (rowCount) => {
   });
   const runtime = createKernelRuntime([store], rowCount);
 
+  return { runtime, store };
+};
+
+const createProjectileKernelRunner = (rowCount) => {
+  const { runtime, store } = createProjectileKernelFixture(rowCount);
+
   return {
     run: () => {
       reduceKernelBatch(runtime, store, store.stateBuckets[0], tickAction);
       flushKernelDespawns(runtime);
     },
   };
+};
+
+const createProjectileReducerPhaseRunner = (rowCount, phase) => {
+  const { runtime, store } = createProjectileKernelFixture(rowCount);
+  return createReducerPhaseRunner([{ runtime, store, indices: store.stateBuckets[0] }], phase);
 };
 
 const createCleanupKernelFixture = (rowCount) => {
@@ -1269,6 +1373,17 @@ const createSpriteKernelRunner = (rowCount) => {
   };
 };
 
+const createSpriteReducerPhaseRunner = (rowCount, phase) => {
+  const { runtime, movementStore, spriteStore } = createSpriteKernelFixture(rowCount);
+  return createReducerPhaseRunner(
+    [
+      { runtime, store: movementStore, indices: movementStore.stateBuckets[0] },
+      { runtime, store: spriteStore, indices: spriteStore.stateBuckets[0] },
+    ],
+    phase,
+  );
+};
+
 const createSpriteKernelPhaseRunner = (rowCount, phase) => {
   const { runtime, movementStore, spriteStore } = createSpriteKernelFixture(rowCount);
   const indices = spriteStore.stateBuckets[0];
@@ -1320,6 +1435,22 @@ const createSpriteKernelPhaseRunner = (rowCount, phase) => {
   };
 };
 
+const reducerPipelineOperationsPerSample = {
+  "movement-update": 10,
+  "projectile-lifetime": 10,
+  "sprite-sync-reaction": 10,
+};
+
+const createReducerPhaseRunners = (createRunner) => ({
+  "reducer-collect-default-transitions": (rowCount) => createRunner(rowCount, "collect-default-transitions"),
+  "reducer-create-self": (rowCount) => createRunner(rowCount, "create-reducer-self"),
+  "reducer-run-user-reducer": (rowCount) => createRunner(rowCount, "run-user-reducer"),
+  "reducer-validate-final-states": (rowCount) => createRunner(rowCount, "validate-final-states"),
+  "reducer-mark-rows-public-slice": (rowCount) => createRunner(rowCount, "mark-rows-public-slice"),
+  "reducer-schedule-lifecycle-work": (rowCount) => createRunner(rowCount, "schedule-lifecycle-work"),
+  "reducer-update-state-buckets": (rowCount) => createRunner(rowCount, "update-state-buckets"),
+});
+
 const layerDefinitions = [
   {
     key: "raw-soa",
@@ -1342,14 +1473,39 @@ const layerDefinitions = [
     },
   },
   {
-    key: "raw-entity-kernel",
-    label: "raw entity kernel",
-    operationsPerSample: {
-      "movement-update": 20,
-      "projectile-lifetime": 20,
-      "despawn-on-cleanup": 5,
-      "sprite-sync-reaction": 10,
-    },
+    key: "reducer-collect-default-transitions",
+    label: "collect/default transitions",
+    operationsPerSample: reducerPipelineOperationsPerSample,
+  },
+  {
+    key: "reducer-create-self",
+    label: "create reducer self",
+    operationsPerSample: reducerPipelineOperationsPerSample,
+  },
+  {
+    key: "reducer-run-user-reducer",
+    label: "run user reducer",
+    operationsPerSample: reducerPipelineOperationsPerSample,
+  },
+  {
+    key: "reducer-validate-final-states",
+    label: "validate final states",
+    operationsPerSample: reducerPipelineOperationsPerSample,
+  },
+  {
+    key: "reducer-mark-rows-public-slice",
+    label: "mark rows/public slice",
+    operationsPerSample: reducerPipelineOperationsPerSample,
+  },
+  {
+    key: "reducer-schedule-lifecycle-work",
+    label: "schedule lifecycle work",
+    operationsPerSample: reducerPipelineOperationsPerSample,
+  },
+  {
+    key: "reducer-update-state-buckets",
+    label: "update state buckets",
+    operationsPerSample: reducerPipelineOperationsPerSample,
   },
   {
     key: "reduce-entity-batches",
@@ -1422,6 +1578,16 @@ const layerDefinitions = [
     },
   },
   {
+    key: "raw-entity-kernel",
+    label: "raw entity kernel",
+    operationsPerSample: {
+      "movement-update": 20,
+      "projectile-lifetime": 20,
+      "despawn-on-cleanup": 5,
+      "sprite-sync-reaction": 10,
+    },
+  },
+  {
     key: "public-transition",
     label: "public manager.transition",
     operationsPerSample: {
@@ -1440,6 +1606,7 @@ const scenarioDefinitions = [
     createRunnerByLayer: {
       "raw-soa": createMovementRawSoaRunner,
       "semantic-soa": createMovementSemanticSoaRunner,
+      ...createReducerPhaseRunners(createMovementReducerPhaseRunner),
       "raw-entity-kernel": createMovementKernelRunner,
       "public-transition": createMovementPublicRunner,
     },
@@ -1450,6 +1617,7 @@ const scenarioDefinitions = [
     createRunnerByLayer: {
       "raw-soa": createProjectileRawSoaRunner,
       "semantic-soa": createProjectileSemanticSoaRunner,
+      ...createReducerPhaseRunners(createProjectileReducerPhaseRunner),
       "raw-entity-kernel": createProjectileKernelRunner,
       "public-transition": (rowCount) => createProjectilePublicRunner(rowCount, "lifetime"),
     },
@@ -1475,6 +1643,7 @@ const scenarioDefinitions = [
     createRunnerByLayer: {
       "raw-soa": createSpriteRawSoaRunner,
       "semantic-soa": createSpriteSemanticSoaRunner,
+      ...createReducerPhaseRunners(createSpriteReducerPhaseRunner),
       "raw-entity-kernel": createSpriteKernelRunner,
       "reduce-entity-batches": (rowCount) => createSpriteKernelPhaseRunner(rowCount, "reduce-entity-batches"),
       "schedule-reaction-batch": (rowCount) => createSpriteKernelPhaseRunner(rowCount, "schedule-reaction-batch"),

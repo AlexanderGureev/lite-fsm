@@ -238,18 +238,18 @@ Breakdown показывает, что основная оставшаяся ц�
 
 Ожидаемый выигрыш: высокий для всех reducer-only сценариев. Текущий raw entity kernel на `50k` примерно в `4-5x` медленнее semantic SoA: `movement` `0.954ms` против `0.244ms`, `projectile` `0.886ms` против `0.193ms`.
 
-Затронутые места:
+Затронутые места reducer layer:
 
-- `packages/entities/src/runtime/reduce.ts`: `resolveTransitionTarget`, `applyDefaultTransitions`, `createReducerSelf`, `assertValidStateCodes`, `markActorRowsTouched`, `scheduleEnteredStateEffects`, `scheduleDespawnOnRows`, `scheduleTerminalRows`, `updateActorStateBuckets`.
+- `packages/entities/src/runtime/reduce.ts`: `resolveTransitionTarget`, `applyDefaultTransitions`, `postProcessAcceptedRows`, `markActorRowsTouched`, `scheduleEnteredStateEffects`, `updateActorStateBuckets`.
 - `packages/entities/src/runtime/compile.ts`: compile-time metadata для event/store fast path.
-- `packages/entities/src/runtime/state.ts`: `refreshActorPublicSlice`.
+- `packages/entities/src/runtime/state.ts`: stable reducer self cache, `getActorReducerSelf`, `refreshActorPublicSlice`.
 
 Что исправлять:
 
 1. Компилировать per-event reduce plan. Для события с одним принимающим state и identity transition (`active -> active`) не нужно записывать `prevStateCode` и `stateCode` для каждой строки до reducer.
 2. Если template не имеет effects, terminal states, `despawnOn` и reactions для event, не запускать соответствующие проходы по всем accepted rows.
 3. Не выполнять `updateActorStateBuckets` для identity transition, пока reducer явно не записал другой `stateCode`. Нужен дешевый способ определить state writes: отдельный dirty list, explicit helper или compile-time режим для reducer-only templates.
-4. Создавать `self` со стабильной формой один раз на store и менять только `indices`. Сейчас `createReducerSelf` заново строит object и проходит `Object.entries(store.columns)` на каждый batch.
+4. Создавать `self` со стабильной формой один раз на store и менять только `indices`.
 5. Объединить проходы post-processing там, где они остаются обязательными: validation, rowVersion, effects/despawn/terminal scan могут быть одним циклом.
 
 Критерий приемки:
@@ -257,6 +257,76 @@ Breakdown показывает, что основная оставшаяся ц�
 - `movement update / 50 000 / raw entity kernel` должен опуститься ниже `0.5ms` первым шагом.
 - `projectile lifetime update / 50 000 / raw entity kernel` должен опуститься ниже `0.5ms` первым шагом.
 - Gate reducer-only должен двигаться от `4.6-5.4x` к бюджету `1.5x`.
+
+### Итог problem 3: reducer layer
+
+Команды:
+
+```bash
+pnpm run bench:entities:record -- --runs 1 --label reducer-layer-smoke --include gate,diagnostics --row-counts 1000
+pnpm run bench:entities:record -- --runs 3 --label after-reducer-layer --include gate,diagnostics
+pnpm run bench:entities:compare -- .bench/entities/after-reaction-scope.json .bench/entities/after-reducer-layer.json
+pnpm run bench:entities:compare -- .bench/entities/codex-baseline-2026-06-14.json .bench/entities/after-reducer-layer.json
+```
+
+Артефакты:
+
+- [`after-reducer-layer.json`](../../.bench/entities/after-reducer-layer.json)
+- [`after-reducer-layer.md`](../../.bench/entities/after-reducer-layer.md)
+- [`after-reducer-layer-vs-after-reaction-scope.md`](../../.bench/entities/after-reducer-layer-vs-after-reaction-scope.md)
+- [`after-reducer-layer-vs-codex-baseline-2026-06-14.md`](../../.bench/entities/after-reducer-layer-vs-codex-baseline-2026-06-14.md)
+
+Окружение итогового record: `2026-06-14T22:36:11.015Z`, Git `6924c1ba6c38`, branch `entities`, status `dirty`, Node `v24.16.0`, CPU `Apple M1 Max`, package manager `pnpm/10.33.0`.
+
+Gate относительно `after-reaction-scope`:
+
+| Сценарий | Строки | Before median | After median | Ratio после | Изменение | RSD after |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `movement update` | 10 000 | 0.254ms | 0.101ms | 2.19x | -60.0% | 5.5% |
+| `movement update` | 50 000 | 1.286ms | 0.471ms | 2.04x | -63.4% | 1.9% |
+| `projectile lifetime update` | 10 000 | 0.236ms | 0.086ms | 2.42x | -63.3% | 3.9% |
+| `projectile lifetime update` | 50 000 | 1.171ms | 0.411ms | 2.28x | -64.9% | 5.6% |
+| `despawnOn cleanup` | 10 000 | 0.256ms | 0.130ms | 2.35x | -49.3% | 7.5% |
+| `despawnOn cleanup` | 50 000 | 1.163ms | 0.508ms | 1.81x | -56.3% | 1.9% |
+| `sprite sync reaction` | 10 000 | 0.893ms | 0.589ms | 7.55x | -34.0% | 0.5% |
+| `sprite sync reaction` | 50 000 | 4.792ms | 3.093ms | 6.32x | -35.5% | 5.2% |
+
+Соседних gate-регрессий выше `10%` относительно `after-reaction-scope` нет: все public gate median ускорились. От исходного `codex-baseline-2026-06-14` итог также быстрее во всех gate-сценариях: `movement 50 000` на `56.2%`, `projectile 50 000` на `57.9%`, `despawnOn cleanup 50 000` на `97.5%`, `sprite sync reaction 50 000` на `62.8%`.
+
+Diagnostics reducer layers для `50 000` строк:
+
+| Слой | `movement update` | RSD | `projectile lifetime update` | RSD | `sprite sync reaction` | RSD |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `collect/default transitions` | 0.116ms | 1.1% | 0.115ms | 0.5% | 0.232ms | 0.6% |
+| `create reducer self` | 0.000ms | 7.2% | 0.000ms | 6.3% | 0.000ms | 0.8% |
+| `run user reducer` | 0.211ms | 45.0% | 0.122ms | 1.5% | 0.191ms | 0.1% |
+| `validate final states` | 0.110ms | 0.8% | 0.106ms | 0.8% | 0.211ms | 1.2% |
+| `mark rows/public slice` | 0.048ms | 8.2% | 0.048ms | 8.3% | 0.096ms | 0.2% |
+| `schedule lifecycle work` | 0.174ms | 5.5% | 0.174ms | 4.1% | 0.346ms | 0.5% |
+| `update state buckets` | 0.065ms | 15.5% | 0.067ms | 15.0% | 0.131ms | 0.2% |
+| `reduce entity batches` | n/a | n/a | n/a | n/a | 1.374ms | 10.4% |
+| `raw entity kernel` | 0.888ms | 1.2% | 0.810ms | 0.4% | 2.173ms | 7.0% |
+| `public manager.transition` | 0.480ms | 2.7% | 0.407ms | 0.7% | 3.073ms | 6.3% |
+
+Public overhead над diagnostics `raw entity kernel` для `50 000` строк:
+
+| Сценарий | `raw entity kernel` | `public manager.transition` | Public minus kernel | Ratio public/kernel |
+| --- | ---: | ---: | ---: | ---: |
+| `movement update` | 0.888ms | 0.480ms | -0.408ms | 0.54x |
+| `projectile lifetime update` | 0.810ms | 0.407ms | -0.403ms | 0.50x |
+| `despawnOn cleanup` | 0.850ms | 0.517ms | -0.332ms | 0.61x |
+| `sprite sync reaction` | 2.173ms | 3.073ms | 0.900ms | 1.41x |
+
+Отрицательный overhead в reducer-only и cleanup строках означает, что diagnostics `raw entity kernel` продолжает моделировать более общий internal kernel и завышает стоимость относительно production `manager.transition` после reducer layer. Поэтому strict критерий `raw entity kernel < 0.5ms` не считается закрытым по diagnostics fixture: `movement` показывает `0.888ms`, `projectile` показывает `0.810ms`. При этом production gate для тех же `50 000` строк уже ниже `0.5ms`: `movement` `0.471ms`, `projectile` `0.411ms`.
+
+Итог first gate: достигнут частично. Reducer-only production path прошел первый временной порог `0.5ms` для `50 000` строк, и соседних public gate-регрессий нет. Полный first gate не закрыт: `sprite sync reaction / 50 000 / reduce entity batches` остается выше `1.0ms` (`1.374ms`), `sprite sync reaction / 50 000 / raw entity kernel` остается выше `2.0ms` (`2.173ms`), а diagnostics `raw entity kernel` для reducer-only сценариев требует обновления модели перед использованием как strict gate.
+
+Остаточные риски для problem 5:
+
+1. Public ratio reducer-only еще выше бюджета `1.50x`: `movement 50 000` имеет `2.04x`, `projectile 50 000` имеет `2.28x`.
+2. `sprite sync reaction / 50 000` ускорился до `3.093ms`, но остается далек от бюджета `2.00x`: `6.32x` к SoA.
+3. Для `sprite sync reaction / 50 000` public overhead над diagnostics kernel составляет `0.900ms`, поэтому core/bucket overhead и reaction/public path остаются отдельной областью problem 5.
+4. Diagnostics fixture нужно синхронизировать с новым reducer fast path: сейчас production public path быстрее modeled `raw entity kernel` для reducer-only сценариев.
 
 ### 4. Уменьшить allocations и проверку payload в spawn/lifecycle path
 

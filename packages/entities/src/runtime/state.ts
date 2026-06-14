@@ -1,3 +1,4 @@
+import { LiteFsmError } from "@lite-fsm/core";
 import type { MachineStore, StorageManagerContext, StorageTemplate } from "@lite-fsm/core";
 
 import { createEntityAccess, type EntityAccess } from "./access";
@@ -61,7 +62,19 @@ export type ColumnarActorStore = {
   routingScratchVersion: number;
   acceptStateBucketsByEventCode: EntityIndex[][][];
   columns: Record<string, EntityColumn>;
+  reducerSelf: EntityReducerSelfCache;
   publicSlice: EntityPublicStateSlice;
+};
+
+export type EntityReducerSelfCache = Record<string, unknown> & {
+  indices: readonly EntityIndex[];
+  readonly states: EntityTemplateMetadata["stateCodeByName"];
+  presence: Uint8Array;
+  stateCode: Int16Array;
+  prevStateCode: Int16Array;
+  rowVersion: Uint32Array;
+  has(entity: EntityIndex): boolean;
+  entityId(entity: EntityIndex): string;
 };
 
 export type EntityRuntimeState = {
@@ -80,6 +93,9 @@ export type EntityRuntimeState = {
 const runtimeByManager = new WeakMap<object, EntityRuntimeState>();
 
 export { compileEntityTemplate, ENTITY_INIT_STATE, ENTITY_INIT_STATE_CODE, getEntityStateCode, getEntityStateName } from "./compile";
+
+const runtimeError = (reason: string): LiteFsmError =>
+  new LiteFsmError("LITE_FSM_INVALID_STORAGE_RUNTIME", `[lite-fsm/entities] ${reason}.`);
 
 const emptyColumnFactories = {
   f32: () => new Float32Array(0),
@@ -165,7 +181,52 @@ const createPublicSlice = (store: Pick<ColumnarActorStore, "capacity" | "count" 
   capacity: store.capacity,
 });
 
-const createColumnarActorStore = (metadata: EntityTemplateMetadata): ColumnarActorStore => {
+const createActorReducerSelf = (entityStore: EntityStore, store: ColumnarActorStore): EntityReducerSelfCache => {
+  const self: EntityReducerSelfCache = {
+    indices: [],
+    states: store.metadata.stateCodeByName,
+    presence: store.presence,
+    stateCode: store.stateCode,
+    prevStateCode: store.prevStateCode,
+    rowVersion: store.rowVersion,
+    has(entity: EntityIndex) {
+      return store.presence[entity] === 1;
+    },
+    entityId(entity: EntityIndex) {
+      const id = entityStore.ids[entity];
+      if (id !== undefined) return id;
+      throw runtimeError(`unknown entity index ${entity}`);
+    },
+  };
+
+  for (const name of Object.keys(store.metadata.initialContext)) {
+    self[name] = store.columns[name];
+  }
+
+  return self;
+};
+
+export const rebindActorReducerSelf = (store: ColumnarActorStore): void => {
+  const { reducerSelf } = store;
+  reducerSelf.presence = store.presence;
+  reducerSelf.stateCode = store.stateCode;
+  reducerSelf.prevStateCode = store.prevStateCode;
+  reducerSelf.rowVersion = store.rowVersion;
+
+  for (const name of Object.keys(store.metadata.initialContext)) {
+    reducerSelf[name] = store.columns[name];
+  }
+};
+
+export const getActorReducerSelf = (
+  store: ColumnarActorStore,
+  indices: readonly EntityIndex[],
+): EntityReducerSelfCache => {
+  store.reducerSelf.indices = indices;
+  return store.reducerSelf;
+};
+
+const createColumnarActorStore = (metadata: EntityTemplateMetadata, entityStore: EntityStore): ColumnarActorStore => {
   const columns = Object.fromEntries(
     Object.entries(metadata.initialContext).map(([name, descriptor]) => [
       name,
@@ -188,9 +249,11 @@ const createColumnarActorStore = (metadata: EntityTemplateMetadata): ColumnarAct
     routingScratchVersion: 0,
     acceptStateBucketsByEventCode: [],
     columns,
+    reducerSelf: undefined as unknown as EntityReducerSelfCache,
     publicSlice: { storage: "entity", version: 0, count: 0, capacity: 0 },
   };
 
+  store.reducerSelf = createActorReducerSelf(entityStore, store);
   store.acceptStateBucketsByEventCode = metadata.acceptStateCodesByEventCode.map((stateCodes) =>
     stateCodes.flatMap((stateCode) => (stateCode >= 0 ? [store.stateBuckets[stateCode]] : [])),
   );
@@ -217,7 +280,7 @@ export const createEntityRuntimeState = (
 
   for (const template of templates) {
     const metadata = compiled.metadataByKey[template.key];
-    const store = createColumnarActorStore(metadata);
+    const store = createColumnarActorStore(metadata, runtime.entityStore);
     runtime.actorStores[template.key] = store;
     for (let eventCode = 0; eventCode < metadata.eventAcceptMask.length; eventCode += 1) {
       if (metadata.eventAcceptMask[eventCode] === 1) {
@@ -266,6 +329,7 @@ export const ensureActorCapacity = (store: ColumnarActorStore, capacity: number)
   for (const [name, descriptor] of Object.entries(store.metadata.initialContext)) {
     store.columns[name] = growColumn(store.columns[name], descriptor as EntityContextDescriptor, capacity);
   }
+  rebindActorReducerSelf(store);
 };
 
 export const getInitialColumnValue = (descriptor: EntityContextDescriptor): number | string => {
@@ -284,7 +348,7 @@ export const refreshActorPublicSlice = (store: ColumnarActorStore): void => {
   store.publicSlice = createPublicSlice(store);
 };
 
-const rebuildAcceptStateBuckets = (store: ColumnarActorStore): void => {
+export const rebuildActorAcceptStateBuckets = (store: ColumnarActorStore): void => {
   store.acceptStateBucketsByEventCode = store.metadata.acceptStateCodesByEventCode.map((stateCodes) =>
     stateCodes.flatMap((stateCode) => (stateCode >= 0 ? [store.stateBuckets[stateCode]] : [])),
   );
@@ -505,7 +569,7 @@ export const rebuildEntityRuntimeIndexes = (runtime: EntityRuntimeState): void =
     store.statePosition.fill(-1);
     store.acceptedScratch = [];
     store.routingScratchVersion = 0;
-    rebuildAcceptStateBuckets(store);
+    rebuildActorAcceptStateBuckets(store);
   }
 
   for (let entity = 0; entity < entityStore.capacity; entity += 1) {
