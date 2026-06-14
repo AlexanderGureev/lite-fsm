@@ -387,7 +387,7 @@ Stretch-цель:
 
 - Diagnostics fixture должен отражать новую reducer architecture.
 - Stable record:
-  - `pnpm run bench:entities:record -- --runs 5 --label after-reducer-layer --include gate,diagnostics`.
+  - `pnpm run bench:entities:record -- --runs 3 --label after-reducer-layer --include gate,diagnostics`.
 - Compare:
   - `pnpm run bench:entities:compare -- .bench/entities/after-reaction-scope.json .bench/entities/after-reducer-layer.json`;
   - при необходимости `pnpm run bench:entities:compare -- .bench/entities/codex-baseline-2026-06-14.json .bench/entities/after-reducer-layer.json`.
