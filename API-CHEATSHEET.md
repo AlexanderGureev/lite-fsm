@@ -281,31 +281,112 @@ State effect приоритетнее `"*"`. Wildcard срабатывает и 
 
 ### Plugin system
 
-Публичный plugin объявляется только через `definePlugin<PluginEvents, HostEvents>().create({ name, ...sections })`. Первый generic — события, которые plugin добавляет в `manager.transition` и может эмитить через `scope.transition`. Второй generic — события host manager, которые plugin типизированно наблюдает в callbacks. Публичного callback `install` нет. `MachineManager(..., { plugins })` принимает только marked values из builder API; structural objects отклоняются runtime validation.
+Plugin расширяет `MachineManager` декларативно, не трогая core. Его объявляют только билдером `definePlugin<PluginEvents, HostEvents>().create({ name, ...sections })`, где каждый ключ объекта — **секция** — добавляет одну возможность.
 
-Типы возвращаемых values доступны из root entrypoint как `LiteFsmPlugin` и `LiteFsmStorageRuntimeDefinition`. Root entrypoint также экспортирует `ReadonlyManagerAction`, `StorageManagerContext`, `DispatchContext`, `ManagerRuntimeContext`, `ManagerExtensionFactory`, `ManagerExtensionType`, `ManagerExtensionTypeLambda`, `PluginScopedInvocationContext`, `StorageRuntimeExtension`, `StorageDependentField`, `StorageDependentTypeLambda`, `StorageTemplate` и public `Storage*Context` для portable inferred types exported plugin factories. `StorageDispatchContext` не экспортируется; `ctx.dispatch` доступен через public callback context types. Создавать structural plugin/storage values по этим типам нельзя.
+- `PluginEvents` — события, которые plugin добавляет в `manager.transition` и эмитит через `scope.transition`.
+- `HostEvents` — события host manager, которые plugin типизированно наблюдает в callbacks.
+- `MachineManager(..., { plugins })` принимает только значения, помеченные билдером (результат `definePlugin().create(...)`); обычный объект той же формы runtime отклоняет.
 
-`PluginEvents` добавляются к manager-level `transition` для текущего plugin tuple, но не становятся событиями машин автоматически. Если машина обрабатывает plugin event, включите его явно: `type AppEvents = HostEvents | PluginManagerEvents<AppPlugins>`. `HostEvents` используются только для contextual typing внутри plugin definition и не входят в `PluginManagerEvents<Plugins>`. Если второй generic не указан, поля action в callbacks наблюдения (`ctx.action`, `ctx.originalAction`, `routeMeta` `ctx.action`, `scope.event`) типизируются как `ReadonlyManagerAction<AnyEvent>`; `definePlugin<PluginEvents>()` по-прежнему добавляет в `PluginManagerEvents<Plugins>` только `PluginEvents`.
+**Секции плагина**
 
-Storage-specific machine typing подключается через app wrapper `TypedCreateMachineFn<P, D, typeof plugins>`. Plugin tuple не расширяет `P` и `D` автоматически: добавьте `PluginManagerEvents<typeof plugins>` и `EffectDeps<AppDeps, typeof plugins>` явно. Прямой `createMachine<AppEvents>(...)` остается core-only API и не принимает custom storage kinds.
+| Секция             | Что добавляет                          | Где видно                       |
+| ------------------ | -------------------------------------- | ------------------------------- |
+| `name`             | обязательный уникальный идентификатор   | diagnostics, проверка дубликатов |
+| `routeMeta`        | ключ маршрутизации в `action.meta`      | `manager.transition({ meta })`   |
+| `manager`          | поле/метод на менеджере                 | `manager.<key>(...)`             |
+| `intercept`        | замена или отмена action до reducer-ов  | фаза interceptors                |
+| `hooks`            | наблюдатели фаз dispatch                | `beforeReduce` … `afterEffects`  |
+| `scopedDeps`       | dep на время одного effect/reaction     | `deps.<key>` в effect            |
+| `scopedTransition` | метод на `deps.transition`              | `deps.transition.<key>(...)`     |
+| `storage`          | свой вид хранилища машин                 | `storage: "<kind>"` у машины     |
 
-Все plugin keys находятся в плоском namespace: `routeMeta.cacheKey` означает `action.meta.cacheKey`, `manager.cache` — `manager.cache`, `scopedDeps.trace` — `deps.trace`, `scopedTransition.refresh` — `deps.transition.refresh`. Core не добавляет prefix; plugin author и integrator отвечают за уникальные keys, особенно в multi-instance factories. Дубликаты route meta, manager, scoped deps, scoped transition и storage kind являются hard error; diagnostics указывают section, key и обоих владельцев.
+```ts
+type FlushAnalytics = FSMEvent<"ANALYTICS_FLUSH", { queueId: string }>;
 
-`routeMeta` объявляет routing contract, а не пользовательские данные. Ключ section становится action meta key; используйте scalar keys вроде `entityId`, `cacheKey`, `documentId`, `tenantId`. Reserved route/sender keys запрещены. Resolver возвращает `string | readonly string[]`; core runtime проверяет result resolver, а raw `value` валидирует сам resolver, если plugin требует строгий input. `dispatch.route` остается single constraint: один action может содержать только один active routing key из `actorId`, registered plugin route keys, `groupId`, `groupTag`. Несколько routing keys бросают `LITE_FSM_AMBIGUOUS_ROUTE_META`; для fanout отправляйте отдельные `manager.transition(...)` или unscoped domain event. `PluginRouteMeta<PluginUnion>` возвращает raw map значений, а optional semantics относятся к `manager.transition(...).meta`.
+const analyticsPlugin = definePlugin<FlushAnalytics, HostEvents>().create({
+  name: "analytics",
+  routeMeta: {
+    queueId: (value: string) => value, // value → action.meta.queueId
+  },
+  manager: {
+    analytics: (ctx) => ({
+      flush: (queueId: string) => ctx.transition({ type: "ANALYTICS_FLUSH", payload: { queueId } }),
+    }),
+  },
+  intercept: (ctx) => console.log("seen", ctx.action.type),
+  hooks: { afterEffects: (ctx) => console.log("done", ctx.action.type) },
+  scopedDeps: {
+    sink: (scope) => ({ record: (name: string) => console.log(scope.event.type, name) }),
+  },
+  scopedTransition: {
+    flush: (scope) => (queueId: string) => scope.transition({ type: "ANALYTICS_FLUSH", payload: { queueId } }),
+  },
+});
 
-`manager` объявляет manager extensions. Ключ section становится полем returned manager, тип поля равен return type factory. Runtime DSL остается прежним: `definePlugin().create({ manager: { key(ctx) { ... } } })`. Factory получает `ManagerRuntimeContext<PluginEvents, S = MachineStore>`: `ctx.transition(...)` принимает события plugin, а не `HostEvents`, `ctx.config` имеет тип текущего store `S`, `ctx.getState()` возвращает `MachinesState<S>`. Если тип extension зависит от host context и не выводится через generic factory, plugin definition может объявить поле как `ManagerExtensionFactory & ManagerExtensionType<Lambda>`, где `Lambda extends ManagerExtensionTypeLambda` вычисляет `type` из `this["context"]`. Это type-only контракт; runtime section остается обычной функцией. Factory вызывается один раз при создании manager после compile templates, runtime state и initial public state.
+const manager = MachineManager({ checkout }, { plugins: [analyticsPlugin] });
+manager.analytics.flush("manual"); // секция manager
+manager.transition({ type: "TRACK", meta: { queueId: "checkout" } }); // секция routeMeta
+```
 
-`intercept(ctx)` выполняется после storage `prepareAction`, в plugin order и до reducer delivery. Context содержит `action`, `originalAction`, `skipDelivery`, `options`, `runtime` и `reportError(error)`. Возврат `{}` является no-op; `{ action }` заменяет committed action и пересчитывает route; `{ skipDelivery: true }` пропускает delivery в machines; `{ stopInterceptors: true }` останавливает только следующие interceptors. Runtime принимает только `void` или plain object с полями `action`, `skipDelivery`, `stopInterceptors`; unknown fields и unknown result shapes бросают `LITE_FSM_INVALID_PLUGIN_CALLBACK_RESULT` с diagnostic владельца `plugin '<name>' intercept`.
+Машина получает `scopedDeps` и `scopedTransition` прямо в аргументах effect:
 
-`hooks` задает функции фаз `beforeReduce`, `afterReduce`, `beforeCommit`, `beforeSubscribers`, `beforeEffects`, `afterEffects`. Hooks выполняются по фазе и plugin order, видят финальный action после interceptors, не управляют replacement/skip/stop, а return value игнорируется. Вызов `manager.transition(...)` из hook запрещен и бросает `LiteFsmError` с кодом `LITE_FSM_REENTRANT_TRANSITION_FORBIDDEN`; вызовы из subscribers и effects остаются разрешены.
+```ts
+effects: {
+  opened: ({ sink, transition }) => {
+    sink.record("opened"); // dep из scopedDeps
+    transition.flush("checkout"); // метод из scopedTransition
+  },
+}
+```
 
-Guarded boundary запрещает nested `manager.transition(...)` в `plugin.intercept`, `storage.prepareAction`, `storage.beforeReduce`, `storage.acceptsEvent`, `storage.reduce`, `storage.reduceBucket`, `storage.commit`, `storage.reactions` и hook phases `hook.beforeReduce`, `hook.afterReduce`, `hook.beforeCommit`, `hook.beforeSubscribers`, `hook.beforeEffects`, `hook.afterEffects`. Ошибка guard пробрасывается из текущего `manager.transition(...)`, не вызывает `onError` автоматически и не запускает вложенный dispatch: action не проходит normalize, middleware, interceptors, reducers, subscribers или effects.
+**Типизация событий**
 
-Для текущего action plugin/storage callback использует return protocol фазы и `ctx.dispatch.runtime` для staged данных. Для нового action используйте subscriber или effect, где reentrant `transition(...)` остается разрешен. Explicit scheduler/defer/enqueue API в этом релизе не добавляется.
+- `PluginEvents` добавляются к `manager.transition` текущего набора plugin-ов, но не становятся событиями машин автоматически. Чтобы машина их обрабатывала: `type AppEvents = HostEvents | PluginManagerEvents<AppPlugins>`.
+- `HostEvents` нужны только для типизации внутри определения plugin и не входят в `PluginManagerEvents<Plugins>`.
+- Без второго generic поля action в callbacks наблюдения (`ctx.action`, `ctx.originalAction`, `routeMeta` `ctx.action`, `scope.event`) типизируются как `ReadonlyManagerAction<AnyEvent>`; `definePlugin<PluginEvents>()` всё равно добавляет в `PluginManagerEvents<Plugins>` только `PluginEvents`.
+- Storage-specific типизацию машин даёт обёртка `TypedCreateMachineFn<P, D, typeof plugins>`. Набор plugin-ов не расширяет `P` и `D` сам — добавьте `PluginManagerEvents<typeof plugins>` и `EffectDeps<AppDeps, typeof plugins>` явно. Прямой `createMachine<AppEvents>(...)` остаётся core-only и не принимает custom storage kinds.
 
-Storage reactions выполняются после public commit и до subscribers, поэтому входят в guarded boundary: nested dispatch из `reactions.run` запрещен, чтобы subscriber текущего action не получил state, уже измененный вложенным action. Storage effects запускаются позже и сохраняют разрешенную reentrant semantics.
+**Плоский namespace.** Ключи всех секций живут в одном пространстве имён: `routeMeta.cacheKey` → `action.meta.cacheKey`, `manager.cache` → `manager.cache`, `scopedDeps.trace` → `deps.trace`, `scopedTransition.refresh` → `deps.transition.refresh`. Core не добавляет prefix; за уникальность ключей отвечают автор plugin и интегратор (особенно в multi-instance factories). Дубликаты `routeMeta`, `manager`, scoped deps/transition и storage kind — hard error; diagnostics указывают секцию, ключ и обоих владельцев.
 
-Ошибки из `intercept`, hooks, guarded storage callbacks и route recalculation пробрасываются из `manager.transition(...)` и не вызывают `onError` автоматически. `ctx.reportError(error)` вызывает текущий `onError` и не меняет control flow. Replacement action из plugin или storage callback валидируется до route recalculation: это должен быть object с `type: string`; `@@lite-fsm/*` запрещен и бросает `LITE_FSM_INVALID_REPLACEMENT_ACTION`. Если initial action или replacement action содержит несколько active routing keys, route recalculation бросает `LITE_FSM_AMBIGUOUS_ROUTE_META` до delivery и до вызова plugin route resolvers. Diagnostics для replacement указывают источник: `plugin '<name>' intercept`, `storage runtime '<kind>' prepareAction` или `storage runtime '<kind>' beforeReduce`.
+**Экспортируемые типы.** Root entrypoint экспортирует `LiteFsmPlugin`, `LiteFsmStorageRuntimeDefinition`, `ReadonlyManagerAction`, `StorageManagerContext`, `DispatchContext`, `ManagerRuntimeContext`, `ManagerExtensionFactory`, `ManagerExtensionType`, `ManagerExtensionTypeLambda`, `PluginScopedInvocationContext`, `StorageRuntimeExtension`, `StorageDependentField`, `StorageDependentTypeLambda`, `StorageTemplate` и public `Storage*Context` — для переносимых выводимых типов у экспортируемых plugin-фабрик. `StorageDispatchContext` не экспортируется (`ctx.dispatch` доступен через public callback context types). Создавать значения plugin/storage вручную по этим типам нельзя.
+
+#### Секции в деталях
+
+`routeMeta` — контракт маршрутизации, а не пользовательские данные:
+
+- ключ секции становится ключом в `action.meta`; используйте скалярные ключи (`entityId`, `cacheKey`, `documentId`, `tenantId`); reserved route/sender keys запрещены;
+- resolver `(value, ctx) => …` возвращает `string` или массив строк; core проверяет результат resolver, а сырой `value` валидирует сам resolver, если plugin требует строгий вход;
+- **одно правило маршрута**: один action несёт только один активный routing key из `actorId`, plugin route keys, `groupId`, `groupTag`. Несколько ключей → `LITE_FSM_AMBIGUOUS_ROUTE_META`; для fanout шлите отдельные `manager.transition(...)` или unscoped событие;
+- `PluginRouteMeta<PluginUnion>` возвращает сырую карту значений; optional-семантика относится к `manager.transition(...).meta`.
+
+`manager` — расширения самого менеджера:
+
+- ключ секции становится полем менеджера, тип поля = возвращаемый тип фабрики; DSL: `definePlugin().create({ manager: { key(ctx) { ... } } })`;
+- фабрика получает `ManagerRuntimeContext<PluginEvents, S = MachineStore>`: `ctx.transition(...)` принимает события plugin (не `HostEvents`), `ctx.config` имеет тип store `S`, `ctx.getState()` возвращает `MachinesState<S>`;
+- если тип расширения зависит от host context и не выводится фабрикой, объявите поле как `ManagerExtensionFactory & ManagerExtensionType<Lambda>`, где `Lambda extends ManagerExtensionTypeLambda` вычисляет `type` из `this["context"]` (контракт только на уровне типов; runtime остаётся обычной функцией);
+- фабрика вызывается один раз при создании менеджера — после compile templates, runtime state и initial public state.
+
+`intercept(ctx)` — заменить или отменить action до reducer-ов (после storage `prepareAction`, в порядке plugin-ов):
+
+- context: `action`, `originalAction`, `skipDelivery`, `options`, `runtime`, `reportError(error)`;
+- `{}` — ничего не делает; `{ action }` заменяет committed action и пересчитывает маршрут; `{ skipDelivery: true }` пропускает доставку в машины; `{ stopInterceptors: true }` останавливает только следующие interceptors;
+- допускается только `void` или plain object с полями `action`, `skipDelivery`, `stopInterceptors`; иначе `LITE_FSM_INVALID_PLUGIN_CALLBACK_RESULT` (diagnostic `plugin '<name>' intercept`).
+
+`hooks` — наблюдатели фаз dispatch `beforeReduce`, `afterReduce`, `beforeCommit`, `beforeSubscribers`, `beforeEffects`, `afterEffects` (порядок фаз — в разделе «Фазы обработки события»):
+
+- выполняются по фазе и порядку plugin-ов, видят финальный action после interceptors, не управляют replace/skip/stop, возвращаемое значение игнорируется;
+- `manager.transition(...)` из hook запрещён (`LITE_FSM_REENTRANT_TRANSITION_FORBIDDEN`); из subscribers и effects — разрешён.
+
+#### Reentrancy и ошибки
+
+**Повторный (reentrant) `transition`** — вызов `manager.transition(...)` изнутри обработки текущего action. В ряде фаз он запрещён (guarded boundary), чтобы вложенный dispatch не подменил state до того, как его увидят подписчики.
+
+Запрет действует в `plugin.intercept`, storage callbacks (`prepareAction`, `beforeReduce`, `acceptsEvent`, `reduce`, `reduceBucket`, `commit`, `reactions`) и всех hook-фазах. Ошибка guard пробрасывается из текущего `manager.transition(...)`, не вызывает `onError` автоматически и не запускает вложенный dispatch: такой action не проходит normalize, middleware, interceptors, reducers, subscribers и effects.
+
+- **Менять текущий action** — через return-протокол фазы и `ctx.dispatch.runtime` для промежуточных данных. **Запускать новый action** — из subscriber или effect, там reentrant `transition(...)` разрешён. Отдельного scheduler/defer/enqueue API в этом релизе нет.
+- Storage reactions идут после public commit и до subscribers → тоже в guarded boundary: вложенный dispatch из `reactions.run` запрещён, чтобы subscriber текущего action не увидел state, изменённый вложенным action. Storage effects идут позже и сохраняют разрешённый reentrant.
+- Ошибки из `intercept`, hooks, guarded storage callbacks и пересчёта маршрута пробрасываются из `manager.transition(...)` без авто-`onError`. `ctx.reportError(error)` вызывает текущий `onError` и не меняет control flow.
+- Replacement action валидируется до пересчёта маршрута: object с `type: string`, без reserved `@@lite-fsm/*` (иначе `LITE_FSM_INVALID_REPLACEMENT_ACTION`). Несколько активных routing keys в исходном или replacement action → `LITE_FSM_AMBIGUOUS_ROUTE_META` до доставки и до вызова resolver-ов. Diagnostics указывают источник: `plugin '<name>' intercept`, `storage runtime '<kind>' prepareAction` или `storage runtime '<kind>' beforeReduce`.
 
 | Plugin/storage `LiteFsmError` code         | Когда                                                                                                                |
 | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
@@ -315,21 +396,49 @@ Storage reactions выполняются после public commit и до subscr
 | `LITE_FSM_INVALID_STORAGE_CALLBACK_RESULT` | storage callback вернул result вне публичного protocol или `acceptsEvent(ctx)` вернул не boolean                     |
 | `LITE_FSM_INVALID_REPLACEMENT_ACTION`      | replacement action не является user action с `type: string` или использует reserved `@@lite-fsm/*` prefix            |
 
-`scopedDeps` добавляет dep только на время effect/reaction invocation: ключ section становится ключом deps, factory возвращает значение. `scopedTransition` добавляет методы к invocation `deps.transition`, сохраняя callable core `transition(action)`. При явном `HostEvents` `scope.event` типизируется как `ReadonlyManagerAction<HostEvents | PluginEvents>`, а без второго generic — как `ReadonlyManagerAction<AnyEvent>`; `scope.transition(...)` принимает только `ManagerAction<PluginEvents>`. `EffectDeps<AppDeps, Plugins>` добавляет эти scoped deps/methods к app deps.
+#### scopedDeps / scopedTransition
 
-`defineStorageRuntime<Extension>().create(...)` объявляет advanced storage definition для plugin section `storage: [definition]`. `Extension` описывает machine-facing поля `input`, `internalEvents`, `reducerContext`, `effectDeps`, `reactionDeps`, `resultMetadata`, `publicState` и runtime-only поля `runtimeState`, `templateData`, `snapshotData`, `invocation`, `identity`, `observedEvents`, `routeMeta`. Builder добавляет storage kind из literal `kind`; machine-facing поля становятся доступны только через `TypedCreateMachineFn<P, D, typeof plugins>` после подключения storage definition в `definePlugin().create({ storage: [...] })`.
+Обе секции дают машине временные зависимости — только на время одного вызова effect или reaction.
 
-Machine-facing поля `resultMetadata`, `reducerContext`, `effectDeps`, `reactionDeps` и `publicState` могут быть fixed object types или dependent type-only function signatures от concrete storage input. Для result type или deps, которые зависят от всего concrete storage input, storage author может использовать type-only `StorageDependentField<Lambda>` с `StorageDependentTypeLambda`. `input` и `internalEvents` остаются fixed fields. Dependent signatures и dependent fields не создаются и не вызываются в runtime; TypeScript использует их для `MachineResultMetadata<M>`, `MachinesState<S>`, reducer meta и effect/reaction deps.
+- `scopedDeps` добавляет dep: ключ секции = ключ в `deps`, фабрика возвращает значение.
+- `scopedTransition` добавляет методы к `deps.transition` этого вызова, сохраняя вызываемый core `transition(action)`.
+- `scope.event`: при явном `HostEvents` — `ReadonlyManagerAction<HostEvents | PluginEvents>`, без второго generic — `ReadonlyManagerAction<AnyEvent>`; `scope.transition(...)` принимает только `ManagerAction<PluginEvents>`.
+- `EffectDeps<AppDeps, Plugins>` добавляет эти scoped deps/methods к app deps.
 
-`compileTemplate(ctx)` возвращает только `void | { data?: TemplateData }`; `key` и `kind` формируются builder-ом. Primitive, `null`, arrays, `key`, `kind` и unknown fields бросают `LITE_FSM_INVALID_STORAGE_CALLBACK_RESULT` с diagnostic `storage runtime '<kind>' compileTemplate`. `routeMetaKeys` — runtime dependency от action meta keys. Если `Extension["routeMeta"]` задан, TypeScript ограничивает `routeMetaKeys` его строковыми ключами и `definePlugin().create(...)` проверяет наличие совместимых `routeMeta` resolvers у plugin. Runtime не валидирует raw route meta values; resolver вызывается только когда его key является единственным active routing key текущего action. `snapshot.dehydrate(ctx)` возвращает `{ machines?, snapshot? }`: `snapshot` попадает в top-level `MachineManagerSnapshot.storage[kind]`. `snapshot.hydrate(ctx)` получает `ctx.machines` и `ctx.snapshot`.
+#### Storage runtime (`defineStorageRuntime`)
 
-Action stages используют strict object result protocol: `prepareAction(ctx)` и `beforeReduce(ctx)` возвращают `void | { type: "replace"; action } | { type: "drop" }`. `prepareAction` выполняется до middleware, `beforeReduce` — после middleware и до interceptors. Reduce stages возвращают только `void | { type: "skip" }`: `void` помечает runtime touched, `{ type: "skip" }` не запускает `commit`, `reactions` и `effects` для этого runtime. `acceptsEvent(ctx)` должен вернуть строго boolean. Unknown fields и unknown result shapes бросают `LITE_FSM_INVALID_STORAGE_CALLBACK_RESULT` с diagnostic `storage runtime '<kind>' <phase>`.
+Storage runtime — собственный вид хранилища машин (storage kind), который plugin подключает секцией `storage`. Машина выбирает его через `storage: "<kind>"`; встроенный kind — `"instance"`.
 
-По умолчанию `reduceScope` равен `"template"`: runtime объявляет `acceptsEvent(ctx)` и `reduce(ctx)`. Для `reduceScope: "bucket"` runtime объявляет только `reduceBucket(ctx)` и получает все templates bucket в `ctx.templates`; `acceptsEvent` и `reduce` в этом режиме запрещены. В template scope запрещен `reduceBucket`.
+`defineStorageRuntime<Extension>().create(...)` объявляет такой runtime для секции `storage: [definition]`. Builder берёт storage kind из литерала `kind`; machine-facing поля доступны машине только через `TypedCreateMachineFn<P, D, typeof plugins>` после подключения definition в `definePlugin().create({ storage: [...] })`.
 
-Action читается как `ctx.action`, исходный action — как `ctx.originalAction`. Если `Extension["observedEvents"]` задан, storage callbacks, которые получают action, используют `ReadonlyManagerAction<Extension["observedEvents"]>`; иначе используется `ReadonlyManagerAction<AnyEvent>`. Этот тип запрещает мутацию `type`, `meta`, arrays/tuples и вложенных полей `payload`; runtime не обещает deep freeze. `ctx.manager` имеет public тип `StorageManagerContext<Extension["observedEvents"]>` без `routing`, `createScopedDeps`, `config`, `options` и `schemaVersion`. В `ctx.dispatch` только `nextState` является заменяемым root accumulator; `runtime` является mutable `Map` для per-dispatch данных. `options`, `route`, `prevState` и `skipDelivery` доступны только для чтения, action stage fields не раскрываются. Методы storage runtime пишутся inline с contextual typing; named context-type imports нужны только для exported helper/factory signatures. `effectDeps` и `reactionDeps` в extension являются type contract. Дубликат `kind` внутри одного plugin считается `LITE_FSM_INVALID_PLUGIN_DEFINITION`; дубликат между plugins или с internal preset — `LITE_FSM_DUPLICATE_STORAGE_KIND`.
+`Extension` описывает форму runtime на уровне типов:
 
-Configurable и multi-instance plugins объявляйте обычными factory functions вокруг `definePlugin().create(...)`; каждый экземпляр должен иметь уникальный `name` и уникальные exposed keys.
+- machine-facing поля (видны машине): `input`, `internalEvents`, `reducerContext`, `effectDeps`, `reactionDeps`, `resultMetadata`, `publicState`;
+- runtime-only поля (внутренние): `runtimeState`, `templateData`, `snapshotData`, `invocation`, `identity`, `observedEvents`, `routeMeta`;
+- `input` и `internalEvents` — фиксированные; `resultMetadata`, `reducerContext`, `effectDeps`, `reactionDeps`, `publicState` — либо фиксированные object types, либо зависящие от конкретного input type-only сигнатуры (через `StorageDependentField<Lambda>` с `StorageDependentTypeLambda`). Зависимые сигнатуры/поля в runtime не создаются и не вызываются; TypeScript использует их для `MachineResultMetadata<M>`, `MachinesState<S>`, reducer meta и effect/reaction deps;
+- `effectDeps` и `reactionDeps` в extension — контракт только на уровне типов.
+
+Callbacks runtime:
+
+- `compileTemplate(ctx)` → `void | { data?: TemplateData }`; `key` и `kind` формирует builder. Примитив, `null`, array, `key`, `kind` и неизвестные поля → `LITE_FSM_INVALID_STORAGE_CALLBACK_RESULT` (diagnostic `storage runtime '<kind>' compileTemplate`).
+- `routeMetaKeys` — runtime-зависимость от ключей `action.meta`. При заданном `Extension["routeMeta"]` TypeScript ограничивает их его строковыми ключами, а `definePlugin().create(...)` требует совместимые `routeMeta` resolvers. Сырые значения runtime не валидирует; resolver вызывается, только когда его ключ — единственный активный routing key текущего action.
+- **Стадии action** (строгий object-протокол): `prepareAction(ctx)` (до middleware) и `beforeReduce(ctx)` (после middleware, до interceptors) → `void | { type: "replace"; action } | { type: "drop" }`. Стадии reduce → `void | { type: "skip" }` (`void` помечает runtime как затронутый, `{ type: "skip" }` пропускает `commit`/`reactions`/`effects` этого runtime). `acceptsEvent(ctx)` → строго boolean. Иначе `LITE_FSM_INVALID_STORAGE_CALLBACK_RESULT` (diagnostic `storage runtime '<kind>' <phase>`).
+- `snapshot.dehydrate(ctx)` → `{ machines?, snapshot? }` (`snapshot` попадает в `MachineManagerSnapshot.storage[kind]`); `snapshot.hydrate(ctx)` получает `ctx.machines` и `ctx.snapshot`.
+
+`reduceScope` — как runtime обрабатывает строки:
+
+- `"template"` (default): по одному template — runtime объявляет `acceptsEvent(ctx)` и `reduce(ctx)`; `reduceBucket` запрещён.
+- `"bucket"`: все templates одного kind разом — runtime объявляет только `reduceBucket(ctx)` и получает их в `ctx.templates`; `acceptsEvent` и `reduce` запрещены.
+
+Context callback-ов:
+
+- action читается как `ctx.action`, исходный — `ctx.originalAction`. При заданном `Extension["observedEvents"]` — `ReadonlyManagerAction<Extension["observedEvents"]>`, иначе `ReadonlyManagerAction<AnyEvent>`; тип запрещает мутацию `type`, `meta`, arrays/tuples и вложенных полей `payload` (deep freeze не гарантируется).
+- `ctx.manager` — public `StorageManagerContext<Extension["observedEvents"]>` без `routing`, `createScopedDeps`, `config`, `options`, `schemaVersion`.
+- `ctx.dispatch`: заменяемый только `nextState` (root accumulator); `runtime` — mutable `Map` для данных одного dispatch; `options`, `route`, `prevState`, `skipDelivery` — read-only; поля стадий action не раскрываются.
+- методы пишутся inline с contextual typing; именованные импорты context-типов нужны только для экспортируемых helper/factory сигнатур.
+- дубликат `kind` внутри одного plugin → `LITE_FSM_INVALID_PLUGIN_DEFINITION`; между plugins или со встроенным preset → `LITE_FSM_DUPLICATE_STORAGE_KIND`.
+
+Configurable и multi-instance plugins оборачивайте в обычные factory-функции вокруг `definePlugin().create(...)`; у каждого экземпляра — уникальный `name` и уникальные открытые ключи.
 
 ### `createEffect`
 
@@ -450,7 +559,9 @@ const preview = manager.getHydratedState(snapshot, {
 });
 ```
 
-`dehydrate()` типизирует все машины, которые участвуют в снимке, как обязательные. `dehydrate({ machines: ["counter"] })` делает обязательными только выбранные literal keys; dynamic array остаётся partial envelope для безопасности. `storage` filter независим от `machines`: `dehydrate({ machines })` не отключает storage payloads, `dehydrate({ storage: [] })` отключает их явно, `dehydrate({ storage: [kind] })` выбирает только указанные storage runtimes. `getSnapshot()` не вызывает storage `dehydrate` и не добавляет `storage`.
+- `dehydrate()` типизирует все участвующие в снимке машины как обязательные; `dehydrate({ machines: ["counter"] })` — только выбранные literal keys, dynamic array остаётся partial envelope для безопасности.
+- `storage` filter независим от `machines`: `dehydrate({ machines })` не отключает storage payloads, `dehydrate({ storage: [] })` отключает их явно, `dehydrate({ storage: [kind] })` выбирает только указанные storage runtimes.
+- `getSnapshot()` не вызывает storage `dehydrate` и не добавляет `storage`.
 
 | API                  | Hooks       | Mutates | Subscribers          | Effects |
 | -------------------- | ----------- | ------- | -------------------- | ------- |
@@ -627,6 +738,161 @@ const request = createMachine({
 ```
 
 Без hooks актор, сохраняемый в снимок, использует дефолтный payload `{ state, context }`. Кастомные actor snapshot hooks видят пользовательский фрагмент данных `{ state, context }`, payload snapshot и meta `hydrate` со стратегией. `actorId`, `groupId` и `groupTag` сохраняет и восстанавливает `MachineManager` рядом с записью актора в снимке.
+
+## Entities (alpha)
+
+`@lite-fsm/entities` — alpha-плагин: колоночное (SoA) хранилище сущностей поверх машин с `storage: "entity"`. Машина-шаблон описывает строку, контекст хранится в типизированных колонках, а `reducer`/`effects`/`reactions` обрабатывают весь батч живых строк сразу. Core entrypoint его не импортирует.
+
+```ts
+const createMachine: TypedCreateMachineFn<AppEvent, Deps, EntitiesPlugin<Deps>> = createLiteFsmMachine;
+
+const movement = createMachine({
+  storage: "entity",
+  initialState: "__INIT",
+  initialContext: { x: f32({ default: 0 }), dx: f32({ default: 0 }) },
+  spawnSchema: { x: f32(), dx: f32() },
+  config: {
+    __INIT: { ENTITY_SPAWNED: "active" },
+    active: { TICK: "active", ENTITY_DESPAWNED: "removed" },
+    removed: {},
+  },
+  reducer(_state, action, { self, payloadFor }) {
+    for (const entity of self.indices) {
+      if (action.type === "ENTITY_SPAWNED") {
+        const p = payloadFor(entity);
+        self.x[entity] = p.x;
+        self.dx[entity] = p.dx;
+        continue;
+      }
+      if (action.type === "TICK") self.x[entity] += self.dx[entity];
+    }
+  },
+});
+
+const manager = MachineManager({ movement }, { plugins: [entitiesPlugin({ spawn })] });
+manager.setDependencies({ entities: manager.entities });
+```
+
+Entity-машина типизируется через `TypedCreateMachineFn<P, D, EntitiesPlugin<D>>`; прямой core `createMachine` про storage kind `"entity"` не знает.
+
+### Схемы и колонки
+
+| Дескриптор    | Колонка        | Значение                                 |
+| ------------- | -------------- | ---------------------------------------- |
+| `f32()`       | `Float32Array` | `number`                                 |
+| `i32()`       | `Int32Array`   | `number`                                 |
+| `i16()`       | `Int16Array`   | `number`                                 |
+| `u8()`        | `Uint8Array`   | `number`                                 |
+| `string()`    | `string[]`     | `string`                                 |
+| `optional(d)` | —              | `value \| null` (только в `spawnSchema`) |
+
+| Схема            | Назначение                                                                |
+| ---------------- | ------------------------------------------------------------------------- |
+| `initialContext` | постоянные колонки строки; дескриптор требует `default`, `optional` запрещён |
+| `spawnSchema`    | данные, приходящие при спавне; `default` запрещён, `optional` разрешён     |
+
+Часть имён зарезервирована рантаймом (`count`, `capacity`, `ids`, `version`, `presence`, `stateCode`, `rowVersion`, `indices`, `states` и др.) и не может быть именем колонки.
+
+### Жизненный цикл
+
+Стартовое состояние всегда `"__INIT"`; единственный переход из него — по внутреннему `ENTITY_SPAWNED`.
+
+| Событие / опция              | Поведение                                                                 |
+| ---------------------------- | ------------------------------------------------------------------------- |
+| `ENTITY_SPAWNED`             | runtime диспатчит при создании строки; в этот момент доступен `payloadFor` |
+| `ENTITY_DESPAWNED`           | диспатчится перед удалением строки                                        |
+| `despawnOn: state \| state[]` | строка автоматически удаляется при входе в указанное состояние             |
+
+Публичный dispatch `ENTITY_SPAWNED` / `ENTITY_DESPAWNED` запрещён. Сущности создаются только через события спавна, удаляются через `despawnOn` или `transition.despawn(...)` в эффекте.
+
+### Reducer
+
+`reducer(_state, action, { self, payloadFor })` выполняется один раз для всего батча затронутых строк; первый аргумент не используется.
+
+| `self` / `payloadFor`                        | Что даёт                                                  |
+| -------------------------------------------- | --------------------------------------------------------- |
+| `self.indices`                               | `EntityIndex[]` строк текущего батча                      |
+| `self.<column>[entity]`                      | чтение и запись значения колонки                          |
+| `self.states.<STATE>`                        | числовой код состояния                                    |
+| `self.stateCode[entity] = self.states.<S>`   | планирует переход строки в состояние `<S>`                |
+| `self.has(entity)` · `self.entityId(entity)` | наличие и строковый id строки                             |
+| `payloadFor(entity)`                         | данные спавна строки (валидно на `ENTITY_SPAWNED`)        |
+
+### Effects и reactions
+
+`effects` объявляются по имени состояния (вход строк в это состояние), `reactions` — по типу события (после коммита транзакции). Effects диспатчат и удаляют сущности; reactions только читают и вызывают сайд-эффекты без dispatch.
+
+```ts
+effects: {
+  EXPIRED: ({ self, transition }) => transition.despawn(self.indices),
+},
+reactions: {
+  TICK: ({ self, entities, sprites }) => {
+    const move = entities().get("movement");
+    for (const e of self.indices) sprites.sync(self.spriteId[e], { x: move.x[e] });
+  },
+},
+```
+
+| `transition` (effects only)            | Поведение                                  |
+| -------------------------------------- | ------------------------------------------ |
+| `transition(action)`                   | обычный диспатч                            |
+| `transition.entity(id, action)`        | адрес по `entityId`                        |
+| `transition.actor/group/tag(...)`      | адрес по `actorId` / `groupId` / `groupTag` |
+| `transition.unscoped(action)`          | без маршрутизации                          |
+| `transition.despawn(ids \| indices)`   | удалить сущности                           |
+
+В аргументах: прикладные deps плюс `action`, `self` (и `transition` только в effects). `condition()` в entity-эффектах не поддерживается.
+
+### Спавн
+
+| API                                              | Назначение                                                         |
+| ------------------------------------------------ | ------------------------------------------------------------------ |
+| `spawnEvent<Payload>()`                          | дескриптор события спавна с типом payload                          |
+| `defineSpawnEvents({ ... })`                     | карта событий спавна                                               |
+| `defineEntitySpawn(machines, spawnEvents)(recipes)` | рецепты `payload -> spec \| spec[]`                             |
+| `entitiesPlugin({ spawn })`                      | подключает спавн и storage kind `"entity"` через `plugins`         |
+
+```ts
+const spawnEvents = defineSpawnEvents({ SPAWN_UNIT: spawnEvent<{ id: string; x: number }>() });
+const spawn = defineEntitySpawn(machines, spawnEvents)({
+  SPAWN_UNIT: (p) => ({ id: `unit/${p.id}`, groupTag: "unit", actors: { movement: { x: p.x, dx: 0 } } }),
+});
+```
+
+`spec` — `{ id, groupTag, actors }`. Одна сущность может состоять из нескольких актёров (`actors: { movement, sprite }`), которые делят `id` и `groupTag`; поля каждого актёра проверяются по его `spawnSchema`. Рецепт может вернуть массив `spec` для батч-спавна. `entitiesPlugin()` без опций подключает storage без спавна.
+
+### Чтение состояния
+
+`manager.entities()` — manager extension плагина; возвращает корневой доступ ко всем хранилищам.
+
+| API                  | Возвращает                                                                                         |
+| -------------------- | -------------------------------------------------------------------------------------------------- |
+| `entities().get(key)`   | представление шаблона: `count`, `version`, `has(entity)`, `state(entity)` и колонки только для чтения |
+| `entities().maybe(key)` | то же без строгих scoped-проверок доступа в dev                                                    |
+
+Строки индексируются по `EntityIndex` (`view.x[entity]`). Передавайте `manager.entities` в deps (`setDependencies({ entities: manager.entities })`), чтобы `reducer`/`effects`/`reactions` читали кросс-машинные колонки.
+
+### React
+
+```tsx
+import { useEntityList, useEntitySnapshot } from "@lite-fsm/entities/react";
+
+const ids = useEntityList<AppMachines>("movement", { groupTag: "unit" });
+const row = useEntitySnapshot<AppMachines>("movement", id); // { entityId, groupTag, state, context } | undefined
+```
+
+| Хук                             | Возвращает                                               |
+| ------------------------------- | -------------------------------------------------------- |
+| `useEntitySnapshot(key, id)`    | `{ entityId, groupTag, state, context }` или `undefined` |
+| `useEntityCount(key, options?)` | число живых строк                                        |
+| `useEntityList(key, options?)`  | список `id` живых строк                                  |
+
+`options.groupTag` фильтрует строки по тегу. Хуки подписываются через `@lite-fsm/react` и работают с SSR/hydration preview.
+
+### Routing
+
+Плагин регистрирует route key `entityId`. Адресация — через `meta` или адресные методы `transition`: `entityId` (конкретные сущности), `groupId` (актёры одной сущности), `groupTag` (все сущности тега). В одном событии активен только один route key.
 
 ## Middleware
 
