@@ -4,223 +4,23 @@
 
 ## Точки входа
 
-| Импорт                                                         | Runtime exports                                                                                                                                                   |
-| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@lite-fsm/core`                                               | `createMachine`, `createConfig`, `createReducer`, `createEffect`, `createActorMeta`, `definePlugin`, `defineStorageRuntime`, `Machine`, `defineMachine`, `MachineManager`, `LiteFsmError` |
+| Импорт                                                         | Runtime exports                                                                                                                                                                                                                                                                                                                                             |
+| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@lite-fsm/core`                                               | `createMachine`, `createConfig`, `createReducer`, `createEffect`, `createActorMeta`, `definePlugin`, `defineStorageRuntime`, `Machine`, `defineMachine`, `MachineManager`, `LiteFsmError`                                                                                                                                                                   |
 | `@lite-fsm/entities`                                           | alpha: `entitiesPlugin`, `defineSpawnEvents`, `defineEntitySpawn`, `spawnEvent`, schema descriptors `f32`/`i16`/`i32`/`u8`/`string`/`optional`; storage kind `"entity"`, lifecycle guards, `despawnOn`, entity effects/reactions, public spawn events, `meta.entityId` routing, `snapshot.storage.entity`, lightweight public slices и `manager.entities()` |
-| `@lite-fsm/entities/react`                                     | alpha: `useEntitySnapshot`, `useEntityCount`, `useEntityList`                                                                                                      |
-| `@lite-fsm/persist`                                            | `persistManager`, `createJsonStorage`                                                                                                                             |
-| `@lite-fsm/persist/react`                                      | `usePersistStatuses`, `useIsPersistRestoring`                                                                                                                     |
-| `@lite-fsm/middleware`                                         | `immerMiddleware`, `devToolsMiddleware`                                                                                                                           |
-| `@lite-fsm/middleware/immer` · `@lite-fsm/middleware/devTools` | per-feature entry points                                                                                                                                          |
-| `@lite-fsm/react`                                              | `FSMContext`, `FSMContextProvider`, `FSMHydrationBoundary`, `useHydrateSnapshot`, `useManager`, `useSelector`, `useStorageHydrationPreview`, `useTransition`, `defineMachine` |
-| `@lite-fsm/graph`                                              | alpha: `compileLiteFsmGraph`, `compileLiteFsmGraphProject`, `selectMachineGraph`, `analyzeLiteFsmGraph` и IR-типы для graph tooling                               |
-| `@lite-fsm/graph/simulator`                                    | alpha: `createGraphSimulator`, `createMachineGraphSimulator` для headless symbolic simulation поверх graph IR                                                     |
-| `@lite-fsm/graph/view-model`                                   | alpha: `buildGraphVisualizerModel`, `buildMachineWorkbenchModel`, `buildMachineFlowModel` для read-only visualizer projections                                    |
-| `@lite-fsm/cli`                                                | alpha binary `lite-fsm`; JS runtime entrypoint не публикуется                                                                                                     |
+| `@lite-fsm/entities/react`                                     | alpha: `useEntitySnapshot`, `useEntityCount`, `useEntityList`                                                                                                                                                                                                                                                                                               |
+| `@lite-fsm/persist`                                            | `persistManager`, `createJsonStorage`                                                                                                                                                                                                                                                                                                                       |
+| `@lite-fsm/persist/react`                                      | `usePersistStatuses`, `useIsPersistRestoring`                                                                                                                                                                                                                                                                                                               |
+| `@lite-fsm/middleware`                                         | `immerMiddleware`, `devToolsMiddleware`                                                                                                                                                                                                                                                                                                                     |
+| `@lite-fsm/middleware/immer` · `@lite-fsm/middleware/devTools` | per-feature entry points                                                                                                                                                                                                                                                                                                                                    |
+| `@lite-fsm/react`                                              | `FSMContext`, `FSMContextProvider`, `FSMHydrationBoundary`, `useHydrateSnapshot`, `useManager`, `useSelector`, `useStorageHydrationPreview`, `useTransition`, `defineMachine`                                                                                                                                                                               |
+| `@lite-fsm/graph`                                              | alpha: `compileLiteFsmGraph`, `compileLiteFsmGraphProject`, `selectMachineGraph`, `analyzeLiteFsmGraph` и IR-типы для graph tooling                                                                                                                                                                                                                         |
+| `@lite-fsm/graph/simulator`                                    | alpha: `createGraphSimulator`, `createMachineGraphSimulator` для headless symbolic simulation поверх graph IR                                                                                                                                                                                                                                               |
+| `@lite-fsm/graph/view-model`                                   | alpha: `buildGraphVisualizerModel`, `buildMachineWorkbenchModel`, `buildMachineFlowModel` для read-only visualizer projections                                                                                                                                                                                                                              |
+| `@lite-fsm/cli`                                                | alpha binary `lite-fsm`; JS runtime entrypoint не публикуется                                                                                                                                                                                                                                                                                               |
 |                                                                |
 
 `@lite-fsm/react` помечен `"use client"`. Импортировать можно из SSR/RSC, hooks/provider — только в client tree.
-
-## Alpha entities
-
-`@lite-fsm/entities` подключается только явным импортом и не входит в core bundle. Пакет предоставляет `entitiesPlugin()`, schema descriptors, storage-specific typing для actor templates с `storage: "entity"`, type-only lifecycle events, public spawn events и root provider `manager.entities()`.
-
-```ts
-import {
-  createMachine as createLiteFsmMachine,
-  MachineManager,
-  type MachinesState,
-  type TypedCreateMachineFn,
-} from "@lite-fsm/core";
-import { defineEntitySpawn, defineSpawnEvents, entitiesPlugin, f32, optional, spawnEvent, string } from "@lite-fsm/entities";
-import type { EntitiesPlugin, EntityAccess } from "@lite-fsm/entities";
-
-type AppEvent = { type: "TICK" };
-type AppMachines = typeof machines;
-type AppState = MachinesState<AppMachines>;
-type AppDeps = {
-  readonly getState?: () => AppState;
-  readonly entities: () => EntityAccess<AppMachines>;
-};
-
-export const createMachine: TypedCreateMachineFn<AppEvent, AppDeps, EntitiesPlugin<AppDeps>> = createLiteFsmMachine;
-
-const manager = MachineManager(machines, {
-  plugins: [entitiesPlugin()],
-});
-```
-
-Entity actor template проходит init-time validation при создании `MachineManager`:
-
-```ts
-const movementActor = createMachine({
-  storage: "entity",
-  initialState: "__INIT",
-  initialContext: {
-    x: f32({ default: 0 }),
-    y: f32(),
-  },
-  spawnSchema: {
-    x: f32(),
-    y: f32(),
-    label: optional(string()),
-  },
-  config: {
-    __INIT: { ENTITY_SPAWNED: "active" },
-    active: { TICK: "active" },
-  },
-});
-```
-
-`initialContext` и `spawnSchema` являются plain object maps известных descriptors. `optional(...)` допустим только в `spawnSchema`: ключ остается обязательным, value type становится `T | null`. `opts.default` допустим только в `initialContext`; в `spawnSchema` defaults отклоняются. Зарезервированные имена колонок (`count`, `capacity`, `ids`, `indexById`, `alive`, `generation`, `freeList`, `stateCode`, `version`, `columns`, `presence`, `rowVersion`, `indices`, `states`) запрещены. `groupTag` задается будущим `EntitySpawnSpec`, а не template.
-
-`despawnOn?: string | readonly string[]` доступен только для `storage: "entity"`. Значения должны ссылаться на states из `config` и не могут быть `__INIT`, `__RESOLVED`, `__REJECTED` или `__CANCELLED`. После default transition и reducer row в одном из этих states синхронно планирует despawn всей entity в том же dispatch. Runtime доставляет internal `ENTITY_DESPAWNED` всем attached rows, но reducer вызывается только у rows, чей текущий state принимает этот event. Rows без edge удаляются cleanup phase. Subscribers видят уже очищенные rows. Public `manager.despawn(...)` не добавляется.
-
-`ENTITY_SPAWNED` и `ENTITY_DESPAWNED` являются internal lifecycle event names для `storage: "entity"`. Type `LiteFsmEntityLifecycleEvents` доступен из `@lite-fsm/entities`; `EntityMachineExtension` добавляет эти события в `config` и reducer surface только для entity templates. Lifecycle events не входят в пользовательский `AppEvents` и не добавляются в public `manager.transition(...)`. Public dispatch `ENTITY_SPAWNED` или `ENTITY_DESPAWNED` бросает `LiteFsmError`, даже если приложение вручную включило эти names в public event union. Переход row в terminal state удаляет эту row, но не вызывает despawn всей entity автоматически.
-
-`__INIT` в entity template должен быть transition map и может содержать только transition по `ENTITY_SPAWNED`. Custom event edge из `__INIT` отклоняется при инициализации manager. `storage: "instance"` сохраняет обычную поддержку custom `__INIT` events.
-
-Public state entity actor template является lightweight read model:
-
-```ts
-manager.getState().movementActor;
-// { storage: "entity", version: 0, count: 0, capacity: 0 }
-```
-
-Columns не попадают в `manager.getState()`. Runtime создает `EntityStore` и `ColumnarActorStore` на каждый entity actor template; live rows появляются через public spawn events.
-
-`manager.entities()` доступен только при установленном `entitiesPlugin()`:
-
-```ts
-const movement = manager.entities().get("movementActor");
-
-movement.count; // 0
-movement.version; // 0
-movement.has(entityIndex); // false для отсутствующей строки
-movement.state(entityIndex); // undefined для отсутствующей строки
-movement.x[entityIndex]; // typed indexed column из initialContext
-```
-
-`manager.entities` является stable provider-функцией. Повторные вызовы
-`manager.entities()` возвращают один root access object текущего менеджера.
-`entities().get(key)` и `entities().maybe(key)` принимают только известные entity
-actor keys. Runtime unknown key бросает `LiteFsmError`. Store views кешируются на
-actor key и читают текущий runtime store. `storage: "instance"` state shape и
-selectors не меняются.
-
-Public spawn events задаются отдельно от `AppEvents`:
-
-```ts
-const spawnEvents = defineSpawnEvents({
-  SPAWN_PROJECTILE: spawnEvent<{ id: string; x: number; y: number }>(),
-});
-
-const spawn = defineEntitySpawn(machines, spawnEvents)({
-  SPAWN_PROJECTILE: (payload) => ({
-    id: `projectile/${payload.id}`,
-    groupTag: "projectile",
-    actors: {
-      movementActor: { x: payload.x, y: payload.y },
-    },
-  }),
-});
-
-const managerWithSpawn = MachineManager(machines, {
-  plugins: [entitiesPlugin({ spawn })],
-});
-```
-
-`spawnEvents` задает event names, payload types, recipe keys и события, которые принимает `manager.transition(...)` от текущего `entitiesPlugin({ spawn })`. `defineEntitySpawn(machines, spawnEvents)` требует recipe для каждого spawn event. Recipe возвращает `EntitySpawnSpec` или массив; пустой массив означает no-op spawn с обычной public delivery. `id`, `groupTag` и хотя бы один actor обязательны. Actor keys должны быть entity actor keys из `machines`, actor payload проверяется по `spawnSchema`.
-
-Spawn hook выполняется в `hooks.beforeReduce` по финальному action после middleware `next`, storage `beforeReduce` и всех plugin `intercept` replacements. Если middleware не вызывает `next` или финальный interceptor выставил `skipDelivery: true`, recipe не запускается. Невалидный recipe result прерывает dispatch до storage reduce, subscribers и effects.
-
-Созданные rows сначала получают internal `ENTITY_SPAWNED`: default transition из `__INIT` применяется до reducer, затем reducer может инициализировать direct columns через `self`. После этого newly spawned rows получают public spawn event в том же dispatch, если их current state принимает этот event. `payloadFor(entity)` доступен только в reducer на `ENTITY_SPAWNED` и только для `EntityIndex` из текущего spawn scope.
-
-Entity reducer получает batch-oriented `self`: `indices`, `states`, `presence`, `rowVersion`, `stateCode`, `prevStateCode`, direct schema columns, `has(entity)` и `entityId(entity)`. Runtime применяет config-default transition до reducer; reducer может записать `self.stateCode[entity]` в другой valid code или вернуть default transition через `self.prevStateCode[entity]`.
-
-Entity effects объявляются по public state names. Effect запускается один раз на
-captured batch rows, которые после reducer фактически вошли в target state; rows
-без смены state, rollback к `prevStateCode` и rows, удаленные через `despawnOn`
-до effect phase, effect не получают. Effects выполняются storage `effects`
-phase после subscribers и после возврата middleware `next`.
-
-В entity effect `self.indices` является stable captured list, а `self`,
-columns и `entities().get(...)`/`entities().maybe(...)` являются live read views
-current committed store. После `await` проверяйте `self.has(entity)` или
-`store.has(entity)` перед чтением columns: проверка учитывает current presence и
-captured `generation`. Scoped `entities().get(key)` в diagnostics проверяет, что
-каждая entity из current scope имеет requested actor row; `entities().maybe(key)`
-не выполняет required validation. Runtime не читает user dependency
-`deps.entities` для создания scoped accessor.
-
-Entity effect `transition(action)` остается unscoped. `transition.entity(id |
-ids, action)` отправляет action rows указанных live entities, дедуплицируя ids с
-сохранением первого появления; unknown ids являются no-op.
-`transition.despawn(id | ids)` удаляет live entities, а
-`transition.despawn(self.indices)` удаляет captured rows с generation check.
-Raw `EntityIndex[]`, не равный captured `self.indices`, бросает `LiteFsmError`.
-`transition.tag(tag | tags, action)` сохраняет core `meta.groupTag` semantics и
-доставляет action всем runtimes с поддержкой `groupTag`; `transition.actor(...)`
-адресует только `storage: "instance"` actors.
-
-Entity reactions объявляются в `reactions` по event names и доступны только для
-`storage: "entity"`. Reaction привязана к accepted event, а не к enter-state:
-runtime вызывает одну reaction на actor template для rows, которые приняли event
-по `config` и routing, даже если reducer не изменил columns или state. Обычные
-reactions выполняются через storage `reactions.run(...)` после commit и cleanup,
-до subscribers и до effects. `ENTITY_DESPAWNED` reactions выполняются внутри
-entity lifecycle до физического cleanup и видят columns удаляемых rows; rows без
-edge `ENTITY_DESPAWNED` lifecycle reaction не получают.
-
-Deps reaction включают `action`, readonly `self`, scoped `entities` и user deps.
-Runtime не предоставляет `transition`, `transition.despawn(...)` или
-`condition()`. `entities().get(...)` использует captured scope и `generation` для
-required-access diagnostics; `entities().maybe(...)` validation не выполняет.
-Reaction должна быть sync-only. Exception и обнаруженный `Promise` return
-передаются через `ctx.dispatch.reportError(...)` в `onError`, не откатывают
-reducer result, не отменяют cleanup/subscribers/effects и не меняют return value
-`manager.transition(...)`.
-
-`AppDeps` объявляет `entities: () => EntityAccess<AppMachines>` явно, если
-callbacks должны видеть typed entity access. В entity effects/reactions runtime
-подставляет scoped provider под тот же ключ и не использует root dependency для
-создания scope. Root `manager.entities` передается через
-`manager.setDependencies({ entities: manager.entities })` только domain/process
-effects, которым нужен root access к entity stores.
-
-`entitiesPlugin()` объявляет `routeMeta.entityId`, а entity storage runtime требует `routeMetaKeys: ["entityId"]`. При подключенном plugin `manager.transition(...)` принимает `meta.entityId?: string | readonly string[]`. Route доставляет action actor rows указанных entities; массив дедуплицируется с сохранением первого появления, unknown ids являются no-op. `meta.groupTag` одновременно сохраняет instance runtime behavior и доставляет entity rows с matching `EntitySpawnSpec.groupTag`. `meta.actorId` и `meta.groupId` не адресуют entity rows. Один action может содержать только один active routing key; `meta.entityId` вместе с `meta.groupTag` бросает `LITE_FSM_AMBIGUOUS_ROUTE_META`. Raw `meta.entityId`, не являющийся строкой или массивом строк, бросает route resolver error.
-
-Entity storage объявляет storage `snapshot` block. `manager.dehydrate()` по умолчанию добавляет durable payload в `snapshot.storage.entity`; `dehydrate({ storage: [] })` отключает storage payloads, а `dehydrate({ machines: [], storage: ["entity"] })` выгружает только entity storage. Фильтры `machines` и `storage` независимы. Durable rows, columns, ids, `generation`, `freeList`, actor presence, states и `rowVersion` находятся только в `storage.entity`; `machines[entityActorKey]` остается lightweight slice `{ storage, version, count, capacity }`.
-
-`manager.hydrate(snapshot)` с `storage.entity` валидирует schema, длины массивов, column payload types и self-consistency до мутации, затем replace-only заменяет entity runtime state независимо от `strategy`. Hydrate без `storage.entity` не меняет rows/columns/generation, даже если `machines[entityActorKey]` содержит поддельные данные; public slice канонизируется из текущего runtime state. `getHydratedState(...)` валидирует `storage.entity` и возвращает preview только lightweight slices без мутации columns. `getSnapshot()` не включает top-level `storage`.
-
-`@lite-fsm/entities/react` предоставляет granular read hooks поверх существующего `FSMContextProvider` из `@lite-fsm/react`:
-
-```ts
-import { useEntityCount, useEntityList, useEntitySnapshot } from "@lite-fsm/entities/react";
-
-const row = useEntitySnapshot("movementActor", selectedEntityId);
-const enemyIds = useEntityList("movementActor", { groupTag: "enemy" });
-const enemyCount = useEntityCount("movementActor", { groupTag: "enemy" });
-```
-
-App-level typed wrappers можно объявлять прямым присваиванием: `const useAppEntitySnapshot: TypedUseEntitySnapshotHook<AppMachines> = useEntitySnapshot`.
-
-`useEntitySnapshot(templateKey, entityId)` возвращает `{ entityId, groupTag, state, context } | undefined`. `entityId: null | undefined` возвращает стабильный `undefined`; отсутствующая row тоже возвращает `undefined`. `context` собирается из `initialContext` schema values и не раскрывает column arrays. Hook кешируется по `rowVersion`, `entityId` и `generation`, поэтому изменение одной row не создает новый snapshot для другой row.
-
-`useEntityList(templateKey, options?)` возвращает `readonly EntityId[]`, а `useEntityCount(templateKey, options?)` — `number`. `options.groupTag?: string` является exact filter по `EntitySpawnSpec.groupTag`. Порядок списка определяется runtime и не сортируется. Ссылка на список сохраняется, если membership и порядок не изменились.
-
-Во время `FSMHydrationBoundary` hooks читают active `snapshot.storage.entity` preview через generic bridge `useStorageHydrationPreview("entity")` и не мутируют committed entity runtime до hydrate commit. Вложенный boundary без `storage.entity` наследует parent preview; boundary со своим `storage.entity` заменяет parent preview для entity hooks.
-
-Benchmark `composition-lite-fsm-entities` запускается командами
-`pnpm run bench:entities` и `pnpm run bench:entities:browser`. Он использует
-production `dist` entrypoints, сравнивает movement update, projectile lifetime
-update, `despawnOn` cleanup и sprite sync reaction с hand-written SoA ECS
-baseline на `10k`/`50k` rows, выполняет `5` warmup и `30` measured iterations,
-печатает median и p95. Hard gate: reducer-only `TICK` не медленнее `1.5x`,
-full pipeline без renderer calls не медленнее `2x`; Node profile дополнительно
-проверяет отсутствие per-row retained allocation growth на steady-state `TICK`.
 
 ## Alpha graph compiler
 
@@ -454,13 +254,13 @@ effects: {
 
 Effect получает один объект:
 
-| Ключ                   | Что даёт                                                                |
-| ---------------------- | ----------------------------------------------------------------------- |
-| `action`               | action, прошедший middleware                                            |
-| `transition(action)`   | dispatch нового события; action может включать routing `meta`           |
-| `condition(predicate)` | promise, резолвится на ближайший matching action                        |
-| `self`                 | (actor only) `{ actorId, groupId, groupTag }`                           |
-| user deps              | из `defineMachine({ dependencies })` или `manager.setDependencies(...)` |
+| Ключ                   | Что даёт                                                                                                      |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `action`               | action, прошедший middleware                                                                                  |
+| `transition(action)`   | dispatch нового события; action может включать routing `meta`                                                 |
+| `condition(predicate)` | promise, резолвится на ближайший matching action                                                              |
+| `self`                 | (actor only) `{ actorId, groupId, groupTag }`                                                                 |
+| user deps              | из `defineMachine({ dependencies })` или `manager.setDependencies(...)`                                       |
 | plugin scoped deps     | `scopedDeps` добавляет invocation dep по object key; `scopedTransition` добавляет методы на `deps.transition` |
 
 State effect приоритетнее `"*"`. Wildcard срабатывает и на self-transition. Ошибки и reject из `condition` уходят в `onError`.
@@ -469,15 +269,15 @@ State effect приоритетнее `"*"`. Wildcard срабатывает и 
 
 `createMachine`, `createConfig`, `createReducer` и `createActorMeta` — typed helpers: runtime-поведение не меняют, только фиксируют и сужают типы. `createEffect` — runtime wrapper: он оборачивает effect guard-ом для политики запуска.
 
-| Factory                                      | Назначение                                                     |
-| -------------------------------------------- | -------------------------------------------------------------- |
-| `createMachine(cfg)`                         | полный machine config                                          |
-| `createConfig(cfg)`                          | только граф переходов                                          |
-| `createReducer(fn)`                          | reducer с фиксированным action union                           |
-| `createActorMeta(meta)`                      | frozen `Readonly<ActorMeta>` для replacement/time-travel input |
-| `definePlugin().create(definition)`          | объявляет marked plugin value для `MachineManager`; plugin sections подключаются через normalized registry |
-| `defineStorageRuntime<Extension>().create(definition)` | объявляет opaque storage definition для `definePlugin().create({ storage: [...] })` |
-| `createEffect({ effect, type?, cancelFn? })` | возвращает effect с guard-ом для политики запуска              |
+| Factory                                                | Назначение                                                                                                 |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| `createMachine(cfg)`                                   | полный machine config                                                                                      |
+| `createConfig(cfg)`                                    | только граф переходов                                                                                      |
+| `createReducer(fn)`                                    | reducer с фиксированным action union                                                                       |
+| `createActorMeta(meta)`                                | frozen `Readonly<ActorMeta>` для replacement/time-travel input                                             |
+| `definePlugin().create(definition)`                    | объявляет marked plugin value для `MachineManager`; plugin sections подключаются через normalized registry |
+| `defineStorageRuntime<Extension>().create(definition)` | объявляет opaque storage definition для `definePlugin().create({ storage: [...] })`                        |
+| `createEffect({ effect, type?, cancelFn? })`           | возвращает effect с guard-ом для политики запуска                                                          |
 
 ### Plugin system
 
@@ -507,13 +307,13 @@ Storage reactions выполняются после public commit и до subscr
 
 Ошибки из `intercept`, hooks, guarded storage callbacks и route recalculation пробрасываются из `manager.transition(...)` и не вызывают `onError` автоматически. `ctx.reportError(error)` вызывает текущий `onError` и не меняет control flow. Replacement action из plugin или storage callback валидируется до route recalculation: это должен быть object с `type: string`; `@@lite-fsm/*` запрещен и бросает `LITE_FSM_INVALID_REPLACEMENT_ACTION`. Если initial action или replacement action содержит несколько active routing keys, route recalculation бросает `LITE_FSM_AMBIGUOUS_ROUTE_META` до delivery и до вызова plugin route resolvers. Diagnostics для replacement указывают источник: `plugin '<name>' intercept`, `storage runtime '<kind>' prepareAction` или `storage runtime '<kind>' beforeReduce`.
 
-| Plugin/storage `LiteFsmError` code | Когда |
-| --- | --- |
-| `LITE_FSM_REENTRANT_TRANSITION_FORBIDDEN` | `transition(...)` вызван из guarded dispatch phase |
-| `LITE_FSM_AMBIGUOUS_ROUTE_META` | action или replacement action содержит несколько active routing keys |
-| `LITE_FSM_INVALID_PLUGIN_CALLBACK_RESULT` | `intercept(ctx)` вернул не `void` и не plain object с публичными полями `action`, `skipDelivery`, `stopInterceptors` |
-| `LITE_FSM_INVALID_STORAGE_CALLBACK_RESULT` | storage callback вернул result вне публичного protocol или `acceptsEvent(ctx)` вернул не boolean |
-| `LITE_FSM_INVALID_REPLACEMENT_ACTION` | replacement action не является user action с `type: string` или использует reserved `@@lite-fsm/*` prefix |
+| Plugin/storage `LiteFsmError` code         | Когда                                                                                                                |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| `LITE_FSM_REENTRANT_TRANSITION_FORBIDDEN`  | `transition(...)` вызван из guarded dispatch phase                                                                   |
+| `LITE_FSM_AMBIGUOUS_ROUTE_META`            | action или replacement action содержит несколько active routing keys                                                 |
+| `LITE_FSM_INVALID_PLUGIN_CALLBACK_RESULT`  | `intercept(ctx)` вернул не `void` и не plain object с публичными полями `action`, `skipDelivery`, `stopInterceptors` |
+| `LITE_FSM_INVALID_STORAGE_CALLBACK_RESULT` | storage callback вернул result вне публичного protocol или `acceptsEvent(ctx)` вернул не boolean                     |
+| `LITE_FSM_INVALID_REPLACEMENT_ACTION`      | replacement action не является user action с `type: string` или использует reserved `@@lite-fsm/*` prefix            |
 
 `scopedDeps` добавляет dep только на время effect/reaction invocation: ключ section становится ключом deps, factory возвращает значение. `scopedTransition` добавляет методы к invocation `deps.transition`, сохраняя callable core `transition(action)`. При явном `HostEvents` `scope.event` типизируется как `ReadonlyManagerAction<HostEvents | PluginEvents>`, а без второго generic — как `ReadonlyManagerAction<AnyEvent>`; `scope.transition(...)` принимает только `ManagerAction<PluginEvents>`. `EffectDeps<AppDeps, Plugins>` добавляет эти scoped deps/methods к app deps.
 
@@ -609,18 +409,18 @@ manager.setDependencies({ api });
 manager.transition({ type: "INC" });
 ```
 
-| Опция                      | Назначение                                                                                                                                                                           |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `middleware?`              | цепочка middleware на все user actions                                                                                                                                               |
-| `plugins?`                 | tuple values из `definePlugin().create(...)`; включает plugin events, optional route meta и manager extensions текущего tuple                                      |
-| `snapshot?`                | начальный snapshot, применяется со strategy `"replace"`                                                                                                                              |
-| `schemaVersion?`           | версия snapshot                                                                                                                                                                      |
-| `onError?`                 | ошибки effects / `condition`                                                                                                                                                         |
-| `onUnknownMachineKey?`     | unknown key в `hydrate` или initial snapshot                                                                                                                                         |
-| `onSchemaVersionMismatch?` | mismatch `snapshot.schemaVersion`                                                                                                                                                    |
-| `originId?`                | префикс владельца, добавляется ко всем created id (`originId#templateKey/counter`); строка без `#` (P2P / multi-tab / шарды)                                                         |
-| `generateActorId?`         | `(ctx: SpawnIdContext<P>) => string` — кастомный actor id; counter в ctx инкрементируется всегда                                                                                     |
-| `generateGroupId?`         | то же для groupId (применяется только при unscoped spawn)                                                                                                                            |
+| Опция                      | Назначение                                                                                                                    |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `middleware?`              | цепочка middleware на все user actions                                                                                        |
+| `plugins?`                 | tuple values из `definePlugin().create(...)`; включает plugin events, optional route meta и manager extensions текущего tuple |
+| `snapshot?`                | начальный snapshot, применяется со strategy `"replace"`                                                                       |
+| `schemaVersion?`           | версия snapshot                                                                                                               |
+| `onError?`                 | ошибки effects / `condition`                                                                                                  |
+| `onUnknownMachineKey?`     | unknown key в `hydrate` или initial snapshot                                                                                  |
+| `onSchemaVersionMismatch?` | mismatch `snapshot.schemaVersion`                                                                                             |
+| `originId?`                | префикс владельца, добавляется ко всем created id (`originId#templateKey/counter`); строка без `#` (P2P / multi-tab / шарды)  |
+| `generateActorId?`         | `(ctx: SpawnIdContext<P>) => string` — кастомный actor id; counter в ctx инкрементируется всегда                              |
+| `generateGroupId?`         | то же для groupId (применяется только при unscoped spawn)                                                                     |
 
 | Метод                               | Назначение                                                               |
 | ----------------------------------- | ------------------------------------------------------------------------ |
