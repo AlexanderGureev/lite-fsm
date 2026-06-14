@@ -46,6 +46,7 @@ export default defineConfig({
       exclude: [
         "packages/**/dist/**",
         "packages/graph/**",
+        "packages/entities/examples/**",
         "packages/**/tsup.config.ts",
         "packages/**/*.d.ts",
         "packages/**/src/index.ts",
