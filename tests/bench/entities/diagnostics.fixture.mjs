@@ -1,0 +1,1222 @@
+/* global globalThis */
+
+import { MachineManager } from "../../../packages/core/dist/index.js";
+import {
+  defineEntitySpawn,
+  defineSpawnEvents,
+  entitiesPlugin,
+  f32,
+  i32,
+  spawnEvent,
+  string as entityString,
+} from "../../../packages/entities/dist/index.js";
+
+export const benchmarkName = "composition-lite-fsm-entities-diagnostics";
+export const warmupIterations = 5;
+export const measuredIterations = 30;
+
+const rowCounts = [10_000, 50_000];
+const tickAction = { type: "TICK" };
+const cleanupBatchSize = 128;
+const entityInitStateCode = -1;
+const noTransitionCode = -32768;
+
+const now = () => globalThis.performance.now();
+
+const median = (sortedSamples) => {
+  const mid = Math.floor(sortedSamples.length / 2);
+  return sortedSamples.length % 2 === 0 ? (sortedSamples[mid - 1] + sortedSamples[mid]) / 2 : sortedSamples[mid];
+};
+
+const percentile = (sortedSamples, rank) => {
+  const index = Math.min(sortedSamples.length - 1, Math.max(0, Math.ceil(sortedSamples.length * rank) - 1));
+  return sortedSamples[index];
+};
+
+const summarize = (samples) => {
+  const sorted = [...samples].sort((left, right) => left - right);
+  return {
+    median: median(sorted),
+    p95: percentile(sorted, 0.95),
+    min: sorted[0],
+    max: sorted[sorted.length - 1],
+    samples,
+  };
+};
+
+const measure = (runner, operationsPerSample) => {
+  for (let sample = 0; sample < warmupIterations; sample += 1) {
+    runner.beforeSample?.();
+    for (let op = 0; op < operationsPerSample; op += 1) {
+      runner.beforeOperation?.();
+      runner.run();
+      runner.afterOperation?.();
+    }
+    runner.afterSample?.();
+  }
+
+  const samples = [];
+  for (let sample = 0; sample < measuredIterations; sample += 1) {
+    runner.beforeSample?.();
+    let elapsed = 0;
+    for (let op = 0; op < operationsPerSample; op += 1) {
+      runner.beforeOperation?.();
+      const startedAt = now();
+      runner.run();
+      elapsed += now() - startedAt;
+      runner.afterOperation?.();
+    }
+    runner.afterSample?.();
+    samples.push(elapsed / operationsPerSample);
+  }
+
+  runner.read?.();
+  return summarize(samples);
+};
+
+const createMovementActor = () =>
+  ({
+    storage: "entity",
+    initialState: "__INIT",
+    initialContext: {
+      x: f32(),
+      y: f32(),
+      dx: f32({ default: 1 }),
+      dy: f32({ default: 1 }),
+    },
+    spawnSchema: {
+      x: f32(),
+      y: f32(),
+      dx: f32(),
+      dy: f32(),
+    },
+    config: {
+      __INIT: { ENTITY_SPAWNED: "active" },
+      active: { TICK: "active" },
+    },
+    reducer(_state, action, { self, payloadFor }) {
+      for (const entity of self.indices) {
+        if (action.type === "ENTITY_SPAWNED") {
+          const payload = payloadFor(entity);
+          self.x[entity] = payload.x;
+          self.y[entity] = payload.y;
+          self.dx[entity] = payload.dx;
+          self.dy[entity] = payload.dy;
+          continue;
+        }
+
+        self.x[entity] += self.dx[entity];
+        self.y[entity] += self.dy[entity];
+      }
+    },
+  });
+
+const createProjectileActor = (mode) =>
+  ({
+    storage: "entity",
+    initialState: "__INIT",
+    initialContext: {
+      ticksLeft: i32(),
+      damage: i32(),
+    },
+    spawnSchema: {
+      ticksLeft: i32(),
+      damage: i32(),
+    },
+    config: {
+      __INIT: { ENTITY_SPAWNED: "active" },
+      active: { TICK: "active" },
+      expired: {},
+    },
+    despawnOn: mode === "cleanup" ? "expired" : undefined,
+    reducer(_state, action, { self, payloadFor }) {
+      for (const entity of self.indices) {
+        if (action.type === "ENTITY_SPAWNED") {
+          const payload = payloadFor(entity);
+          self.ticksLeft[entity] = payload.ticksLeft;
+          self.damage[entity] = payload.damage;
+          continue;
+        }
+
+        self.ticksLeft[entity] -= 1;
+        if (mode === "cleanup" && self.ticksLeft[entity] <= 0) self.stateCode[entity] = self.states.expired;
+      }
+    },
+  });
+
+const createSpriteActor = (spriteAccumulator) =>
+  ({
+    storage: "entity",
+    initialState: "__INIT",
+    initialContext: {
+      spriteId: entityString(),
+    },
+    spawnSchema: {
+      spriteId: entityString(),
+    },
+    config: {
+      __INIT: { ENTITY_SPAWNED: "visible" },
+      visible: { TICK: "visible" },
+    },
+    reducer(_state, action, { self, payloadFor }) {
+      if (action.type !== "ENTITY_SPAWNED") return;
+
+      for (const entity of self.indices) {
+        self.spriteId[entity] = payloadFor(entity).spriteId;
+      }
+    },
+    reactions: {
+      TICK: ({ self, entities }) => {
+        const movement = entities().get("movementActor");
+        let checksum = 0;
+
+        for (const entity of self.indices) {
+          checksum += movement.x[entity] + movement.y[entity] + self.spriteId[entity].length;
+        }
+
+        spriteAccumulator.value += checksum;
+      },
+    },
+  });
+
+const createSpawnEvents = () =>
+  defineSpawnEvents({
+    SPAWN_BENCH_BATCH: spawnEvent(),
+  });
+
+const createSpawn = (machines, createSpec) => {
+  const spawnEvents = createSpawnEvents();
+
+  return defineEntitySpawn(machines, spawnEvents)({
+    SPAWN_BENCH_BATCH: (payload) => {
+      const specs = new Array(payload.count);
+      for (let index = 0; index < payload.count; index += 1) specs[index] = createSpec(index, payload);
+      return specs;
+    },
+  });
+};
+
+const createMovementPublicRunner = (rowCount) => {
+  const movementActor = createMovementActor();
+  const machines = { movementActor };
+  const spawn = createSpawn(machines, (index, payload) => ({
+    id: `unit/${payload.startId + index}`,
+    groupTag: "unit",
+    actors: {
+      movementActor: {
+        x: index % 1024,
+        y: index % 2048,
+        dx: 1 + (index % 3),
+        dy: 1 + (index % 5),
+      },
+    },
+  }));
+  const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] });
+  manager.transition({ type: "SPAWN_BENCH_BATCH", payload: { count: rowCount, startId: 0 } });
+
+  return {
+    run: () => manager.transition(tickAction),
+  };
+};
+
+const createProjectilePublicRunner = (rowCount, mode) => {
+  const projectileActor = createProjectileActor(mode);
+  const machines = { projectileActor };
+  const initialTicksLeft = 1_000_000;
+  const spawn = createSpawn(machines, (index, payload) => ({
+    id: `projectile/${payload.startId + index}`,
+    groupTag: "projectile",
+    actors: {
+      projectileActor: {
+        ticksLeft: index < (payload.expireCount ?? 0) ? 1 : initialTicksLeft,
+        damage: 10 + (index % 7),
+      },
+    },
+  }));
+  const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] });
+
+  if (mode !== "cleanup") {
+    manager.transition({ type: "SPAWN_BENCH_BATCH", payload: { count: rowCount, startId: 0, expireCount: 0 } });
+    return {
+      run: () => manager.transition(tickAction),
+    };
+  }
+
+  let nextId = 0;
+  let needsReplacement = false;
+  const spawnBatch = (count, expireCount) => {
+    manager.transition({
+      type: "SPAWN_BENCH_BATCH",
+      payload: { count, startId: nextId, expireCount },
+    });
+    nextId += count;
+  };
+
+  spawnBatch(rowCount, cleanupBatchSize);
+
+  return {
+    beforeOperation: () => {
+      if (needsReplacement) spawnBatch(cleanupBatchSize, cleanupBatchSize);
+      needsReplacement = false;
+    },
+    run: () => manager.transition(tickAction),
+    afterOperation: () => {
+      needsReplacement = true;
+    },
+  };
+};
+
+const createSpritePublicRunner = (rowCount) => {
+  const spriteAccumulator = { value: 0 };
+  const movementActor = createMovementActor();
+  const spriteSyncActor = createSpriteActor(spriteAccumulator);
+  const machines = { movementActor, spriteSyncActor };
+  const spawn = createSpawn(machines, (index, payload) => ({
+    id: `sprite/${payload.startId + index}`,
+    groupTag: "unit",
+    actors: {
+      movementActor: {
+        x: index % 1024,
+        y: index % 2048,
+        dx: 1 + (index % 3),
+        dy: 1 + (index % 5),
+      },
+      spriteSyncActor: {
+        spriteId: `sprite-${index}`,
+      },
+    },
+  }));
+  const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] });
+  manager.transition({ type: "SPAWN_BENCH_BATCH", payload: { count: rowCount, startId: 0 } });
+
+  return {
+    run: () => manager.transition(tickAction),
+    read: () => spriteAccumulator.value,
+  };
+};
+
+const createSoaRows = (rowCount) => {
+  const indices = new Int32Array(rowCount);
+  const accepted = new Int32Array(rowCount);
+  const presence = new Uint8Array(rowCount);
+  const stateCode = new Int16Array(rowCount);
+  const prevStateCode = new Int16Array(rowCount);
+  const rowVersion = new Uint32Array(rowCount);
+  const x = new Float32Array(rowCount);
+  const y = new Float32Array(rowCount);
+  const dx = new Float32Array(rowCount);
+  const dy = new Float32Array(rowCount);
+  const ticksLeft = new Int32Array(rowCount);
+  const damage = new Int32Array(rowCount);
+  const spriteIds = new Array(rowCount);
+  const ids = new Array(rowCount);
+
+  for (let entity = 0; entity < rowCount; entity += 1) {
+    indices[entity] = entity;
+    presence[entity] = 1;
+    x[entity] = entity % 1024;
+    y[entity] = entity % 2048;
+    dx[entity] = 1 + (entity % 3);
+    dy[entity] = 1 + (entity % 5);
+    ticksLeft[entity] = 1_000_000;
+    damage[entity] = 10 + (entity % 7);
+    spriteIds[entity] = `sprite-${entity}`;
+    ids[entity] = `entity/${entity}`;
+  }
+
+  return {
+    count: rowCount,
+    version: 0,
+    indices,
+    accepted,
+    presence,
+    stateCode,
+    prevStateCode,
+    rowVersion,
+    x,
+    y,
+    dx,
+    dy,
+    ticksLeft,
+    damage,
+    spriteIds,
+    ids,
+    indexById: Object.create(null),
+    checksum: 0,
+  };
+};
+
+const fillIndexById = (rows) => {
+  rows.indexById = Object.create(null);
+  for (let entity = 0; entity < rows.count; entity += 1) rows.indexById[rows.ids[entity]] = entity;
+};
+
+const createMovementRawSoaRunner = (rowCount) => {
+  const rows = createSoaRows(rowCount);
+
+  return {
+    run: () => {
+      const { x, y, dx, dy } = rows;
+      for (let entity = 0; entity < rowCount; entity += 1) {
+        x[entity] += dx[entity];
+        y[entity] += dy[entity];
+      }
+    },
+  };
+};
+
+const createProjectileRawSoaRunner = (rowCount) => {
+  const rows = createSoaRows(rowCount);
+
+  return {
+    run: () => {
+      const { ticksLeft } = rows;
+      for (let entity = 0; entity < rowCount; entity += 1) ticksLeft[entity] -= 1;
+    },
+  };
+};
+
+const createCleanupRawSoaRunner = (rowCount) => {
+  const rows = createSoaRows(rowCount);
+  const reset = () => {
+    rows.count = rowCount;
+    for (let entity = 0; entity < rowCount; entity += 1) rows.indices[entity] = entity;
+    rows.presence.fill(1);
+    rows.ticksLeft.fill(1_000_000);
+    for (let entity = 0; entity < cleanupBatchSize; entity += 1) rows.ticksLeft[entity] = 1;
+    fillIndexById(rows);
+  };
+
+  return {
+    beforeOperation: reset,
+    run: () => {
+      const { indices, presence, ticksLeft, ids, indexById } = rows;
+      let write = 0;
+
+      for (let offset = 0; offset < rowCount; offset += 1) {
+        const entity = indices[offset];
+        if (presence[entity] === 0) continue;
+
+        ticksLeft[entity] -= 1;
+        if (ticksLeft[entity] <= 0) {
+          presence[entity] = 0;
+          delete indexById[ids[entity]];
+          continue;
+        }
+
+        indices[write] = entity;
+        write += 1;
+      }
+
+      rows.count = write;
+      rows.version += 1;
+    },
+  };
+};
+
+const createSpriteRawSoaRunner = (rowCount) => {
+  const rows = createSoaRows(rowCount);
+
+  return {
+    run: () => {
+      const { x, y, dx, dy, spriteIds } = rows;
+      let checksum = 0;
+      for (let entity = 0; entity < rowCount; entity += 1) {
+        x[entity] += dx[entity];
+        y[entity] += dy[entity];
+        checksum += x[entity] + y[entity] + spriteIds[entity].length;
+      }
+      rows.checksum += checksum;
+    },
+    read: () => rows.checksum,
+  };
+};
+
+const createMovementSemanticSoaRunner = (rowCount) => {
+  const rows = createSoaRows(rowCount);
+
+  return {
+    run: () => {
+      const { indices, accepted, presence, stateCode, prevStateCode, rowVersion, x, y, dx, dy } = rows;
+      let acceptedCount = 0;
+
+      for (let offset = 0; offset < rowCount; offset += 1) {
+        const entity = indices[offset];
+        if (presence[entity] === 0 || stateCode[entity] !== 0) continue;
+        prevStateCode[entity] = stateCode[entity];
+        accepted[acceptedCount] = entity;
+        acceptedCount += 1;
+        x[entity] += dx[entity];
+        y[entity] += dy[entity];
+      }
+
+      for (let offset = 0; offset < acceptedCount; offset += 1) rowVersion[accepted[offset]] += 1;
+      rows.version += 1;
+    },
+  };
+};
+
+const createProjectileSemanticSoaRunner = (rowCount) => {
+  const rows = createSoaRows(rowCount);
+
+  return {
+    run: () => {
+      const { indices, accepted, presence, stateCode, prevStateCode, rowVersion, ticksLeft, damage } = rows;
+      let acceptedCount = 0;
+
+      for (let offset = 0; offset < rowCount; offset += 1) {
+        const entity = indices[offset];
+        if (presence[entity] === 0 || stateCode[entity] !== 0) continue;
+        prevStateCode[entity] = stateCode[entity];
+        accepted[acceptedCount] = entity;
+        acceptedCount += 1;
+        ticksLeft[entity] -= 1;
+        damage[entity] += 0;
+      }
+
+      for (let offset = 0; offset < acceptedCount; offset += 1) rowVersion[accepted[offset]] += 1;
+      rows.version += 1;
+    },
+  };
+};
+
+const createCleanupSemanticSoaRunner = (rowCount) => {
+  const rows = createSoaRows(rowCount);
+  const reset = () => {
+    rows.count = rowCount;
+    rows.version += 1;
+    for (let entity = 0; entity < rowCount; entity += 1) rows.indices[entity] = entity;
+    rows.presence.fill(1);
+    rows.stateCode.fill(0);
+    rows.prevStateCode.fill(0);
+    rows.ticksLeft.fill(1_000_000);
+    for (let entity = 0; entity < cleanupBatchSize; entity += 1) rows.ticksLeft[entity] = 1;
+    fillIndexById(rows);
+  };
+
+  return {
+    beforeOperation: reset,
+    run: () => {
+      const { indices, accepted, presence, stateCode, prevStateCode, rowVersion, ticksLeft, ids, indexById } = rows;
+      let write = 0;
+      let acceptedCount = 0;
+
+      for (let offset = 0; offset < rowCount; offset += 1) {
+        const entity = indices[offset];
+        if (presence[entity] === 0 || stateCode[entity] !== 0) continue;
+
+        prevStateCode[entity] = stateCode[entity];
+        accepted[acceptedCount] = entity;
+        acceptedCount += 1;
+        ticksLeft[entity] -= 1;
+        if (ticksLeft[entity] <= 0) {
+          presence[entity] = 0;
+          stateCode[entity] = 1;
+          delete indexById[ids[entity]];
+          continue;
+        }
+
+        indices[write] = entity;
+        write += 1;
+      }
+
+      rows.count = write;
+      for (let offset = 0; offset < acceptedCount; offset += 1) rowVersion[accepted[offset]] += 1;
+      rows.version += 1;
+    },
+  };
+};
+
+const createSpriteSemanticSoaRunner = (rowCount) => {
+  const rows = createSoaRows(rowCount);
+
+  return {
+    run: () => {
+      const { indices, accepted, presence, stateCode, prevStateCode, rowVersion, x, y, dx, dy, spriteIds } = rows;
+      let acceptedCount = 0;
+      let checksum = 0;
+
+      for (let offset = 0; offset < rowCount; offset += 1) {
+        const entity = indices[offset];
+        if (presence[entity] === 0 || stateCode[entity] !== 0) continue;
+        prevStateCode[entity] = stateCode[entity];
+        accepted[acceptedCount] = entity;
+        acceptedCount += 1;
+        x[entity] += dx[entity];
+        y[entity] += dy[entity];
+        checksum += x[entity] + y[entity] + spriteIds[entity].length;
+      }
+
+      for (let offset = 0; offset < acceptedCount; offset += 1) rowVersion[accepted[offset]] += 1;
+      rows.version += 1;
+      rows.checksum += checksum;
+    },
+    read: () => rows.checksum,
+  };
+};
+
+const createKernelStore = ({
+  templateKey,
+  rowCount,
+  states,
+  columns,
+  reducer,
+  hasReaction = false,
+  despawnStates = [],
+}) => {
+  const stateCodeByName = Object.fromEntries(states.map((state, index) => [state, index]));
+  const activeCode = stateCodeByName.active ?? stateCodeByName.visible ?? 0;
+  const transitionTable = new Int16Array(2 * (states.length + 1));
+  transitionTable.fill(noTransitionCode);
+  transitionTable[0 * (states.length + 1) + (activeCode + 1)] = activeCode;
+
+  const despawnStateMask = new Uint8Array(states.length);
+  for (const state of despawnStates) despawnStateMask[stateCodeByName[state]] = 1;
+
+  const activeBucket = Array.from({ length: rowCount }, (_, entity) => entity);
+  const stateBuckets = states.map((state) => (stateCodeByName[state] === activeCode ? activeBucket : []));
+  const statePosition = new Int32Array(rowCount);
+  const presence = new Uint8Array(rowCount);
+  const stateCode = new Int16Array(rowCount);
+  const prevStateCode = new Int16Array(rowCount);
+  const rowVersion = new Uint32Array(rowCount);
+
+  presence.fill(1);
+  stateCode.fill(activeCode);
+  prevStateCode.fill(activeCode);
+  for (let entity = 0; entity < rowCount; entity += 1) statePosition[entity] = entity;
+
+  return {
+    templateKey,
+    count: rowCount,
+    version: 0,
+    metadata: {
+      templateKey,
+      publicStates: states,
+      stateCodeByName,
+      stateSlotCount: states.length + 1,
+      transitionTable,
+      despawnStateMask,
+      effectsByStateCode: Array.from({ length: states.length }),
+      reactionsByEventCode: hasReaction ? [() => undefined] : [],
+      reducer,
+    },
+    presence,
+    stateCode,
+    prevStateCode,
+    rowVersion,
+    stateBuckets,
+    statePosition,
+    acceptedScratch: activeBucket,
+    columns,
+    publicSlice: { storage: "entity", version: 0, count: rowCount, capacity: rowCount },
+  };
+};
+
+const createKernelRuntime = (stores, rowCount) => {
+  const ids = new Array(rowCount);
+  const alive = new Uint8Array(rowCount);
+  const generation = new Uint32Array(rowCount);
+  const groupTagByIndex = new Array(rowCount);
+  const entitiesByGroupTag = Object.create(null);
+  const groupTagPosition = new Int32Array(rowCount);
+  const actorRowsByEntity = Array.from({ length: rowCount }, () => []);
+  const actorRowsByGroupTag = Object.create(null);
+  const entityBucket = [];
+  const unitRows = [];
+
+  for (let entity = 0; entity < rowCount; entity += 1) {
+    ids[entity] = `entity/${entity}`;
+    alive[entity] = 1;
+    generation[entity] = 1;
+    groupTagByIndex[entity] = "unit";
+    groupTagPosition[entity] = entity;
+    entityBucket.push(entity);
+    for (const store of stores) {
+      const row = { store, entity };
+      actorRowsByEntity[entity].push(row);
+      unitRows.push(row);
+    }
+  }
+  entitiesByGroupTag.unit = entityBucket;
+  actorRowsByGroupTag.unit = unitRows;
+
+  return {
+    stores,
+    entityStore: {
+      ids,
+      alive,
+      generation,
+      indexById: Object.create(null),
+      groupTagByIndex,
+      entitiesByGroupTag,
+      groupTagPosition,
+      freeList: [],
+      count: rowCount,
+      version: 0,
+    },
+    actorRowsByEntity,
+    actorRowsByGroupTag,
+    reactionBatches: [],
+    scheduledDespawns: [],
+    despawnScheduled: new Uint8Array(rowCount),
+    checksum: 0,
+  };
+};
+
+const createReducerSelf = (runtime, store, indices) => {
+  const self = {
+    indices,
+    states: store.metadata.stateCodeByName,
+    presence: store.presence,
+    stateCode: store.stateCode,
+    prevStateCode: store.prevStateCode,
+    rowVersion: store.rowVersion,
+    has(entity) {
+      return store.presence[entity] === 1;
+    },
+    entityId(entity) {
+      return runtime.entityStore.ids[entity];
+    },
+  };
+
+  for (const [name, column] of Object.entries(store.columns)) self[name] = column;
+  return self;
+};
+
+const resolveTransitionTarget = (store, entity, eventCode) => {
+  const previousCode = store.stateCode[entity];
+  const cell = eventCode * store.metadata.stateSlotCount + previousCode + 1;
+  const nextCode = store.metadata.transitionTable[cell];
+  if (nextCode === noTransitionCode) return false;
+
+  store.prevStateCode[entity] = previousCode;
+  store.stateCode[entity] = nextCode;
+  return true;
+};
+
+const moveStateBucket = (store, entity, previousCode, nextCode) => {
+  if (previousCode === nextCode) return;
+
+  if (previousCode >= 0) {
+    const previousBucket = store.stateBuckets[previousCode];
+    const position = store.statePosition[entity];
+    const last = previousBucket.pop();
+    if (last !== undefined && last !== entity) {
+      previousBucket[position] = last;
+      store.statePosition[last] = position;
+    }
+  }
+
+  if (nextCode >= 0) {
+    const nextBucket = store.stateBuckets[nextCode];
+    store.statePosition[entity] = nextBucket.length;
+    nextBucket.push(entity);
+    return;
+  }
+
+  store.statePosition[entity] = -1;
+};
+
+const removeRowRef = (rows, store, entity) => {
+  if (!rows) return false;
+
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index];
+    if (row.store !== store || row.entity !== entity) continue;
+
+    const last = rows.pop();
+    if (last !== undefined && last !== row) rows[index] = last;
+    return true;
+  }
+
+  return false;
+};
+
+const removeKernelActorRowOwnership = (runtime, store, entity) => {
+  const entityRows = runtime.actorRowsByEntity[entity];
+  removeRowRef(entityRows, store, entity);
+
+  const groupTag = runtime.entityStore.groupTagByIndex[entity];
+  const groupRows = runtime.actorRowsByGroupTag[groupTag];
+  if (!removeRowRef(groupRows, store, entity) || groupRows.length > 0) return;
+
+  delete runtime.actorRowsByGroupTag[groupTag];
+};
+
+const writeInitialKernelColumns = (store, entity) => {
+  for (const column of Object.values(store.columns)) {
+    column[entity] = Array.isArray(column) ? "" : 0;
+  }
+};
+
+const refreshKernelPublicSlice = (store) => {
+  store.publicSlice = { storage: "entity", version: store.version, count: store.count, capacity: store.presence.length };
+};
+
+const removeKernelEntityFromGroupBucket = (runtime, entity) => {
+  const entityStore = runtime.entityStore;
+  const groupTag = entityStore.groupTagByIndex[entity];
+  const bucket = entityStore.entitiesByGroupTag[groupTag];
+  const position = entityStore.groupTagPosition[entity];
+  if (!bucket || position < 0) return;
+
+  const last = bucket.pop();
+  if (last !== undefined && last !== entity) {
+    bucket[position] = last;
+    entityStore.groupTagPosition[last] = position;
+  }
+  if (bucket.length === 0) delete entityStore.entitiesByGroupTag[groupTag];
+  entityStore.groupTagPosition[entity] = -1;
+};
+
+const scheduleDespawns = (runtime, store, indices) => {
+  if (store.metadata.despawnStateMask.length === 0) return;
+
+  for (const entity of indices) {
+    const stateCode = store.stateCode[entity];
+    if (stateCode < 0 || store.metadata.despawnStateMask[stateCode] !== 1) continue;
+    if (runtime.entityStore.alive[entity] !== 1 || runtime.despawnScheduled[entity] === 1) continue;
+    runtime.despawnScheduled[entity] = 1;
+    runtime.scheduledDespawns.push(entity);
+  }
+};
+
+const removeKernelActorRow = (runtime, store, entity) => {
+  if (store.presence[entity] !== 1) return;
+
+  moveStateBucket(store, entity, store.stateCode[entity], entityInitStateCode);
+  removeKernelActorRowOwnership(runtime, store, entity);
+  store.presence[entity] = 0;
+  store.stateCode[entity] = entityInitStateCode;
+  store.prevStateCode[entity] = entityInitStateCode;
+  store.rowVersion[entity] = 0;
+  store.count -= 1;
+  store.version += 1;
+  writeInitialKernelColumns(store, entity);
+  refreshKernelPublicSlice(store);
+};
+
+const removeKernelEntityIfEmpty = (runtime, entity) => {
+  const rows = runtime.actorRowsByEntity[entity];
+  if (rows && rows.length > 0) return;
+
+  const entityStore = runtime.entityStore;
+  if (entityStore.alive[entity] !== 1) return;
+
+  removeKernelEntityFromGroupBucket(runtime, entity);
+  delete entityStore.indexById[entityStore.ids[entity]];
+  entityStore.alive[entity] = 0;
+  entityStore.ids[entity] = "";
+  entityStore.groupTagByIndex[entity] = "";
+  entityStore.freeList.push(entity);
+  entityStore.count -= 1;
+  entityStore.version += 1;
+  runtime.actorRowsByEntity[entity] = [];
+};
+
+const flushKernelDespawns = (runtime) => {
+  const despawns = runtime.scheduledDespawns;
+  runtime.scheduledDespawns = [];
+
+  for (const entity of despawns) {
+    runtime.despawnScheduled[entity] = 0;
+    const rows = runtime.actorRowsByEntity[entity];
+    const attachedRows = rows.slice();
+    for (const row of attachedRows) removeKernelActorRow(runtime, row.store, entity);
+    removeKernelEntityIfEmpty(runtime, entity);
+  }
+};
+
+const reduceKernelBatch = (runtime, store, indices, action, { scheduleReactions = false } = {}) => {
+  let firstNextState;
+  for (const entity of indices) {
+    if (!resolveTransitionTarget(store, entity, 0)) continue;
+    firstNextState ??= store.metadata.publicStates[store.stateCode[entity]];
+  }
+  if (indices.length === 0) return;
+
+  if (store.metadata.reducer) {
+    store.metadata.reducer(
+      { state: firstNextState, context: {} },
+      action,
+      {
+        nextState: firstNextState,
+        config: undefined,
+        self: createReducerSelf(runtime, store, indices),
+        payloadFor() {
+          throw new Error("payloadFor is not available in diagnostic kernel TICK");
+        },
+      },
+    );
+  }
+
+  for (const entity of indices) {
+    const code = store.stateCode[entity];
+    if (code !== entityInitStateCode && store.metadata.publicStates[code] === undefined) {
+      throw new Error(`invalid diagnostic stateCode ${code}`);
+    }
+  }
+  for (const entity of indices) store.rowVersion[entity] += 1;
+  store.version += 1;
+
+  for (const entity of indices) {
+    const stateCode = store.stateCode[entity];
+    if (stateCode < 0 || stateCode === store.prevStateCode[entity]) continue;
+    if (!store.metadata.effectsByStateCode[stateCode]) continue;
+  }
+
+  if (scheduleReactions && store.metadata.reactionsByEventCode[0]) {
+    runtime.reactionBatches.push({ store, eventCode: 0, indices: indices.slice() });
+  }
+
+  scheduleDespawns(runtime, store, indices);
+
+  for (const entity of indices) {
+    if (store.stateCode[entity] >= -1) continue;
+  }
+
+  for (let index = indices.length - 1; index >= 0; index -= 1) {
+    const entity = indices[index];
+    moveStateBucket(store, entity, store.prevStateCode[entity], store.stateCode[entity]);
+  }
+};
+
+const runKernelReactions = (runtime, movementStore) => {
+  for (const batch of runtime.reactionBatches) {
+    const entries = [];
+    for (const entity of batch.indices) {
+      if (batch.store.presence[entity] !== 1 || runtime.entityStore.alive[entity] !== 1) continue;
+      const id = runtime.entityStore.ids[entity];
+      if (id === undefined || id.length === 0) continue;
+      entries.push({ entity, generation: runtime.entityStore.generation[entity], id });
+    }
+    if (entries.length === 0) continue;
+
+    const entriesByEntity = new Map(entries.map((entry) => [entry.entity, entry]));
+    const self = {
+      indices: entries.map((entry) => entry.entity),
+      spriteId: batch.store.columns.spriteId,
+      has(entity) {
+        const entry = entriesByEntity.get(entity);
+        return Boolean(entry) && runtime.entityStore.alive[entity] === 1;
+      },
+      entityId(entity) {
+        return entriesByEntity.get(entity).id;
+      },
+    };
+    const entities = () => ({
+      get(key) {
+        if (key !== "movementActor") throw new Error(`unknown diagnostic actor '${key}'`);
+        return movementStore.columns;
+      },
+    });
+    const movement = entities().get("movementActor");
+    let checksum = 0;
+
+    for (const entity of self.indices) {
+      checksum += movement.x[entity] + movement.y[entity] + self.spriteId[entity].length;
+    }
+    runtime.checksum += checksum;
+  }
+
+  runtime.reactionBatches.length = 0;
+};
+
+const resetCleanupKernel = (runtime, store, rowCount) => {
+  runtime.entityStore.count = rowCount;
+  runtime.entityStore.freeList.length = 0;
+  runtime.entityStore.entitiesByGroupTag.unit = [];
+  runtime.scheduledDespawns.length = 0;
+  runtime.despawnScheduled.fill(0);
+  runtime.entityStore.alive.fill(1);
+  runtime.actorRowsByGroupTag.unit = [];
+  store.count = rowCount;
+  store.presence.fill(1);
+  store.stateCode.fill(0);
+  store.prevStateCode.fill(0);
+  store.rowVersion.fill(0);
+  store.stateBuckets[0].length = rowCount;
+  store.stateBuckets[1].length = 0;
+
+  for (let entity = 0; entity < rowCount; entity += 1) {
+    runtime.entityStore.ids[entity] = `entity/${entity}`;
+    runtime.entityStore.groupTagByIndex[entity] = "unit";
+    runtime.entityStore.groupTagPosition[entity] = entity;
+    runtime.entityStore.entitiesByGroupTag.unit.push(entity);
+    runtime.actorRowsByEntity[entity] = [];
+    for (const actorStore of runtime.stores) {
+      const row = { store: actorStore, entity };
+      runtime.actorRowsByEntity[entity].push(row);
+      runtime.actorRowsByGroupTag.unit.push(row);
+    }
+    store.stateBuckets[0][entity] = entity;
+    store.statePosition[entity] = entity;
+    store.columns.ticksLeft[entity] = entity < cleanupBatchSize ? 1 : 1_000_000;
+  }
+};
+
+const createMovementKernelRunner = (rowCount) => {
+  const rows = createSoaRows(rowCount);
+  const store = createKernelStore({
+    templateKey: "movementActor",
+    rowCount,
+    states: ["active"],
+    columns: { x: rows.x, y: rows.y, dx: rows.dx, dy: rows.dy },
+    reducer: createMovementActor().reducer,
+  });
+  const runtime = createKernelRuntime([store], rowCount);
+
+  return {
+    run: () => {
+      reduceKernelBatch(runtime, store, store.stateBuckets[0], tickAction);
+      flushKernelDespawns(runtime);
+    },
+  };
+};
+
+const createProjectileKernelRunner = (rowCount) => {
+  const rows = createSoaRows(rowCount);
+  const store = createKernelStore({
+    templateKey: "projectileActor",
+    rowCount,
+    states: ["active", "expired"],
+    columns: { ticksLeft: rows.ticksLeft, damage: rows.damage },
+    reducer: createProjectileActor("lifetime").reducer,
+  });
+  const runtime = createKernelRuntime([store], rowCount);
+
+  return {
+    run: () => {
+      reduceKernelBatch(runtime, store, store.stateBuckets[0], tickAction);
+      flushKernelDespawns(runtime);
+    },
+  };
+};
+
+const createCleanupKernelRunner = (rowCount) => {
+  const rows = createSoaRows(rowCount);
+  const store = createKernelStore({
+    templateKey: "projectileActor",
+    rowCount,
+    states: ["active", "expired"],
+    columns: { ticksLeft: rows.ticksLeft, damage: rows.damage },
+    reducer: createProjectileActor("cleanup").reducer,
+    despawnStates: ["expired"],
+  });
+  const runtime = createKernelRuntime([store], rowCount);
+
+  return {
+    beforeOperation: () => resetCleanupKernel(runtime, store, rowCount),
+    run: () => {
+      reduceKernelBatch(runtime, store, store.stateBuckets[0], tickAction);
+      flushKernelDespawns(runtime);
+    },
+  };
+};
+
+const createSpriteKernelRunner = (rowCount) => {
+  const rows = createSoaRows(rowCount);
+  const movementStore = createKernelStore({
+    templateKey: "movementActor",
+    rowCount,
+    states: ["active"],
+    columns: { x: rows.x, y: rows.y, dx: rows.dx, dy: rows.dy },
+    reducer: createMovementActor().reducer,
+  });
+  const spriteStore = createKernelStore({
+    templateKey: "spriteSyncActor",
+    rowCount,
+    states: ["visible"],
+    columns: { spriteId: rows.spriteIds },
+    reducer: createSpriteActor({ value: 0 }).reducer,
+    hasReaction: true,
+  });
+  const runtime = createKernelRuntime([movementStore, spriteStore], rowCount);
+
+  return {
+    run: () => {
+      reduceKernelBatch(runtime, movementStore, movementStore.stateBuckets[0], tickAction, { scheduleReactions: true });
+      reduceKernelBatch(runtime, spriteStore, spriteStore.stateBuckets[0], tickAction, { scheduleReactions: true });
+      runKernelReactions(runtime, movementStore);
+      flushKernelDespawns(runtime);
+    },
+    read: () => runtime.checksum,
+  };
+};
+
+const layerDefinitions = [
+  {
+    key: "raw-soa",
+    label: "raw SoA lower bound",
+    operationsPerSample: {
+      "movement-update": 100,
+      "projectile-lifetime": 100,
+      "despawn-on-cleanup": 20,
+      "sprite-sync-reaction": 100,
+    },
+  },
+  {
+    key: "semantic-soa",
+    label: "semantic SoA baseline",
+    operationsPerSample: {
+      "movement-update": 50,
+      "projectile-lifetime": 50,
+      "despawn-on-cleanup": 10,
+      "sprite-sync-reaction": 50,
+    },
+  },
+  {
+    key: "raw-entity-kernel",
+    label: "raw entity kernel",
+    operationsPerSample: {
+      "movement-update": 20,
+      "projectile-lifetime": 20,
+      "despawn-on-cleanup": 5,
+      "sprite-sync-reaction": 10,
+    },
+  },
+  {
+    key: "public-transition",
+    label: "public manager.transition",
+    operationsPerSample: {
+      "movement-update": 5,
+      "projectile-lifetime": 5,
+      "despawn-on-cleanup": 5,
+      "sprite-sync-reaction": 5,
+    },
+  },
+];
+
+const scenarioDefinitions = [
+  {
+    key: "movement-update",
+    label: "movement update",
+    createRunnerByLayer: {
+      "raw-soa": createMovementRawSoaRunner,
+      "semantic-soa": createMovementSemanticSoaRunner,
+      "raw-entity-kernel": createMovementKernelRunner,
+      "public-transition": createMovementPublicRunner,
+    },
+  },
+  {
+    key: "projectile-lifetime",
+    label: "projectile lifetime update",
+    createRunnerByLayer: {
+      "raw-soa": createProjectileRawSoaRunner,
+      "semantic-soa": createProjectileSemanticSoaRunner,
+      "raw-entity-kernel": createProjectileKernelRunner,
+      "public-transition": (rowCount) => createProjectilePublicRunner(rowCount, "lifetime"),
+    },
+  },
+  {
+    key: "despawn-on-cleanup",
+    label: "despawnOn cleanup",
+    createRunnerByLayer: {
+      "raw-soa": createCleanupRawSoaRunner,
+      "semantic-soa": createCleanupSemanticSoaRunner,
+      "raw-entity-kernel": createCleanupKernelRunner,
+      "public-transition": (rowCount) => createProjectilePublicRunner(rowCount, "cleanup"),
+    },
+  },
+  {
+    key: "sprite-sync-reaction",
+    label: "sprite sync reaction",
+    createRunnerByLayer: {
+      "raw-soa": createSpriteRawSoaRunner,
+      "semantic-soa": createSpriteSemanticSoaRunner,
+      "raw-entity-kernel": createSpriteKernelRunner,
+      "public-transition": createSpritePublicRunner,
+    },
+  },
+];
+
+const runLayer = (scenario, layer, rowCount) => {
+  const runner = scenario.createRunnerByLayer[layer.key](rowCount);
+  const operationsPerSample = layer.operationsPerSample[scenario.key];
+  const summary = measure(runner, operationsPerSample);
+
+  return {
+    key: layer.key,
+    label: layer.label,
+    operationsPerSample,
+    ...summary,
+  };
+};
+
+const runScenario = (scenario, rowCount) => {
+  const layers = layerDefinitions.map((layer) => runLayer(scenario, layer, rowCount));
+  const rawSoa = layers.find((layer) => layer.key === "raw-soa");
+
+  return {
+    key: scenario.key,
+    label: scenario.label,
+    rowCount,
+    layers: layers.map((layer) => ({
+      ...layer,
+      ratioToRawSoa: layer.median / rawSoa.median,
+    })),
+  };
+};
+
+export const runEntitiesDiagnosticsBenchmark = ({
+  profile,
+  onScenarioStart,
+  onScenarioEnd,
+  rowCounts: selectedRowCounts = rowCounts,
+} = {}) => {
+  const scenarios = [];
+
+  for (const scenarioDefinition of scenarioDefinitions) {
+    for (const rowCount of selectedRowCounts) {
+      onScenarioStart?.(scenarioDefinition, rowCount);
+      const scenario = runScenario(scenarioDefinition, rowCount);
+      scenarios.push(scenario);
+      onScenarioEnd?.(scenario);
+    }
+  }
+
+  return {
+    benchmark: benchmarkName,
+    profile: profile ?? "node",
+    runtime: "production dist",
+    rowCounts: selectedRowCounts,
+    scenarios,
+  };
+};
+
+const formatMs = (value) => `${value.toFixed(3)}ms`;
+const formatRatio = (value) => `${value.toFixed(2)}x`;
+
+export const formatDiagnosticsReport = (result) => {
+  const lines = [
+    `${result.benchmark} (${result.profile}, ${result.runtime})`,
+    `iterations: warmup=${warmupIterations}, measured=${measuredIterations}`,
+    "",
+  ];
+
+  for (const scenario of result.scenarios) {
+    lines.push(`## ${scenario.label} / ${scenario.rowCount.toLocaleString("en-US")} rows`);
+    lines.push("");
+    lines.push("| Layer | Median | p95 | Min | Max | Ops/sample | Ratio to raw SoA |");
+    lines.push("| --- | ---: | ---: | ---: | ---: | ---: | ---: |");
+
+    for (const layer of scenario.layers) {
+      lines.push(
+        [
+          layer.label,
+          formatMs(layer.median),
+          formatMs(layer.p95),
+          formatMs(layer.min),
+          formatMs(layer.max),
+          String(layer.operationsPerSample),
+          formatRatio(layer.ratioToRawSoa),
+        ].join(" | ").replace(/^/, "| ").replace(/$/, " |"),
+      );
+    }
+
+    lines.push("");
+  }
+
+  return lines.join("\n");
+};

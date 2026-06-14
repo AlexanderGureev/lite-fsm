@@ -30,6 +30,7 @@ apps/**/out/
 packages/**/dist/
 .turbo/
 .preview/
+.bench/
 
 # Pagefind индексы для поиска
 apps/docs/public/_pagefind/

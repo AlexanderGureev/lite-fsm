@@ -1,3 +1,5 @@
+/* global globalThis */
+
 import { MachineManager } from "../../../packages/core/dist/index.js";
 import {
   defineEntitySpawn,
@@ -46,6 +48,7 @@ const summarize = (samples) => {
     p95: percentile(sorted, 0.95),
     min: sorted[0],
     max: sorted[sorted.length - 1],
+    samples,
   };
 };
 
@@ -567,7 +570,7 @@ const retainedHeap = () => {
   return process.memoryUsage().heapUsed;
 };
 
-const runAllocationGuard = (forceGc) => {
+const runAllocationGuard = (forceGc, selectedRowCounts = rowCounts) => {
   if (!forceGc || retainedHeap() === undefined) {
     return {
       skipped: true,
@@ -576,7 +579,15 @@ const runAllocationGuard = (forceGc) => {
     };
   }
 
-  const samples = rowCounts.map((rowCount) => {
+  if (selectedRowCounts.length < 2) {
+    return {
+      skipped: true,
+      reason: "Allocation guard requires at least two row counts.",
+      budget: allocationGuardBudget,
+    };
+  }
+
+  const samples = selectedRowCounts.map((rowCount) => {
     const runner = createMovementEntityRunner(rowCount);
     for (let i = 0; i < warmupIterations; i += 1) runner.run();
 
@@ -593,7 +604,8 @@ const runAllocationGuard = (forceGc) => {
       bytesPerRow: retainedBytes / rowCount,
     };
   });
-  const [small, large] = samples;
+  const small = samples[0];
+  const large = samples[samples.length - 1];
   const bytesPerRowGrowth = Math.max(0, large.bytesPerRow - small.bytesPerRow);
   const retainedGrowth = Math.max(0, large.retainedBytes - small.retainedBytes);
   const passed =
@@ -610,11 +622,17 @@ const runAllocationGuard = (forceGc) => {
   };
 };
 
-export const runEntitiesBenchmarkProfile = ({ profile, forceGc, onScenarioStart, onScenarioEnd } = {}) => {
+export const runEntitiesBenchmarkProfile = ({
+  profile,
+  forceGc,
+  onScenarioStart,
+  onScenarioEnd,
+  rowCounts: selectedRowCounts = rowCounts,
+} = {}) => {
   const scenarios = [];
 
   for (const definition of scenarioDefinitions) {
-    for (const rowCount of rowCounts) {
+    for (const rowCount of selectedRowCounts) {
       onScenarioStart?.(definition, rowCount);
       const scenario = runScenario(definition, rowCount);
       scenarios.push(scenario);
@@ -622,14 +640,14 @@ export const runEntitiesBenchmarkProfile = ({ profile, forceGc, onScenarioStart,
     }
   }
 
-  const allocationGuard = runAllocationGuard(forceGc);
+  const allocationGuard = runAllocationGuard(forceGc, selectedRowCounts);
   const passed = scenarios.every((scenario) => scenario.passed) && (allocationGuard.skipped || allocationGuard.passed);
 
   return {
     benchmark: benchmarkName,
     profile: profile ?? "node",
     runtime: "production dist",
-    rowCounts,
+    rowCounts: selectedRowCounts,
     scenarios,
     allocationGuard,
     passed,
