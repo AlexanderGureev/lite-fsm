@@ -7,8 +7,8 @@ Alpha-пакет для entity storage в `lite-fsm`.
 `LiteFsmEntityLifecycleEvents`, `EntityMachineExtension` и reducer context
 types. Плагин регистрирует storage kind `"entity"` через публичный core plugin
 DSL, валидирует entity actor templates при создании `MachineManager`, создает
-manager-owned entity runtime state, добавляет `manager.entities`, создает live
-entity rows через public spawn events и выполняет lifecycle cleanup через
+manager-owned entity runtime state, добавляет provider `manager.entities()`,
+создает live entity rows через public spawn events и выполняет lifecycle cleanup через
 `despawnOn`. Плагин добавляет routing по `meta.entityId`, entity enter-state
 effects, sync-only entity reactions и durable snapshot через
 `snapshot.storage.entity`. React read hooks доступны отдельной точкой входа
@@ -109,7 +109,7 @@ type AppMachines = typeof machines;
 type AppState = MachinesState<AppMachines>;
 type AppDeps = {
   readonly getState?: () => AppState;
-  readonly entities?: EntityAccess<AppMachines>;
+  readonly entities: () => EntityAccess<AppMachines>;
 };
 
 export const createMachine: TypedCreateMachineFn<
@@ -214,7 +214,7 @@ const aiActor = createMachine({
   },
   effects: {
     active: ({ self, entities, transition }) => {
-      const movement = entities.maybe("movementActor");
+      const movement = entities().maybe("movementActor");
 
       for (const entity of self.indices) {
         if (!self.has(entity) || !movement.has(entity)) continue;
@@ -233,11 +233,11 @@ Effect запускается один раз на captured batch rows, кото
 `next`.
 
 `self.indices` является stable captured списком. `self`, columns и
-`entities.get(...)`/`entities.maybe(...)` являются live read views текущего
+`entities().get(...)`/`entities().maybe(...)` являются live read views текущего
 committed store. В async effect после `await` проверяйте `self.has(entity)` или
 `store.has(entity)` перед чтением columns: метод учитывает текущую presence и
-captured `generation`. В dev diagnostics `entities.get(key)` проверяет, что
-каждая entity из captured scope имеет requested actor row; `entities.maybe(key)`
+captured `generation`. В dev diagnostics `entities().get(key)` проверяет, что
+каждая entity из captured scope имеет requested actor row; `entities().maybe(key)`
 не выполняет required-access validation.
 
 В entity effects доступны обычный `transition(action)`, core helpers
@@ -276,7 +276,7 @@ const spriteActor = createMachine({
   },
   reactions: {
     POSITION_CHANGED: ({ self, entities, renderer }) => {
-      const movement = entities.get("movementActor");
+      const movement = entities().get("movementActor");
 
       for (const entity of self.indices) {
         renderer.sync(self.spriteId[entity], movement.x[entity], movement.y[entity]);
@@ -305,9 +305,9 @@ cleanup и видит columns удаляемых rows. Rows без edge `ENTITY_
 
 Deps reaction включают `action`, readonly `self`, scoped `entities` и user deps
 из `manager.setDependencies(...)`. Runtime не предоставляет `transition` и не
-поддерживает dispatch/despawn из reaction. `entities.get(key)` выполняет ту же
+поддерживает dispatch/despawn из reaction. `entities().get(key)` выполняет ту же
 required-access validation по captured scope и `generation`, что entity effects;
-`entities.maybe(key)` возвращает optional live view.
+`entities().maybe(key)` возвращает optional live view.
 
 Reaction должна выполняться синхронно. Exception и обнаруженный `Promise` return
 передаются в `onError` через storage `reportError(...)`; reducer result,
@@ -337,13 +337,13 @@ Columns не входят в `manager.getState()`. Пустые `EntityStore` и
 `ColumnarActorStore` создаются внутри runtime state и остаются source of truth
 для будущих rows.
 
-`manager.entities` доступен только при установленном `entitiesPlugin()`:
+`manager.entities()` доступен только при установленном `entitiesPlugin()`:
 
 ```ts
 type AppMachines = typeof machines;
 type Entities = EntityAccess<AppMachines>;
 
-const movement = manager.entities.get("movementActor");
+const movement = manager.entities().get("movementActor");
 
 movement.count; // 0
 movement.version; // 0
@@ -352,19 +352,21 @@ movement.state(entityIndex); // undefined для отсутствующей ст
 movement.x[entityIndex]; // number, если x описан через f32()
 ```
 
-`entities.get(key)` и `entities.maybe(key)` возвращают cached live store view для
-известного entity actor key. Unknown key бросает `LiteFsmError`, если TypeScript
-был обойден. Store view содержит indexed readonly columns из `initialContext`,
-`count`, `version`, `has(entity)` и `state(entity)`.
+`manager.entities` является stable provider-функцией. Повторные вызовы
+`manager.entities()` возвращают один root access object текущего менеджера.
+`entities().get(key)` и `entities().maybe(key)` возвращают cached live store
+view для известного entity actor key. Unknown key бросает `LiteFsmError`, если
+TypeScript был обойден. Store view содержит indexed readonly columns из
+`initialContext`, `count`, `version`, `has(entity)` и `state(entity)`.
 
-`AppDeps.entities?: EntityAccess<AppMachines>` является опциональным источником
-типов для scoped объекта `entities` внутри entity effects/reactions. Runtime не
-читает `deps.entities`, когда создает entity scope: объект `entities` в deps
-effect/reaction всегда инжектируется runtime и привязан к текущему batch
-entities.
+Если callbacks должны видеть typed entity access, приложение объявляет
+`entities: () => EntityAccess<AppMachines>` в `AppDeps` явно. `@lite-fsm/entities`
+не добавляет этот ключ в public deps types автоматически. В entity effects и
+reactions runtime подставляет scoped provider под тот же ключ `entities`;
+provider возвращает access object, привязанный к текущему batch entities.
 
 Если обычные domain/process effects должны читать root entity stores, передайте
-root accessor явно:
+root provider явно:
 
 ```ts
 manager.setDependencies({
@@ -374,8 +376,8 @@ manager.setDependencies({
 ```
 
 Без этой передачи domain/process effects не получают root access. Entity
-effects/reactions продолжают получать scoped `entities`, если
-`AppDeps.entities?: EntityAccess<AppMachines>` объявлен как источник типов.
+effects/reactions получают scoped provider, если `AppDeps` объявляет ключ
+`entities: () => EntityAccess<AppMachines>`.
 
 ## Snapshot и hydrate
 
@@ -547,16 +549,16 @@ actor-specific spawn payload только во время `ENTITY_SPAWNED` и т
 
 - typed wrapper `TypedCreateMachineFn<AppEvent, AppDeps, EntitiesPlugin<AppDeps>>`;
 - `AppDeps` с `getState?: () => AppState` и
-  `entities?: EntityAccess<AppMachines>`;
+  `entities: () => EntityAccess<AppMachines>`;
 - `defineSpawnEvents`, `spawnEvent`, `SpawnEventsFrom`,
-  `defineEntitySpawn`, `entitiesPlugin({ spawn })` и `manager.entities`;
+  `defineEntitySpawn`, `entitiesPlugin({ spawn })` и `manager.entities()`;
 - spawn events `SPAWN_UNIT` и `SPAWN_PROJECTILE`, а не public
   `manager.spawn(...)`;
 - обязательный `groupTag` в каждом `EntitySpawnSpec`;
 - descriptors `f32`, `i32`, `string` и `optional(...)`;
 - `initialContext` как описание persistent columns и `spawnSchema` как описание
   payload actor row при spawn;
-- `reactions` для sprite sync через `entities.get("movementActor")`;
+- `reactions` для sprite sync через `entities().get("movementActor")`;
 - `despawnOn: "expired"` для projectile lifetime cleanup.
 
 Пример не использует public routing по `actorId` к entity rows. Внешняя

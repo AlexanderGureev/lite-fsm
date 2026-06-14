@@ -6,7 +6,7 @@
 
 | Импорт                       | Типы                                                                                                                                                                                                                                                                                              |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@lite-fsm/core`             | весь `types.ts` + `interfaces.ts`: `FSMEvent`, `MachineConfig`, `CFG`, `MachineReducer`, `MachineEffect`, `MachineManagerSnapshot`, `MachinesState`, `MachineEvents`, `MachineDependencies`, `IMachineManager`, `Middleware`, actor types, snapshot types, `ReadonlyManagerAction`, helpers; plugin helper/value/context types для `definePlugin().create(...)`, `LiteFsmPlugin`, `LiteFsmStorageRuntimeDefinition`, `StorageManagerContext`, `StorageRuntimeExtension`, `StorageDependentField`, `StorageDependentTypeLambda`, `StorageTemplate`, public `Storage*Context` |
+| `@lite-fsm/core`             | весь `types.ts` + `interfaces.ts`: `FSMEvent`, `MachineConfig`, `CFG`, `MachineReducer`, `MachineEffect`, `MachineManagerSnapshot`, `MachinesState`, `MachineEvents`, `MachineDependencies`, `IMachineManager`, `Middleware`, actor types, snapshot types, `ReadonlyManagerAction`, helpers; plugin helper/value/context types для `definePlugin().create(...)`, `LiteFsmPlugin`, `LiteFsmStorageRuntimeDefinition`, `ManagerExtensionFactory`, `ManagerExtensionType`, `ManagerExtensionTypeLambda`, `StorageManagerContext`, `StorageRuntimeExtension`, `StorageDependentField`, `StorageDependentTypeLambda`, `StorageTemplate`, public `Storage*Context` |
 | `@lite-fsm/entities`         | alpha: `EntityId`, `EntityIndex`, `EntityAccess<AppMachines>`, `EntityMachineExtension`, `EntityReducerContext`, `EntityReducerSelf`, `LiteFsmEntityLifecycleEvents`, `SpawnEventsFrom`; runtime exports `entitiesPlugin()`, `defineSpawnEvents`, `defineEntitySpawn`, `spawnEvent`, `f32`, `i16`, `i32`, `u8`, `string`, `optional`; entity effects/reactions и `snapshot.storage.entity` типизируются через extension/core envelope |
 | `@lite-fsm/entities/react`   | alpha: `EntityRowSnapshot`, `EntityListOptions`, `TypedUseEntitySnapshotHook`, `TypedUseEntityCountHook`, `TypedUseEntityListHook`                                                                                                                                                                |
 | `@lite-fsm/react`            | `FSMContextType`, `FSMContextProviderProps`, `FSMPersistLifecycle`, `FSMHydrationBoundaryProps`, `FSMStorageHydrationPreview`, typed hook aliases                                                                                                                                                  |
@@ -52,7 +52,7 @@
 | --------------------------- | ------------------------------------------------------------------------- |
 | `EntityId`                  | alias `string`; публичный id entity                                       |
 | `EntityIndex`               | branded `number`; runtime index, не plain input type пользовательского API |
-| `EntityAccess<AppMachines>` | typed root accessor для `manager.entities`                                |
+| `EntityAccess<AppMachines>` | typed read access object, который возвращают `manager.entities()` и scoped provider `entities()` |
 | `EntitiesPlugin<AppDeps, PluginEvents>` | type-only plugin source для `TypedCreateMachineFn` и manager events от runtime `spawn` |
 | `EntityMachineExtension`    | machine-facing extension для `storage: "entity"` через plugin source      |
 | `EntityReducerContext<ContextSchema, SpawnSchema, Config = object>` | reducer context с `self` и `payloadFor(entity)` для entity actor template |
@@ -142,14 +142,14 @@ storage payloads, а `{ machines: [], storage: ["entity"] }` оставляет 
 type AppMachines = typeof machines;
 type Entities = EntityAccess<AppMachines>;
 
-declare const entities: Entities;
+declare const entities: () => Entities;
 declare const entity: EntityIndex;
 
-entities.get("movementActor").x[entity]; // number
-entities.get("movementActor").state(entity); // "moving" | "stopped" | undefined
+entities().get("movementActor").x[entity]; // number
+entities().get("movementActor").state(entity); // "moving" | "stopped" | undefined
 ```
 
-`entities.get("unknownActor")`, domain machines и `storage: "instance"` actor templates являются TypeScript errors. `store.state(entity)` возвращает public actor state union без `"__INIT"` и `undefined` для отсутствующей строки.
+`entities().get("unknownActor")`, domain machines и `storage: "instance"` actor templates являются TypeScript errors. `store.state(entity)` возвращает public actor state union без `"__INIT"` и `undefined` для отсутствующей строки.
 
 `MachineManager(machines, { plugins: [entitiesPlugin()] as const })` добавляет `.entities`; без plugin returned manager не содержит этого поля.
 
@@ -198,17 +198,16 @@ type MovementReducerContext = EntityReducerContext<
 `storage: "entity"` templates. `self` является readonly batch view: `indices`,
 `states`, `presence`, `rowVersion`, `stateCode`, `prevStateCode`, typed readonly
 columns, `has(entity)` и `entityId(entity)`. `entities` имеет тип
-`EntityAccess<AppMachines>`, если `AppDeps` содержит
-`entities?: EntityAccess<AppMachines>`; без этого поля runtime accessor
-присутствует, но `entities.get(...)` и `entities.maybe(...)` принимают ключ
-`never`.
+`() => EntityAccess<AppMachines>`, если `AppDeps` явно содержит
+`entities: () => EntityAccess<AppMachines>`; без этого поля callback не получает
+типизированный `entities`.
 
 ```ts
 type AppMachines = typeof machines;
 type AppState = MachinesState<AppMachines>;
 type AppDeps = {
   readonly getState?: () => AppState;
-  entities?: EntityAccess<AppMachines>;
+  readonly entities: () => EntityAccess<AppMachines>;
 };
 
 const createMachine: TypedCreateMachineFn<AppEvent, AppDeps, EntitiesPlugin<AppDeps>> = createLiteFsmMachine;
@@ -225,7 +224,7 @@ const aiActor = createMachine({
   },
   effects: {
     active: ({ self, entities, transition }) => {
-      const movement = entities.maybe("movementActor");
+      const movement = entities().maybe("movementActor");
 
       for (const entity of self.indices) {
         if (!self.has(entity) || !movement.has(entity)) continue;
@@ -254,14 +253,14 @@ actor effect typing; `transition.tag(...)` использует `meta.groupTag`,
 `action`, readonly `self`, scoped `entities` и user deps из `AppDeps`, но не
 включает `transition` или `condition`. Lifecycle event names доступны в keys
 `reactions`, если template `config` принимает соответствующий internal event.
-`AppDeps.entities?: EntityAccess<AppMachines>` задает strict keys для
-`entities.get(...)` и `entities.maybe(...)`; без этого поля ключи имеют тип
-`never`.
+`AppDeps.entities: () => EntityAccess<AppMachines>` задает strict keys для
+`entities().get(...)` и `entities().maybe(...)`; без этого поля callback не
+получает типизированный `entities`.
 
-`AppDeps.entities` остается optional: runtime entity effects/reactions не читают
-root dependency и получают scoped `entities` из `EntityMachineExtension`.
-Передача `manager.setDependencies({ entities: manager.entities })` нужна только
-обычным domain/process effects, которые должны читать root entity stores.
+Runtime entity effects/reactions подставляет scoped provider под ключ
+`entities`, объявленный в `AppDeps`. Передача
+`manager.setDependencies({ entities: manager.entities })` нужна только обычным
+domain/process effects, которые должны читать root entity stores.
 
 ```ts
 const syncActor = createMachine({
@@ -276,7 +275,7 @@ const syncActor = createMachine({
   },
   reactions: {
     POSITION_CHANGED: ({ self, entities, renderer }) => {
-      const movement = entities.get("movementActor");
+      const movement = entities().get("movementActor");
       const entity = self.indices[0];
 
       renderer.sync(self.spriteId[entity], movement.x[entity], movement.y[entity]);
@@ -535,10 +534,13 @@ Plugin keys имеют плоский namespace. Core не добавляет pr
 | `PluginRouteMeta<Plugins>`               | raw map route meta values; в `manager.transition(...).meta` поля текущего tuple становятся optional, но runtime принимает только один active routing key |
 | `PluginScopedDeps<Plugins>`              | поля из `scopedDeps` по ключам section и return types builder-ов                                 |
 | `PluginScopedTransition<Plugins>`        | методы из `scopedTransition` по ключам section и return types builder-ов                         |
-| `PluginManagerExtensions<Plugins, S = MachineStore>` | поля returned manager по ключам `manager`; generic manager factories инстанцируются текущим store |
+| `PluginManagerExtensions<Plugins, S = MachineStore, Events = AnyEvent>` | поля returned manager по ключам `manager`; generic manager factories и type-only extension contracts инстанцируются текущим store и событиями manager |
 | `EffectDeps<AppDeps, Plugins>`           | `AppDeps` плюс `PluginScopedDeps<Plugins>` и `transition: PluginScopedTransition<Plugins>`       |
 | `LiteFsmPlugin<Name, PluginEvents, Definition>` | opaque тип value, возвращаемого `definePlugin().create(...)`; используйте для exported constants и factory return types |
 | `LiteFsmStorageRuntimeDefinition<Kind, MachineExtension, RouteMetaRequirements>` | opaque тип value, возвращаемого `defineStorageRuntime().create(...)`; третий generic хранит type-level требования storage к `routeMeta` |
+| `ManagerExtensionFactory<Events, Value, S>` | функция manager section; получает `ManagerRuntimeContext<Events, S>` и возвращает public extension value |
+| `ManagerExtensionType<Lambda>`           | type-only marker для manager extension, чей public type вычисляется из host manager context      |
+| `ManagerExtensionTypeLambda`             | базовый контракт lambda с полем `type`; dependent type получает context через `this["context"]` |
 | `StorageRuntimeExtension`                | public shape storage extension: machine-facing и runtime-only поля                               |
 | `StorageTemplate<TemplateData>`          | `{ key; kind; data? }` для compiled storage templates                                             |
 | `StorageManagerContext<Events>`          | публичное подмножество manager в storage callbacks: `getState`, `transition`, `onTransition`, `getDependencies` |
@@ -546,7 +548,7 @@ Plugin keys имеют плоский namespace. Core не добавляет pr
 
 Helpers принимают plugin union и runtime tuple; tuple нормализуется через `[number]`. `PluginRouteMeta<PluginUnion>` возвращает raw value map: annotated resolver `(value: string, ctx) => ...` дает `string`, а unannotated `value` считается `unknown`. Optional semantics относятся к `manager.transition(...).meta`: эти ключи optional и доступны только для подключенного plugin tuple. Типы не запрещают несколько optional route fields в одном object, но runtime contract запрещает несколько active routing keys в одном dispatch. `ctx.key` внутри resolver типизируется literal ключом resolver; при явном `HostEvents` `ctx.action` — `ReadonlyManagerAction<HostEvents | PluginEvents>`, а без второго generic — `ReadonlyManagerAction<AnyEvent>`.
 
-`PluginManagerExtensions<Plugins, S = MachineStore>` возвращает поля manager по return type factory из section `manager`. Первый generic сохраняет старую форму вызова; второй generic задает store текущего `MachineManager`. Factory может объявить `<S extends MachineStore>(ctx: ManagerRuntimeContext<AnyEvent, S>)` и вернуть тип, зависящий от `MachinesState<S>`. Factory получает `ManagerRuntimeContext<PluginEvents, S>`: `ctx.config` имеет тип `S`, `ctx.getState()` возвращает `MachinesState<S>`, а `ctx.transition(...)` принимает `ManagerAction<PluginEvents>` и возвращает `ManagerAction<PluginEvents>`. `HostEvents` не входят в этот contract, а `definePlugin().create({ manager })` без первого generic не получает fallback на произвольный `AnyEvent`.
+`PluginManagerExtensions<Plugins, S = MachineStore, Events = AnyEvent>` возвращает поля manager по return type factory из section `manager`. Первый generic принимает plugin value, union или tuple, второй задает store текущего `MachineManager`, третий задает события runtime manager для dependent type contracts. Factory может объявить `<S extends MachineStore>(ctx: ManagerRuntimeContext<AnyEvent, S>)` и вернуть тип, зависящий от `MachinesState<S>`. Если TypeScript не может применить store к generic factory при извлечении return type, plugin author может объявить поле definition как `ManagerExtensionFactory & ManagerExtensionType<Lambda>`, где `Lambda extends ManagerExtensionTypeLambda` вычисляет `type` из `this["context"]`. Такой marker не меняет runtime DSL. Factory получает `ManagerRuntimeContext<PluginEvents, S>`: `ctx.config` имеет тип `S`, `ctx.getState()` возвращает `MachinesState<S>`, а `ctx.transition(...)` принимает `ManagerAction<PluginEvents>` и возвращает `ManagerAction<PluginEvents>`. `HostEvents` не входят в runtime factory contract, а `definePlugin().create({ manager })` без первого generic не получает fallback на произвольный `AnyEvent`.
 
 При явном `HostEvents` `intercept` и hooks получают action context с `action` и `originalAction` типа `ReadonlyManagerAction<HostEvents | PluginEvents>`; без второго generic — `ReadonlyManagerAction<AnyEvent>`. `intercept` может вернуть replacement action как обычный `ManagerAction`, `skipDelivery` и `stopInterceptors`; `{}` является no-op. Runtime принимает только `void` или plain object с известными полями и бросает `LITE_FSM_INVALID_PLUGIN_CALLBACK_RESULT` для неверного result. Hooks получают context без API для replacement/skip/stop; их return value runtime игнорирует. `manager.transition(...)` внутри hook запрещен runtime-ошибкой `LITE_FSM_REENTRANT_TRANSITION_FORBIDDEN`. `DispatchContext`, `ManagerRuntimeContext` и `PluginScopedInvocationContext` экспортируются для portable inferred types exported plugin factories; обычно callbacks пишутся inline и не требуют ручной аннотации context.
 

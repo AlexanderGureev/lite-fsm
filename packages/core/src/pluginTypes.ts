@@ -75,6 +75,8 @@ export type ScopedInvocationContext = {
 
 // === Manager extension =======================================================
 
+export declare const managerExtensionTypeMarker: unique symbol;
+
 export type ManagerRuntimeContext<
   Events extends AnyEvent = AnyEvent,
   S extends MachineStore = MachineStore,
@@ -99,6 +101,14 @@ export type ManagerExtensionFactory<
   Value = unknown,
   S extends MachineStore = MachineStore,
 > = (ctx: ManagerRuntimeContext<Events, S>) => Value;
+
+export type ManagerExtensionTypeLambda = {
+  readonly type: unknown;
+};
+
+export type ManagerExtensionType<Lambda extends ManagerExtensionTypeLambda> = {
+  readonly [managerExtensionTypeMarker]?: Lambda;
+};
 
 // === Normalized plugin payload ===============================================
 // Internal representation, в которое plugin DSL приводит входное plugin definition.

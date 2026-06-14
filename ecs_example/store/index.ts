@@ -3,7 +3,7 @@ import { entitiesPlugin, defineEntitySpawn } from "@lite-fsm/entities";
 import { immerMiddleware } from "@lite-fsm/middleware/immer";
 import { createJsonStorage, persistManager } from "@lite-fsm/persist";
 
-import type { AppEntityAccess, MachineDeps, RuntimeDeps } from "./deps";
+import type { RuntimeDeps } from "./deps";
 import { blinkActor } from "./machines/blink-actor";
 import { enemyActor } from "./machines/enemy-actor";
 import { enemySpriteActor } from "./machines/enemy-sprite-actor";
@@ -20,10 +20,6 @@ export const machines = {
 
 export type AppMachines = typeof machines;
 export type AppState = MachinesState<AppMachines>;
-export type AppDeps = Omit<MachineDeps, "getState"> & {
-  getState: () => AppState;
-  entities?: AppEntityAccess<AppMachines>;
-};
 
 export const spawn = defineEntitySpawn(
   machines,
@@ -50,10 +46,6 @@ export const spawn = defineEntitySpawn(
   }),
 });
 
-const createPlugins = () => [entitiesPlugin({ spawn })];
-
-type AppPlugins = ReturnType<typeof createPlugins>;
-
 const shouldPersistBlinkActor = ({ action }: { action: { type: string } }) => {
   switch (action.type) {
     case "START_BLINK_ACTOR":
@@ -67,8 +59,8 @@ const shouldPersistBlinkActor = ({ action }: { action: { type: string } }) => {
 };
 
 export const makeStore = (deps: RuntimeDeps) => {
-  const plugins = createPlugins();
-  const manager = MachineManager<AppMachines, AppEvents, AppPlugins>(machines, {
+  const plugins = [entitiesPlugin({ spawn })];
+  const manager = MachineManager<AppMachines, AppEvents, typeof plugins>(machines, {
     plugins,
     middleware: [immerMiddleware],
     onError: console.error,
@@ -84,14 +76,13 @@ export const makeStore = (deps: RuntimeDeps) => {
   manager.setDependencies({
     ...deps,
     getState: manager.getState,
+    entities: manager.entities,
   });
 
   const persistStorage = createJsonStorage<AppMachines>({
     key: "lite-fsm:ecs-example:v1",
     storage: () => deps.persistStorage ?? globalThis.localStorage,
   });
-
-  // manager.entities.get('')
 
   const persist = [
     persistManager(manager, {

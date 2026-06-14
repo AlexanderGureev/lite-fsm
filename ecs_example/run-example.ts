@@ -1,6 +1,6 @@
-import type { EntityAccess, EntityId } from "@lite-fsm/entities";
+import type { EntityId } from "@lite-fsm/entities";
 
-import { createMemorySprites, createMemoryStorage, makeStore, type AppMachines } from "./store";
+import { createMemorySprites, createMemoryStorage, makeStore } from "./store";
 import { selectGameGateStatus } from "./store/selectors";
 
 export const runEcsExample = async () => {
@@ -46,8 +46,7 @@ export const runEcsExample = async () => {
   });
   await Promise.resolve();
 
-  const entities: EntityAccess<AppMachines> = manager.entities;
-  const enemyStore = entities.get("enemyActor");
+  const enemyStore = manager.entities().get("enemyActor");
   const snapshot = manager.dehydrate();
   const preview = manager.getHydratedState(snapshot);
 

@@ -171,7 +171,7 @@ const createSpriteActor = (spriteAccumulator) =>
     },
     reactions: {
       TICK: ({ self, entities }) => {
-        const movement = entities.get("movementActor");
+        const movement = entities().get("movementActor");
         let checksum = 0;
 
         for (const entity of self.indices) {

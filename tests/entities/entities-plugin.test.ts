@@ -179,8 +179,8 @@ const createEmptySpawnEvents = () =>
   });
 
 const entityAccess = <Machines extends MachineStore>(
-  manager: { readonly entities: unknown },
-): EntityAccess<Machines> => manager.entities as EntityAccess<Machines>;
+  manager: { readonly entities: () => EntityAccess<Machines> },
+): EntityAccess<Machines> => manager.entities();
 
 const expectLiteFsmError = (run: () => unknown, code: LiteFsmError["code"]): LiteFsmError => {
   let caught: unknown;
@@ -640,7 +640,7 @@ describe("@lite-fsm/entities — этап 3 public state и manager.entities", (
     expect(manager.getState().movementActor).not.toHaveProperty("x");
   });
 
-  it("manager.entities.get возвращает cached live store view с readonly indexed columns", () => {
+  it("manager.entities().get возвращает cached live store view с readonly indexed columns", () => {
     const machines = { movementActor: createEntityTemplateWithSchema() };
     const manager = MachineManager(machines, { plugins: [entitiesPlugin()] as const });
     const access = entityAccess<typeof machines>(manager);
@@ -662,7 +662,7 @@ describe("@lite-fsm/entities — этап 3 public state и manager.entities", (
     expect(store.name[0 as EntityIndex]).toBeUndefined();
   });
 
-  it("manager.entities остается stable root accessor после transition", () => {
+  it("manager.entities остается stable provider, а manager.entities() возвращает stable root access", () => {
     const manager = MachineManager(
       {
         counter: createCounter(),
@@ -670,14 +670,18 @@ describe("@lite-fsm/entities — этап 3 public state и manager.entities", (
       },
       { plugins: [entitiesPlugin()] as const },
     );
-    const access = manager.entities;
+    const provider = manager.entities;
+    const access = manager.entities();
+
+    expect(manager.entities()).toBe(access);
 
     manager.transition({ type: "INC" });
 
-    expect(manager.entities).toBe(access);
+    expect(manager.entities).toBe(provider);
+    expect(manager.entities()).toBe(access);
   });
 
-  it("manager.entities.maybe возвращает cached optional store view", () => {
+  it("manager.entities().maybe возвращает cached optional store view", () => {
     const machines = { movementActor: createEntityTemplateWithSchema() };
     const manager = MachineManager(machines, { plugins: [entitiesPlugin()] as const });
     const access = entityAccess<typeof machines>(manager);
@@ -709,10 +713,10 @@ describe("@lite-fsm/entities — этап 3 public state и manager.entities", (
     expect("entities" in manager).toBe(false);
   });
 
-  it("entities.get бросает clear LiteFsmError для unknown runtime key", () => {
+  it("manager.entities().get бросает clear LiteFsmError для unknown runtime key", () => {
     const manager = MachineManager({ movementActor: createEntityTemplateWithSchema() }, { plugins: [entitiesPlugin()] as const });
     const error = expectLiteFsmError(
-      () => manager.entities.get("unknownActor" as never),
+      () => manager.entities().get("unknownActor" as never),
       "LITE_FSM_INVALID_STORAGE_RUNTIME",
     );
 
@@ -1875,7 +1879,7 @@ describe("@lite-fsm/entities — этап 6 reduce pipeline и routing", () => {
       spawnSchema: {},
     } as const;
     const manager = MachineManager({ actor }, { plugins: [entitiesPlugin()] as const });
-    const runtime = getEntityRuntimeState(manager.entities);
+    const runtime = getEntityRuntimeState(manager.entities());
     const eventCode = runtime.eventCodeByType.TICK;
 
     expect(manager.transition({ type: "TICK" })).toEqual({ type: "TICK" });
@@ -1928,7 +1932,7 @@ describe("@lite-fsm/entities — этап 6 reduce pipeline и routing", () => {
       }),
     });
     const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
-    const runtime = getEntityRuntimeState(manager.entities);
+    const runtime = getEntityRuntimeState(manager.entities());
 
     spawnStage6Entity(manager, "unit/dead");
     spawnStage6Entity(manager, "other/a");
@@ -2089,7 +2093,7 @@ describe("@lite-fsm/entities — этап 6 reduce pipeline и routing", () => {
     spawnStage6Entity(manager, "unit/b");
     spawnStage6Entity(manager, "unit/c");
 
-    const actorStore = getEntityRuntimeState(manager.entities).actorStores.actor;
+    const actorStore = getEntityRuntimeState(manager.entities()).actorStores.actor;
     const readyCode = actorStore.metadata.stateCodeByName.READY;
     const stoppedCode = actorStore.metadata.stateCodeByName.STOPPED;
     expect(actorStore.stateBuckets[readyCode]).toEqual([0, 1, 2]);
@@ -2124,7 +2128,7 @@ describe("@lite-fsm/entities — этап 6 reduce pipeline и routing", () => {
 
     spawnStage6Entity(manager, "unit/a");
     spawnStage6Entity(manager, "unit/b");
-    const actorStore = getEntityRuntimeState(manager.entities).actorStores.actor;
+    const actorStore = getEntityRuntimeState(manager.entities()).actorStores.actor;
     const beforeA = actorStore.rowVersion[0];
     const beforeB = actorStore.rowVersion[1];
 
@@ -2373,7 +2377,7 @@ describe("@lite-fsm/entities — этап 6 reduce pipeline и routing", () => {
     spawnStage6Entity(manager, "unit/target", "target");
     spawnStage6Entity(manager, "unit/noise", "noise");
 
-    const runtime = getEntityRuntimeState(manager.entities);
+    const runtime = getEntityRuntimeState(manager.entities());
     let unrelatedScratchReads = 0;
     for (const templateKey of ["noiseA", "noiseB", "noiseC"] as const) {
       const store = runtime.actorStores[templateKey];
@@ -2596,7 +2600,7 @@ describe("@lite-fsm/entities — этап 8 despawnOn и lifecycle cleanup", () 
 
     spawnStage8Entity(manager, "unit/a", 10);
     spawnStage8Entity(manager, "unit/b", 20);
-    const runtime = getEntityRuntimeState(manager.entities);
+    const runtime = getEntityRuntimeState(manager.entities());
     const firstGeneration = runtime.entityStore.generation[0];
 
     manager.transition({ type: "EXPIRE", meta: { entityId: "unit/a" } } as never);
@@ -2681,7 +2685,7 @@ describe("@lite-fsm/entities — этап 8 despawnOn и lifecycle cleanup", () 
     spawnStage8Entity(manager, "unit/a", 1);
     manager.transition({ type: "DONE", meta: { entityId: "unit/a" } } as never);
 
-    const runtime = getEntityRuntimeState(manager.entities);
+    const runtime = getEntityRuntimeState(manager.entities());
     expect(lifecycleCalls).toEqual([]);
     expect(subscriberSnapshots).toEqual([{ resolverCount: 0, siblingCount: 1 }]);
     expect(resolverStore.has(0 as EntityIndex)).toBe(false);
@@ -2727,7 +2731,7 @@ describe("@lite-fsm/entities — этап 8 despawnOn и lifecycle cleanup", () 
     spawnStage8Entity(manager, "unit/solo", 7);
     manager.transition({ type: "EXPIRE" });
 
-    const runtime = getEntityRuntimeState(manager.entities);
+    const runtime = getEntityRuntimeState(manager.entities());
     expect(store.count).toBe(0);
     expect(store.has(0 as EntityIndex)).toBe(false);
     expect(store.hp[0 as EntityIndex]).toBe(0);
@@ -2784,7 +2788,7 @@ describe("@lite-fsm/entities — этап 8 despawnOn и lifecycle cleanup", () 
     expect(lifecycleCalls).toEqual(["unit/a"]);
     expect(access.get("terminalActor").count).toBe(0);
     expect(access.get("cleanupActor").count).toBe(0);
-    expect(getEntityRuntimeState(manager.entities).entityStore.alive[0]).toBe(0);
+    expect(getEntityRuntimeState(manager.entities()).entityStore.alive[0]).toBe(0);
   });
 
   it("валидирует despawnOn при init и компилирует его в despawnStateMask", () => {
@@ -3109,14 +3113,18 @@ describe("@lite-fsm/entities — этап 9 effects и transition helpers", () =
       spawnSchema: {},
       despawnOn: "DEAD",
       effects: {
-        READY: async ({ self, entities }: { readonly self: any; readonly entities: EntityAccess<any> }) => {
+        READY: async ({ self, entities }: { readonly self: any; readonly entities: () => EntityAccess<any> }) => {
           const entity = self.indices[0];
-          const sibling = entities.get("siblingActor" as never);
+          const scopedEntities = entities();
+          observations.push(`provider:${entities() === scopedEntities}`);
+          const sibling = scopedEntities.get("siblingActor" as never);
           observations.push(`before:${self.has(entity)}:${sibling.has(entity)}`);
           await gate;
-          observations.push(`after:${self.has(entity)}:${entities.maybe("siblingActor" as never).has(entity)}`);
+          observations.push(
+            `after:${self.has(entity)}:${entities() === scopedEntities}:${entities().maybe("siblingActor" as never).has(entity)}`,
+          );
           try {
-            entities.get("siblingActor" as never);
+            entities().get("siblingActor" as never);
           } catch (error) {
             observations.push(`get-error:${(error as LiteFsmError).code}:${(error as Error).message.includes("unit/a")}`);
           }
@@ -3142,19 +3150,20 @@ describe("@lite-fsm/entities — этап 9 effects и transition helpers", () =
     const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
 
     spawnStage9Entity(manager, "unit/a");
-    expect(observations).toEqual(["before:true:true"]);
+    expect(observations).toEqual(["provider:true", "before:true:true"]);
     manager.transition({ type: "EXPIRE", meta: { entityId: "unit/a" } } as never);
     resume();
     await Promise.resolve();
 
     expect(observations).toEqual([
+      "provider:true",
       "before:true:true",
-      "after:false:false",
+      "after:false:true:false",
       "get-error:LITE_FSM_INVALID_STORAGE_RUNTIME:true",
     ]);
   });
 
-  it("scoped entities.get сообщает source actor, event type, requested key и entity id", () => {
+  it("scoped entities().get сообщает source actor, event type, requested key и entity id", () => {
     const mainActor = {
       storage: "entity",
       config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: {} },
@@ -3162,8 +3171,8 @@ describe("@lite-fsm/entities — этап 9 effects и transition helpers", () =
       initialContext: {},
       spawnSchema: {},
       effects: {
-        READY: ({ entities }: { readonly entities: EntityAccess<any> }) => {
-          entities.get("siblingActor" as never);
+        READY: ({ entities }: { readonly entities: () => EntityAccess<any> }) => {
+          entities().get("siblingActor" as never);
         },
       },
     } as const;
@@ -3190,6 +3199,7 @@ describe("@lite-fsm/entities — этап 9 effects и transition helpers", () =
     expect(errors[0]).toBeInstanceOf(LiteFsmError);
     const error = errors[0] as Error;
     expect(error.message).toContain("source actor 'mainActor'");
+    expect(error.message).toContain("entities().get('siblingActor')");
     expect(error.message).toContain("SPAWN_STAGE9");
     expect(error.message).toContain("siblingActor");
     expect(error.message).toContain("unit/a");
@@ -3296,7 +3306,7 @@ describe("@lite-fsm/entities — этап 9 effects и transition helpers", () =
     manager.transition({ type: "DESPAWN", meta: { entityId: "unit/a" } } as never);
 
     expect(store.has(0 as EntityIndex)).toBe(false);
-    expect(getEntityRuntimeState(manager.entities).entityStore.indexById["unit/a"]).toBeUndefined();
+    expect(getEntityRuntimeState(manager.entities()).entityStore.indexById["unit/a"]).toBeUndefined();
   });
 
   it("transition.despawn отклоняет raw EntityIndex array вне self.indices", () => {
@@ -3674,8 +3684,16 @@ describe("@lite-fsm/entities — этап 10 reactions и reaction error semanti
         }
       },
       reactions: {
-        TICK: ({ self, entities, api }: { readonly self: any; readonly entities: EntityAccess<any>; readonly api: { record(value: string): void } }) => {
-          const sensor = entities.get("sensorActor" as never);
+        TICK: ({
+          self,
+          entities,
+          api,
+        }: {
+          readonly self: any;
+          readonly entities: () => EntityAccess<any>;
+          readonly api: { record(value: string): void };
+        }) => {
+          const sensor = entities().get("sensorActor" as never);
           movementReactions.push(
             self.indices
               .map((entity: EntityIndex) => `${self.entityId(entity)}:${self.x[entity]}:${sensor.marker[entity]}`)
@@ -3812,8 +3830,8 @@ describe("@lite-fsm/entities — этап 10 reactions и reaction error semanti
     expect(store.count).toBe(0);
     expect(store.hp[0 as EntityIndex]).toBe(0);
     expect(store.hp[1 as EntityIndex]).toBe(0);
-    expect(getEntityRuntimeState(manager.entities).entityStore.alive[0]).toBe(0);
-    expect(getEntityRuntimeState(manager.entities).entityStore.alive[1]).toBe(0);
+    expect(getEntityRuntimeState(manager.entities()).entityStore.alive[0]).toBe(0);
+    expect(getEntityRuntimeState(manager.entities()).entityStore.alive[1]).toBe(0);
   });
 
   it("reaction errors идут в onError, не меняют return value и не блокируют subscribers", async () => {
@@ -3945,7 +3963,7 @@ describe("@lite-fsm/entities — этап 10 reactions и reaction error semanti
       }),
     });
     const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
-    runtime = getEntityRuntimeState(manager.entities);
+    runtime = getEntityRuntimeState(manager.entities());
 
     spawnStage10Entity(manager, "unit/a", 1);
     manager.transition({ type: "TICK" });
@@ -4236,7 +4254,7 @@ describe("@lite-fsm/entities — этап 11 snapshot.storage.entity", () => {
 
     target.manager.hydrate(snapshot);
 
-    const runtime = getEntityRuntimeState(target.manager.entities);
+    const runtime = getEntityRuntimeState(target.manager.entities());
     const movement = entityAccess<typeof target.machines>(target.manager).get("movementActor");
     const sensor = entityAccess<typeof target.machines>(target.manager).get("sensorActor");
     expect(delivered).toEqual([HYDRATE_ACTION_TYPE]);
@@ -4326,7 +4344,7 @@ describe("@lite-fsm/entities — этап 11 snapshot.storage.entity", () => {
 
   it("dehydrate нормализует sparse строковые массивы в plain JSON arrays", () => {
     const { manager } = createStage11Manager();
-    const runtime = getEntityRuntimeState(manager.entities);
+    const runtime = getEntityRuntimeState(manager.entities());
     ensureEntityCapacity(runtime.entityStore, 1);
 
     const snapshot = manager.dehydrate().storage?.entity as any;
@@ -4366,7 +4384,7 @@ describe("@lite-fsm/entities — этап 11 snapshot.storage.entity", () => {
     const target = createStage11Manager();
     spawnStage11Entity(target.manager, "unit/current", "ally", 10);
     const movement = entityAccess<typeof target.machines>(target.manager).get("movementActor");
-    const runtime = getEntityRuntimeState(target.manager.entities);
+    const runtime = getEntityRuntimeState(target.manager.entities());
     const currentVersion = runtime.actorStores.movementActor.version;
 
     const preview = target.manager.getHydratedState(snapshot);
@@ -4389,7 +4407,7 @@ describe("@lite-fsm/entities — этап 11 snapshot.storage.entity", () => {
     spawnStage11Entity(target.manager, "unit/current-a", "ally", 10);
     spawnStage11Entity(target.manager, "unit/current-b", "ally", 20);
     spawnStage11Entity(target.manager, "unit/current-c", "ally", 30);
-    const runtime = getEntityRuntimeState(target.manager.entities);
+    const runtime = getEntityRuntimeState(target.manager.entities());
     const currentVersion = runtime.entityStore.version;
 
     target.manager.hydrate({ machines: {}, storage: { entity: storage } });
@@ -4413,7 +4431,7 @@ describe("@lite-fsm/entities — этап 11 snapshot.storage.entity", () => {
     const target = createStage11Manager();
     target.manager.hydrate({ machines: {}, storage: { entity: storage } });
 
-    const runtime = getEntityRuntimeState(target.manager.entities);
+    const runtime = getEntityRuntimeState(target.manager.entities());
     expect(Array.from(runtime.entityStore.generation)).toEqual([0, 0]);
     expect(runtime.entityStore.freeList).toEqual([0]);
     expect(runtime.actorStores.movementActor.rowVersion[1]).toBeGreaterThan(0);

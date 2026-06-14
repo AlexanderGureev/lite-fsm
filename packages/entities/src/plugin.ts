@@ -3,6 +3,9 @@ import type {
   AnyEvent,
   LiteFsmPlugin,
   MachineStore,
+  ManagerExtensionFactory,
+  ManagerExtensionType,
+  ManagerExtensionTypeLambda,
   ManagerRuntimeContext,
 } from "@lite-fsm/core";
 
@@ -25,8 +28,17 @@ export type EntityIndex = number & { readonly [entityIndexBrand]: "EntityIndex" 
 type EntityPluginOptions<Spawn extends AnyEntitySpawnDescriptor> = {
   readonly spawn: Spawn;
 };
+
+interface EntityAccessManagerExtension extends ManagerExtensionTypeLambda {
+  readonly type: this extends {
+    readonly context: ManagerRuntimeContext<infer _Events, infer AppMachines extends MachineStore>;
+  }
+    ? () => EntityAccess<AppMachines>
+    : never;
+}
+
 type EntityManagerDefinition = {
-  readonly entities: <S extends MachineStore>(ctx: ManagerRuntimeContext<AnyEvent, S>) => EntityAccess<S>;
+  readonly entities: ManagerExtensionFactory & ManagerExtensionType<EntityAccessManagerExtension>;
 };
 type EntityRouteMetaResolvers = {
   readonly entityId: (value: EntityStorageRouteMeta["entityId"]) => EntityStorageRouteMeta["entityId"];
@@ -71,8 +83,9 @@ const createEntitiesPlugin = <PluginEvents extends AnyEvent>(
       },
     },
     manager: {
-      entities<S extends MachineStore>(ctx: ManagerRuntimeContext<AnyEvent, S>): EntityAccess<S> {
-        return getEntityRuntimeState(ctx).access as EntityAccess<S>;
+      entities<S extends MachineStore>(ctx: ManagerRuntimeContext<AnyEvent, S>): () => EntityAccess<S> {
+        const access = getEntityRuntimeState(ctx).access as EntityAccess<S>;
+        return () => access;
       },
     },
   });

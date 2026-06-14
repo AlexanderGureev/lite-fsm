@@ -129,7 +129,7 @@ export type AppMachines = {
 export type AppState = MachinesState<AppMachines>;
 export type AppDeps = {
   readonly getState?: () => AppState;
-  readonly entities?: EntityAccess<AppMachines>;
+  readonly entities: () => EntityAccess<AppMachines>;
   readonly sprites: SpriteAdapter;
 };
 
@@ -158,7 +158,7 @@ export const spriteSyncActor = createMachine({
   },
   reactions: {
     TICK: ({ self, entities, sprites }) => {
-      const movement = entities.get("movementActor");
+      const movement = entities().get("movementActor");
 
       for (const entity of self.indices) {
         sprites.sync(self.spriteId[entity], {
@@ -188,7 +188,10 @@ export const spawnEvents = defineSpawnEvents({
 
 export type EntitySpawnEvents = SpawnEventsFrom<typeof spawnEvents>;
 
-export const spawn = defineEntitySpawn(machines, spawnEvents)({
+export const spawn = defineEntitySpawn(
+  machines,
+  spawnEvents,
+)({
   SPAWN_UNIT: (payload) => ({
     id: `unit/${payload.id}`,
     groupTag: "unit",
@@ -253,6 +256,7 @@ export const createEntitiesExampleManager = (sprites: SpriteAdapter) => {
 
   manager.setDependencies({
     getState: manager.getState,
+    entities: manager.entities,
     sprites,
   });
 
@@ -291,11 +295,11 @@ export const runEntitiesCompositionExample = () => {
   });
   manager.transition({ type: "TICK" });
 
-  const rootEntities = manager.entities;
+  const rootEntities = manager.entities();
   const state = manager.getState();
 
   return {
-    hasRootEntityAccessor: rootEntities === manager.entities,
+    hasRootEntityAccessor: rootEntities === manager.entities(),
     movementCount: state.movementActor.count,
     unitPosition: spriteMemory.positions.get("sprite/unit-alpha"),
     projectileVisible: spriteMemory.positions.has("sprite/projectile-p1"),

@@ -34,6 +34,7 @@ import type {
 import type {
   FSMEvent,
   LiteFsmPlugin,
+  MachineDependencies,
   MachineResultMetadata,
   MachineEvents,
   ManagerAction,
@@ -301,11 +302,102 @@ describe("@lite-fsm/entities — этап 3 EntityAccess и manager.entities typ
   test("MachineManager добавляет .entities только при подключенном entitiesPlugin tuple", () => {
     const withPlugin = MachineManager(machines, { plugins });
     const withoutPlugin = MachineManager(machines);
+    const entity = 0 as EntityIndex;
+    const movement = withPlugin.entities().get("movementActor");
 
-    expect(withPlugin.entities).type.toBeAssignableTo<EntityAccess<AppMachines>>();
+    expect(withPlugin.entities).type.toBeAssignableTo<() => EntityAccess<AppMachines>>();
+    expect(movement.x[entity]).type.toBe<number>();
 
     // @ts-expect-error!
     withoutPlugin.entities;
+  });
+
+  test("MachineManager выводит ключи .entities для обычного массива plugins", () => {
+    const pluginArray = [entityPlugin];
+    type AppPlugins = typeof pluginArray;
+    const manager = MachineManager<AppMachines, AppEvent, AppPlugins>(machines, { plugins: pluginArray });
+
+    expect(manager.entities).type.toBeAssignableTo<() => EntityAccess<AppMachines>>();
+
+    manager.entities().get("movementActor");
+    manager.entities().get("nameActor");
+
+    const entityProvider = manager.entities;
+
+    // @ts-expect-error!
+    entityProvider.get("movementActor");
+    // @ts-expect-error!
+    manager.entities().get("domainMachine");
+    // @ts-expect-error!
+    manager.entities().get("instanceActor");
+    // @ts-expect-error!
+    manager.entities().get("unknownActor");
+  });
+
+  test("единый MachineDeps с entities provider не создает цикл типов", () => {
+    type Clock = { readonly now: () => number };
+    type MachineDeps = {
+      readonly getState: () => AppState;
+      readonly entities: () => EntityAccess<AppMachines>;
+      readonly clock: Clock;
+    };
+    type AppPlugins = readonly [EntitiesPlugin<MachineDeps>];
+    const createSharedMachine: TypedCreateMachineFn<AppEvent, MachineDeps, EntitiesPlugin<MachineDeps>> =
+      createMachine;
+
+    const sharedMovementActor = createSharedMachine({
+      storage: "entity",
+      initialState: "__INIT",
+      initialContext: {
+        x: f32(),
+      },
+      spawnSchema: {},
+      config: {
+        __INIT: { ENTITY_SPAWNED: "moving" },
+        moving: { TICK: "moving" },
+      },
+      effects: {
+        moving: ({ clock, entities, getState, self, transition }) => {
+          const entity = self.indices[0];
+          const movement = entities().get("sharedMovementActor");
+          const state = getState();
+
+          expect(clock.now()).type.toBe<number>();
+          expect(movement.x[entity]).type.toBe<number>();
+          expect(state.sharedMovementActor.storage).type.toBe<"entity">();
+
+          transition({ type: "TICK" });
+        },
+      },
+    });
+
+    const sharedDomainMachine = createSharedMachine({
+      config: {
+        idle: { TICK: "idle" },
+      },
+      initialState: "idle",
+      initialContext: {},
+      effects: {
+        idle: ({ clock, entities, getState }) => {
+          const state = getState();
+
+          expect(clock.now()).type.toBe<number>();
+          expect(entities().get("sharedMovementActor").count).type.toBe<number>();
+          expect(state.sharedDomainMachine.state).type.toBe<"idle">();
+        },
+      },
+    });
+
+    const sharedMachines = {
+      sharedMovementActor,
+      sharedDomainMachine,
+    };
+    type AppMachines = typeof sharedMachines;
+    type AppState = MachinesState<AppMachines>;
+
+    expect<MachineDependencies<AppMachines, AppPlugins>["entities"]>().type.toBe<() => EntityAccess<AppMachines>>();
+    expect<MachineDependencies<AppMachines, AppPlugins>["getState"]>().type.toBe<() => AppState>();
+    expect<MachineDependencies<AppMachines, AppPlugins>["clock"]>().type.toBe<Clock>();
   });
 });
 
@@ -920,7 +1012,7 @@ describe("@lite-fsm/entities — этап 9 entity effect deps types", () => {
   const machines = { movementActor, healthActor, domainMachine, instanceActor };
   type AppMachines = typeof machines;
   type AppDeps = {
-    readonly entities?: EntityAccess<AppMachines>;
+    readonly entities: () => EntityAccess<AppMachines>;
   };
   const createStrictMachine: TypedCreateMachineFn<AppEvent, AppDeps, EntitiesPlugin<AppDeps>> = createMachine;
 
@@ -949,8 +1041,8 @@ describe("@lite-fsm/entities — этап 9 entity effect deps types", () => {
       effects: {
         active: ({ self, entities, transition }) => {
           const entity = self.indices[0];
-          const movement = entities.get("movementActor");
-          const health = entities.maybe("healthActor");
+          const movement = entities().get("movementActor");
+          const health = entities().maybe("healthActor");
 
           expect(self.indices).type.toBe<readonly EntityIndex[]>();
           expect(self.x[entity]).type.toBe<number>();
@@ -979,9 +1071,9 @@ describe("@lite-fsm/entities — этап 9 entity effect deps types", () => {
           // @ts-expect-error!
           transition.despawn(entity);
           // @ts-expect-error!
-          entities.get("domainMachine");
+          entities().get("domainMachine");
           // @ts-expect-error!
-          entities.get("instanceActor");
+          entities().get("instanceActor");
           // @ts-expect-error!
           self.x[entity] = 1;
         },
@@ -1029,7 +1121,7 @@ describe("@lite-fsm/entities — этап 9 entity effect deps types", () => {
     });
   });
 
-  test("отсутствие AppDeps.entities оставляет runtime entities, но отклоняет string keys", () => {
+  test("отсутствие AppDeps.entities не добавляет entities в entity effect deps", () => {
     const createWithoutEntities: TypedCreateMachineFn<AppEvent, {}, EntitiesPlugin<{}>> = createMachine;
 
     createWithoutEntities({
@@ -1044,13 +1136,11 @@ describe("@lite-fsm/entities — этап 9 entity effect deps types", () => {
         alive: { TICK: "alive" },
       },
       effects: {
-        alive: ({ entities, transition, self }) => {
-          transition.despawn(self.indices);
+        alive: (deps) => {
+          deps.transition.despawn(deps.self.indices);
 
           // @ts-expect-error!
-          entities.get("movementActor");
-          // @ts-expect-error!
-          entities.maybe("movementActor");
+          deps.entities;
         },
       },
     });
@@ -1113,7 +1203,7 @@ describe("@lite-fsm/entities — этап 10 entity reaction deps types", () => 
   type AppMachines = typeof machines;
   type AppDeps = {
     readonly api: { readonly sync: () => void };
-    readonly entities?: EntityAccess<AppMachines>;
+    readonly entities: () => EntityAccess<AppMachines>;
   };
   const createStrictMachine: TypedCreateMachineFn<AppEvent, AppDeps, EntitiesPlugin<AppDeps>> = createMachine;
 
@@ -1134,8 +1224,8 @@ describe("@lite-fsm/entities — этап 10 entity reaction deps types", () => 
       reactions: {
         TICK: (deps) => {
           const entity = deps.self.indices[0];
-          const movement = deps.entities.get("movementActor");
-          const health = deps.entities.maybe("healthActor");
+          const movement = deps.entities().get("movementActor");
+          const health = deps.entities().maybe("healthActor");
 
           deps.api.sync();
           expect(deps.action.type).type.toBe<string>();
@@ -1157,9 +1247,9 @@ describe("@lite-fsm/entities — этап 10 entity reaction deps types", () => 
           // @ts-expect-error!
           deps.transition.despawn("unit/a");
           // @ts-expect-error!
-          deps.entities.get("domainMachine");
+          deps.entities().get("domainMachine");
           // @ts-expect-error!
-          deps.entities.get("instanceActor");
+          deps.entities().get("instanceActor");
           // @ts-expect-error!
           deps.self.x[entity] = 1;
           // @ts-expect-error!
@@ -1188,7 +1278,7 @@ describe("@lite-fsm/entities — этап 10 entity reaction deps types", () => 
     });
   });
 
-  test("отсутствие AppDeps.entities отклоняет string keys в reaction entities", () => {
+  test("отсутствие AppDeps.entities не добавляет entities в entity reaction deps", () => {
     const createWithoutEntities: TypedCreateMachineFn<
       AppEvent,
       { readonly api: { readonly sync: () => void } },
@@ -1207,13 +1297,11 @@ describe("@lite-fsm/entities — этап 10 entity reaction deps types", () => 
         alive: { TICK: "alive" },
       },
       reactions: {
-        TICK: ({ api, entities }) => {
-          api.sync();
+        TICK: (deps) => {
+          deps.api.sync();
 
           // @ts-expect-error!
-          entities.get("movementActor");
-          // @ts-expect-error!
-          entities.maybe("movementActor");
+          deps.entities;
         },
       },
     });

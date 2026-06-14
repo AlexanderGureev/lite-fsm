@@ -23,6 +23,8 @@ export type {
   DispatchHook,
   DispatchHookPhase,
   ManagerExtensionFactory,
+  ManagerExtensionType,
+  ManagerExtensionTypeLambda,
   ManagerRuntimeContext,
   NormalizedDispatchHook,
   NormalizedManagerEntry,

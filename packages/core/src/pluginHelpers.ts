@@ -4,7 +4,12 @@
 import type { LiteFsmStorageRuntimeDefinition } from "./pluginStorage";
 import type { LiteFsmPlugin } from "./plugin";
 import type { AnyEvent, CoreActionMeta, MachinesState, MachineStore } from "./types";
-import type { ManagerRuntimeContext } from "./pluginTypes";
+import type {
+  ManagerExtensionType,
+  ManagerExtensionTypeLambda,
+  managerExtensionTypeMarker,
+  ManagerRuntimeContext,
+} from "./pluginTypes";
 import type { StorageMachineTypingExtension } from "./pluginStorageTypes";
 
 // === Utility types ===========================================================
@@ -101,19 +106,31 @@ type ScopedTransitionForPlugin<Plugin> =
     ? { [Key in keyof ScopedTransition]: FactoryReturn<ScopedTransition[Key]> }
     : {};
 
-type ManagerFactoryReturn<Factory, S extends MachineStore> =
-  SpecializeStoreReferences<
-    Factory extends (ctx: ManagerRuntimeContext<infer Events, any>) => unknown
-      ? Factory extends (ctx: ManagerRuntimeContext<Events, S>) => infer Result
-        ? Result
-        : FactoryReturn<Factory>
-      : FactoryReturn<Factory>,
-    S
-  >;
+type ApplyManagerExtensionType<
+  Lambda extends ManagerExtensionTypeLambda,
+  S extends MachineStore,
+  Events extends AnyEvent,
+> = (Lambda & {
+  readonly context: ManagerRuntimeContext<Events, S>;
+})["type"];
 
-type ManagerExtensionsForPlugin<Plugin, S extends MachineStore> =
+type ManagerFactoryReturn<Factory, S extends MachineStore, Events extends AnyEvent> =
+  typeof managerExtensionTypeMarker extends keyof Factory
+    ? Factory extends ManagerExtensionType<infer Lambda>
+      ? ApplyManagerExtensionType<Lambda, S, Events>
+      : never
+    : SpecializeStoreReferences<
+        Factory extends (ctx: ManagerRuntimeContext<infer FactoryEvents, any>) => unknown
+          ? Factory extends (ctx: ManagerRuntimeContext<FactoryEvents, S>) => infer Result
+            ? Result
+            : FactoryReturn<Factory>
+          : FactoryReturn<Factory>,
+        S
+      >;
+
+type ManagerExtensionsForPlugin<Plugin, S extends MachineStore, Events extends AnyEvent> =
   PluginDefinitionOf<Plugin> extends { readonly manager?: infer Manager extends object }
-    ? { [Key in keyof Manager]: ManagerFactoryReturn<Manager[Key], S> }
+    ? { [Key in keyof Manager]: ManagerFactoryReturn<Manager[Key], S, Events> }
     : {};
 
 type StorageTypingExtensionsForPlugin<Plugin> =
@@ -176,10 +193,14 @@ export type PluginScopedTransition<Plugin> = IntersectCapabilities<
     : never
 >;
 
-export type PluginManagerExtensions<Plugin, S extends MachineStore = MachineStore> = IntersectCapabilities<
+export type PluginManagerExtensions<
+  Plugin,
+  S extends MachineStore = MachineStore,
+  Events extends AnyEvent = AnyEvent,
+> = IntersectCapabilities<
   PluginMember<Plugin> extends infer Member
     ? Member extends LiteFsmPlugin<any, any, any>
-      ? ManagerExtensionsForPlugin<Member, S>
+      ? ManagerExtensionsForPlugin<Member, S, Events>
       : never
     : never
 >;

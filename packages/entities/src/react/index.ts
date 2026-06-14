@@ -19,7 +19,7 @@ export type {
 } from "../runtime/react";
 
 type EntityReactManager = {
-  readonly entities?: object;
+  readonly entities?: () => object;
   onTransition(cb: () => void): () => void;
 };
 
@@ -29,12 +29,12 @@ const COMMITTED_ENTITY_READ_MODE = { mode: "commit" } as const;
 const subscribeNoop = () => () => {};
 
 const getEntityReactRuntime = (manager: EntityReactManager) => {
-  const access = manager.entities;
-  if (!access) {
+  const accessProvider = manager.entities;
+  if (!accessProvider) {
     throw new Error("[lite-fsm/entities/react] hooks require a manager configured with entitiesPlugin().");
   }
 
-  const runtime = getEntityRuntimeState(access);
+  const runtime = getEntityRuntimeState(accessProvider());
   if (runtime.react) return runtime.react;
 
   throw new Error("[lite-fsm/entities/react] entity runtime does not expose React subscription/preview capability.");

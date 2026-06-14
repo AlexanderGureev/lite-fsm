@@ -207,6 +207,7 @@ export const invokeEntityEffect = (
   const effect = store?.metadata.effectsByStateCode[invocation.stateCode];
   if (!store || !effect) return;
 
+  const scopedEntities = createScopedEntityAccess(runtime, invocation.scope);
   const deps = {
     ...ctx.manager.getDependencies(),
     action: ctx.action,
@@ -215,7 +216,7 @@ export const invokeEntityEffect = (
       indices: invocation.indices,
       entries: invocation.scope.entries,
     }),
-    entities: createScopedEntityAccess(runtime, invocation.scope),
+    entities: () => scopedEntities,
     transition: createEffectTransition(runtime, ctx.manager, invocation),
     condition: unsupportedCondition,
   };

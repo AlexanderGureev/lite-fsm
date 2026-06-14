@@ -1,42 +1,10 @@
-import {
-  i32,
-  string as stringColumn,
-  type EntityAccess,
-  type EntityId,
-  type EntityIndex,
-  type EntitiesPlugin,
-} from "@lite-fsm/entities";
-import {
-  createMachine as createLiteFsmMachine,
-  type TypedCreateMachineFn,
-} from "@lite-fsm/core";
+import { i32, string as stringColumn } from "@lite-fsm/entities";
 
-import type { MachineDeps } from "../deps";
-import type { AppEvents } from "../types";
-import type { enemyActor } from "./enemy-actor";
-
-type EnemyReadMachines = {
-  readonly enemyActor: typeof enemyActor;
-};
-
-type EnemySpriteDeps = MachineDeps & {
-  readonly entities?: EntityAccess<EnemyReadMachines>;
-};
-
-const createEnemySpriteMachine: TypedCreateMachineFn<
-  AppEvents,
-  EnemySpriteDeps,
-  EntitiesPlugin<EnemySpriteDeps>
-> = createLiteFsmMachine;
+import { createMachine } from "../create-machine";
 
 const SPRITE_DESPAWN_TICKS = 1_000;
 
-const toEntityIds = (
-  indices: readonly EntityIndex[],
-  entityId: (entity: EntityIndex) => EntityId,
-): readonly EntityId[] => indices.map((entity) => entityId(entity));
-
-export const enemySpriteActor = createEnemySpriteMachine({
+export const enemySpriteActor = createMachine({
   storage: "entity",
   despawnOn: "EXPIRED",
   config: {
@@ -104,7 +72,7 @@ export const enemySpriteActor = createEnemySpriteMachine({
     },
 
     ALERTING: ({ self, transition }) => {
-      const entityIds = toEntityIds(self.indices, self.entityId);
+      const entityIds = self.indices.map((entity) => self.entityId(entity));
       const firstEntityId = entityIds[0];
 
       transition({
@@ -128,7 +96,7 @@ export const enemySpriteActor = createEnemySpriteMachine({
   },
   reactions: {
     TICK: ({ entities, self, sprites }) => {
-      const enemies = entities.get("enemyActor");
+      const enemies = entities().get("enemyActor");
 
       for (const entity of self.indices) {
         if (!enemies.has(entity)) continue;

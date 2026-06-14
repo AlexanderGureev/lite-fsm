@@ -1,7 +1,4 @@
 import { createConfig, createEffect, createMachine, createReducer } from "../create-machine";
-import type { WorldEvents } from "../types";
-
-export type Events = WorldEvents;
 
 type WorldContext = {
   frame: number;

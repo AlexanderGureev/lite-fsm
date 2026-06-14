@@ -1,7 +1,6 @@
 import type {
   ActorPublicState,
   AnyEvent,
-  MachineStore,
   ManagerAction,
   ReadonlyManagerAction,
   StorageDependentField,
@@ -11,7 +10,7 @@ import type {
 import type { EntityContextSchema, EntitySpawnPayload, EntitySpawnSchema } from "./schema";
 import type { EntityIndex } from "./plugin";
 import type { LiteFsmEntityLifecycleEvents } from "./runtime/lifecycle";
-import type { EntityAccess, ReadonlyEntityColumn } from "./runtime/access";
+import type { ReadonlyEntityColumn } from "./runtime/access";
 
 export declare const entityStateMetadata: unique symbol;
 
@@ -41,7 +40,7 @@ export type EntityMachineExtension<
       readonly internalEvents: LiteFsmEntityLifecycleEvents;
       readonly input: EntityMachineInput<ContextSchema, SpawnSchema, Config, AppDeps>;
       readonly reducerContext: StorageDependentField<EntityReducerContextLambda>;
-      readonly effectDeps: StorageDependentField<EntityEffectDepsLambda<AppDeps>>;
+      readonly effectDeps: StorageDependentField<EntityEffectDepsLambda>;
       readonly reactionDeps: StorageDependentField<EntityReactionDepsLambda<AppDeps>>;
       readonly resultMetadata: <Input extends EntityMachineInput<ContextSchema, SpawnSchema, Config>>(input: Input) => {
         readonly entityContextSchema: Input["initialContext"];
@@ -118,12 +117,6 @@ export type EntityEffectSelf<ContextSchema extends EntityContextSchema, Config e
   entityId(entity: EntityIndex): string;
 } & EntityEffectColumns<ContextSchema>;
 
-type EntityAccessMachinesFromDeps<AppDeps> = AppDeps extends {
-  readonly entities?: EntityAccess<infer AppMachines extends MachineStore>;
-}
-  ? AppMachines
-  : Record<never, never>;
-
 type EntityPlainAction<Events extends AnyEvent> = Events & { readonly meta?: never };
 
 export type EntityEffectTransition<Events extends AnyEvent = AnyEvent> = {
@@ -137,11 +130,9 @@ export type EntityEffectTransition<Events extends AnyEvent = AnyEvent> = {
 
 export type EntityEffectDeps<
   ContextSchema extends EntityContextSchema,
-  AppDeps = unknown,
   Config extends object = object,
 > = {
   readonly self: EntityEffectSelf<ContextSchema, Config>;
-  readonly entities: EntityAccess<EntityAccessMachinesFromDeps<AppDeps>>;
   readonly transition: EntityEffectTransition;
 };
 
@@ -151,15 +142,13 @@ export type EntityReactionSelf<ContextSchema extends EntityContextSchema, Config
 type EntityReactionRuntimeDeps<
   ContextSchema extends EntityContextSchema,
   Config extends object,
-  AppMachines extends MachineStore,
 > = {
   readonly action: ReadonlyManagerAction<AnyEvent>;
   readonly self: EntityReactionSelf<ContextSchema, Config>;
-  readonly entities: EntityAccess<AppMachines>;
 };
 
 type EntityReactionUserDeps<AppDeps> = AppDeps extends object
-  ? Omit<AppDeps, "action" | "condition" | "entities" | "self" | "transition">
+  ? Omit<AppDeps, "action" | "condition" | "self" | "transition">
   : {};
 
 export type EntityReactionDeps<
@@ -167,7 +156,7 @@ export type EntityReactionDeps<
   AppDeps = unknown,
   Config extends object = object,
 > = EntityReactionUserDeps<AppDeps> &
-  EntityReactionRuntimeDeps<ContextSchema, Config, EntityAccessMachinesFromDeps<AppDeps>>;
+  EntityReactionRuntimeDeps<ContextSchema, Config>;
 
 export type EntityReaction<
   ContextSchema extends EntityContextSchema,
@@ -204,15 +193,15 @@ interface EntityReducerContextLambda extends StorageDependentTypeLambda {
   readonly type: this extends { readonly input: infer Input } ? EntityReducerContextForInput<Input> : never;
 }
 
-type EntityEffectDepsForInput<Input, AppDeps> = Input extends {
+type EntityEffectDepsForInput<Input> = Input extends {
   readonly initialContext: infer ContextSchema extends EntityContextSchema;
   readonly config: infer Config extends object;
 }
-  ? EntityEffectDeps<ContextSchema, AppDeps, Config>
+  ? EntityEffectDeps<ContextSchema, Config>
   : never;
 
-interface EntityEffectDepsLambda<AppDeps> extends StorageDependentTypeLambda {
-  readonly type: this extends { readonly input: infer Input } ? EntityEffectDepsForInput<Input, AppDeps> : never;
+interface EntityEffectDepsLambda extends StorageDependentTypeLambda {
+  readonly type: this extends { readonly input: infer Input } ? EntityEffectDepsForInput<Input> : never;
 }
 
 type EntityReactionDepsForInput<Input, AppDeps> = Input extends {

@@ -44,6 +44,7 @@ const createReactionDeps = (
     eventType: ctx.action.type,
     entries,
   };
+  const scopedEntities = createScopedEntityAccess(runtime, scope);
   const userDeps = { ...ctx.manager.getDependencies() };
   delete userDeps.action;
   delete userDeps.condition;
@@ -60,7 +61,7 @@ const createReactionDeps = (
       indices,
       entries,
     }),
-    entities: createScopedEntityAccess(runtime, scope),
+    entities: () => scopedEntities,
   };
 };
 

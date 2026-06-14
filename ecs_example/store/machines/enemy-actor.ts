@@ -1,20 +1,11 @@
 import { f32, i16, i32, optional, string as stringColumn, u8 } from "@lite-fsm/entities";
-import type { EntitiesPlugin } from "@lite-fsm/entities";
-import {
-  createMachine as createLiteFsmMachine,
-  type TypedCreateMachineFn,
-} from "@lite-fsm/core";
 
-import type { EnemyEvents } from "../types";
-
-export type Events = EnemyEvents;
+import { createMachine } from "../create-machine";
 
 const ENEMY_ESCAPED_X = 320;
 const FLAG_DESPAWNED = 1;
 
-const createEnemyMachine: TypedCreateMachineFn<EnemyEvents, {}, EntitiesPlugin<{}>> = createLiteFsmMachine;
-
-export const enemyActor = createEnemyMachine({
+export const enemyActor = createMachine({
   storage: "entity",
   config: {
     __INIT: {

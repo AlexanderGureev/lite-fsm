@@ -127,7 +127,7 @@ const emptyServerOverlay = (manager: ReturnType<typeof createEntityManager>) => 
 });
 
 const entityAccess = (manager: ReturnType<typeof createEntityManager>): EntityAccess<Machines> =>
-  manager.entities as EntityAccess<Machines>;
+  manager.entities();
 
 describe("@lite-fsm/entities/react — чтение committed state", () => {
   it("useEntitySnapshot возвращает публичный snapshot строки", () => {
@@ -285,7 +285,7 @@ describe("@lite-fsm/entities/react — чтение committed state", () => {
   it("useEntitySnapshot возвращает undefined для live entity без row выбранного template", () => {
     const manager = createEntityManager();
     spawnEntity(manager, "unit/a", "enemy", 1);
-    const runtime = getEntityRuntimeState(manager.entities);
+    const runtime = getEntityRuntimeState(manager.entities());
     const entity = runtime.entityStore.indexById["unit/a"];
     runtime.actorStores.movementActor.presence[entity] = 0;
 
@@ -370,7 +370,7 @@ describe("@lite-fsm/entities/react — чтение committed state", () => {
 
   it("бросает clear error если runtime не имеет React capability", () => {
     const manager = createEntityManager();
-    const runtime = getEntityRuntimeState(manager.entities);
+    const runtime = getEntityRuntimeState(manager.entities());
     const reactRuntime = runtime.react;
     delete runtime.react;
 
@@ -386,7 +386,7 @@ describe("@lite-fsm/entities/react — чтение committed state", () => {
   it("бросает clear error если present row не имеет public state snapshot", () => {
     const manager = createEntityManager();
     spawnEntity(manager, "unit/a", "enemy", 1);
-    const runtime = getEntityRuntimeState(manager.entities);
+    const runtime = getEntityRuntimeState(manager.entities());
     const entity = runtime.entityStore.indexById["unit/a"];
     runtime.actorStores.movementActor.stateCode[entity] = -1;
 

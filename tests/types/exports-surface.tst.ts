@@ -65,6 +65,9 @@ import type {
   MachinesState,
   ManagerAction,
   ManagerCommitAction,
+  ManagerExtensionFactory,
+  ManagerExtensionType,
+  ManagerExtensionTypeLambda,
   ManagerFromPlugins,
   ManagerRuntimeContext,
   ReadonlyManagerAction,
@@ -508,11 +511,24 @@ describe("canary поверхности экспорта core-типов", () =>
   test("экспортирует definePlugin как public runtime helper", () => {
     const plugin = definePlugin().create({ name: "exported-plugin" });
 
+    interface AuditManagerExtension extends ManagerExtensionTypeLambda {
+      readonly type: { readonly enabled: true };
+    }
+
     expect(plugin.name).type.toBe<"exported-plugin">();
     expect(plugin).type.toBeAssignableTo<LiteFsmPlugin<"exported-plugin">>();
     expect<DispatchContext["runtime"]>().type.toBe<Map<string, unknown>>();
     expect<DispatchContext["action"]>().type.toBe<ReadonlyManagerAction<AnyEvent>>();
     expect<DispatchContext["originalAction"]>().type.toBe<ReadonlyManagerAction<AnyEvent>>();
+    expect<Parameters<ManagerExtensionFactory<Ping, { readonly enabled: true }>>[0]>().type.toBe<
+      ManagerRuntimeContext<Ping, MachineStore>
+    >();
+    expect<ReturnType<ManagerExtensionFactory<Ping, { readonly enabled: true }>>>().type.toBe<{
+      readonly enabled: true;
+    }>();
+    expect<ManagerExtensionFactory & ManagerExtensionType<AuditManagerExtension>>().type.toBeAssignableTo<
+      ManagerExtensionType<AuditManagerExtension>
+    >();
     expect<ManagerRuntimeContext["schemaVersion"]>().type.toBe<number | undefined>();
     expect<ManagerRuntimeContext<Ping>["transition"]>().type.toBe<
       (action: ManagerAction<Ping>, options?: unknown) => ManagerAction<Ping>

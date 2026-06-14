@@ -1,7 +1,4 @@
 import { createMachine } from "../create-machine";
-import type { BlinkEvents } from "../types";
-
-export type Events = BlinkEvents;
 
 type BlinkContext = {
   id: string;

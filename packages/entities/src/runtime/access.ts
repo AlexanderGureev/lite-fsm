@@ -99,7 +99,7 @@ const scopedAccessError = (
 ): LiteFsmError =>
   new LiteFsmError(
     "LITE_FSM_INVALID_STORAGE_RUNTIME",
-    `[lite-fsm/entities] scoped entities.get('${requestedKey}') failed for source actor '${scope.sourceActor}' while handling '${scope.eventType}' on entity '${entityId}': ${reason}.`,
+    `[lite-fsm/entities] scoped entities().get('${requestedKey}') failed for source actor '${scope.sourceActor}' while handling '${scope.eventType}' on entity '${entityId}': ${reason}.`,
   );
 
 export const capturedEntityScopeEntryIsLive = (

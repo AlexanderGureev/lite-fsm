@@ -31,14 +31,14 @@ describe("@lite-fsm/entities — этап 13 README и examples", () => {
     expect(example).toContain("SpawnEventsFrom");
     expect(example).toContain("defineEntitySpawn");
     expect(example).toContain("entitiesPlugin({ spawn })");
-    expect(example).toContain("manager.entities");
+    expect(example).toContain("manager.entities()");
     expect(example).toContain('groupTag: "unit"');
-    expect(example).toContain('entities.get("movementActor")');
+    expect(example).toContain('entities().get("movementActor")');
     expect(example).toContain("optional(entityString())");
     expect(example).not.toContain("manager.spawn");
     expect(example).not.toContain("actorId");
 
-    expect(readme).toContain("AppDeps.entities");
+    expect(readme).toContain("entities: () => EntityAccess<AppMachines>");
     expect(readme).toContain("scoped");
     expect(readme).toContain("manager.setDependencies");
   });

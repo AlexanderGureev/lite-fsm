@@ -1,10 +1,9 @@
-import type { EntityAccess, EntityId } from "@lite-fsm/entities";
+import type { EntityId } from "@lite-fsm/entities";
 
 import {
   createMemorySprites,
   createMemoryStorage,
   makeStore,
-  type AppMachines,
 } from "./store";
 
 export const runLiteFsmCompositionExample = () => {
@@ -47,8 +46,7 @@ export const runLiteFsmCompositionExample = () => {
     meta: { groupTag: "enemy" },
   });
 
-  const entities: EntityAccess<AppMachines> = manager.entities;
-  const enemies = entities.get("enemyActor");
+  const enemies = manager.entities().get("enemyActor");
 
   return {
     enemyCount: enemies.count,
