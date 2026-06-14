@@ -1276,24 +1276,9 @@ describe("@lite-fsm/entities/react — этап 12 hook types", () => {
   type AppMachines = typeof machines;
 
   test("typed aliases ограничивают templateKey entity actor keys", () => {
-    const useSnapshot: TypedUseEntitySnapshotHook<AppMachines> = <Key extends Parameters<
-      TypedUseEntitySnapshotHook<AppMachines>
-    >[0]>(
-      templateKey: Key,
-      entityId: EntityId | null | undefined,
-    ) => useEntitySnapshot<AppMachines, Key>(templateKey, entityId);
-    const useCount: TypedUseEntityCountHook<AppMachines> = <Key extends Parameters<
-      TypedUseEntityCountHook<AppMachines>
-    >[0]>(
-      templateKey: Key,
-      options?: EntityListOptions,
-    ) => useEntityCount<AppMachines, Key>(templateKey, options);
-    const useList: TypedUseEntityListHook<AppMachines> = <Key extends Parameters<
-      TypedUseEntityListHook<AppMachines>
-    >[0]>(
-      templateKey: Key,
-      options?: EntityListOptions,
-    ) => useEntityList<AppMachines, Key>(templateKey, options);
+    const useSnapshot: TypedUseEntitySnapshotHook<AppMachines> = useEntitySnapshot;
+    const useCount: TypedUseEntityCountHook<AppMachines> = useEntityCount;
+    const useList: TypedUseEntityListHook<AppMachines> = useEntityList;
 
     const snapshot = useSnapshot("movementActor", "unit/a");
     const nullableSnapshot = useSnapshot("movementActor", null);
@@ -1341,6 +1326,7 @@ describe("@lite-fsm/entities/react — этап 12 hook types", () => {
 
   test("untyped hooks сохраняют публичные return contracts без EntityIndex input", () => {
     const snapshot = useEntitySnapshot<AppMachines, "movementActor">("movementActor", "unit/a");
+    const fallbackSnapshot = useEntitySnapshot("movementActor", "unit/a");
     const list = useEntityList<AppMachines, "movementActor">("movementActor");
     const count = useEntityCount<AppMachines, "movementActor">("movementActor");
 
@@ -1353,6 +1339,7 @@ describe("@lite-fsm/entities/react — этап 12 hook types", () => {
         "alive" | "gone"
       > | undefined
     >();
+    expect(fallbackSnapshot).type.toBe<EntityRowSnapshot<Record<string, unknown>, string> | undefined>();
     expect(list).type.toBe<readonly EntityId[]>();
     expect(count).type.toBe<number>();
 

@@ -300,15 +300,16 @@ import type {
   TypedUseEntityListHook,
   TypedUseEntitySnapshotHook,
 } from "@lite-fsm/entities/react";
-import { useEntitySnapshot } from "@lite-fsm/entities/react";
+import { useEntityCount, useEntityList, useEntitySnapshot } from "@lite-fsm/entities/react";
 
 type AppMachines = typeof machines;
 
-const useAppEntitySnapshot: TypedUseEntitySnapshotHook<AppMachines> = (templateKey, entityId) =>
-  useEntitySnapshot<AppMachines, typeof templateKey>(templateKey, entityId);
+const useAppEntitySnapshot: TypedUseEntitySnapshotHook<AppMachines> = useEntitySnapshot;
+const useAppEntityCount: TypedUseEntityCountHook<AppMachines> = useEntityCount;
+const useAppEntityList: TypedUseEntityListHook<AppMachines> = useEntityList;
 ```
 
-`EntityRowSnapshot<Context, State>` имеет форму `{ entityId: EntityId; groupTag: string; state: State; context: Context }`. `TypedUseEntitySnapshotHook<AppMachines>` принимает только entity actor keys, принимает `EntityId | null | undefined` и возвращает `EntityRowSnapshot<EntityContext, StateUnion> | undefined`. `TypedUseEntityCountHook<AppMachines>` возвращает `number`; `TypedUseEntityListHook<AppMachines>` возвращает `readonly EntityId[]`. `EntityListOptions` содержит только `groupTag?: string`. Hook types не принимают raw `EntityIndex` как публичный row identifier.
+`EntityRowSnapshot<Context, State>` имеет форму `{ entityId: EntityId; groupTag: string; state: State; context: Context }`. `TypedUseEntitySnapshotHook<AppMachines>` принимает только entity actor keys, принимает `EntityId | null | undefined` и возвращает `EntityRowSnapshot<EntityContext, StateUnion> | undefined`. `TypedUseEntityCountHook<AppMachines>` возвращает `number`; `TypedUseEntityListHook<AppMachines>` возвращает `readonly EntityId[]`. Typed aliases поддерживают прямое присваивание runtime hooks. `EntityListOptions` содержит только `groupTag?: string`. Hook types не принимают raw `EntityIndex` как публичный row identifier.
 
 ## События
 

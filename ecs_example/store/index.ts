@@ -25,7 +25,10 @@ export type AppDeps = Omit<MachineDeps, "getState"> & {
   entities?: AppEntityAccess<AppMachines>;
 };
 
-export const spawn = defineEntitySpawn(machines, spawnEvents)({
+export const spawn = defineEntitySpawn(
+  machines,
+  spawnEvents,
+)({
   SPAWN_ENEMY: (payload) => ({
     id: payload.id,
     groupTag: payload.faction ?? "enemy",
@@ -47,7 +50,7 @@ export const spawn = defineEntitySpawn(machines, spawnEvents)({
   }),
 });
 
-const createPlugins = () => [entitiesPlugin({ spawn })] as const;
+const createPlugins = () => [entitiesPlugin({ spawn })];
 
 type AppPlugins = ReturnType<typeof createPlugins>;
 
@@ -87,6 +90,9 @@ export const makeStore = (deps: RuntimeDeps) => {
     key: "lite-fsm:ecs-example:v1",
     storage: () => deps.persistStorage ?? globalThis.localStorage,
   });
+
+  // manager.entities.get('')
+
   const persist = [
     persistManager(manager, {
       storage: persistStorage,
@@ -94,7 +100,7 @@ export const makeStore = (deps: RuntimeDeps) => {
       throttleMs: 50,
       shouldSave: shouldPersistBlinkActor,
     }),
-  ] as const;
+  ];
 
   return { manager, persist };
 };

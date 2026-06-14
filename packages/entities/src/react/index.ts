@@ -49,7 +49,15 @@ export function useEntitySnapshot<
 >(
   templateKey: Key,
   entityId: EntityId | null | undefined,
-): EntityRowSnapshot<EntityContextFor<AppMachines, Key>, EntityStateFor<AppMachines, Key>> | undefined {
+): EntityRowSnapshot<EntityContextFor<AppMachines, Key>, EntityStateFor<AppMachines, Key>> | undefined;
+export function useEntitySnapshot(
+  templateKey: string,
+  entityId: EntityId | null | undefined,
+): EntityRowSnapshot<Record<string, unknown>, string> | undefined;
+export function useEntitySnapshot(
+  templateKey: string,
+  entityId: EntityId | null | undefined,
+): EntityRowSnapshot<Record<string, unknown>, string> | undefined {
   const manager = useManager() as EntityReactManager;
   const runtime = getEntityReactRuntime(manager);
   const preview = useStorageHydrationPreview(ENTITY_STORAGE_KIND);
@@ -89,14 +97,16 @@ export function useEntitySnapshot<
   );
 
   return React.useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot) as
-    | EntityRowSnapshot<EntityContextFor<AppMachines, Key>, EntityStateFor<AppMachines, Key>>
+    | EntityRowSnapshot<Record<string, unknown>, string>
     | undefined;
 }
 
 export function useEntityCount<
   AppMachines extends MachineStore = MachineStore,
   Key extends EntityActorKey<AppMachines> = EntityActorKey<AppMachines>,
->(templateKey: Key, options?: EntityListOptions): number {
+>(templateKey: Key, options?: EntityListOptions): number;
+export function useEntityCount(templateKey: string, options?: EntityListOptions): number;
+export function useEntityCount(templateKey: string, options?: EntityListOptions): number {
   const manager = useManager() as EntityReactManager;
   const runtime = getEntityReactRuntime(manager);
   const preview = useStorageHydrationPreview(ENTITY_STORAGE_KIND);
@@ -130,7 +140,9 @@ export function useEntityCount<
 export function useEntityList<
   AppMachines extends MachineStore = MachineStore,
   Key extends EntityActorKey<AppMachines> = EntityActorKey<AppMachines>,
->(templateKey: Key, options?: EntityListOptions): readonly EntityId[] {
+>(templateKey: Key, options?: EntityListOptions): readonly EntityId[];
+export function useEntityList(templateKey: string, options?: EntityListOptions): readonly EntityId[];
+export function useEntityList(templateKey: string, options?: EntityListOptions): readonly EntityId[] {
   const manager = useManager() as EntityReactManager;
   const runtime = getEntityReactRuntime(manager);
   const preview = useStorageHydrationPreview(ENTITY_STORAGE_KIND);

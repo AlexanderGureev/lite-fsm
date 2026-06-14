@@ -199,6 +199,8 @@ const enemyIds = useEntityList("movementActor", { groupTag: "enemy" });
 const enemyCount = useEntityCount("movementActor", { groupTag: "enemy" });
 ```
 
+App-level typed wrappers можно объявлять прямым присваиванием: `const useAppEntitySnapshot: TypedUseEntitySnapshotHook<AppMachines> = useEntitySnapshot`.
+
 `useEntitySnapshot(templateKey, entityId)` возвращает `{ entityId, groupTag, state, context } | undefined`. `entityId: null | undefined` возвращает стабильный `undefined`; отсутствующая row тоже возвращает `undefined`. `context` собирается из `initialContext` schema values и не раскрывает column arrays. Hook кешируется по `rowVersion`, `entityId` и `generation`, поэтому изменение одной row не создает новый snapshot для другой row.
 
 `useEntityList(templateKey, options?)` возвращает `readonly EntityId[]`, а `useEntityCount(templateKey, options?)` — `number`. `options.groupTag?: string` является exact filter по `EntitySpawnSpec.groupTag`. Порядок списка определяется runtime и не сортируется. Ссылка на список сохраняется, если membership и порядок не изменились.
