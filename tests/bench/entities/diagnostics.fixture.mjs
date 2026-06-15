@@ -1,5 +1,8 @@
 /* global globalThis */
 
+// Legacy synthetic calibration fixture. The active optimization record workflow uses gate+trace
+// and does not treat these synthetic layers as production `manager.transition` attribution.
+
 import { MachineManager } from "../../../packages/core/dist/index.js";
 import {
   defineEntitySpawn,
@@ -11,7 +14,7 @@ import {
   string as entityString,
 } from "../../../packages/entities/dist/index.js";
 
-export const benchmarkName = "composition-lite-fsm-entities-diagnostics";
+export const benchmarkName = "composition-lite-fsm-entities-legacy-diagnostics";
 export const warmupIterations = 5;
 export const measuredIterations = 30;
 
@@ -1723,6 +1726,7 @@ const formatRatio = (value) => `${value.toFixed(2)}x`;
 export const formatDiagnosticsReport = (result) => {
   const lines = [
     `${result.benchmark} (${result.profile}, ${result.runtime})`,
+    "legacy synthetic calibration; not production manager.transition attribution",
     `iterations: warmup=${warmupIterations}, measured=${measuredIterations}`,
     "",
   ];

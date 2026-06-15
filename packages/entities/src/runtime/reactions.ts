@@ -8,6 +8,11 @@ import {
   type EntityReactionScope,
 } from "./access";
 import type { ColumnarActorStore, EntityRuntimeState } from "./state";
+import {
+  readEntityTransitionTraceSession,
+  recordEntityTracePhase,
+  type EntityTransitionTraceSession,
+} from "./transitionTrace";
 import { getEntityTransaction, type EntityReactionBatch } from "./transaction";
 
 type ReactionRunContext = {
@@ -165,21 +170,30 @@ const runReactionBatch = (
   runtime: EntityRuntimeState,
   batch: EntityReactionBatch,
   ctx: ReactionRunContext,
+  trace?: EntityTransitionTraceSession,
 ): void => {
   const reaction = batch.store.metadata.reactionsByEventCode[batch.eventCode];
   if (!reaction) return;
 
+  const captureStartedAt = trace?.now();
   const captured = captureReactionScope(runtime, batch.store, batch.indices);
+  recordEntityTracePhase(trace, "entities.reactions.captureScope", captureStartedAt);
   if (!captured) return;
 
+  const depsStartedAt = trace?.now();
+  const deps = createReactionDeps(runtime, batch.store, captured.scope, ctx);
+  recordEntityTracePhase(trace, "entities.reactions.createDeps", depsStartedAt);
+
+  const userStartedAt = trace?.now();
   try {
-    const result = reaction(createReactionDeps(runtime, batch.store, captured.scope, ctx));
+    const result = reaction(deps);
     if (result instanceof Promise) {
       ctx.dispatch.reportError(reactionPromiseError(batch.store, ctx.action.type));
     }
   } catch (error) {
     ctx.dispatch.reportError(error);
   } finally {
+    recordEntityTracePhase(trace, "entities.reactions.user", userStartedAt);
     cleanupReactionScope(captured.scratch);
   }
 };
@@ -196,5 +210,6 @@ export const runEntityReactions = (runtime: EntityRuntimeState, ctx: ReactionRun
   const transaction = getEntityTransaction(ctx.dispatch);
   if (!transaction || transaction.reactionBatches.length === 0) return;
 
-  runEntityReactionBatches(runtime, transaction.reactionBatches, ctx);
+  const trace = readEntityTransitionTraceSession(ctx.dispatch);
+  for (const batch of transaction.reactionBatches) runReactionBatch(runtime, batch, ctx, trace);
 };

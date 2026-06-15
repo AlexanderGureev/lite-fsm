@@ -10,6 +10,7 @@ import { createEntityReactRuntime } from "./react";
 import { runEntityReactions } from "./reactions";
 import { dehydrateEntityRuntime, hydrateEntityRuntime, type EntitySnapshot } from "./snapshot";
 import type { EntityTemplateMetadata } from "./compile";
+import { readEntityTransitionTraceSession, recordEntityTracePhase } from "./transitionTrace";
 import {
   asEntityRuntimeState,
   compileEntityTemplate,
@@ -154,26 +155,56 @@ export const entityStorageRuntime: EntityStorageDefinition<unknown> =
       return createEntityPublicInitialState(asEntityRuntimeState(state), template);
     },
     prepareAction({ action, dispatch, state }) {
-      assertPublicEntityLifecycleDispatch(action.type);
-      prepareEntityTransaction(dispatch, asEntityRuntimeState(state));
+      const trace = readEntityTransitionTraceSession(dispatch);
+      const startedAt = trace?.now();
+      try {
+        assertPublicEntityLifecycleDispatch(action.type);
+        prepareEntityTransaction(dispatch, asEntityRuntimeState(state));
+      } finally {
+        recordEntityTracePhase(trace, "entities.prepare.transaction", startedAt);
+      }
     },
     reduceBucket(ctx) {
       return reduceEntityBucket(asEntityRuntimeState(ctx.state), ctx);
     },
     commit({ state, dispatch }) {
-      dispatch.nextState = restorePublicSlices(asEntityRuntimeState(state), dispatch.nextState);
+      const trace = readEntityTransitionTraceSession(dispatch);
+      const startedAt = trace?.now();
+      try {
+        dispatch.nextState = restorePublicSlices(asEntityRuntimeState(state), dispatch.nextState);
+      } finally {
+        recordEntityTracePhase(trace, "entities.commit.restorePublicSlices", startedAt);
+      }
     },
     effects: {
       resolveInvocations(ctx) {
-        return resolveEntityEffectInvocations(asEntityRuntimeState(ctx.state), ctx);
+        const trace = readEntityTransitionTraceSession(ctx.dispatch);
+        const startedAt = trace?.now();
+        try {
+          return resolveEntityEffectInvocations(asEntityRuntimeState(ctx.state), ctx);
+        } finally {
+          recordEntityTracePhase(trace, "entities.effects.resolve", startedAt);
+        }
       },
       invoke(ctx) {
-        invokeEntityEffect(asEntityRuntimeState(ctx.state), ctx.invocation, ctx);
+        const trace = readEntityTransitionTraceSession(ctx.dispatch);
+        const startedAt = trace?.now();
+        try {
+          invokeEntityEffect(asEntityRuntimeState(ctx.state), ctx.invocation, ctx);
+        } finally {
+          recordEntityTracePhase(trace, "entities.effects.invoke", startedAt);
+        }
       },
     },
     reactions: {
       run(ctx) {
-        runEntityReactions(asEntityRuntimeState(ctx.state), ctx);
+        const trace = readEntityTransitionTraceSession(ctx.dispatch);
+        const startedAt = trace?.now();
+        try {
+          runEntityReactions(asEntityRuntimeState(ctx.state), ctx);
+        } finally {
+          recordEntityTracePhase(trace, "entities.reactions.total", startedAt);
+        }
       },
     },
     snapshot: {

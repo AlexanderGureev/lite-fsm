@@ -8,9 +8,11 @@ const benchmarkName = "entities";
 const highVarianceThreshold = 0.15;
 const timerNoiseThresholdMs = 0.05;
 const significantChangeThreshold = 10;
+const traceOverheadWarningThreshold = 2;
 
 const gateScenarioKey = (scenario) => `${scenario.key}::${scenario.rowCount}`;
 const layerKey = (scenario, layer) => `${gateScenarioKey(scenario)}::${layer.key}`;
+const phaseRowKey = (scenario, phase) => `${gateScenarioKey(scenario)}::${phase.key}`;
 
 const sortNumbers = (values) => [...values].sort((left, right) => left - right);
 
@@ -66,6 +68,15 @@ const cloneMeasurement = (measurement) => ({
   samples: Array.isArray(measurement.samples) ? measurement.samples : [],
 });
 
+const cloneTraceMetric = (metric) => ({
+  median: metric.median,
+  p95: metric.p95,
+  min: metric.min,
+  max: metric.max,
+  relativeStdDev: metric.relativeStdDev,
+  samples: Array.isArray(metric.samples) ? metric.samples : [],
+});
+
 const metricFromMeasurementSummary = (summary) => ({
   median: summary.medianOfMedians,
   p95: summary.medianOfP95s,
@@ -73,6 +84,25 @@ const metricFromMeasurementSummary = (summary) => ({
   max: summary.maxOfMaxs,
   summary,
 });
+
+const traceMetricFromRuns = (runs) => {
+  const summary = summarizeMeasurements(runs);
+  return {
+    ...metricFromMeasurementSummary(summary),
+    relativeStdDev: summary.relativeStdDev,
+    samples: runs.flatMap((run) => (Array.isArray(run.samples) ? run.samples : [])),
+  };
+};
+
+const traceShareFromRuns = (runs, key) => {
+  const values = runs.map((run) => run[key]).filter((value) => typeof value === "number");
+  if (values.length === 0) return undefined;
+  const summary = summarizeSeries(values);
+  return {
+    value: summary.medianOfMedians,
+    summary,
+  };
+};
 
 const commandOutput = (command, args, cwd) => {
   try {
@@ -307,6 +337,139 @@ export const aggregateDiagnosticsRuns = (runs) => {
   };
 };
 
+const aggregateTraceCoverageRuns = (coverageRuns) => {
+  const coverage = traceMetricFromRuns(coverageRuns);
+  const unattributed = traceMetricFromRuns(coverageRuns.map((run) => run.unattributed));
+
+  return {
+    key: coverageRuns[0].key,
+    label: coverageRuns[0].label,
+    parentKey: coverageRuns[0].parentKey,
+    numeratorKeys: coverageRuns[0].numeratorKeys,
+    ...coverage,
+    unattributed,
+  };
+};
+
+export const aggregateTraceRuns = (runs, gateResult) => {
+  if (runs.length === 0) throw new Error("Cannot aggregate trace benchmark without runs.");
+
+  const gateScenarios = mapScenarios(gateResult);
+  const scenariosByKey = new Map();
+  for (const [runIndex, run] of runs.entries()) {
+    if (!Array.isArray(run.scenarios)) throw new Error("Invalid trace benchmark result: scenarios must be an array.");
+
+    for (const scenario of run.scenarios) {
+      assertScenarioResult(scenario, "trace");
+      if (!Array.isArray(scenario.phases)) throw new Error("Invalid trace scenario: phases must be an array.");
+
+      const key = gateScenarioKey(scenario);
+      const existing =
+        scenariosByKey.get(key) ??
+        {
+          key: scenario.key,
+          label: scenario.label,
+          rowCount: scenario.rowCount,
+          kind: scenario.kind,
+          iterations: scenario.iterations,
+          runs: [],
+          phaseRunsByKey: new Map(),
+          coverageRunsByKey: new Map(),
+        };
+
+      for (const phase of scenario.phases) {
+        const phaseRuns =
+          existing.phaseRunsByKey.get(phase.key) ??
+          {
+            key: phase.key,
+            label: phase.label,
+            parentKey: phase.parentKey,
+            runtimeKind: phase.runtimeKind,
+            runs: [],
+          };
+        phaseRuns.runs.push({ runIndex: runIndex + 1, ...cloneTraceMetric(phase), ...phase });
+        existing.phaseRunsByKey.set(phase.key, phaseRuns);
+      }
+
+      for (const coverage of scenario.coverage ?? []) {
+        const coverageRuns =
+          existing.coverageRunsByKey.get(coverage.key) ??
+          {
+            key: coverage.key,
+            label: coverage.label,
+            parentKey: coverage.parentKey,
+            numeratorKeys: coverage.numeratorKeys,
+            runs: [],
+          };
+        coverageRuns.runs.push({ runIndex: runIndex + 1, ...cloneTraceMetric(coverage), ...coverage });
+        existing.coverageRunsByKey.set(coverage.key, coverageRuns);
+      }
+
+      existing.runs.push({
+        runIndex: runIndex + 1,
+        transitionCount: scenario.transitionCount,
+      });
+      scenariosByKey.set(key, existing);
+    }
+  }
+
+  const scenarios = Array.from(scenariosByKey.values()).map((scenario) => {
+    const phases = Array.from(scenario.phaseRunsByKey.values()).map((phase) => {
+      const metric = traceMetricFromRuns(phase.runs);
+      const percentOfTransition = traceShareFromRuns(phase.runs, "percentOfTransition");
+      const percentOfParent = traceShareFromRuns(phase.runs, "percentOfParent");
+
+      return {
+        key: phase.key,
+        label: phase.label,
+        ...(phase.parentKey ? { parentKey: phase.parentKey } : {}),
+        ...(phase.runtimeKind !== undefined ? { runtimeKind: phase.runtimeKind } : {}),
+        ...metric,
+        ...(percentOfTransition
+          ? { percentOfTransition: percentOfTransition.value, percentOfTransitionSummary: percentOfTransition.summary }
+          : {}),
+        ...(percentOfParent
+          ? { percentOfParent: percentOfParent.value, percentOfParentSummary: percentOfParent.summary }
+          : {}),
+      };
+    });
+    const coverage = Array.from(scenario.coverageRunsByKey.values()).map((entry) =>
+      aggregateTraceCoverageRuns(entry.runs),
+    );
+    const total = phases.find((phase) => phase.key === "core.transition.total");
+    const gateScenario = gateScenarios.get(gateScenarioKey(scenario));
+    const gateEntityMedian = gateScenario?.entity?.median;
+    const traceTotalToGateEntityMedian =
+      total && typeof gateEntityMedian === "number" ? total.median / gateEntityMedian : undefined;
+
+    return {
+      key: scenario.key,
+      label: scenario.label,
+      rowCount: scenario.rowCount,
+      kind: scenario.kind,
+      iterations: scenario.iterations,
+      runs: scenario.runs,
+      transitionCount: scenario.runs.reduce((sum, run) => sum + run.transitionCount, 0),
+      ...(total ? { total } : {}),
+      ...(typeof gateEntityMedian === "number" ? { gateEntityMedian } : {}),
+      ...(traceTotalToGateEntityMedian !== undefined ? { traceTotalToGateEntityMedian } : {}),
+      phases,
+      coverage,
+    };
+  });
+
+  return {
+    benchmark: runs[0].benchmark,
+    profile: runs[0].profile,
+    runtime: runs[0].runtime,
+    config: {
+      rowCounts: runs[0].rowCounts,
+      runs: runs.length,
+    },
+    scenarios,
+  };
+};
+
 const escapeTableCell = (value) => String(value).replace(/\|/g, "\\|").replace(/\n/g, "<br>");
 const formatMs = (value) => `${value.toFixed(3)}ms`;
 const formatRatio = (value) => `${value.toFixed(2)}x`;
@@ -315,11 +478,76 @@ const formatChangePercent = (value) => (value === null ? "n/a" : `${value >= 0 ?
 const formatDelta = (value, unit) => `${value >= 0 ? "+" : ""}${value.toFixed(3)}${unit}`;
 const shortSha = (sha) => (sha ? sha.slice(0, 12) : "unknown");
 
+const topLevelCorePhaseKeys = new Set([
+  "core.assertUserAction",
+  "core.createDispatch",
+  "core.prepareAction.total",
+  "core.beforeReduce.total",
+  "core.interceptors",
+  "core.hooks.beforeReduce",
+  "core.rootReducer",
+  "core.markExternallyChangedBuckets",
+  "core.hooks.afterReduce",
+  "core.hooks.beforeCommit",
+  "core.commit.total",
+  "core.hooks.beforeSubscribers",
+  "core.reactions.total",
+  "core.subscribers",
+  "core.hooks.beforeEffects",
+  "core.effects.total",
+  "core.hooks.afterEffects",
+]);
+
+const entitiesReducePhaseKeys = new Set([
+  "entities.reduce.spawnLifecycle",
+  "entities.reduce.spawnCleanup",
+  "entities.reduce.collectPublicBatches",
+  "entities.reduce.publicBatch.total",
+  "entities.reduce.publicCleanup",
+]);
+
+const entitiesReactionPhaseKeys = new Set([
+  "entities.reactions.captureScope",
+  "entities.reactions.createDeps",
+  "entities.reactions.user",
+]);
+
 const addTable = (lines, headers, rows) => {
   lines.push(`| ${headers.join(" | ")} |`);
   lines.push(`| ${headers.map(() => "---").join(" | ")} |`);
   for (const row of rows) lines.push(`| ${row.map(escapeTableCell).join(" | ")} |`);
 };
+
+const traceRatioLabel = (scenario) =>
+  scenario.traceTotalToGateEntityMedian === undefined ? "n/a" : formatRatio(scenario.traceTotalToGateEntityMedian);
+
+const traceRatioStatus = (scenario) => {
+  if (scenario.traceTotalToGateEntityMedian === undefined) return "n/a";
+  return scenario.traceTotalToGateEntityMedian > traceOverheadWarningThreshold ? "warning" : "ok";
+};
+
+const traceShareLabel = (phase, shareLabel) => {
+  if (shareLabel === "transition") {
+    return phase.percentOfTransition === undefined ? "n/a" : formatPercent(phase.percentOfTransition);
+  }
+  return phase.percentOfParent === undefined ? "n/a" : formatPercent(phase.percentOfParent);
+};
+
+const tracePhaseRows = (trace, phaseFilter, shareLabel) =>
+  trace.scenarios.flatMap((scenario) =>
+    scenario.phases.filter(phaseFilter).map((phase) => [
+      scenario.label,
+      scenario.rowCount.toLocaleString("en-US"),
+      phase.key,
+      phase.parentKey ?? "",
+      phase.runtimeKind ?? "",
+      formatMs(phase.median),
+      formatMs(phase.p95),
+      traceShareLabel(phase, shareLabel),
+      formatPercent(phase.relativeStdDev),
+      String(phase.samples.length),
+    ]),
+  );
 
 const collectStabilityWarnings = (record) => {
   const warnings = [];
@@ -349,18 +577,38 @@ const collectStabilityWarnings = (record) => {
       for (const layer of scenario.layers) {
         if (layer.summary.relativeStdDev > highVarianceThreshold) {
           warnings.push(
-            `Diagnostics ${scenario.label} / ${scenario.rowCount} rows / ${layer.label} has high median variance (${formatPercent(
+            `Legacy diagnostics ${scenario.label} / ${scenario.rowCount} rows / ${layer.label} has high median variance (${formatPercent(
               layer.summary.relativeStdDev,
             )}).`,
           );
         }
         if (layer.key === "raw-soa" && layer.median < timerNoiseThresholdMs) {
           warnings.push(
-            `Diagnostics ${scenario.label} / ${scenario.rowCount} rows raw SoA median is below ${formatMs(
+            `Legacy diagnostics ${scenario.label} / ${scenario.rowCount} rows raw SoA median is below ${formatMs(
               timerNoiseThresholdMs,
             )}.`,
           );
         }
+      }
+    }
+  }
+
+  const trace = record.results.trace;
+  if (trace) {
+    for (const scenario of trace.scenarios) {
+      if (scenario.total?.relativeStdDev > highVarianceThreshold) {
+        warnings.push(
+          `Trace ${scenario.label} / ${scenario.rowCount} rows total median has high variance (${formatPercent(
+            scenario.total.relativeStdDev,
+          )}).`,
+        );
+      }
+      if (scenario.traceTotalToGateEntityMedian > traceOverheadWarningThreshold) {
+        warnings.push(
+          `Trace ${scenario.label} / ${scenario.rowCount} rows traceTotal / gateEntityMedian is ${formatRatio(
+            scenario.traceTotalToGateEntityMedian,
+          )}.`,
+        );
       }
     }
   }
@@ -425,11 +673,15 @@ export const formatRecordMarkdown = (record) => {
   }
 
   lines.push("");
-  lines.push("## Diagnostics benchmark");
+  lines.push("## Legacy diagnostics benchmark");
   lines.push("");
   if (!record.results.diagnostics) {
-    lines.push("Diagnostics benchmark was not included.");
+    lines.push("Legacy diagnostics benchmark was not included.");
   } else {
+    lines.push(
+      "Legacy diagnostics is synthetic calibration data. It is not production `manager.transition` attribution for current optimization gates.",
+    );
+    lines.push("");
     addTable(
       lines,
       ["Scenario", "Rows", "Layer", "Median", "p95", "Min", "Max", "Ratio to raw SoA", "Ops/sample", "RSD"],
@@ -445,6 +697,85 @@ export const formatRecordMarkdown = (record) => {
           formatRatio(layer.ratioToRawSoa),
           String(layer.operationsPerSample),
           formatPercent(layer.summary.relativeStdDev),
+        ]),
+      ),
+    );
+  }
+
+  lines.push("");
+  lines.push("## Trace benchmark");
+  lines.push("");
+  if (!record.results.trace) {
+    lines.push("Trace benchmark was not included.");
+  } else {
+    addTable(
+      lines,
+      [
+        "Scenario",
+        "Rows",
+        "Total",
+        "Total p95",
+        "gateEntityMedian",
+        "traceTotal / gateEntityMedian",
+        "Status",
+        "Transitions",
+        "RSD",
+      ],
+      record.results.trace.scenarios.map((scenario) => [
+        scenario.label,
+        scenario.rowCount.toLocaleString("en-US"),
+        scenario.total ? formatMs(scenario.total.median) : "n/a",
+        scenario.total ? formatMs(scenario.total.p95) : "n/a",
+        scenario.gateEntityMedian === undefined ? "n/a" : formatMs(scenario.gateEntityMedian),
+        traceRatioLabel(scenario),
+        traceRatioStatus(scenario),
+        String(scenario.transitionCount),
+        scenario.total ? formatPercent(scenario.total.relativeStdDev) : "n/a",
+      ]),
+    );
+
+    lines.push("");
+    lines.push("### Top-level core phases");
+    lines.push("");
+    addTable(
+      lines,
+      ["Scenario", "Rows", "Phase", "Parent", "Runtime", "Median", "p95", "Share", "RSD", "Samples"],
+      tracePhaseRows(record.results.trace, (phase) => topLevelCorePhaseKeys.has(phase.key), "transition"),
+    );
+
+    lines.push("");
+    lines.push("### Entities reduce phases");
+    lines.push("");
+    addTable(
+      lines,
+      ["Scenario", "Rows", "Phase", "Parent", "Runtime", "Median", "p95", "Share", "RSD", "Samples"],
+      tracePhaseRows(record.results.trace, (phase) => entitiesReducePhaseKeys.has(phase.key), "parent"),
+    );
+
+    lines.push("");
+    lines.push("### Entities reaction phases");
+    lines.push("");
+    addTable(
+      lines,
+      ["Scenario", "Rows", "Phase", "Parent", "Runtime", "Median", "p95", "Share", "RSD", "Samples"],
+      tracePhaseRows(record.results.trace, (phase) => entitiesReactionPhaseKeys.has(phase.key), "parent"),
+    );
+
+    lines.push("");
+    lines.push("### Trace coverage");
+    lines.push("");
+    addTable(
+      lines,
+      ["Scenario", "Rows", "Scope", "Parent", "Coverage", "Unattributed", "Samples"],
+      record.results.trace.scenarios.flatMap((scenario) =>
+        scenario.coverage.map((coverage) => [
+          scenario.label,
+          scenario.rowCount.toLocaleString("en-US"),
+          coverage.label,
+          coverage.parentKey,
+          formatPercent(coverage.median),
+          formatMs(coverage.unattributed.median),
+          String(coverage.samples.length),
         ]),
       ),
     );
@@ -497,14 +828,23 @@ const formatDirection = ({ direction, significant }) => {
 
 const compareMetricRow = ({ scenario, rowCount, metric, beforeValue, afterValue, unit }) => {
   const comparison = compareValues(beforeValue, afterValue);
-  const formatter = unit === "ms" ? formatMs : formatRatio;
+  let formatter = formatRatio;
+  let delta = formatDelta(comparison.delta, "x");
+  if (unit === "ms") {
+    formatter = formatMs;
+    delta = formatDelta(comparison.delta, "ms");
+  }
+  if (unit === "percent") {
+    formatter = formatPercent;
+    delta = `${comparison.delta >= 0 ? "+" : ""}${(comparison.delta * 100).toFixed(1)}pp`;
+  }
   return [
     scenario,
     rowCount.toLocaleString("en-US"),
     metric,
     formatter(beforeValue),
     formatter(afterValue),
-    formatDelta(comparison.delta, unit === "ms" ? "ms" : "x"),
+    delta,
     formatChangePercent(comparison.percent),
     formatDirection(comparison),
   ];
@@ -521,6 +861,9 @@ const addMissingScenarioNotes = (lines, label, beforeMap, afterMap) => {
   for (const key of beforeOnly) lines.push(`- Missing in after: ${key}.`);
   for (const key of afterOnly) lines.push(`- Missing in before: ${key}.`);
 };
+
+const phaseShare = (phase) => phase.percentOfTransition ?? phase.percentOfParent;
+const phaseShareMetric = (phase) => (phase.percentOfTransition === undefined ? "parent share" : "transition share");
 
 export const formatCompareMarkdown = (before, after) => {
   const lines = [
@@ -616,10 +959,59 @@ export const formatCompareMarkdown = (before, after) => {
       );
     }
 
-    lines.push("## Diagnostics benchmark");
+    lines.push("## Legacy diagnostics benchmark");
     lines.push("");
     addTable(lines, ["Scenario / layer", "Rows", "Metric", "Before", "After", "Delta", "Change", "Direction"], rows);
-    addMissingScenarioNotes(lines, "Diagnostics benchmark", beforeRows, afterRows);
+    addMissingScenarioNotes(lines, "Legacy diagnostics benchmark", beforeRows, afterRows);
+    lines.push("");
+  }
+
+  if (before.results.trace && after.results.trace) {
+    const beforeRows = new Map();
+    const afterRows = new Map();
+    for (const scenario of before.results.trace.scenarios) {
+      for (const phase of scenario.phases) beforeRows.set(phaseRowKey(scenario, phase), { scenario, phase });
+    }
+    for (const scenario of after.results.trace.scenarios) {
+      for (const phase of scenario.phases) afterRows.set(phaseRowKey(scenario, phase), { scenario, phase });
+    }
+
+    const rows = [];
+    for (const [key, beforeEntry] of beforeRows) {
+      const afterEntry = afterRows.get(key);
+      if (!afterEntry) continue;
+
+      rows.push(
+        compareMetricRow({
+          scenario: `${beforeEntry.scenario.label} / ${beforeEntry.phase.key}`,
+          rowCount: beforeEntry.scenario.rowCount,
+          metric: "median",
+          beforeValue: beforeEntry.phase.median,
+          afterValue: afterEntry.phase.median,
+          unit: "ms",
+        }),
+      );
+
+      const beforeShare = phaseShare(beforeEntry.phase);
+      const afterShare = phaseShare(afterEntry.phase);
+      if (beforeShare !== undefined && afterShare !== undefined) {
+        rows.push(
+          compareMetricRow({
+            scenario: `${beforeEntry.scenario.label} / ${beforeEntry.phase.key}`,
+            rowCount: beforeEntry.scenario.rowCount,
+            metric: phaseShareMetric(beforeEntry.phase),
+            beforeValue: beforeShare,
+            afterValue: afterShare,
+            unit: "percent",
+          }),
+        );
+      }
+    }
+
+    lines.push("## Trace benchmark");
+    lines.push("");
+    addTable(lines, ["Scenario / phase", "Rows", "Metric", "Before", "After", "Delta", "Change", "Direction"], rows);
+    addMissingScenarioNotes(lines, "Trace benchmark", beforeRows, afterRows);
     lines.push("");
   }
 
@@ -631,9 +1023,16 @@ export const formatCompareMarkdown = (before, after) => {
   }
 
   if (!before.results.diagnostics || !after.results.diagnostics) {
-    lines.push("## Diagnostics benchmark");
+    lines.push("## Legacy diagnostics benchmark");
     lines.push("");
-    lines.push("Diagnostics benchmark was not present in both records.");
+    lines.push("Legacy diagnostics benchmark was not present in both records.");
+    lines.push("");
+  }
+
+  if (!before.results.trace || !after.results.trace) {
+    lines.push("## Trace benchmark");
+    lines.push("");
+    lines.push("Trace benchmark was not present in both records.");
     lines.push("");
   }
 

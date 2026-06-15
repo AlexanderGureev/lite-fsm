@@ -44,6 +44,11 @@ import {
   type StagedEntitySpawn,
 } from "./transaction";
 import { runEntityReactionBatches } from "./reactions";
+import {
+  readEntityTransitionTraceSession,
+  recordEntityTracePhase,
+  type EntityTransitionTraceSession,
+} from "./transitionTrace";
 
 type SpawnBatch = {
   readonly store: ColumnarActorStore;
@@ -66,6 +71,8 @@ type ReduceAcceptedBatchOptions = {
   readonly scheduleEffects?: boolean;
   readonly scheduleReactions?: boolean;
   readonly scheduleTerminal?: boolean;
+  readonly trace?: EntityTransitionTraceSession;
+  readonly tracePublicBatch?: boolean;
   onAccepted?(accepted: readonly EntityIndex[]): void;
 };
 
@@ -93,6 +100,8 @@ type AcceptedRowsPostProcessing = {
   readonly enteredByState: ReadonlyMap<number, readonly EntityIndex[]> | undefined;
   readonly cleanupRemovesAcceptedRows: boolean;
 };
+
+type CleanupPhaseKind = "spawn" | "public";
 
 const spawnLifecycleAction: ManagerAction<AnyEvent> = { type: ENTITY_SPAWNED };
 const despawnLifecycleAction: ManagerAction<AnyEvent> = { type: ENTITY_DESPAWNED };
@@ -383,43 +392,91 @@ const reduceAcceptedBatch = (
   transaction: EntityDispatchTransaction | undefined,
   options: ReduceAcceptedBatchOptions = {},
 ): boolean => {
-  const accepted = getAcceptedIndices(batch);
-  if (accepted.length === 0) return false;
+  const trace = options.tracePublicBatch ? options.trace : undefined;
+  const totalStartedAt = trace?.now();
+  try {
+    let accepted: readonly EntityIndex[] = [];
+    let firstNextState: string | undefined;
+    const defaultTransitionsStartedAt = trace?.now();
+    try {
+      accepted = getAcceptedIndices(batch);
+      if (accepted.length === 0) return false;
+      firstNextState = applyDefaultTransitions(batch, accepted);
+    } finally {
+      recordEntityTracePhase(trace, "entities.reduce.publicBatch.defaultTransitions", defaultTransitionsStartedAt);
+    }
 
-  const firstNextState = applyDefaultTransitions(batch, accepted);
+    const reducer = batch.store.metadata.reducer;
+    const userReducerStartedAt = trace?.now();
+    try {
+      if (reducer) {
+        const nextState = firstNextState!;
+        reducer(
+          { state: nextState, context: {} },
+          batch.action,
+          {
+            nextState,
+            config: batch.store.metadata.config,
+            self: getActorReducerSelf(batch.store, accepted),
+            payloadFor: createPayloadFor(batch.store, batch.payloadByEntity),
+          },
+        );
+      }
+    } finally {
+      recordEntityTracePhase(trace, "entities.reduce.publicBatch.userReducer", userReducerStartedAt);
+    }
 
-  const reducer = batch.store.metadata.reducer;
-  if (reducer) {
-    const nextState = firstNextState!;
-    reducer(
-      { state: nextState, context: {} },
-      batch.action,
-      {
-        nextState,
-        config: batch.store.metadata.config,
-        self: getActorReducerSelf(batch.store, accepted),
-        payloadFor: createPayloadFor(batch.store, batch.payloadByEntity),
-      },
-    );
+    const plan = getBatchReducePlan(batch);
+    let postProcessing: AcceptedRowsPostProcessing;
+    const postProcessStartedAt = trace?.now();
+    try {
+      postProcessing = postProcessAcceptedRows(
+        transaction,
+        batch.store,
+        accepted,
+        getPostProcessingFlags(batch.store, plan, options),
+      );
+    } finally {
+      recordEntityTracePhase(trace, "entities.reduce.publicBatch.postProcess", postProcessStartedAt);
+    }
+
+    const markTouchedStartedAt = trace?.now();
+    try {
+      markActorRowsTouched(batch.store);
+    } finally {
+      recordEntityTracePhase(trace, "entities.reduce.publicBatch.markTouched", markTouchedStartedAt);
+    }
+
+    const scheduleEffectsStartedAt = trace?.now();
+    try {
+      scheduleEnteredStateEffects(transaction, batch.store, postProcessing.enteredByState);
+    } finally {
+      recordEntityTracePhase(trace, "entities.reduce.publicBatch.scheduleEffects", scheduleEffectsStartedAt);
+    }
+
+    const scheduleReactionsStartedAt = trace?.now();
+    try {
+      if (options.scheduleReactions && batch.eventCode !== undefined) {
+        scheduleEntityReactionBatch(transaction, batch.store, batch.eventCode, accepted, {
+          ownership: chooseReactionBatchOwnership(plan, postProcessing, options),
+        });
+      }
+    } finally {
+      recordEntityTracePhase(trace, "entities.reduce.publicBatch.scheduleReactions", scheduleReactionsStartedAt);
+    }
+
+    const updateStateBucketsStartedAt = trace?.now();
+    try {
+      if (postProcessing.dirtyRows) updateActorStateBuckets(batch.store, postProcessing.dirtyRows);
+    } finally {
+      recordEntityTracePhase(trace, "entities.reduce.publicBatch.updateStateBuckets", updateStateBucketsStartedAt);
+    }
+
+    options.onAccepted?.(accepted);
+    return true;
+  } finally {
+    recordEntityTracePhase(trace, "entities.reduce.publicBatch.total", totalStartedAt);
   }
-
-  const plan = getBatchReducePlan(batch);
-  const postProcessing = postProcessAcceptedRows(
-    transaction,
-    batch.store,
-    accepted,
-    getPostProcessingFlags(batch.store, plan, options),
-  );
-  markActorRowsTouched(batch.store);
-  scheduleEnteredStateEffects(transaction, batch.store, postProcessing.enteredByState);
-  if (options.scheduleReactions && batch.eventCode !== undefined) {
-    scheduleEntityReactionBatch(transaction, batch.store, batch.eventCode, accepted, {
-      ownership: chooseReactionBatchOwnership(plan, postProcessing, options),
-    });
-  }
-  if (postProcessing.dirtyRows) updateActorStateBuckets(batch.store, postProcessing.dirtyRows);
-  options.onAccepted?.(accepted);
-  return true;
 };
 
 const allocateEntity = (runtime: EntityRuntimeState, staged: StagedEntitySpawn): EntityIndex => {
@@ -630,25 +687,47 @@ const removeEmptyEntityRecords = (runtime: EntityRuntimeState, entities: readonl
   return removeEntityRecords(runtime, emptyEntities) > 0;
 };
 
-const cleanupTerminalRows = (runtime: EntityRuntimeState, transaction: EntityDispatchTransaction): boolean => {
+const cleanupTerminalRows = (
+  runtime: EntityRuntimeState,
+  transaction: EntityDispatchTransaction,
+  trace: EntityTransitionTraceSession | undefined,
+  phaseKind: CleanupPhaseKind,
+): boolean => {
   if (transaction.terminalRows.length === 0) return false;
 
   const terminalEntities: EntityIndex[] = [];
   const removalBatches = new Map<string, ActorRowRemovalBatch>();
-  const terminalRows = transaction.terminalRows;
-  transaction.terminalRows = [];
-  for (const row of terminalRows) {
-    if (!isTerminalStateCode(row.store.stateCode[row.entity])) continue;
+  const collectStartedAt = trace?.now();
+  try {
+    const terminalRows = transaction.terminalRows;
+    transaction.terminalRows = [];
+    for (const row of terminalRows) {
+      if (!isTerminalStateCode(row.store.stateCode[row.entity])) continue;
 
-    const ref = findActorRowRef(runtime, row.store, row.entity);
-    /* v8 ignore next -- defensive terminal cleanup invariant: terminal row refs remain attached until cleanup. */
-    if (!ref) continue;
-    appendActorRowRemoval(removalBatches, ref);
-    terminalEntities.push(row.entity);
+      const ref = findActorRowRef(runtime, row.store, row.entity);
+      /* v8 ignore next -- defensive terminal cleanup invariant: terminal row refs remain attached until cleanup. */
+      if (!ref) continue;
+      appendActorRowRemoval(removalBatches, ref);
+      terminalEntities.push(row.entity);
+    }
+  } finally {
+    recordEntityTracePhase(trace, `entities.cleanup.${phaseKind}.collectPlan`, collectStartedAt);
   }
 
-  let touched = removeActorRowsFromBatches(runtime, [...removalBatches.values()]);
-  touched = removeEmptyEntityRecords(runtime, terminalEntities) || touched;
+  let touched = false;
+  const removeActorRowsStartedAt = trace?.now();
+  try {
+    touched = removeActorRowsFromBatches(runtime, [...removalBatches.values()]);
+  } finally {
+    recordEntityTracePhase(trace, `entities.cleanup.${phaseKind}.removeActorRows`, removeActorRowsStartedAt);
+  }
+
+  const removeEntityRecordsStartedAt = trace?.now();
+  try {
+    touched = removeEmptyEntityRecords(runtime, terminalEntities) || touched;
+  } finally {
+    recordEntityTracePhase(trace, `entities.cleanup.${phaseKind}.removeEntityRecords`, removeEntityRecordsStartedAt);
+  }
   return touched;
 };
 
@@ -656,40 +735,67 @@ const flushEntityLifecycleCleanup = (
   runtime: EntityRuntimeState,
   transaction: EntityDispatchTransaction | undefined,
   reactionContext: LifecycleReactionContext,
+  phaseKind: CleanupPhaseKind,
+  trace: EntityTransitionTraceSession | undefined,
 ): boolean => {
   /* v8 ignore next -- defensive invariant: prepareAction creates the entity transaction before reduceBucket. */
   if (!transaction) return false;
 
   let touched = false;
   const despawns = consumeScheduledDespawns(transaction);
-  if (despawns.length > 0) {
-    const cleanupPlan = collectDespawnCleanupPlan(runtime, despawns);
-    const reactionBatches: EntityReactionBatch[] = [];
-    for (const batch of cleanupPlan.lifecycleBatches) {
-      const reduced = reduceAcceptedBatch(batch, transaction, {
-        scheduleDespawnOn: false,
-        scheduleEffects: false,
-        scheduleReactions: false,
-        scheduleTerminal: false,
-        onAccepted(accepted) {
-          appendLifecycleReactionBatch(transaction, reactionBatches, batch.store, batch.eventCode, accepted);
-        },
-      });
-      touched = touched || reduced;
-    }
-    runEntityReactionBatches(runtime, reactionBatches, {
-      action: despawnLifecycleAction,
-      manager: reactionContext.manager,
-      dispatch: reactionContext.dispatch,
-    });
+  let cleanupPlan: DespawnCleanupPlan | undefined;
+  const collectStartedAt = trace?.now();
+  try {
+    if (despawns.length > 0) cleanupPlan = collectDespawnCleanupPlan(runtime, despawns);
+  } finally {
+    recordEntityTracePhase(trace, `entities.cleanup.${phaseKind}.collectPlan`, collectStartedAt);
+  }
 
-    const removedRows = removeActorRowsFromBatches(runtime, cleanupPlan.removalBatches);
-    const removedEntities = removeEntityRecords(runtime, cleanupPlan.entities) > 0;
+  if (cleanupPlan) {
+    const reactionBatches: EntityReactionBatch[] = [];
+    const lifecycleStartedAt = trace?.now();
+    try {
+      for (const batch of cleanupPlan.lifecycleBatches) {
+        const reduced = reduceAcceptedBatch(batch, transaction, {
+          scheduleDespawnOn: false,
+          scheduleEffects: false,
+          scheduleReactions: false,
+          scheduleTerminal: false,
+          onAccepted(accepted) {
+            appendLifecycleReactionBatch(transaction, reactionBatches, batch.store, batch.eventCode, accepted);
+          },
+        });
+        touched = touched || reduced;
+      }
+      runEntityReactionBatches(runtime, reactionBatches, {
+        action: despawnLifecycleAction,
+        manager: reactionContext.manager,
+        dispatch: reactionContext.dispatch,
+      });
+    } finally {
+      recordEntityTracePhase(trace, `entities.cleanup.${phaseKind}.lifecycle`, lifecycleStartedAt);
+    }
+
+    let removedRows = false;
+    const removeActorRowsStartedAt = trace?.now();
+    try {
+      removedRows = removeActorRowsFromBatches(runtime, cleanupPlan.removalBatches);
+    } finally {
+      recordEntityTracePhase(trace, `entities.cleanup.${phaseKind}.removeActorRows`, removeActorRowsStartedAt);
+    }
+
+    let removedEntities = false;
+    const removeEntityRecordsStartedAt = trace?.now();
+    try {
+      removedEntities = removeEntityRecords(runtime, cleanupPlan.entities) > 0;
+    } finally {
+      recordEntityTracePhase(trace, `entities.cleanup.${phaseKind}.removeEntityRecords`, removeEntityRecordsStartedAt);
+    }
     if (removedRows) touched = true;
     if (removedEntities) touched = true;
   }
 
-  const removedTerminals = cleanupTerminalRows(runtime, transaction);
+  const removedTerminals = cleanupTerminalRows(runtime, transaction, trace, phaseKind);
   touched = touched || removedTerminals;
   return touched;
 };
@@ -698,6 +804,8 @@ export const reduceEntityBucket = (
   runtime: EntityRuntimeState,
   ctx: StorageReduceBucketContext<any>,
 ): { readonly type: "skip" } | void => {
+  const trace = readEntityTransitionTraceSession(ctx.dispatch);
+  const totalStartedAt = trace?.now();
   const staged = getStagedSpawns(ctx.dispatch);
   const transaction = getEntityTransaction(ctx.dispatch);
   const snapshot = staged.length > 0 ? snapshotRuntimeMutation(runtime) : undefined;
@@ -705,13 +813,34 @@ export const reduceEntityBucket = (
 
   try {
     let touched = false;
-    const spawned = reduceStagedSpawnLifecycle(runtime, staged, transaction, ctx);
-    const spawnCleanup = flushEntityLifecycleCleanup(runtime, transaction, ctx);
+    const spawnLifecycleStartedAt = trace?.now();
+    let spawned = false;
+    try {
+      spawned = reduceStagedSpawnLifecycle(runtime, staged, transaction, ctx);
+    } finally {
+      recordEntityTracePhase(trace, "entities.reduce.spawnLifecycle", spawnLifecycleStartedAt);
+    }
+
+    const spawnCleanupStartedAt = trace?.now();
+    let spawnCleanup = false;
+    try {
+      spawnCleanup = flushEntityLifecycleCleanup(runtime, transaction, ctx, "spawn", trace);
+    } finally {
+      recordEntityTracePhase(trace, "entities.reduce.spawnCleanup", spawnCleanupStartedAt);
+    }
     touched = touched || spawned || spawnCleanup;
 
     if (eventCode === undefined) return touched ? undefined : { type: "skip" };
 
-    for (const batch of collectEntityPublicReducerBatches(runtime, eventCode, ctx.dispatch.route)) {
+    let publicBatches: ReturnType<typeof collectEntityPublicReducerBatches>;
+    const collectPublicBatchesStartedAt = trace?.now();
+    try {
+      publicBatches = collectEntityPublicReducerBatches(runtime, eventCode, ctx.dispatch.route);
+    } finally {
+      recordEntityTracePhase(trace, "entities.reduce.collectPublicBatches", collectPublicBatchesStartedAt);
+    }
+
+    for (const batch of publicBatches) {
       if (reduceAcceptedBatch(
         {
           store: batch.store,
@@ -726,17 +855,27 @@ export const reduceEntityBucket = (
             ctx.dispatch.route.scope === "unscoped" &&
             isSingleStateBucketReactionSource(batch.store, eventCode, batch.indices),
           scheduleReactions: true,
+          trace,
+          tracePublicBatch: true,
         },
       )) {
         touched = true;
       }
     }
 
-    const publicCleanup = flushEntityLifecycleCleanup(runtime, transaction, ctx);
+    const publicCleanupStartedAt = trace?.now();
+    let publicCleanup = false;
+    try {
+      publicCleanup = flushEntityLifecycleCleanup(runtime, transaction, ctx, "public", trace);
+    } finally {
+      recordEntityTracePhase(trace, "entities.reduce.publicCleanup", publicCleanupStartedAt);
+    }
     touched = touched || publicCleanup;
     return touched ? undefined : { type: "skip" };
   } catch (error) {
     if (snapshot) restoreRuntimeMutation(runtime, snapshot);
     throw error;
+  } finally {
+    recordEntityTracePhase(trace, "entities.reduce.total", totalStartedAt);
   }
 };

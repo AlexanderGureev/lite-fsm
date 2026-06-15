@@ -17,7 +17,11 @@ Benchmark проверяет репрезентативный composition-сце
 - `despawnOn cleanup` — переход в состояние удаления и очистка entity storage;
 - `sprite sync reaction` — reducer вместе с reaction и чтением данных другого actor.
 
-В обычном режиме сценарии запускаются на `10_000` и `50_000` строках. Gate benchmark сравнивает публичный путь `@lite-fsm/entities` с ручным SoA baseline и проверяет ratio-budget. Diagnostics benchmark раскладывает стоимость по слоям: `raw-soa`, `semantic-soa`, `raw-entity-kernel`, `public-transition`.
+В обычном режиме сценарии запускаются на `10_000` и `50_000` строках. Gate benchmark сравнивает публичный путь `@lite-fsm/entities` с ручным SoA baseline и проверяет ratio-budget.
+
+Trace benchmark включается через `--include trace` и измеряет тот же production public path `manager.transition(...)`, что и сценарии gate. Collector добавляет overhead, поэтому абсолютные значения trace не смешиваются с gate median. Gate остается основным budget check; trace нужен для attribution и выбора следующего шага оптимизации.
+
+Historical diagnostics artifacts с `results.diagnostics` являются legacy synthetic data. Они читаются `compare` для сопоставления старых records, но текущий optimization workflow не создает diagnostics section и не использует `raw entity kernel` как источник production attribution.
 
 ### Быстрый цикл
 
@@ -30,17 +34,42 @@ pnpm run bench:entities:compare -- .bench/entities/before.json .bench/entities/a
 
 `record` также обновляет `.bench/entities/latest.json` и `.bench/entities/latest.md`. Директория `.bench/` игнорируется Git.
 
+### Trace workflow
+
+Основной baseline для trace фиксируется только на `50_000` строках:
+
+```bash
+pnpm run bench:entities:record -- --runs 5 --label transition-trace-baseline --include gate,trace --row-counts 50000
+```
+
+После оптимизации сохраняй отдельный record и сравнивай его с baseline:
+
+```bash
+pnpm run bench:entities:record -- --runs 5 --label <short-name> --include gate,trace --row-counts 50000
+pnpm run bench:entities:compare -- .bench/entities/transition-trace-baseline.json .bench/entities/<short-name>.json
+```
+
+`traceTotal / gateEntityMedian` связывает trace total с gate median того же scenario и row count. Предупреждение `traceTotal / gateEntityMedian > 2.00x` означает, что instrumentation overhead стал слишком большим для качественного attribution; это guard качества разметки, а не performance budget.
+
+Trace phases сохраняются плоским списком с `parentKey`. Child phases показывают состав parent phase и уже входят в ее время, поэтому child phases нельзя суммировать с parent как общий total. Coverage считает заранее выбранные non-overlapping child sets из per-transition сумм; его нельзя восстанавливать как сумму median отдельных child phases.
+
 ### Полезные варианты
 
 ```bash
 pnpm run bench:entities:record -- --runs 5
 pnpm run bench:entities:record -- --out .bench/entities
 pnpm run bench:entities:record -- --include gate
-pnpm run bench:entities:record -- --include diagnostics
-pnpm run bench:entities:record -- --include gate,diagnostics
+pnpm run bench:entities:record -- --include trace
+pnpm run bench:entities:record -- --include gate,trace
 ```
 
-По умолчанию `record` запускает `3` прогона и включает `gate,diagnostics`.
+По умолчанию `record` запускает `3` прогона и включает `gate,trace`.
+
+Legacy synthetic diagnostics запускается отдельной командой и не участвует в record workflow:
+
+```bash
+pnpm run bench:entities:legacy-diagnostics
+```
 
 ### Что делает `record`
 
@@ -62,10 +91,16 @@ pnpm run bench:entities:record -- --include gate,diagnostics
 - `ratio`;
 - `baseline median`.
 
-Для diagnostics benchmark сравниваются:
+Для legacy diagnostics benchmark в старых records сравниваются:
 
 - `median` каждого layer;
 - `ratioToRawSoa` каждого layer.
+
+Для trace benchmark сравниваются:
+
+- `median` каждой flat phase;
+- share phase относительно transition или parent;
+- total trace scenario и `traceTotal / gateEntityMedian`, если оба отчета содержат gate.
 
 Изменения больше `10%` выделяются в таблице. По умолчанию compare не завершает процесс с ошибкой при регрессии.
 
@@ -93,7 +128,7 @@ JSON использует `schemaVersion: 1` и содержит:
 - git sha, branch и dirty status;
 - Node, OS, arch, CPU и package manager;
 - argv, cwd, количество runs и include-набор;
-- результаты `gate` и/или `diagnostics`;
+- результаты `gate` и/или `trace`; старые records могут содержать legacy `diagnostics`;
 - raw samples и summary across runs.
 
 ### Стабильность измерений
@@ -102,6 +137,7 @@ JSON использует `schemaVersion: 1` и содержит:
 
 - разброс median across runs выше `15%`;
 - baseline или raw SoA median ниже `0.05ms`, то есть близок к шуму таймера.
+- `traceTotal / gateEntityMedian` выше `2.00x`.
 
 Browser benchmark не входит в стабильный Node record. Его можно запускать отдельно:
 
@@ -114,8 +150,15 @@ pnpm run bench:entities:browser
 Для быстрой локальной проверки без полного набора строк есть служебный флаг `--row-counts`:
 
 ```bash
-pnpm run bench:entities:record -- --runs 1 --label smoke --include gate,diagnostics --row-counts 1000
+pnpm run bench:entities:record -- --runs 1 --label smoke --include gate,trace --row-counts 1000
 pnpm run bench:entities:compare -- .bench/entities/smoke.json .bench/entities/smoke.json
+```
+
+Trace smoke:
+
+```bash
+pnpm run bench:entities:record -- --runs 1 --label trace-smoke --include trace --row-counts 1000
+pnpm run bench:entities:compare -- .bench/entities/trace-smoke.json .bench/entities/trace-smoke.json
 ```
 
 Обычный режим использует row counts из fixtures.

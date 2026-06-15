@@ -43,7 +43,9 @@ pnpm run bench:entities:record -- --runs 5 --label codex-baseline-2026-06-14 --i
 - Diagnostics `despawnOn cleanup / 50 000 / public manager.transition` имеет высокий разброс: `24.4%`.
 - Несколько baseline на `10 000` строк ниже `0.050ms`; для них ratio чувствителен к шуму таймера.
 
-## Diagnostics summary
+## Historical diagnostics summary
+
+Этот раздел фиксирует legacy synthetic diagnostics из базового record 2026-06-14. После `transition-trace-baseline` эти данные не являются источником production attribution и не используются как strict gate для следующих оптимизаций. Текущий workflow использует `gate` для budget check и `trace` для attribution реального `manager.transition(...)`.
 
 | Сценарий | Строки | raw SoA | semantic SoA | raw entity kernel | public transition |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -86,6 +88,8 @@ pnpm run bench:entities:record -- --runs 5 --label codex-baseline-2026-06-14 --i
 Основная проблема: generic lifecycle pipeline выполняет много проходов, проверок, allocations и cleanup-операций даже для простых событий вида `active -> active`.
 
 ## Приоритеты оптимизации
+
+Разделы 1-3 фиксируют исторические итерации до появления trace baseline. Команды с `--include gate,diagnostics` в этих разделах оставлены как provenance старых artifacts; для следующих оптимизаций использовать workflow `gate,trace` из раздела `Итог trace baseline` и финального порядка работ.
 
 ### 1. Ускорить `despawnOn cleanup`
 
@@ -328,6 +332,73 @@ Public overhead над diagnostics `raw entity kernel` для `50 000` стро�
 3. Для `sprite sync reaction / 50 000` public overhead над diagnostics kernel составляет `0.900ms`, поэтому core/bucket overhead и reaction/public path остаются отдельной областью problem 5.
 4. Diagnostics fixture нужно синхронизировать с новым reducer fast path: сейчас production public path быстрее modeled `raw entity kernel` для reducer-only сценариев.
 
+### Итог trace baseline
+
+Команды:
+
+```bash
+pnpm run bench:entities:record -- --runs 5 --label transition-trace-baseline --include gate,trace --row-counts 50000
+pnpm run bench:entities:compare -- .bench/entities/transition-trace-baseline.json .bench/entities/transition-trace-baseline.json
+```
+
+Артефакты:
+
+- [`transition-trace-baseline.json`](../../.bench/entities/transition-trace-baseline.json)
+- [`transition-trace-baseline.md`](../../.bench/entities/transition-trace-baseline.md)
+
+Trace измеряет реальный public path `manager.transition(...)` на production dist и использует те же composition runners, что gate. Включенный collector добавляет собственный overhead, поэтому абсолютные `Trace total` отделены от значений gate. `traceTotal / gateEntityMedian` — guard качества instrumentation: значение выше `2.00x` требует проверки разметки, но не является performance budget. Основной budget check остается за gate; trace является attribution-отчетом для выбора следующего шага оптимизации.
+
+Начиная с этого baseline, `raw entity kernel` из legacy diagnostics не используется для выбора следующего шага и не считается production truth. Старые diagnostics artifacts сохраняются только для исторического сравнения.
+
+Gate `50 000`:
+
+| Сценарий | SoA median | entities median | Ratio | Бюджет | Статус | RSD |
+| --- | ---: | ---: | ---: | ---: | --- | ---: |
+| `movement update` | 0.250ms | 0.832ms | 3.39x | 1.50x | fail | 32.5% |
+| `projectile lifetime update` | 0.181ms | 0.404ms | 2.27x | 1.50x | fail | 32.9% |
+| `despawnOn cleanup` | 0.276ms | 0.512ms | 1.86x | 2.00x | fail | 1.9% |
+| `sprite sync reaction` | 0.320ms | 3.723ms | 11.70x | 2.00x | fail | 5.2% |
+
+Trace totals:
+
+| Сценарий | Trace total | Gate entities median | `traceTotal / gateEntityMedian` | Transitions | RSD |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `movement update` | 0.819ms | 0.832ms | 0.98x | 750 | 1.0% |
+| `projectile lifetime update` | 0.413ms | 0.404ms | 1.02x | 750 | 0.7% |
+| `despawnOn cleanup` | 0.510ms | 0.512ms | 0.99x | 750 | 1.3% |
+| `sprite sync reaction` | 3.529ms | 3.723ms | 0.95x | 750 | 4.8% |
+
+Предупреждений `traceTotal / gateEntityMedian > 2.00x` нет. Высокий RSD у reducer-only gate-сценариев относится к budget report data и не меняет trace attribution semantics.
+
+Top core phases:
+
+| Сценарий | Фазы |
+| --- | --- |
+| `movement update` | `core.rootReducer` 0.805ms (98.5%); `core.commit.total` 0.003ms (0.3%); `core.prepareAction.total` 0.002ms (0.2%) |
+| `projectile lifetime update` | `core.rootReducer` 0.402ms (97.5%); `core.commit.total` 0.002ms (0.5%); `core.prepareAction.total` 0.002ms (0.4%) |
+| `despawnOn cleanup` | `core.rootReducer` 0.477ms (93.6%); `core.prepareAction.total` 0.009ms (1.7%); `core.createDispatch` 0.005ms (0.9%) |
+| `sprite sync reaction` | `core.reactions.total` 2.369ms (67.3%); `core.rootReducer` 1.095ms (31.7%); `core.commit.total` 0.007ms (0.2%) |
+
+Top entities phases:
+
+| Сценарий | Фазы |
+| --- | --- |
+| `movement update` | `entities.reduce.total` 0.803ms (100.0%); `entities.reduce.publicBatch.total` 0.801ms (99.8%); `entities.reduce.publicBatch.userReducer` 0.523ms (65.4%); `entities.reduce.publicBatch.postProcess` 0.239ms (29.9%) |
+| `projectile lifetime update` | `entities.reduce.total` 0.400ms (99.9%); `entities.reduce.publicBatch.total` 0.398ms (99.7%); `entities.reduce.publicBatch.postProcess` 0.239ms (60.0%); `entities.reduce.publicBatch.userReducer` 0.122ms (30.7%) |
+| `despawnOn cleanup` | `entities.reduce.total` 0.470ms (99.9%); `entities.reduce.publicBatch.total` 0.448ms (95.7%); `entities.reduce.publicBatch.postProcess` 0.278ms (62.1%); `entities.reduce.publicBatch.userReducer` 0.131ms (29.2%) |
+| `sprite sync reaction` | `entities.reactions.total` 2.367ms (99.9%); `entities.reactions.user` 1.701ms (74.0%); `entities.reduce.total` 1.090ms (100.0%); `entities.reduce.publicBatch.total` 1.087ms (99.7%); `entities.reactions.captureScope` 0.586ms (23.9%) |
+
+Residual unattributed time:
+
+| Сценарий | Core residual | Entities reduce residual | Entities reactions residual |
+| --- | ---: | ---: | ---: |
+| `movement update` | 0.002ms (0.2%) | 0.001ms (0.1%) | 0.000ms |
+| `projectile lifetime update` | 0.002ms (0.4%) | 0.001ms (0.1%) | 0.000ms |
+| `despawnOn cleanup` | 0.004ms (0.8%) | 0.001ms (0.3%) | 0.000ms |
+| `sprite sync reaction` | 0.003ms (0.1%) | 0.001ms (0.1%) | 0.045ms (1.9%) |
+
+Основной кандидат для следующего optimization ТЗ — `sprite sync reaction / 50 000`: gate ratio `11.70x`, а trace показывает `core.reactions.total` 2.369ms и внутри него `entities.reactions.user` 1.701ms. Следующий шаг должен разбирать public reaction path и scoped access/deps work в `entities.reactions.user`; `entities.reactions.captureScope` 0.586ms и `entities.reduce.publicBatch.total` 1.087ms остаются соседними вторичными целями.
+
 ### 4. Уменьшить allocations и проверку payload в spawn/lifecycle path
 
 Ожидаемый выигрыш: средний для текущего измеряемого `TICK`, высокий для реальных workloads со spawn/despawn. В gate cleanup replacement spawn выполняется вне timed участка, но в приложении это часть кадра.
@@ -347,7 +418,7 @@ Public overhead над diagnostics `raw entity kernel` для `50 000` стро�
 
 Критерий приемки:
 
-- Добавить отдельный diagnostics слой или сценарий для timed spawn batch.
+- Добавить отдельный gate/trace scenario для timed spawn batch.
 - Не ухудшить `movement update` и `projectile lifetime update` на `50k`.
 
 ### 5. Снизить постоянный overhead `manager.transition` для bucket storage
@@ -369,23 +440,25 @@ Public overhead над diagnostics `raw entity kernel` для `50 000` стро�
 
 Критерий приемки:
 
-- Public minus raw entity kernel для reducer-only `50k` должен быть ниже `0.05ms`.
+- Gate reducer-only `50k` должен приближаться к бюджету `1.50x` без регрессий соседних сценариев больше `10%`.
+- Trace должен показать снижение постоянных core/bucket фаз (`core.createDispatch`, `core.prepareAction.total`, `core.commit.total`, hooks и bucket phases) для reducer-only сценариев.
+- Legacy diagnostics `raw entity kernel` не используется как strict gate или источник production attribution.
 - Изменения core должны проходить общий `pnpm run test`, `pnpm run test:types`, `pnpm run check-types`.
 
-### 6. Уточнить benchmark breakdown перед крупными изменениями
+### 6. Уточнить trace breakdown перед крупными изменениями
 
 Ожидаемый выигрыш: непрямой. Нужен, чтобы не оптимизировать по неверной гипотезе.
 
 Что добавить:
 
-1. Diagnostics слои для cleanup: `schedule despawn`, `despawn lifecycle batches`, `remove rows`, `public commit`.
-2. Diagnostics слои для reactions: `schedule reaction batch`, `collect entries`, `create deps`, `run user reaction`.
-3. Timed spawn scenario, где spawn входит в measured участок.
-4. Allocation counters для hot scenarios, хотя бы retained heap plus operation count.
+1. Дополнительные trace phases для cleanup и reactions, если текущая детализация не объясняет изменение gate.
+2. Timed spawn scenario в gate/trace workflow, где spawn входит в measured участок.
+3. Allocation counters для hot scenarios, хотя бы retained heap plus operation count.
+4. Если нужен synthetic calibration benchmark, оформить его отдельной legacy-командой и не включать в optimization gates.
 
 Критерий приемки:
 
-- Новый diagnostics должен объяснять не менее `80%` времени `despawnOn cleanup / public transition` и `sprite sync reaction / raw entity kernel`.
+- Trace должен объяснять не менее `80%` времени `despawnOn cleanup / public transition` и `sprite sync reaction / public transition`.
 - Существующие gate таблицы должны остаться сопоставимыми с текущим baseline.
 
 ## Рекомендуемый порядок работ
@@ -400,8 +473,8 @@ Public overhead над diagnostics `raw entity kernel` для `50 000` стро�
 После каждого пункта сохранять отдельный record:
 
 ```bash
-pnpm run bench:entities:record -- --runs 5 --label <short-name> --include gate,diagnostics
-pnpm run bench:entities:compare -- .bench/entities/codex-baseline-2026-06-14.json .bench/entities/<short-name>.json
+pnpm run bench:entities:record -- --runs 5 --label <short-name> --include gate,trace --row-counts 50000
+pnpm run bench:entities:compare -- .bench/entities/transition-trace-baseline.json .bench/entities/<short-name>.json
 ```
 
 Отчет считать успешным для этапа только если целевой сценарий ускорился, соседние сценарии не получили регрессию больше `10%`, а новые runtime контракты покрыты тестами.

@@ -501,7 +501,7 @@ const createSpriteSoaRunner = (rowCount) => {
   };
 };
 
-const scenarioDefinitions = [
+export const scenarioDefinitions = [
   {
     key: "movement-update",
     label: "movement update",

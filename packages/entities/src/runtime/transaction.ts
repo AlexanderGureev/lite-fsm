@@ -6,6 +6,7 @@ import type { EntitySpawnDescriptor } from "../spawn";
 import { hasSpawnRecipe, runSpawnRecipe } from "../spawn";
 import type { EntitySpawnSchema } from "../schema";
 import type { ColumnarActorStore, EntityRuntimeState } from "./state";
+import { readEntityTransitionTraceSession, recordEntityTracePhase } from "./transitionTrace";
 
 type RuntimeCarrier = {
   readonly runtime: Map<string, unknown>;
@@ -304,23 +305,29 @@ export const stageSpawnAction = (
   },
   spawn: EntitySpawnDescriptor,
 ): void => {
-  if (carrier.skipDelivery || !hasSpawnRecipe(spawn, carrier.action.type)) return;
+  const trace = readEntityTransitionTraceSession(carrier);
+  const startedAt = trace?.now();
+  try {
+    if (carrier.skipDelivery || !hasSpawnRecipe(spawn, carrier.action.type)) return;
 
-  const transaction = getEntityTransaction(carrier);
-  /* v8 ignore next 3 -- defensive invariant: entity storage prepareAction creates the slot before hooks. */
-  if (!transaction) {
-    throw runtimeError("entity transaction slot was not prepared before spawn staging");
+    const transaction = getEntityTransaction(carrier);
+    /* v8 ignore next 3 -- defensive invariant: entity storage prepareAction creates the slot before hooks. */
+    if (!transaction) {
+      throw runtimeError("entity transaction slot was not prepared before spawn staging");
+    }
+
+    const result = runSpawnRecipe(spawn, carrier.action as AnyEvent);
+    const rawSpecs = normalizeRecipeResult(result);
+    if (rawSpecs.length === 0) {
+      transaction.stagedSpawns = [];
+      return;
+    }
+
+    const seenIds = new Set<string>();
+    transaction.stagedSpawns = rawSpecs.map((spec) => validateSpawnSpec(transaction.runtime, spec, seenIds));
+  } finally {
+    recordEntityTracePhase(trace, "entities.spawn.stage", startedAt);
   }
-
-  const result = runSpawnRecipe(spawn, carrier.action as AnyEvent);
-  const rawSpecs = normalizeRecipeResult(result);
-  if (rawSpecs.length === 0) {
-    transaction.stagedSpawns = [];
-    return;
-  }
-
-  const seenIds = new Set<string>();
-  transaction.stagedSpawns = rawSpecs.map((spec) => validateSpawnSpec(transaction.runtime, spec, seenIds));
 };
 
 export const getStagedSpawns = (carrier: RuntimeCarrier): readonly StagedEntitySpawn[] => {

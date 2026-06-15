@@ -6,8 +6,8 @@ import { isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  aggregateDiagnosticsRuns,
   aggregateGateRuns,
+  aggregateTraceRuns,
   collectEnvironmentMetadata,
   formatRecordMarkdown,
   safeFilePart,
@@ -17,30 +17,31 @@ import {
 // Benchmark fixtures import production dist runtime; set the mode before those imports.
 process.env.NODE_ENV = "production";
 
-const {
-  measuredIterations: gateMeasuredIterations,
-  runEntitiesBenchmarkProfile,
-  warmupIterations: gateWarmupIterations,
-} = await import("./composition-lite-fsm-entities.fixture.mjs");
-const {
-  measuredIterations: diagnosticsMeasuredIterations,
-  runEntitiesDiagnosticsBenchmark,
-  warmupIterations: diagnosticsWarmupIterations,
-} = await import("./diagnostics.fixture.mjs");
-
 const rootDir = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
 const defaultOutDir = ".bench/entities";
 const defaultRuns = 3;
-const allowedIncludes = ["gate", "diagnostics"];
+const allowedIncludes = ["gate", "trace"];
+
+let benchmarkFixtures;
+
+const loadBenchmarkFixtures = async () => {
+  if (benchmarkFixtures) return benchmarkFixtures;
+
+  const gate = await import("./composition-lite-fsm-entities.fixture.mjs");
+  const trace = await import("./trace.fixture.mjs");
+
+  benchmarkFixtures = { gate, trace };
+  return benchmarkFixtures;
+};
 
 const usage = `Usage:
-  pnpm run bench:entities:record -- [--label name] [--runs 1..20] [--out dir] [--include gate,diagnostics]
+  pnpm run bench:entities:record -- [--label name] [--runs 1..20] [--out dir] [--include gate,trace]
 
 Options:
   --label <name>          Human label stored in the report and used for label aliases.
   --runs <count>          Number of benchmark runs to aggregate. Defaults to ${defaultRuns}.
   --out <dir>             Report directory. Defaults to ${defaultOutDir}.
-  --include <items>       Comma-separated subset: gate, diagnostics. Defaults to both.
+  --include <items>       Comma-separated subset: gate, trace. Defaults to gate,trace.
   --row-counts <items>    Internal smoke-test override, for example 1000 or 1000,5000.
 `;
 
@@ -152,22 +153,21 @@ const logGateScenarioEnd = (scenario) => {
   );
 };
 
-const logDiagnosticsScenarioEnd = (scenario) => {
-  const publicLayer = scenario.layers.find((layer) => layer.key === "public-transition");
-  const rawSoa = scenario.layers.find((layer) => layer.key === "raw-soa");
+const logTraceScenarioEnd = (scenario) => {
+  const total = scenario.phases.find((phase) => phase.key === "core.transition.total");
   console.error(
-    `[entities bench record] diagnostics ${scenario.label} / ${scenario.rowCount.toLocaleString(
+    `[entities bench record] trace ${scenario.label} / ${scenario.rowCount.toLocaleString(
       "en-US",
-    )} rows: raw ${rawSoa.median.toFixed(3)}ms, public ${publicLayer.median.toFixed(3)}ms`,
+    )} rows: total ${total ? total.median.toFixed(3) : "n/a"}ms, transitions ${scenario.transitionCount}`,
   );
 };
 
-const runGateBenchmarks = ({ runs, rowCounts }) => {
+const runGateBenchmarks = ({ runs, rowCounts, fixture }) => {
   const results = [];
   for (let runIndex = 0; runIndex < runs; runIndex += 1) {
     console.error(`[entities bench record] gate run ${runIndex + 1}/${runs}`);
     results.push(
-      runEntitiesBenchmarkProfile({
+      fixture.runEntitiesBenchmarkProfile({
         profile: "node",
         forceGc: typeof globalThis.gc === "function" ? globalThis.gc : undefined,
         rowCounts,
@@ -181,20 +181,18 @@ const runGateBenchmarks = ({ runs, rowCounts }) => {
   return results;
 };
 
-const runDiagnosticsBenchmarks = ({ runs, rowCounts }) => {
+const runTraceBenchmarks = ({ runs, rowCounts, fixture }) => {
   const results = [];
   for (let runIndex = 0; runIndex < runs; runIndex += 1) {
-    console.error(`[entities bench record] diagnostics run ${runIndex + 1}/${runs}`);
+    console.error(`[entities bench record] trace run ${runIndex + 1}/${runs}`);
     results.push(
-      runEntitiesDiagnosticsBenchmark({
+      fixture.runEntitiesTraceBenchmark({
         profile: "node",
         rowCounts,
         onScenarioStart: (scenario, rowCount) => {
-          console.error(
-            `[entities bench record] diagnostics ${scenario.label} / ${rowCount.toLocaleString("en-US")} rows`,
-          );
+          console.error(`[entities bench record] trace ${scenario.label} / ${rowCount.toLocaleString("en-US")} rows`);
         },
-        onScenarioEnd: logDiagnosticsScenarioEnd,
+        onScenarioEnd: logTraceScenarioEnd,
       }),
     );
   }
@@ -204,19 +202,23 @@ const runDiagnosticsBenchmarks = ({ runs, rowCounts }) => {
 const createRecord = async (options) => {
   const createdAt = new Date().toISOString();
   const results = {};
+  const fixtures = await loadBenchmarkFixtures();
 
   if (options.include.includes("gate")) {
-    results.gate = aggregateGateRuns(runGateBenchmarks({ runs: options.runs, rowCounts: options.rowCounts }));
-    results.gate.config.warmupIterations = gateWarmupIterations;
-    results.gate.config.measuredIterations = gateMeasuredIterations;
+    results.gate = aggregateGateRuns(
+      runGateBenchmarks({ runs: options.runs, rowCounts: options.rowCounts, fixture: fixtures.gate }),
+    );
+    results.gate.config.warmupIterations = fixtures.gate.warmupIterations;
+    results.gate.config.measuredIterations = fixtures.gate.measuredIterations;
   }
 
-  if (options.include.includes("diagnostics")) {
-    results.diagnostics = aggregateDiagnosticsRuns(
-      runDiagnosticsBenchmarks({ runs: options.runs, rowCounts: options.rowCounts }),
+  if (options.include.includes("trace")) {
+    results.trace = aggregateTraceRuns(
+      runTraceBenchmarks({ runs: options.runs, rowCounts: options.rowCounts, fixture: fixtures.trace }),
+      results.gate,
     );
-    results.diagnostics.config.warmupIterations = diagnosticsWarmupIterations;
-    results.diagnostics.config.measuredIterations = diagnosticsMeasuredIterations;
+    results.trace.config.warmupIterations = fixtures.trace.warmupIterations;
+    results.trace.config.measuredIterations = fixtures.trace.measuredIterations;
   }
 
   return {
