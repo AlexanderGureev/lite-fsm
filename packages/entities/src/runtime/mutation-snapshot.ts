@@ -1,5 +1,6 @@
 import type { EntityIndex } from "../plugin";
 
+import { rebindEntityStoreView } from "./access";
 import {
   rebuildActorAcceptStateBuckets,
   rebindActorReducerSelf,
@@ -35,6 +36,9 @@ type ActorStoreMutationSnapshot = {
   readonly stateBuckets: EntityIndex[][];
   readonly statePosition: Int32Array;
   readonly acceptedScratch: EntityIndex[];
+  readonly pendingPrevStateCodeSync: EntityIndex[];
+  readonly pendingPrevStateCodeSyncMark: Uint32Array;
+  readonly pendingPrevStateCodeSyncToken: number;
   readonly columns: Record<string, EntityColumn>;
   readonly publicSlice: ColumnarActorStore["publicSlice"];
 };
@@ -114,6 +118,9 @@ const snapshotActorStore = (store: ColumnarActorStore): ActorStoreMutationSnapsh
   stateBuckets: cloneIndexArrays(store.stateBuckets),
   statePosition: store.statePosition.slice(),
   acceptedScratch: store.acceptedScratch.slice(),
+  pendingPrevStateCodeSync: store.pendingPrevStateCodeSync.slice(),
+  pendingPrevStateCodeSyncMark: store.pendingPrevStateCodeSyncMark.slice(),
+  pendingPrevStateCodeSyncToken: store.pendingPrevStateCodeSyncToken,
   columns: cloneColumns(store.columns),
   publicSlice: store.publicSlice,
 });
@@ -156,9 +163,13 @@ const restoreActorStore = (store: ColumnarActorStore, snapshot: ActorStoreMutati
   store.stateBuckets = snapshot.stateBuckets;
   store.statePosition = snapshot.statePosition;
   store.acceptedScratch = snapshot.acceptedScratch;
+  store.pendingPrevStateCodeSync = snapshot.pendingPrevStateCodeSync;
+  store.pendingPrevStateCodeSyncMark = snapshot.pendingPrevStateCodeSyncMark;
+  store.pendingPrevStateCodeSyncToken = snapshot.pendingPrevStateCodeSyncToken;
   rebuildActorAcceptStateBuckets(store);
   store.columns = snapshot.columns;
   rebindActorReducerSelf(store);
+  rebindEntityStoreView(store);
   store.publicSlice = snapshot.publicSlice;
 };
 

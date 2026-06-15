@@ -79,6 +79,7 @@ export type EntityReactionScope = {
   readonly indices: readonly EntityIndex[];
   readonly markers: Uint32Array;
   readonly generation: Uint32Array;
+  readonly lifetime: { readonly token: number };
   readonly token: number;
 };
 
@@ -135,6 +136,26 @@ const validateRequiredScopedAccess = (
   }
 };
 
+const attachStoreColumns = (view: EntityStoreView, store: ColumnarActorStore): void => {
+  for (const columnName of Object.keys(store.columns)) {
+    Object.defineProperty(view, columnName, {
+      enumerable: true,
+      configurable: true,
+      writable: false,
+      value: store.columns[columnName],
+    });
+  }
+};
+
+const storeViewByStore = new WeakMap<ColumnarActorStore, EntityStoreView>();
+
+export const rebindEntityStoreView = (store: ColumnarActorStore): void => {
+  const view = storeViewByStore.get(store);
+  if (!view) return;
+
+  attachStoreColumns(view, store);
+};
+
 const createStoreView = (runtime: EntityRuntimeState, key: string): EntityStoreView => {
   const store = getKnownStore(runtime, key);
   const view: EntityStoreView = {
@@ -157,16 +178,8 @@ const createStoreView = (runtime: EntityRuntimeState, key: string): EntityStoreV
     },
   };
 
-  for (const columnName of Object.keys(store.columns)) {
-    Object.defineProperty(view, columnName, {
-      enumerable: true,
-      configurable: false,
-      get() {
-        return store.columns[columnName];
-      },
-    });
-  }
-
+  attachStoreColumns(view, store);
+  storeViewByStore.set(store, view);
   return view;
 };
 
@@ -244,7 +257,8 @@ export const createReactionEntitySelf = (
   store: ColumnarActorStore,
   scope: EntityReactionScope,
 ): Record<string, unknown> => {
-  const entityIsInScope = (entity: EntityIndex): boolean => scope.markers[entity] === scope.token;
+  const entityIsInScope = (entity: EntityIndex): boolean =>
+    scope.lifetime.token === scope.token && scope.markers[entity] === scope.token;
   const entityHasCapturedGeneration = (entity: EntityIndex): boolean =>
     runtime.entityStore.generation[entity] === scope.generation[entity];
   const entityHasCurrentId = (entity: EntityIndex): boolean => {

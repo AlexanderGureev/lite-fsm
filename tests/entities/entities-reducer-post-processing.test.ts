@@ -10,11 +10,14 @@ import {
 } from "@lite-fsm/entities";
 import type { EntityIndex } from "@lite-fsm/entities";
 
+import { ENTITY_RESOLVED_STATE_CODE } from "../../packages/entities/src/runtime/compile";
 import { reduceEntityBucket } from "../../packages/entities/src/runtime/reduce";
 import {
   getEntityRuntimeState,
   moveActorStateBucket,
   rebindActorReducerSelf,
+  schedulePrevStateCodeSync,
+  syncPendingPrevStateCode,
   type ColumnarActorStore,
   type EntityRuntimeState,
 } from "../../packages/entities/src/runtime/state";
@@ -24,6 +27,7 @@ type TestReducerSelf = {
   readonly indices: readonly EntityIndex[];
   readonly states: Record<"READY" | "STOPPED", number>;
   stateCode: Int16Array;
+  prevStateCode: Int16Array;
 };
 
 type TestReducer = (
@@ -100,6 +104,7 @@ const installStateCodeReadCounters = (store: ColumnarActorStore) => {
   const prevStateCode = Array.from(originalPrevStateCode);
   let stateReads = 0;
   let prevReads = 0;
+  let prevWrites = 0;
 
   store.stateCode = new Proxy(stateCode, {
     get(target, property, receiver) {
@@ -116,6 +121,7 @@ const installStateCodeReadCounters = (store: ColumnarActorStore) => {
       return Reflect.get(target, property, receiver);
     },
     set(target, property, value, receiver) {
+      if (isNumericIndex(property)) prevWrites += 1;
       return Reflect.set(target, property, value, receiver);
     },
   }) as unknown as Int16Array;
@@ -127,6 +133,9 @@ const installStateCodeReadCounters = (store: ColumnarActorStore) => {
     },
     get prevReads() {
       return prevReads;
+    },
+    get prevWrites() {
+      return prevWrites;
     },
     restore() {
       store.stateCode = originalStateCode;
@@ -182,6 +191,8 @@ describe("@lite-fsm/entities — reducer post-processing dirty rows", () => {
     const runtime = getEntityRuntimeState(manager.entities());
     const store = runtime.actorStores.actor;
     const rowCount = store.stateBuckets[store.metadata.stateCodeByName.READY].length;
+    reduceUnscopedTick(runtime, createUnscopedTickContext(runtime));
+
     const ctx = createUnscopedTickContext(runtime);
     const reads = installStateCodeReadCounters(store);
     const originalEntries = Object.entries;
@@ -208,7 +219,37 @@ describe("@lite-fsm/entities — reducer post-processing dirty rows", () => {
     expect(setAllocations).toBe(0);
     expect(columnEnumerations).toBe(0);
     expect(reads.stateReads).toBe(rowCount);
-    expect(reads.prevReads).toBe(rowCount);
+    expect(reads.prevReads).toBe(0);
+    expect(reads.prevWrites).toBe(0);
+  });
+
+  it("identity TICK синхронизирует pending prevStateCode один раз после spawn", () => {
+    const observations: number[] = [];
+    const manager = createManager((_slice, action, { self }) => {
+      if (action.type !== "TICK") return;
+      for (const entity of self.indices) observations.push(self.prevStateCode[entity]);
+    });
+    spawnEntity(manager, "unit/a");
+    spawnEntity(manager, "unit/b");
+    spawnEntity(manager, "unit/c");
+
+    const runtime = getEntityRuntimeState(manager.entities());
+    const store = runtime.actorStores.actor;
+    const readyCode = store.metadata.stateCodeByName.READY;
+    const rowCount = store.stateBuckets[readyCode].length;
+    const reads = installStateCodeReadCounters(store);
+
+    try {
+      reduceUnscopedTick(runtime, createUnscopedTickContext(runtime));
+      const writesAfterFirstTick = reads.prevWrites;
+      reduceUnscopedTick(runtime, createUnscopedTickContext(runtime));
+
+      expect(observations).toEqual([readyCode, readyCode, readyCode, readyCode, readyCode, readyCode]);
+      expect(writesAfterFirstTick).toBe(rowCount);
+      expect(reads.prevWrites).toBe(writesAfterFirstTick);
+    } finally {
+      reads.restore();
+    }
   });
 
   it("bucket update читает только dirty rows после reducer override", () => {
@@ -225,6 +266,7 @@ describe("@lite-fsm/entities — reducer post-processing dirty rows", () => {
     const readyCode = store.metadata.stateCodeByName.READY;
     const stoppedCode = store.metadata.stateCodeByName.STOPPED;
     const rowCount = store.stateBuckets[readyCode].length;
+    syncPendingPrevStateCode(store);
     const ctx = createUnscopedTickContext(runtime);
     const reads = installStateCodeReadCounters(store);
 
@@ -237,7 +279,42 @@ describe("@lite-fsm/entities — reducer post-processing dirty rows", () => {
     expect(store.stateBuckets[readyCode]).toEqual([0, 2]);
     expect(store.stateBuckets[stoppedCode]).toEqual([1]);
     expect(reads.stateReads).toBe(rowCount + 1);
-    expect(reads.prevReads).toBe(rowCount + 1);
+    expect(reads.prevReads).toBe(0);
+  });
+
+  it("identity fast path планирует terminal cleanup после reducer write", () => {
+    const manager = createManager((_slice, action, { self }) => {
+      if (action.type !== "TICK") return;
+      self.stateCode[0 as EntityIndex] = ENTITY_RESOLVED_STATE_CODE;
+    });
+    spawnEntity(manager, "unit/a");
+
+    const runtime = getEntityRuntimeState(manager.entities());
+    const store = runtime.actorStores.actor;
+    const ctx = createUnscopedTickContext(runtime);
+
+    reduceUnscopedTick(runtime, ctx);
+
+    expect(store.presence[0 as EntityIndex]).toBe(0);
+    expect(store.count).toBe(0);
+    expect(runtime.entityStore.alive[0 as EntityIndex]).toBe(0);
+  });
+
+  it("pending prevStateCode sync пропускает удаленные rows", () => {
+    const manager = createManager();
+    spawnEntity(manager, "unit/a");
+
+    const store = getEntityRuntimeState(manager.entities()).actorStores.actor;
+    const entity = 0 as EntityIndex;
+    store.prevStateCode[entity] = -1;
+    store.stateCode[entity] = store.metadata.stateCodeByName.READY;
+    store.presence[entity] = 0;
+
+    schedulePrevStateCodeSync(store, [entity]);
+    syncPendingPrevStateCode(store);
+
+    expect(store.prevStateCode[entity]).toBe(-1);
+    expect(store.pendingPrevStateCodeSync).toEqual([]);
   });
 
   it("identity bucket move сохраняет текущую state bucket позицию", () => {

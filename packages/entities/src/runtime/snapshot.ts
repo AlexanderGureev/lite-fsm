@@ -1,6 +1,7 @@
 import { LiteFsmError } from "@lite-fsm/core";
 
 import type { EntityIndex } from "../plugin";
+import { rebindEntityStoreView } from "./access";
 import {
   ENTITY_CANCELLED_STATE_CODE,
   ENTITY_INIT_STATE_CODE,
@@ -8,9 +9,11 @@ import {
   ENTITY_RESOLVED_STATE_CODE,
 } from "./compile";
 import {
+  clearPendingPrevStateCodeSync,
   rebuildEntityRuntimeIndexes,
   rebindActorReducerSelf,
   restorePublicSlices,
+  schedulePresentPrevStateCodeSync,
   type ColumnarActorStore,
   type EntityColumn,
   type EntityRuntimeState,
@@ -591,8 +594,14 @@ const applyActorStore = (target: ColumnarActorStore, source: ImportedActorStore)
   target.stateCode = source.stateCode;
   target.prevStateCode = source.prevStateCode;
   target.rowVersion = source.rowVersion;
+  target.pendingPrevStateCodeSync = [];
+  target.pendingPrevStateCodeSyncMark = new Uint32Array(source.capacity);
+  target.pendingPrevStateCodeSyncToken = 1;
+  clearPendingPrevStateCodeSync(target);
+  schedulePresentPrevStateCodeSync(target);
   target.columns = source.columns;
   rebindActorReducerSelf(target);
+  rebindEntityStoreView(target);
 };
 
 const applyImportedRuntime = (runtime: EntityRuntimeState, imported: ImportedRuntime): void => {

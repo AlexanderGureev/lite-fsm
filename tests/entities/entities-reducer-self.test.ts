@@ -163,6 +163,9 @@ describe("@lite-fsm/entities — stable reducer self и default transition fast 
     spawnEntity(manager, "unit/a", 10);
     const runtime = getEntityRuntimeState(manager.entities());
     const firstColumn = runtime.actorStores.actor.columns.x;
+    const actorView = manager.entities().get("actor");
+    const firstViewColumn = actorView.x;
+    const descriptor = Object.getOwnPropertyDescriptor(actorView, "x");
 
     spawnEntity(manager, "unit/b", 20);
 
@@ -170,7 +173,11 @@ describe("@lite-fsm/entities — stable reducer self и default transition fast 
     expect(columnRefs[0]).toBe(firstColumn);
     expect(columnRefs[1]).toBe(runtime.actorStores.actor.columns.x);
     expect(columnRefs[1]).not.toBe(firstColumn);
-    expect(manager.entities().get("actor").x[1 as EntityIndex]).toBe(20);
+    expect(descriptor?.get).toBeUndefined();
+    expect(descriptor?.writable).toBe(false);
+    expect(actorView.x).toBe(runtime.actorStores.actor.columns.x);
+    expect(actorView.x).not.toBe(firstViewColumn);
+    expect(actorView.x[1 as EntityIndex]).toBe(20);
   });
 
   it("cached self получает актуальные columns после hydrate", () => {
@@ -198,11 +205,15 @@ describe("@lite-fsm/entities — stable reducer self и default transition fast 
     runtime = getEntityRuntimeState(target.manager.entities());
     const preview = importEntitySnapshotPreview(runtime, snapshot.storage.entity);
     expect(preview.actorStores.actor.columns.x[0]).toBe(42);
+    const actorView = target.manager.entities().get("actor");
+    const preHydrateColumn = actorView.x;
 
     target.manager.hydrate(snapshot);
     target.manager.transition({ type: "TICK" });
 
     expect(observed).toEqual([42]);
+    expect(actorView.x).toBe(runtime.actorStores.actor.columns.x);
+    expect(actorView.x).not.toBe(preHydrateColumn);
     expect(target.manager.entities().get("actor").x[0 as EntityIndex]).toBe(43);
   });
 
@@ -250,10 +261,14 @@ describe("@lite-fsm/entities — stable reducer self и default transition fast 
     runtime = getEntityRuntimeState(manager.entities());
 
     spawnEntity(manager, "unit/a", 7);
+    const actorView = manager.entities().get("actor");
+    const beforeRollbackColumn = actorView.x;
     expect(() => spawnEntity(manager, "unit/b", -1)).toThrow("spawn failed");
     manager.transition({ type: "TICK" });
 
     expect(runtime.actorStores.actor.columns.x.length).toBe(1);
+    expect(actorView.x).toBe(runtime.actorStores.actor.columns.x);
+    expect(actorView.x).not.toBe(beforeRollbackColumn);
     expect(observed).toEqual([7]);
   });
 

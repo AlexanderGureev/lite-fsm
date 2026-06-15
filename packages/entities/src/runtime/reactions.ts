@@ -24,8 +24,8 @@ type ReactionRunContext = {
 type ReactionScopeScratch = {
   markers: Uint32Array;
   generation: Uint32Array;
-  readonly touched: EntityIndex[];
   readonly compactIndices: EntityIndex[];
+  readonly lifetime: { token: number };
   token: number;
 };
 
@@ -37,8 +37,8 @@ const reactionScratchByRuntime = new WeakMap<EntityRuntimeState, ReactionScopeSc
 const createReactionScopeScratch = (): ReactionScopeScratch => ({
   markers: new Uint32Array(0),
   generation: new Uint32Array(0),
-  touched: [],
   compactIndices: [],
+  lifetime: { token: 0 },
   token: 0,
 });
 
@@ -87,11 +87,7 @@ const entityCanEnterReactionScope = (
 };
 
 const cleanupReactionScope = (scratch: ReactionScopeScratch): void => {
-  for (const entity of scratch.touched) {
-    scratch.markers[entity] = 0;
-    scratch.generation[entity] = 0;
-  }
-  scratch.touched.length = 0;
+  scratch.lifetime.token = 0;
   scratch.compactIndices.length = 0;
 };
 
@@ -99,6 +95,7 @@ const captureReactionScope = (
   runtime: EntityRuntimeState,
   store: ColumnarActorStore,
   indices: readonly EntityIndex[],
+  ownership: EntityReactionBatch["ownership"],
 ): { readonly scratch: ReactionScopeScratch; readonly scope: EntityReactionScope } | undefined => {
   const scratch = getReactionScopeScratch(runtime);
   cleanupReactionScope(scratch);
@@ -110,22 +107,29 @@ const captureReactionScope = (
   const token = nextReactionScopeToken(scratch);
   let compact: EntityIndex[] | undefined;
 
-  for (let index = 0; index < indices.length; index += 1) {
-    const entity = indices[index];
-
-    if (!entityCanEnterReactionScope(runtime, store, entity)) {
-      if (!compact) {
-        compact = scratch.compactIndices;
-        compact.length = 0;
-        for (let copyIndex = 0; copyIndex < index; copyIndex += 1) compact.push(indices[copyIndex]);
-      }
-      continue;
+  if (ownership === "borrowed") {
+    for (let index = 0; index < indices.length; index += 1) {
+      const entity = indices[index];
+      scratch.markers[entity] = token;
+      scratch.generation[entity] = runtime.entityStore.generation[entity];
     }
+  } else {
+    for (let index = 0; index < indices.length; index += 1) {
+      const entity = indices[index];
 
-    scratch.markers[entity] = token;
-    scratch.generation[entity] = runtime.entityStore.generation[entity];
-    scratch.touched.push(entity);
-    compact?.push(entity);
+      if (!entityCanEnterReactionScope(runtime, store, entity)) {
+        if (!compact) {
+          compact = scratch.compactIndices;
+          compact.length = 0;
+          for (let copyIndex = 0; copyIndex < index; copyIndex += 1) compact.push(indices[copyIndex]);
+        }
+        continue;
+      }
+
+      scratch.markers[entity] = token;
+      scratch.generation[entity] = runtime.entityStore.generation[entity];
+      compact?.push(entity);
+    }
   }
 
   const scopedIndices = compact ?? indices;
@@ -134,12 +138,14 @@ const captureReactionScope = (
     return undefined;
   }
 
+  scratch.lifetime.token = token;
   return {
     scratch,
     scope: {
       indices: scopedIndices,
       markers: scratch.markers,
       generation: scratch.generation,
+      lifetime: scratch.lifetime,
       token,
     },
   };
@@ -176,7 +182,7 @@ const runReactionBatch = (
   if (!reaction) return;
 
   const captureStartedAt = trace?.now();
-  const captured = captureReactionScope(runtime, batch.store, batch.indices);
+  const captured = captureReactionScope(runtime, batch.store, batch.indices, batch.ownership);
   recordEntityTracePhase(trace, "entities.reactions.captureScope", captureStartedAt);
   if (!captured) return;
 

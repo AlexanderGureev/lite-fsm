@@ -1,7 +1,7 @@
 import { LiteFsmError } from "@lite-fsm/core";
 import type { MachineStore, StorageManagerContext, StorageTemplate } from "@lite-fsm/core";
 
-import { createEntityAccess, type EntityAccess } from "./access";
+import { createEntityAccess, rebindEntityStoreView, type EntityAccess } from "./access";
 import {
   compileEntityRuntimeMetadata,
   ENTITY_INIT_STATE_CODE,
@@ -59,6 +59,9 @@ export type ColumnarActorStore = {
   stateBuckets: EntityIndex[][];
   statePosition: Int32Array;
   acceptedScratch: EntityIndex[];
+  pendingPrevStateCodeSync: EntityIndex[];
+  pendingPrevStateCodeSyncMark: Uint32Array;
+  pendingPrevStateCodeSyncToken: number;
   routingScratchVersion: number;
   acceptStateBucketsByEventCode: EntityIndex[][][];
   columns: Record<string, EntityColumn>;
@@ -246,6 +249,9 @@ const createColumnarActorStore = (metadata: EntityTemplateMetadata, entityStore:
     stateBuckets: createScratchByState(metadata.publicStates),
     statePosition: new Int32Array(0),
     acceptedScratch: [],
+    pendingPrevStateCodeSync: [],
+    pendingPrevStateCodeSyncMark: new Uint32Array(0),
+    pendingPrevStateCodeSyncToken: 1,
     routingScratchVersion: 0,
     acceptStateBucketsByEventCode: [],
     columns,
@@ -325,11 +331,13 @@ export const ensureActorCapacity = (store: ColumnarActorStore, capacity: number)
   store.prevStateCode = growInt16(store.prevStateCode, capacity, ENTITY_INIT_STATE_CODE);
   store.rowVersion = growUint32(store.rowVersion, capacity);
   store.statePosition = growInt32(store.statePosition, capacity, -1);
+  store.pendingPrevStateCodeSyncMark = growUint32(store.pendingPrevStateCodeSyncMark, capacity);
 
   for (const [name, descriptor] of Object.entries(store.metadata.initialContext)) {
     store.columns[name] = growColumn(store.columns[name], descriptor as EntityContextDescriptor, capacity);
   }
   rebindActorReducerSelf(store);
+  rebindEntityStoreView(store);
 };
 
 export const getInitialColumnValue = (descriptor: EntityContextDescriptor): number | string => {
@@ -346,6 +354,59 @@ export const writeInitialColumnValues = (store: ColumnarActorStore, entity: Enti
 
 export const refreshActorPublicSlice = (store: ColumnarActorStore): void => {
   store.publicSlice = createPublicSlice(store);
+};
+
+export const clearPendingPrevStateCodeSync = (store: ColumnarActorStore): void => {
+  store.pendingPrevStateCodeSync.length = 0;
+  store.pendingPrevStateCodeSyncToken += 1;
+  /* v8 ignore next 4 -- one actor store would need more than four billion dirty-row sync epochs. */
+  if (store.pendingPrevStateCodeSyncToken >= 0xffffffff) {
+    store.pendingPrevStateCodeSyncMark.fill(0);
+    store.pendingPrevStateCodeSyncToken = 1;
+  }
+};
+
+export const schedulePrevStateCodeSync = (
+  store: ColumnarActorStore,
+  indices: readonly EntityIndex[],
+): void => {
+  const pending = store.pendingPrevStateCodeSync;
+  const marks = store.pendingPrevStateCodeSyncMark;
+  const token = store.pendingPrevStateCodeSyncToken;
+
+  for (let index = 0; index < indices.length; index += 1) {
+    const entity = indices[index];
+    if (marks[entity] === token) continue;
+    marks[entity] = token;
+    pending.push(entity);
+  }
+};
+
+export const schedulePresentPrevStateCodeSync = (store: ColumnarActorStore): void => {
+  const pending = store.pendingPrevStateCodeSync;
+  const marks = store.pendingPrevStateCodeSyncMark;
+  const token = store.pendingPrevStateCodeSyncToken;
+  const presence = store.presence;
+
+  for (let entity = 0; entity < presence.length; entity += 1) {
+    if (presence[entity] !== 1 || marks[entity] === token) continue;
+    marks[entity] = token;
+    pending.push(entity as EntityIndex);
+  }
+};
+
+export const syncPendingPrevStateCode = (store: ColumnarActorStore): void => {
+  const pending = store.pendingPrevStateCodeSync;
+  if (pending.length === 0) return;
+
+  const presence = store.presence;
+  const previousStateCodeByEntity = store.prevStateCode;
+  const stateCodeByEntity = store.stateCode;
+  for (let index = 0; index < pending.length; index += 1) {
+    const entity = pending[index];
+    if (presence[entity] === 1) previousStateCodeByEntity[entity] = stateCodeByEntity[entity];
+  }
+  clearPendingPrevStateCodeSync(store);
 };
 
 export const rebuildActorAcceptStateBuckets = (store: ColumnarActorStore): void => {

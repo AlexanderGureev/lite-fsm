@@ -5228,6 +5228,10 @@ describe("@lite-fsm/entities — этап 10 reactions и reaction error semanti
   it("reaction self helpers проверяют captured scope и generation", () => {
     const observations: string[] = [];
     let runtime!: ReturnType<typeof getEntityRuntimeState>;
+    let capturedSelf!: {
+      has(entity: EntityIndex): boolean;
+      entityId(entity: EntityIndex): string;
+    };
     const actor = {
       storage: "entity",
       config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { TICK: "READY" } },
@@ -5236,6 +5240,7 @@ describe("@lite-fsm/entities — этап 10 reactions и reaction error semanti
       spawnSchema: { value: i32() },
       reactions: {
         TICK: ({ self }: { readonly self: any }) => {
+          capturedSelf = self;
           const entity = self.indices[0] as EntityIndex;
           observations.push(`outside:${self.has(999 as EntityIndex)}`);
           try {
@@ -5306,6 +5311,8 @@ describe("@lite-fsm/entities — этап 10 reactions и reaction error semanti
       "missingIdEntityId:true",
     ]);
     expect(runtime.entityStore.generation[0]).toBe(1);
+    expect(capturedSelf.has(0 as EntityIndex)).toBe(false);
+    expect(() => capturedSelf.entityId(0 as EntityIndex)).toThrow("outside current entity reaction scope");
   });
 
   it("reaction runtime helpers пропускают missing transaction, missing reaction и empty scope", () => {
