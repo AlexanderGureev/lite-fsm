@@ -211,6 +211,9 @@ importers:
       '@lite-fsm/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@lite-fsm/entities':
+        specifier: workspace:*
+        version: link:../../packages/entities
       '@lite-fsm/middleware':
         specifier: workspace:*
         version: link:../../packages/middleware

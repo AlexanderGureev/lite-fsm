@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@lite-fsm/core": "workspace:*",
+    "@lite-fsm/entities": "workspace:*",
     "@lite-fsm/middleware": "workspace:*",
     "@lite-fsm/persist": "workspace:*",
     "@lite-fsm/react": "workspace:*",

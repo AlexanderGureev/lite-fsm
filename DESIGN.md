@@ -216,6 +216,7 @@ Idle cards, buttons, badges and panels have no shadow.
 - Page content width: `max-w-6xl`.
 - Horizontal page padding: `px-6`.
 - Non-SSR example pages: `mx-auto flex max-w-6xl flex-col gap-8 px-6 py-12`.
+- Исключение: `/examples/entities-rts` использует обычную карточку настройки, но после `launch` занимает всю доступную область под `TopBar` и `ExamplesSubNav`.
 - SSR example pages: `mx-auto flex max-w-6xl flex-col gap-6 px-6 py-8` inside `StoreProvider`, with `ScreensNav`, `StaticExportNotice`, then page content.
 - Homepage examples section: `px-6 py-16 md:py-24`.
 
@@ -265,6 +266,7 @@ Manifest category order:
 | `/examples/likes-v2`            | Same vote grid grammar, pending count from actor instances                            |
 | `/examples/actor-canvas`        | Two peer drawing cards, `Separator`, packet inspector, explanatory side card          |
 | `/examples/roguelite`           | Phaser frame card, control buttons, compact status/error text                         |
+| `/examples/entities-rts`        | Setup card; launched RTS game as viewport Phaser surface with overlay HUD             |
 | `/examples/ssr-demo/[screen]`   | SSR shell, `ScreensNav`, static export notice, screen header, two-column widget lists |
 | `/examples/ssr-demo-2/[screen]` | SSR shell, manifest/grid screens, three-column widget lists, append button            |
 | `/examples/ssr-demo-3/[screen]` | SSR shell, snapshot hydration screens, three-column widget lists, append button       |
@@ -522,6 +524,10 @@ Widget:
 - Drawing canvas: `aspect-[680/420] rounded-md border border-hairline bg-surface-pearl`.
 - Packet inspector: `pre` with `h-[360px] overflow-auto rounded-md border border-hairline bg-canvas-parchment p-4 text-caption leading-relaxed text-ink-muted-80`.
 - Phaser frame: `overflow-hidden rounded-md border border-hairline`, inner aspect `23/14`, background `#fafafc`.
+- `entities-rts` после запуска не использует карточку или fixed aspect frame: Phaser canvas заполняет viewport-область под навигацией, камера пересчитывает cover zoom по размеру canvas.
+- `entities-rts` HUD живет поверх игрового поля в темных overlay-панелях с `pointer-events-auto`; остальной overlay слой должен пропускать ввод в Phaser.
+- На desktop стартовая и reset-центровка `entities-rts` учитывает правый HUD, чтобы hero base находилась в центре свободной игровой области.
+- `entities-rts` camera zoom управляется колесом над canvas, клавишами `+`, `-`, `0` и icon-only overlay-кнопками zoom out/reset/zoom in.
 - Peer status dots may use domain colors from the demo store, but surrounding UI remains core-token based.
 
 ## Iconography

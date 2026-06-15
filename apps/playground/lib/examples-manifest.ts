@@ -116,6 +116,16 @@ export const examples = [
     iconKey: "gamepad",
   },
   {
+    id: "entities-rts",
+    title: "RTS stress test",
+    kicker: "Entities + Phaser",
+    description:
+      "Интерактивный RTS stress test для @lite-fsm/entities: Phaser canvas, entity storage, выбор, приказы и метрики производительности.",
+    tags: ["actors"],
+    category: "actors",
+    iconKey: "gamepad",
+  },
+  {
     id: "album-download",
     title: "Релиз: закачка альбома и треков",
     kicker: "Actors для download-задач",
