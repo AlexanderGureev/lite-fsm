@@ -15,7 +15,7 @@ Benchmark проверяет репрезентативный composition-сце
 - `movement update` — массовое обновление числовых колонок;
 - `projectile lifetime update` — простой reducer без удаления сущностей;
 - `despawnOn cleanup` — переход в состояние удаления и очистка entity storage;
-- `sprite sync reaction` — reducer вместе с reaction и чтением данных другого actor.
+- `unit frame composition` — кадр игрового юнита с `movement`, `sprite`, `health`, `targeting`, reaction, effect, `getState()`, `entities()` и внешним adapter через deps.
 
 В обычном режиме сценарии запускаются на `10_000` и `50_000` строках. Gate benchmark сравнивает публичный путь `@lite-fsm/entities` с ручным SoA baseline и проверяет ratio-budget.
 
@@ -36,17 +36,17 @@ pnpm run bench:entities:compare -- .bench/entities/before.json .bench/entities/a
 
 ### Trace workflow
 
-Основной baseline для trace фиксируется только на `50_000` строках:
+Основной active baseline для trace фиксируется только на `50_000` строках:
 
 ```bash
-pnpm run bench:entities:record -- --runs 5 --label transition-trace-baseline --include gate,trace --row-counts 50000
+pnpm run bench:entities:record -- --runs 3 --label unit-composition-baseline --include gate,trace --row-counts 50000
 ```
 
 После оптимизации сохраняй отдельный record и сравнивай его с baseline:
 
 ```bash
 pnpm run bench:entities:record -- --runs 5 --label <short-name> --include gate,trace --row-counts 50000
-pnpm run bench:entities:compare -- .bench/entities/transition-trace-baseline.json .bench/entities/<short-name>.json
+pnpm run bench:entities:compare -- .bench/entities/unit-composition-baseline.json .bench/entities/<short-name>.json
 ```
 
 `traceTotal / gateEntityMedian` связывает trace total с gate median того же scenario и row count. Предупреждение `traceTotal / gateEntityMedian > 2.00x` означает, что instrumentation overhead стал слишком большим для качественного attribution; это guard качества разметки, а не performance budget.

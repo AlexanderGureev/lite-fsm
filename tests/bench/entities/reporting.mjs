@@ -512,6 +512,11 @@ const entitiesReactionPhaseKeys = new Set([
   "entities.reactions.user",
 ]);
 
+const entitiesEffectPhaseKeys = new Set([
+  "entities.effects.resolve",
+  "entities.effects.invoke",
+]);
+
 const addTable = (lines, headers, rows) => {
   lines.push(`| ${headers.join(" | ")} |`);
   lines.push(`| ${headers.map(() => "---").join(" | ")} |`);
@@ -759,6 +764,15 @@ export const formatRecordMarkdown = (record) => {
       lines,
       ["Scenario", "Rows", "Phase", "Parent", "Runtime", "Median", "p95", "Share", "RSD", "Samples"],
       tracePhaseRows(record.results.trace, (phase) => entitiesReactionPhaseKeys.has(phase.key), "parent"),
+    );
+
+    lines.push("");
+    lines.push("### Entities effect phases");
+    lines.push("");
+    addTable(
+      lines,
+      ["Scenario", "Rows", "Phase", "Parent", "Runtime", "Median", "p95", "Share", "RSD", "Samples"],
+      tracePhaseRows(record.results.trace, (phase) => entitiesEffectPhaseKeys.has(phase.key), "parent"),
     );
 
     lines.push("");

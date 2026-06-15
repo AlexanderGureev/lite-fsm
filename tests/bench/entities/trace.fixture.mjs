@@ -62,6 +62,15 @@ const coverageDefinitions = [
       "entities.reactions.user",
     ],
   },
+  {
+    key: "entities.effects",
+    label: "entities effects coverage",
+    parentKey: "core.effects.total",
+    numeratorKeys: [
+      "entities.effects.resolve",
+      "entities.effects.invoke",
+    ],
+  },
 ];
 
 const phaseLabelOverrides = {

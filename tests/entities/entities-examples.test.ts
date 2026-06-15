@@ -12,8 +12,18 @@ describe("@lite-fsm/entities — этап 13 README и examples", () => {
     const result = runEntitiesCompositionExample();
 
     expect(result.movementCount).toBe(1);
+    expect(result.healthCount).toBe(1);
+    expect(result.targetingCount).toBe(1);
     expect(result.hasRootEntityAccessor).toBe(true);
     expect(result.unitPosition).toEqual({ x: 11, y: 22 });
+    expect(result.unitFrameReports).toEqual([
+      {
+        frameState: "reportA",
+        reportedUnits: 1,
+        totalUnits: 1,
+        checksum: 333.125,
+      },
+    ]);
     expect(result.projectileVisible).toBe(false);
     expect(result.removedSprites).toEqual(["sprite/projectile-p1"]);
   });
@@ -34,6 +44,9 @@ describe("@lite-fsm/entities — этап 13 README и examples", () => {
     expect(example).toContain("manager.entities()");
     expect(example).toContain('groupTag: "unit"');
     expect(example).toContain('entities().get("movementActor")');
+    expect(example).toContain('entities().get("targetingActor")');
+    expect(example).toContain("getState()");
+    expect(example).toContain("publishUnitFrame");
     expect(example).toContain("optional(entityString())");
     expect(example).not.toContain("manager.spawn");
     expect(example).not.toContain("actorId");

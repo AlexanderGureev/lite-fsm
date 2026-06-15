@@ -14,7 +14,7 @@ import {
   spawnEvent,
   string as entityString,
 } from "@lite-fsm/entities";
-import type { EntityAccess, EntitiesPlugin, SpawnEventsFrom } from "@lite-fsm/entities";
+import type { EntityAccess, EntitiesPlugin, EntityIndex, SpawnEventsFrom } from "@lite-fsm/entities";
 
 export type UnitSpawn = {
   readonly id: string;
@@ -24,9 +24,21 @@ export type UnitSpawn = {
   readonly dy: number;
   readonly spriteId: string;
   readonly label: string | null;
+  readonly hp: number;
+  readonly maxHp: number;
+  readonly targetX: number;
+  readonly targetY: number;
+  readonly threat: number;
 };
 
-export type ProjectileSpawn = UnitSpawn & {
+export type ProjectileSpawn = {
+  readonly id: string;
+  readonly x: number;
+  readonly y: number;
+  readonly dx: number;
+  readonly dy: number;
+  readonly spriteId: string;
+  readonly label: string | null;
   readonly ticksLeft: number;
   readonly damage: number;
 };
@@ -41,6 +53,17 @@ export type SpritePosition = {
 export type SpriteAdapter = {
   readonly sync: (spriteId: string, position: SpritePosition) => void;
   readonly remove: (spriteId: string) => void;
+};
+
+export type UnitFrameReport = {
+  readonly frameState: "reportA" | "reportB";
+  readonly reportedUnits: number;
+  readonly totalUnits: number;
+  readonly checksum: number;
+};
+
+export type GameWorldAdapter = {
+  readonly publishUnitFrame: (report: UnitFrameReport) => void;
 };
 
 const createBaseMachine: TypedCreateMachineFn<AppEvent, {}, EntitiesPlugin<{}>> = createLiteFsmMachine;
@@ -122,18 +145,154 @@ export const projectileActor = createBaseMachine({
   },
 });
 
+export const targetingActor = createBaseMachine({
+  storage: "entity",
+  initialState: "__INIT",
+  initialContext: {
+    targetX: f32({ default: 0 }),
+    targetY: f32({ default: 0 }),
+    threat: i32({ default: 0 }),
+  },
+  spawnSchema: {
+    targetX: f32(),
+    targetY: f32(),
+    threat: i32(),
+  },
+  config: {
+    __INIT: { ENTITY_SPAWNED: "tracking" },
+    tracking: { TICK: "tracking", ENTITY_DESPAWNED: "removed" },
+    removed: {},
+  },
+  reducer(_state, action, { self, payloadFor }) {
+    for (const entity of self.indices) {
+      if (action.type === "ENTITY_SPAWNED") {
+        const payload = payloadFor(entity);
+        self.targetX[entity] = payload.targetX;
+        self.targetY[entity] = payload.targetY;
+        self.threat[entity] = payload.threat;
+        continue;
+      }
+
+      if (action.type === "TICK") {
+        self.targetX[entity] += 0.25;
+        self.targetY[entity] -= 0.125;
+        self.threat[entity] += 1;
+      }
+    }
+  },
+});
+
+type EntityPublicSlice = {
+  readonly storage: "entity";
+  readonly version: number;
+  readonly count: number;
+  readonly capacity: number;
+};
+
 export type AppMachines = {
   readonly movementActor: typeof movementActor;
+  readonly targetingActor: typeof targetingActor;
   readonly projectileActor: typeof projectileActor;
 };
-export type AppState = MachinesState<AppMachines>;
+export type AppState = MachinesState<AppMachines> & {
+  readonly healthActor: EntityPublicSlice;
+};
 export type AppDeps = {
-  readonly getState?: () => AppState;
+  readonly getState: () => AppState;
   readonly entities: () => EntityAccess<AppMachines>;
   readonly sprites: SpriteAdapter;
+  readonly world: GameWorldAdapter;
 };
 
 export const createMachine: TypedCreateMachineFn<AppEvent, AppDeps, EntitiesPlugin<AppDeps>> = createLiteFsmMachine;
+
+type UnitFrameEffectDeps = {
+  readonly self: {
+    readonly indices: readonly EntityIndex[];
+    readonly hp: { readonly [entity: EntityIndex]: number };
+    readonly maxHp: { readonly [entity: EntityIndex]: number };
+    readonly stateCode: { readonly [entity: EntityIndex]: number };
+    readonly states: {
+      readonly reportA: number;
+      readonly reportB: number;
+    };
+  };
+  readonly entities: () => EntityAccess<AppMachines>;
+  readonly getState: () => AppState;
+  readonly world: GameWorldAdapter;
+};
+
+const publishUnitFrame = ({ self, entities, getState, world }: UnitFrameEffectDeps): void => {
+  const movement = entities().get("movementActor");
+  const targeting = entities().get("targetingActor");
+  const state = getState();
+  let checksum = state.healthActor.count;
+
+  for (const entity of self.indices) {
+    checksum +=
+      self.hp[entity] +
+      self.maxHp[entity] +
+      movement.x[entity] +
+      movement.y[entity] +
+      targeting.targetX[entity] +
+      targeting.targetY[entity] +
+      targeting.threat[entity];
+  }
+
+  const firstEntity = self.indices[0];
+  const frameState = self.stateCode[firstEntity] === self.states.reportA ? "reportA" : "reportB";
+
+  world.publishUnitFrame({
+    frameState,
+    reportedUnits: self.indices.length,
+    totalUnits: state.healthActor.count,
+    checksum,
+  });
+};
+
+export const healthActor = createMachine({
+  storage: "entity",
+  initialState: "__INIT",
+  initialContext: {
+    hp: i32({ default: 1 }),
+    maxHp: i32({ default: 1 }),
+    armor: i32({ default: 0 }),
+  },
+  spawnSchema: {
+    hp: i32(),
+    maxHp: i32(),
+    armor: i32(),
+  },
+  config: {
+    __INIT: { ENTITY_SPAWNED: "alive" },
+    alive: { TICK: "reportA", ENTITY_DESPAWNED: "removed" },
+    reportA: { TICK: "reportB", ENTITY_DESPAWNED: "removed" },
+    reportB: { TICK: "reportA", ENTITY_DESPAWNED: "removed" },
+    dead: {},
+    removed: {},
+  },
+  despawnOn: "dead",
+  reducer(_state, action, { self, payloadFor }) {
+    for (const entity of self.indices) {
+      if (action.type === "ENTITY_SPAWNED") {
+        const payload = payloadFor(entity);
+        self.hp[entity] = payload.hp;
+        self.maxHp[entity] = payload.maxHp;
+        self.armor[entity] = payload.armor;
+        continue;
+      }
+
+      if (action.type === "TICK") {
+        if (self.hp[entity] < self.maxHp[entity]) self.hp[entity] += 1;
+        if (self.hp[entity] <= 0) self.stateCode[entity] = self.states.dead;
+      }
+    }
+  },
+  effects: {
+    reportA: publishUnitFrame,
+    reportB: publishUnitFrame,
+  },
+});
 
 export const spriteSyncActor = createMachine({
   storage: "entity",
@@ -177,6 +336,8 @@ export const spriteSyncActor = createMachine({
 
 export const machines = {
   movementActor,
+  healthActor,
+  targetingActor,
   spriteSyncActor,
   projectileActor,
 };
@@ -205,6 +366,16 @@ export const spawn = defineEntitySpawn(
       },
       spriteSyncActor: {
         spriteId: payload.spriteId,
+      },
+      healthActor: {
+        hp: payload.hp,
+        maxHp: payload.maxHp,
+        armor: 2,
+      },
+      targetingActor: {
+        targetX: payload.targetX,
+        targetY: payload.targetY,
+        threat: payload.threat,
       },
     },
   }),
@@ -249,7 +420,20 @@ export const createMemorySpriteAdapter = () => {
   };
 };
 
-export const createEntitiesExampleManager = (sprites: SpriteAdapter) => {
+export const createMemoryWorldAdapter = () => {
+  const reports: UnitFrameReport[] = [];
+
+  return {
+    world: {
+      publishUnitFrame: (report: UnitFrameReport) => {
+        reports.push(report);
+      },
+    } satisfies GameWorldAdapter,
+    reports,
+  };
+};
+
+export const createEntitiesExampleManager = (sprites: SpriteAdapter, world: GameWorldAdapter) => {
   const manager = MachineManager(machines, {
     plugins: [entitiesPlugin({ spawn })] as const,
   });
@@ -258,6 +442,7 @@ export const createEntitiesExampleManager = (sprites: SpriteAdapter) => {
     getState: manager.getState,
     entities: manager.entities,
     sprites,
+    world,
   });
 
   return manager;
@@ -265,7 +450,8 @@ export const createEntitiesExampleManager = (sprites: SpriteAdapter) => {
 
 export const runEntitiesCompositionExample = () => {
   const spriteMemory = createMemorySpriteAdapter();
-  const manager = createEntitiesExampleManager(spriteMemory.sprites);
+  const worldMemory = createMemoryWorldAdapter();
+  const manager = createEntitiesExampleManager(spriteMemory.sprites, worldMemory.world);
 
   manager.transition({
     type: "SPAWN_UNIT",
@@ -277,6 +463,11 @@ export const runEntitiesCompositionExample = () => {
       dy: 2,
       spriteId: "sprite/unit-alpha",
       label: null,
+      hp: 90,
+      maxHp: 100,
+      targetX: 40,
+      targetY: 60,
+      threat: 7,
     },
   });
   manager.transition({
@@ -296,12 +487,15 @@ export const runEntitiesCompositionExample = () => {
   manager.transition({ type: "TICK" });
 
   const rootEntities = manager.entities();
-  const state = manager.getState();
+  const state = manager.getState() as unknown as AppState;
 
   return {
     hasRootEntityAccessor: rootEntities === manager.entities(),
     movementCount: state.movementActor.count,
+    healthCount: state.healthActor.count,
+    targetingCount: state.targetingActor.count,
     unitPosition: spriteMemory.positions.get("sprite/unit-alpha"),
+    unitFrameReports: [...worldMemory.reports],
     projectileVisible: spriteMemory.positions.has("sprite/projectile-p1"),
     removedSprites: [...spriteMemory.removed],
   };

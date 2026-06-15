@@ -151,6 +151,103 @@ const createProjectileActor = (mode) =>
     },
   });
 
+const recordUnitFrame = ({ self, entities, getState, world }) => {
+  const movement = entities().get("movementActor");
+  const targeting = entities().get("targetingActor");
+  const state = getState();
+  let checksum = state.healthActor.count;
+
+  for (const entity of self.indices) {
+    checksum +=
+      self.hp[entity] +
+      self.maxHp[entity] +
+      movement.x[entity] +
+      movement.y[entity] +
+      targeting.targetX[entity] +
+      targeting.targetY[entity] +
+      targeting.threat[entity];
+  }
+
+  world.recordUnitFrame(checksum, self.indices.length, state.healthActor.count);
+};
+
+const createHealthActor = () =>
+  ({
+    storage: "entity",
+    initialState: "__INIT",
+    initialContext: {
+      hp: i32({ default: 1 }),
+      maxHp: i32({ default: 1 }),
+      armor: i32(),
+    },
+    spawnSchema: {
+      hp: i32(),
+      maxHp: i32(),
+      armor: i32(),
+    },
+    config: {
+      __INIT: { ENTITY_SPAWNED: "alive" },
+      alive: { TICK: "reportA" },
+      reportA: { TICK: "reportB" },
+      reportB: { TICK: "reportA" },
+      dead: {},
+    },
+    despawnOn: "dead",
+    reducer(_state, action, { self, payloadFor }) {
+      for (const entity of self.indices) {
+        if (action.type === "ENTITY_SPAWNED") {
+          const payload = payloadFor(entity);
+          self.hp[entity] = payload.hp;
+          self.maxHp[entity] = payload.maxHp;
+          self.armor[entity] = payload.armor;
+          continue;
+        }
+
+        if (self.hp[entity] < self.maxHp[entity]) self.hp[entity] += 1;
+        if (self.hp[entity] <= 0) self.stateCode[entity] = self.states.dead;
+      }
+    },
+    effects: {
+      reportA: recordUnitFrame,
+      reportB: recordUnitFrame,
+    },
+  });
+
+const createTargetingActor = () =>
+  ({
+    storage: "entity",
+    initialState: "__INIT",
+    initialContext: {
+      targetX: f32(),
+      targetY: f32(),
+      threat: i32(),
+    },
+    spawnSchema: {
+      targetX: f32(),
+      targetY: f32(),
+      threat: i32(),
+    },
+    config: {
+      __INIT: { ENTITY_SPAWNED: "tracking" },
+      tracking: { TICK: "tracking" },
+    },
+    reducer(_state, action, { self, payloadFor }) {
+      for (const entity of self.indices) {
+        if (action.type === "ENTITY_SPAWNED") {
+          const payload = payloadFor(entity);
+          self.targetX[entity] = payload.targetX;
+          self.targetY[entity] = payload.targetY;
+          self.threat[entity] = payload.threat;
+          continue;
+        }
+
+        self.targetX[entity] += 0.25;
+        self.targetY[entity] -= 0.125;
+        self.threat[entity] += 1;
+      }
+    },
+  });
+
 const createSpriteActor = (spriteAccumulator) =>
   ({
     storage: "entity",
@@ -281,13 +378,25 @@ const createProjectileEntityRunner = (rowCount, mode) => {
   };
 };
 
-const createSpriteEntityRunner = (rowCount) => {
+const createUnitFrameEntityRunner = (rowCount) => {
   const spriteAccumulator = { value: 0 };
+  const worldAccumulator = {
+    checksum: 0,
+    reportedUnits: 0,
+    totalUnits: 0,
+    recordUnitFrame(checksum, reportedUnits, totalUnits) {
+      this.checksum += checksum;
+      this.reportedUnits += reportedUnits;
+      this.totalUnits += totalUnits;
+    },
+  };
   const movementActor = createMovementActor();
+  const healthActor = createHealthActor();
+  const targetingActor = createTargetingActor();
   const spriteSyncActor = createSpriteActor(spriteAccumulator);
-  const machines = { movementActor, spriteSyncActor };
+  const machines = { movementActor, healthActor, targetingActor, spriteSyncActor };
   const spawn = createSpawn(machines, (index, payload) => ({
-    id: `sprite/${payload.startId + index}`,
+    id: `unit/${payload.startId + index}`,
     groupTag: "unit",
     actors: {
       movementActor: {
@@ -299,9 +408,24 @@ const createSpriteEntityRunner = (rowCount) => {
       spriteSyncActor: {
         spriteId: `sprite-${index}`,
       },
+      healthActor: {
+        hp: 80 + (index % 20),
+        maxHp: 100,
+        armor: index % 5,
+      },
+      targetingActor: {
+        targetX: (index % 512) + 32,
+        targetY: (index % 256) + 64,
+        threat: index % 1024,
+      },
     },
   }));
   const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] });
+  manager.setDependencies({
+    getState: manager.getState,
+    entities: manager.entities,
+    world: worldAccumulator,
+  });
 
   manager.transition({ type: "SPAWN_BENCH_BATCH", payload: { count: rowCount, startId: 0 } });
 
@@ -309,7 +433,7 @@ const createSpriteEntityRunner = (rowCount) => {
     beforeSample: noop,
     run: () => manager.transition(tickAction),
     afterSample: noop,
-    read: () => spriteAccumulator.value,
+    read: () => spriteAccumulator.value + worldAccumulator.checksum,
   };
 };
 
@@ -326,6 +450,12 @@ const createSoaRows = (rowCount) => {
   const dy = new Float32Array(rowCount);
   const ticksLeft = new Int32Array(rowCount);
   const damage = new Int32Array(rowCount);
+  const hp = new Int32Array(rowCount);
+  const maxHp = new Int32Array(rowCount);
+  const armor = new Int32Array(rowCount);
+  const targetX = new Float32Array(rowCount);
+  const targetY = new Float32Array(rowCount);
+  const threat = new Int32Array(rowCount);
   const spriteIds = new Array(rowCount);
   const ids = new Array(rowCount);
 
@@ -339,6 +469,12 @@ const createSoaRows = (rowCount) => {
     dy[i] = 1 + (i % 5);
     ticksLeft[i] = 1_000_000;
     damage[i] = 10 + (i % 7);
+    hp[i] = 80 + (i % 20);
+    maxHp[i] = 100;
+    armor[i] = i % 5;
+    targetX[i] = (i % 512) + 32;
+    targetY[i] = (i % 256) + 64;
+    threat[i] = i % 1024;
     spriteIds[i] = `sprite-${i}`;
     ids[i] = `entity/${i}`;
   }
@@ -358,10 +494,18 @@ const createSoaRows = (rowCount) => {
     dy,
     ticksLeft,
     damage,
+    hp,
+    maxHp,
+    armor,
+    targetX,
+    targetY,
+    threat,
     spriteIds,
     ids,
     indexById: Object.create(null),
     checksum: 0,
+    reportedUnits: 0,
+    totalUnits: 0,
   };
 };
 
@@ -471,15 +615,33 @@ const createCleanupSoaRunner = (rowCount) => {
   };
 };
 
-const createSpriteSoaRunner = (rowCount) => {
+const createUnitFrameSoaRunner = (rowCount) => {
   const rows = createSoaRows(rowCount);
 
   return {
     beforeSample: noop,
     run: () => {
-      const { indices, accepted, presence, stateCode, prevStateCode, rowVersion, x, y, dx, dy, spriteIds } = rows;
+      const {
+        indices,
+        accepted,
+        presence,
+        stateCode,
+        prevStateCode,
+        rowVersion,
+        x,
+        y,
+        dx,
+        dy,
+        spriteIds,
+        hp,
+        maxHp,
+        targetX,
+        targetY,
+        threat,
+      } = rows;
       let acceptedCount = 0;
-      let checksum = 0;
+      let spriteChecksum = 0;
+      let worldChecksum = rowCount;
 
       for (let offset = 0; offset < rowCount; offset += 1) {
         const entity = indices[offset];
@@ -489,12 +651,19 @@ const createSpriteSoaRunner = (rowCount) => {
         acceptedCount += 1;
         x[entity] += dx[entity];
         y[entity] += dy[entity];
-        checksum += x[entity] + y[entity] + spriteIds[entity].length;
+        if (hp[entity] < maxHp[entity]) hp[entity] += 1;
+        targetX[entity] += 0.25;
+        targetY[entity] -= 0.125;
+        threat[entity] += 1;
+        spriteChecksum += x[entity] + y[entity] + spriteIds[entity].length;
+        worldChecksum += hp[entity] + maxHp[entity] + x[entity] + y[entity] + targetX[entity] + targetY[entity] + threat[entity];
       }
 
       for (let offset = 0; offset < acceptedCount; offset += 1) rowVersion[accepted[offset]] += 1;
       rows.version += 1;
-      rows.checksum += checksum;
+      rows.checksum += spriteChecksum + worldChecksum;
+      rows.reportedUnits += acceptedCount;
+      rows.totalUnits += rowCount;
     },
     afterSample: noop,
     read: () => rows.checksum,
@@ -527,12 +696,12 @@ export const scenarioDefinitions = [
     createBaselineRunner: createCleanupSoaRunner,
   },
   {
-    key: "sprite-sync-reaction",
-    label: "sprite sync reaction",
+    key: "unit-frame-composition",
+    label: "unit frame composition",
     kind: "full-pipeline",
     operationsPerSample: 5,
-    createEntityRunner: createSpriteEntityRunner,
-    createBaselineRunner: createSpriteSoaRunner,
+    createEntityRunner: createUnitFrameEntityRunner,
+    createBaselineRunner: createUnitFrameSoaRunner,
   },
 ];
 

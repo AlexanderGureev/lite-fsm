@@ -399,6 +399,63 @@ Residual unattributed time:
 
 Основной кандидат для следующего optimization ТЗ — `sprite sync reaction / 50 000`: gate ratio `11.70x`, а trace показывает `core.reactions.total` 2.369ms и внутри него `entities.reactions.user` 1.701ms. Следующий шаг должен разбирать public reaction path и scoped access/deps work в `entities.reactions.user`; `entities.reactions.captureScope` 0.586ms и `entities.reduce.publicBatch.total` 1.087ms остаются соседними вторичными целями.
 
+### Итог unit composition benchmark
+
+Команда:
+
+```bash
+pnpm run bench:entities:record -- --runs 3 --label unit-composition-baseline --include gate,trace --row-counts 50000
+```
+
+Артефакты:
+
+- [`unit-composition-baseline.json`](../../.bench/entities/unit-composition-baseline.json)
+- [`unit-composition-baseline.md`](../../.bench/entities/unit-composition-baseline.md)
+
+Окружение record: `2026-06-15T13:29:56.184Z`, Git `381ee5e0f982`, branch `entities`, status `dirty`, Node `v24.16.0`, CPU `Apple M1 Max`, package manager `pnpm/10.33.0`.
+
+Активный composition benchmark заменяет узкий `sprite sync reaction` на `unit frame composition`: entity `unit` содержит `movementActor`, `spriteSyncActor`, `healthActor` и `targetingActor`. `healthActor` имеет state effect, который читает `getState()`, scoped `entities().get("movementActor")` и `entities().get("targetingActor")`, затем пишет агрегат во внешний `world` adapter через deps. Поэтому этот record не является прямым сравнением со старым `sprite sync reaction`; старые значения выше остаются историческим baseline для reaction-only сценария.
+
+Gate `50 000`:
+
+| Сценарий | SoA median | entities median | Ratio | Бюджет | Статус | RSD |
+| --- | ---: | ---: | ---: | ---: | --- | ---: |
+| `movement update` | 0.236ms | 0.285ms | 1.21x | 1.50x | pass | 3.8% |
+| `projectile lifetime update` | 0.180ms | 0.218ms | 1.22x | 1.50x | fail | 49.5% |
+| `despawnOn cleanup` | 0.277ms | 0.421ms | 1.51x | 2.00x | fail | 2.6% |
+| `unit frame composition` | 1.121ms | 10.269ms | 9.26x | 2.00x | fail | 6.7% |
+
+Trace totals:
+
+| Сценарий | Trace total | Gate entities median | `traceTotal / gateEntityMedian` | Transitions | RSD |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `movement update` | 0.293ms | 0.285ms | 1.03x | 450 | 0.7% |
+| `projectile lifetime update` | 0.227ms | 0.218ms | 1.04x | 450 | 1.2% |
+| `despawnOn cleanup` | 0.420ms | 0.421ms | 1.00x | 450 | 1.4% |
+| `unit frame composition` | 10.465ms | 10.269ms | 1.02x | 450 | 1.3% |
+
+Trace для `unit frame composition / 50 000`:
+
+| Фаза | Median | Share |
+| --- | ---: | ---: |
+| `core.effects.total` | 6.406ms | 61.7% от transition |
+| `core.rootReducer` | 3.210ms | 31.1% от transition |
+| `core.reactions.total` | 0.682ms | 6.5% от transition |
+| `entities.effects.resolve` | 2.046ms | 99.9% от parent |
+| `entities.effects.invoke` | 4.300ms | 99.8% от parent |
+| `entities.reduce.publicBatch.total` | 2.957ms | 93.1% от `entities.reduce.total` |
+| `entities.reactions.user` | 0.620ms | 91.6% от `entities.reactions.total` |
+
+Trace coverage для нового сценария закрывает attribution: `core top-level` 100.0%, `entities reduce` 99.9%, `entities reactions` 99.7%, `entities effects` 99.8%. Предупреждений `traceTotal / gateEntityMedian > 2.00x` нет.
+
+Вывод: новый пример лучше отражает реальный игровой unit, но смещает главный hot spot с reaction-only пути на effects path. Основной кандидат для следующего optimization ТЗ — `unit frame composition / 50 000`: `core.effects.total` занимает `6.406ms`, из них `entities.effects.invoke` `4.300ms`, а `entities.effects.resolve` `2.046ms`. Это включает capture scope для effect, создание scoped access/self и пользовательский effect, который читает root state, две entity views и пишет во внешний adapter. Вторичные цели — `entities.reduce.publicBatch.total` `2.957ms` для четырех actor batches и `entities.reactions.user` `0.620ms`.
+
+Остаточные риски record:
+
+1. `projectile lifetime update` имеет высокий разброс gate median `49.5%`: median ratio ниже бюджета, но один из трех runs провалил per-run gate.
+2. `despawnOn cleanup` имеет median ratio ниже бюджета (`1.51x` против `2.00x`), но record status остался `fail` из-за per-run gate.
+3. Бюджет `unit frame composition` пока не является приемочным production budget: он фиксирует новый более реалистичный baseline для будущих оптимизаций effects path.
+
 ### 4. Уменьшить allocations и проверку payload в spawn/lifecycle path
 
 Ожидаемый выигрыш: средний для текущего измеряемого `TICK`, высокий для реальных workloads со spawn/despawn. В gate cleanup replacement spawn выполняется вне timed участка, но в приложении это часть кадра.
@@ -463,18 +520,20 @@ Residual unattributed time:
 
 ## Рекомендуемый порядок работ
 
-1. `despawnOn cleanup`: fast path без `ENTITY_DESPAWNED`, batch remove, single public slice refresh.
-2. `sprite sync reaction`: убрать `indices.slice`, entries `Map`, deps copy.
-3. `reduceAcceptedBatch`: compile-time fast path для identity self-transition и отключение пустых post-processing passes.
-4. Spawn/lifecycle allocation: validators, payload arrays, capacity reservation.
-5. Core bucket overhead: убрать пустые phases и лишние action views.
-6. Benchmark breakdown: добавить детализацию для cleanup/reactions и timed spawn.
+Актуальный порядок идет от `unit-composition-baseline`, потому что активный benchmark теперь измеряет более реалистичный игровой unit composition, а не только reaction-only путь.
+
+1. Entity effects path для `unit frame composition`: уменьшить `entities.effects.invoke` и `entities.effects.resolve`, особенно capture scope, scoped access/self creation и user effect с `getState()`/`entities()` reads.
+2. `reduceAcceptedBatch` для multi-actor unit frame: снизить `entities.reduce.publicBatch.total` при четырех actor batches без регрессий reducer-only сценариев.
+3. Reaction user path: сохранить прошлые улучшения `sprite` reaction и дальше снижать `entities.reactions.user` в составе `unit frame composition`.
+4. Spawn/lifecycle allocation: validators, payload arrays, capacity reservation, отдельный timed spawn scenario.
+5. Core bucket overhead: убрать пустые phases и лишние action views после стабилизации entity-specific hot spots.
+6. Benchmark breakdown: при необходимости добавить более детальные effect phases для capture scope, deps/self creation и user callback.
 
 После каждого пункта сохранять отдельный record:
 
 ```bash
 pnpm run bench:entities:record -- --runs 5 --label <short-name> --include gate,trace --row-counts 50000
-pnpm run bench:entities:compare -- .bench/entities/transition-trace-baseline.json .bench/entities/<short-name>.json
+pnpm run bench:entities:compare -- .bench/entities/unit-composition-baseline.json .bench/entities/<short-name>.json
 ```
 
-Отчет считать успешным для этапа только если целевой сценарий ускорился, соседние сценарии не получили регрессию больше `10%`, а новые runtime контракты покрыты тестами.
+Отчет считать успешным для этапа только если целевой сценарий ускорился, соседние сценарии не получили регрессию больше `10%`, `traceTotal / gateEntityMedian` остался ниже `2.00x`, а новые runtime контракты покрыты тестами.
