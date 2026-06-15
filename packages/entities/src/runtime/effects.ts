@@ -3,7 +3,6 @@ import type { AnyEvent, ManagerAction, ReadonlyManagerAction, StorageManagerCont
 
 import type { EntityIndex } from "../plugin";
 import {
-  capturedEntityScopeEntryIsLive,
   createScopedEntityAccess,
   createScopedEntitySelf,
   type EntityAccessScope,
@@ -95,8 +94,10 @@ const liveCapturedEntries = (
   entries: readonly CapturedEntityScopeEntry[],
 ): readonly CapturedEntityScopeEntry[] => {
   const live: CapturedEntityScopeEntry[] = [];
+  const alive = runtime.entityStore.alive;
+  const generation = runtime.entityStore.generation;
   for (const entry of entries) {
-    if (capturedEntityScopeEntryIsLive(runtime, entry)) {
+    if (alive[entry.entity] === 1 && generation[entry.entity] === entry.generation) {
       live.push(entry);
       continue;
     }
@@ -169,26 +170,73 @@ export const resolveEntityEffectInvocations = (
 
   const invocations: EntityEffectInvocation[] = [];
   for (const batch of transaction.effectBatches) {
-    const effect = batch.store.metadata.effectsByStateCode[batch.stateCode];
+    const store = batch.store;
+    const expectedStateCode = batch.stateCode;
+    const effect = store.metadata.effectsByStateCode[expectedStateCode];
     if (!effect) continue;
 
-    const entries: CapturedEntityScopeEntry[] = [];
-    for (const entity of batch.indices) {
-      if (batch.store.presence[entity] !== 1 || batch.store.stateCode[entity] !== batch.stateCode) continue;
-      if (runtime.entityStore.alive[entity] !== 1) continue;
+    if (
+      batch.capturedEntries &&
+      batch.storeVersion === store.version &&
+      batch.entityStoreVersion === runtime.entityStore.version
+    ) {
+      invocations.push({
+        storeKey: store.templateKey,
+        stateCode: expectedStateCode,
+        indices: batch.indices,
+        scope: {
+          sourceActor: store.templateKey,
+          eventType: ctx.action.type,
+          entries: batch.capturedEntries,
+        },
+      });
+      continue;
+    }
 
-      const id = runtime.entityStore.ids[entity];
-      if (id === undefined || id.length === 0) continue;
-      entries.push({ entity, generation: runtime.entityStore.generation[entity], id });
+    const entries: CapturedEntityScopeEntry[] = [];
+    let compactIndices: EntityIndex[] | undefined;
+    const indices = batch.indices;
+    const presence = store.presence;
+    const stateCodeByEntity = store.stateCode;
+    const alive = runtime.entityStore.alive;
+    const idsByEntity = runtime.entityStore.ids;
+    const generation = runtime.entityStore.generation;
+    const ensureCompactIndices = (): EntityIndex[] => {
+      if (compactIndices) return compactIndices;
+
+      compactIndices = [];
+      for (let copyIndex = 0; copyIndex < entries.length; copyIndex += 1) {
+        compactIndices.push(entries[copyIndex].entity);
+      }
+      return compactIndices;
+    };
+    for (let index = 0; index < indices.length; index += 1) {
+      const entity = indices[index];
+      if (presence[entity] !== 1 || stateCodeByEntity[entity] !== expectedStateCode) {
+        ensureCompactIndices();
+        continue;
+      }
+      if (alive[entity] !== 1) {
+        ensureCompactIndices();
+        continue;
+      }
+
+      const id = idsByEntity[entity];
+      if (id === undefined || id.length === 0) {
+        ensureCompactIndices();
+        continue;
+      }
+      entries.push({ entity, generation: generation[entity], id });
+      compactIndices?.push(entity);
     }
     if (entries.length === 0) continue;
 
     invocations.push({
-      storeKey: batch.store.templateKey,
-      stateCode: batch.stateCode,
-      indices: entries.map((entry) => entry.entity),
+      storeKey: store.templateKey,
+      stateCode: expectedStateCode,
+      indices: compactIndices ?? indices,
       scope: {
-        sourceActor: batch.store.templateKey,
+        sourceActor: store.templateKey,
         eventType: ctx.action.type,
         entries,
       },
@@ -208,18 +256,16 @@ export const invokeEntityEffect = (
   if (!store || !effect) return;
 
   const scopedEntities = createScopedEntityAccess(runtime, invocation.scope);
-  const deps = {
-    ...ctx.manager.getDependencies(),
-    action: ctx.action,
-    self: createScopedEntitySelf(runtime, store, {
-      scopeName: "effect",
-      indices: invocation.indices,
-      entries: invocation.scope.entries,
-    }),
-    entities: () => scopedEntities,
-    transition: createEffectTransition(runtime, ctx.manager, invocation),
-    condition: unsupportedCondition,
-  };
+  const deps = Object.create(ctx.manager.getDependencies()) as Record<string, unknown>;
+  deps.action = ctx.action;
+  deps.self = createScopedEntitySelf(runtime, store, {
+    scopeName: "effect",
+    indices: invocation.indices,
+    entries: invocation.scope.entries,
+  });
+  deps.entities = () => scopedEntities;
+  deps.transition = createEffectTransition(runtime, ctx.manager, invocation);
+  deps.condition = unsupportedCondition;
 
   try {
     const result = effect(deps);

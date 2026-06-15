@@ -50,6 +50,9 @@ export type EntityEffectBatch = {
   readonly store: ColumnarActorStore;
   readonly stateCode: number;
   readonly indices: readonly EntityIndex[];
+  readonly capturedEntries?: readonly CapturedEntityScopeEntry[];
+  readonly storeVersion?: number;
+  readonly entityStoreVersion?: number;
 };
 
 export type EntityReactionBatch = {
@@ -374,10 +377,19 @@ export const scheduleEntityEffectBatch = (
   store: ColumnarActorStore,
   stateCode: number,
   indices: readonly EntityIndex[],
+  capturedEntries?: readonly CapturedEntityScopeEntry[],
 ): void => {
   if (!transaction || indices.length === 0 || !store.metadata.effectsByStateCode[stateCode]) return;
 
-  transaction.effectBatches.push({ store, stateCode, indices: indices.slice() });
+  const entityStore = transaction.runtime.entityStore;
+  transaction.effectBatches.push({
+    store,
+    stateCode,
+    indices,
+    capturedEntries,
+    storeVersion: store.version,
+    entityStoreVersion: entityStore.version,
+  });
 };
 
 const ownReactionIndices = (

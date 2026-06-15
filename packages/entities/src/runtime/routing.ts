@@ -51,13 +51,25 @@ const collectUnscopedBatch = (
   if (!buckets || buckets.length === 0) return undefined;
   if (buckets.length === 1) return buckets[0].length === 0 ? undefined : buckets[0];
 
+  let singleBucket: readonly EntityIndex[] | undefined;
   const accepted = store.acceptedScratch;
   accepted.length = 0;
   for (const bucket of buckets) {
+    if (bucket.length === 0) continue;
+
+    if (!singleBucket) {
+      singleBucket = bucket;
+      continue;
+    }
+
+    if (accepted.length === 0) {
+      for (let index = 0; index < singleBucket.length; index += 1) accepted.push(singleBucket[index]);
+    }
     for (let index = 0; index < bucket.length; index += 1) accepted.push(bucket[index]);
   }
 
-  return accepted.length === 0 ? undefined : accepted;
+  if (accepted.length > 0) return accepted;
+  return singleBucket;
 };
 
 const beginRoutedCollection = (runtime: EntityRuntimeState): number => {

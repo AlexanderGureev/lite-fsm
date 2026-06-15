@@ -1638,6 +1638,29 @@ describe("@lite-fsm/entities — этап 5 spawn events и entity spawn", () =>
     );
     expect(targetRetryError.message).toContain("targets unknown state 'MISSING'");
 
+    const badTickActor = {
+      ...createMovementSpawnActor(),
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { TICK: "MISSING" } },
+    } as never;
+    const tickTargetMachines = { movementActor: badTickActor };
+    const tickTargetSpawnEvents = createSpawnEvents();
+    const tickTargetSpawn = defineEntitySpawn(tickTargetMachines, tickTargetSpawnEvents)({
+      SPAWN_ENTITY: (payload) => ({
+        id: payload.id,
+        groupTag: "unit",
+        actors: { movementActor: { x: payload.x, y: payload.y, label: payload.label } },
+      }),
+    });
+    const tickTargetManager = MachineManager(tickTargetMachines, {
+      plugins: [entitiesPlugin({ spawn: tickTargetSpawn })] as const,
+    });
+    tickTargetManager.transition({ type: "SPAWN_ENTITY", payload: { id: "unit/a", x: 1, y: 2, label: null } });
+    const tickTargetError = expectLiteFsmError(
+      () => tickTargetManager.transition({ type: "TICK" }),
+      "LITE_FSM_INVALID_STORAGE_RUNTIME",
+    );
+    expect(tickTargetError.message).toContain("targets unknown state 'MISSING'");
+
     const invalidStateActor = createMovementSpawnActor((_slice, action, { self }) => {
       if (action.type !== "TICK") return;
       for (const entity of self.indices) self.stateCode[entity] = 99;
@@ -2013,8 +2036,9 @@ describe("@lite-fsm/entities — этап 6 reduce pipeline и routing", () => {
       storage: "entity",
       config: {
         __INIT: { ENTITY_SPAWNED: "READY" },
-        READY: { STOP: "STOPPED", TICK: "READY" },
+        READY: { STOP: "STOPPED", PAUSE: "PAUSED", TICK: "READY" },
         STOPPED: { TICK: "STOPPED" },
+        PAUSED: { TICK: "PAUSED" },
       },
       initialState: "__INIT",
       initialContext: { hits: i32() },
@@ -2038,13 +2062,53 @@ describe("@lite-fsm/entities — этап 6 reduce pipeline и routing", () => {
 
     spawnStage6Entity(manager, "unit/a");
     spawnStage6Entity(manager, "unit/b");
+    spawnStage6Entity(manager, "unit/c");
     manager.transition({ type: "STOP", meta: { entityId: "unit/b" } } as never);
+    manager.transition({ type: "PAUSE", meta: { entityId: "unit/c" } } as never);
     manager.transition({ type: "TICK" });
 
     const store = entityAccess<typeof machines>(manager).get("actor");
-    expect(frames).toEqual([["unit/a", "unit/b"]]);
+    expect(frames).toEqual([["unit/a", "unit/b", "unit/c"]]);
     expect(store.hits[0 as EntityIndex]).toBe(1);
     expect(store.hits[1 as EntityIndex]).toBe(1);
+    expect(store.hits[2 as EntityIndex]).toBe(1);
+  });
+
+  it("unscoped event переиспользует единственный непустой state bucket", () => {
+    const actor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "READY" },
+        READY: { TICK: "READY" },
+        STOPPED: { TICK: "STOPPED" },
+      },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createStage6SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE6: (payload) => ({ id: payload.id, groupTag: payload.groupTag, actors: { actor: {} } }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+
+    spawnStage6Entity(manager, "unit/a");
+    spawnStage6Entity(manager, "unit/b");
+
+    const runtime = getEntityRuntimeState(manager.entities());
+    const eventCode = runtime.eventCodeByType.TICK;
+    const actorStore = runtime.actorStores.actor;
+    const readyBucket = actorStore.stateBuckets[actorStore.metadata.stateCodeByName.READY];
+    const batches = collectEntityPublicReducerBatches(runtime, eventCode, {
+      scope: "unscoped",
+      key: undefined,
+      targetSet: [],
+    });
+
+    expect(batches).toHaveLength(1);
+    expect(batches[0].indices).toBe(readyBucket);
+    expect(batches[0].indices).not.toBe(actorStore.acceptedScratch);
   });
 
   it("invalid stateCode после reducer бросает clear dev error", () => {
@@ -3826,6 +3890,64 @@ describe("@lite-fsm/entities — этап 9 effects и transition helpers", () =
     ]);
   });
 
+  it("effect self.indices не включает dirty rows без effect state", () => {
+    const effectIds: string[][] = [];
+    const actor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "READY" },
+        READY: { TICK: "REPORT" },
+        REPORT: {},
+        ALERT: {},
+        DONE: {},
+      },
+      initialState: "__INIT",
+      initialContext: { role: i32() },
+      spawnSchema: { role: i32() },
+      reducer(_slice: unknown, action: { readonly type: string }, { self, payloadFor }: { readonly self: any; readonly payloadFor: any }) {
+        for (const entity of self.indices) {
+          if (action.type === "ENTITY_SPAWNED") {
+            self.role[entity] = payloadFor(entity).role;
+            continue;
+          }
+          if (self.role[entity] === 1) self.stateCode[entity] = self.states.DONE;
+          if (self.role[entity] === 2) self.stateCode[entity] = self.states.ALERT;
+        }
+      },
+      effects: {
+        REPORT: ({ self }: { readonly self: { readonly indices: readonly EntityIndex[]; entityId(entity: EntityIndex): string } }) => {
+          effectIds.push(self.indices.map((entity) => self.entityId(entity)));
+        },
+        ALERT: ({ self }: { readonly self: { readonly indices: readonly EntityIndex[]; entityId(entity: EntityIndex): string } }) => {
+          effectIds.push(self.indices.map((entity) => self.entityId(entity)));
+        },
+      },
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createStage9SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_STAGE9: (payload) => [
+        { id: `${payload.id}/report-a`, groupTag: payload.groupTag, actors: { actor: { role: 0 } } },
+        { id: `${payload.id}/alert-a`, groupTag: payload.groupTag, actors: { actor: { role: 2 } } },
+        { id: `${payload.id}/alert-b`, groupTag: payload.groupTag, actors: { actor: { role: 2 } } },
+        { id: `${payload.id}/report-b`, groupTag: payload.groupTag, actors: { actor: { role: 0 } } },
+        { id: `${payload.id}/done`, groupTag: payload.groupTag, actors: { actor: { role: 1 } } },
+      ],
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+
+    spawnStage9Entity(manager, "unit");
+    manager.transition({ type: "TICK" } as never);
+
+    const normalizedEffectIds = effectIds
+      .map((ids) => [...ids].sort())
+      .sort((left, right) => left.join(",").localeCompare(right.join(",")));
+    expect(normalizedEffectIds).toEqual([
+      ["unit/alert-a", "unit/alert-b"],
+      ["unit/report-a", "unit/report-b"],
+    ]);
+  });
+
   it("effects используют final state после reducer и не запускаются для steady/rollback/despawnOn rows", () => {
     const effects: string[] = [];
     const actor = {
@@ -4351,26 +4473,79 @@ describe("@lite-fsm/entities — этап 9 effects и transition helpers", () =
     const carrierWithEffect = { runtime: new Map<string, unknown>() };
     const transactionWithEffect = prepareEntityTransaction(carrierWithEffect, runtimeWithEffect);
     const storeWithEffect = runtimeWithEffect.actorStores.actor;
-    ensureEntityCapacity(runtimeWithEffect.entityStore, 3);
-    ensureActorCapacity(storeWithEffect, 3);
+    ensureEntityCapacity(runtimeWithEffect.entityStore, 4);
+    ensureActorCapacity(storeWithEffect, 4);
+    storeWithEffect.presence[0] = 1;
     storeWithEffect.presence[1] = 1;
     storeWithEffect.presence[2] = 1;
+    storeWithEffect.stateCode[0] = 0;
     storeWithEffect.stateCode[1] = 0;
     storeWithEffect.stateCode[2] = 0;
+    runtimeWithEffect.entityStore.alive[0] = 1;
     runtimeWithEffect.entityStore.alive[2] = 1;
+    runtimeWithEffect.entityStore.generation[0] = 7;
+    runtimeWithEffect.entityStore.ids[0] = "unit/live";
     runtimeWithEffect.entityStore.ids[2] = "";
+
+    const capturedEntries = [{ entity: 0 as EntityIndex, generation: 7, id: "unit/live" }];
+    scheduleEntityEffectBatch(transactionWithEffect, storeWithEffect, 0, [0 as EntityIndex], capturedEntries);
     transactionWithEffect.effectBatches.push({
       store: storeWithEffect,
       stateCode: 0,
-      indices: [0 as EntityIndex, 1 as EntityIndex, 2 as EntityIndex],
+      indices: [3 as EntityIndex],
+    });
+    transactionWithEffect.effectBatches.push({
+      store: storeWithEffect,
+      stateCode: 0,
+      indices: [0 as EntityIndex],
+      capturedEntries: [{ entity: 0 as EntityIndex, generation: 7, id: "unit/stale" }],
+      storeVersion: storeWithEffect.version - 1,
+      entityStoreVersion: runtimeWithEffect.entityStore.version,
+    });
+    transactionWithEffect.effectBatches.push({
+      store: storeWithEffect,
+      stateCode: 0,
+      indices: [0 as EntityIndex, 1 as EntityIndex, 2 as EntityIndex, 3 as EntityIndex],
     });
 
-    expect(
-      resolveEntityEffectInvocations(runtimeWithEffect, {
-        action: { type: "TEST" },
-        dispatch: carrierWithEffect,
-      }),
-    ).toEqual([]);
+    const resolvedEffects = resolveEntityEffectInvocations(runtimeWithEffect, {
+      action: { type: "TEST" },
+      dispatch: carrierWithEffect,
+    });
+
+    expect(resolvedEffects).toEqual([
+      {
+        storeKey: "actor",
+        stateCode: 0,
+        indices: [0 as EntityIndex],
+        scope: {
+          sourceActor: "actor",
+          eventType: "TEST",
+          entries: [{ entity: 0 as EntityIndex, generation: 7, id: "unit/live" }],
+        },
+      },
+      {
+        storeKey: "actor",
+        stateCode: 0,
+        indices: [0 as EntityIndex],
+        scope: {
+          sourceActor: "actor",
+          eventType: "TEST",
+          entries: [{ entity: 0 as EntityIndex, generation: 7, id: "unit/live" }],
+        },
+      },
+      {
+        storeKey: "actor",
+        stateCode: 0,
+        indices: [0 as EntityIndex],
+        scope: {
+          sourceActor: "actor",
+          eventType: "TEST",
+          entries: [{ entity: 0 as EntityIndex, generation: 7, id: "unit/live" }],
+        },
+      },
+    ]);
+    expect(resolvedEffects[0]?.scope.entries).toBe(capturedEntries);
 
     const manager = {
       getDependencies: () => ({}),

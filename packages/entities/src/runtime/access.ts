@@ -227,7 +227,15 @@ export const createScopedEntitySelf = (
   store: ColumnarActorStore,
   options: ScopedEntitySelfOptions,
 ): Record<string, unknown> => {
-  const entriesByEntity = new Map(options.entries.map((entry) => [entry.entity, entry]));
+  let entriesByEntity: Map<EntityIndex, CapturedEntityScopeEntry> | undefined;
+  const getEntriesByEntity = (): Map<EntityIndex, CapturedEntityScopeEntry> => {
+    if (entriesByEntity) return entriesByEntity;
+
+    const next = new Map<EntityIndex, CapturedEntityScopeEntry>();
+    for (const entry of options.entries) next.set(entry.entity, entry);
+    entriesByEntity = next;
+    return next;
+  };
   const self: Record<string, unknown> = {
     indices: options.indices,
     states: store.metadata.stateCodeByName,
@@ -236,12 +244,12 @@ export const createScopedEntitySelf = (
     prevStateCode: store.prevStateCode,
     rowVersion: store.rowVersion,
     has(entity: EntityIndex) {
-      const entry = entriesByEntity.get(entity);
+      const entry = getEntriesByEntity().get(entity);
       if (!entry) return false;
       return capturedEntityScopeEntryIsLive(runtime, entry) && store.presence[entity] === 1;
     },
     entityId(entity: EntityIndex) {
-      const entry = entriesByEntity.get(entity);
+      const entry = getEntriesByEntity().get(entity);
       if (entry) return entry.id;
       throw outsideScopeError(options.scopeName, entity);
     },

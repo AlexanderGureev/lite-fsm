@@ -40,6 +40,7 @@ import {
   scheduleEntityDespawn,
   scheduleEntityEffectBatch,
   scheduleEntityReactionBatch,
+  type CapturedEntityScopeEntry,
   type EntityDispatchTransaction,
   type EntityReactionBatch,
   type EntityReactionBatchOwnership,
@@ -100,13 +101,19 @@ type PostProcessingFlags = {
 type AcceptedRowsPostProcessing = {
   readonly dirtyRows: readonly EntityIndex[] | undefined;
   readonly dirtyRowsPreviousStateCode: number | undefined;
-  readonly enteredByState: ReadonlyMap<number, readonly EntityIndex[]> | undefined;
+  readonly enteredByState: ReadonlyMap<number, EnteredEffectRows> | undefined;
   readonly cleanupRemovesAcceptedRows: boolean;
+};
+
+type EnteredEffectRows = {
+  readonly indices: EntityIndex[];
+  readonly entries: CapturedEntityScopeEntry[];
 };
 
 type DefaultTransitionResult = {
   readonly firstNextState: string | undefined;
   readonly previousStateCodeForAccepted: number | undefined;
+  readonly knownValidStateCodeForAccepted?: number;
 };
 
 type CleanupPhaseKind = "spawn" | "public";
@@ -129,6 +136,7 @@ const resolveTransitionTarget = (
 
   const previousCode = store.stateCode[entity];
   const stateSlot = previousCode + 1;
+  /* v8 ignore next -- public routing and single-state fast path reject invalid source states before this fallback. */
   if (stateSlot < 0 || stateSlot >= store.metadata.stateSlotCount) {
     throw runtimeError(`actor '${store.templateKey}' has invalid stateCode ${previousCode} for entity ${entity}`);
   }
@@ -178,13 +186,13 @@ const updateActorStateBuckets = (
 const scheduleEnteredStateEffects = (
   transaction: EntityDispatchTransaction | undefined,
   store: ColumnarActorStore,
-  enteredByState: ReadonlyMap<number, readonly EntityIndex[]> | undefined,
+  enteredByState: ReadonlyMap<number, EnteredEffectRows> | undefined,
 ): void => {
   /* v8 ignore next -- defensive invariant: reduceBucket receives a transaction from prepareAction. */
   if (!transaction || !enteredByState) return;
 
   for (const [stateCode, entered] of enteredByState) {
-    scheduleEntityEffectBatch(transaction, store, stateCode, entered);
+    scheduleEntityEffectBatch(transaction, store, stateCode, getEnteredEffectIndices(entered), entered.entries);
   }
 };
 
@@ -220,19 +228,33 @@ const getPostProcessingFlags = (
 };
 
 const appendEnteredEffectRow = (
-  enteredByState: Map<number, EntityIndex[]> | undefined,
+  enteredByState: Map<number, EnteredEffectRows> | undefined,
+  entityStore: EntityRuntimeState["entityStore"],
   stateCode: number,
   entity: EntityIndex,
-): Map<number, EntityIndex[]> => {
-  const next = enteredByState ?? new Map<number, EntityIndex[]>();
+  dirtyRows: EntityIndex[],
+): Map<number, EnteredEffectRows> => {
+  const next = enteredByState ?? new Map<number, EnteredEffectRows>();
+  const entry = { entity, generation: entityStore.generation[entity], id: entityStore.ids[entity] as string };
   const entered = next.get(stateCode);
   if (entered) {
-    entered.push(entity);
+    if (entered.indices !== dirtyRows) entered.indices.push(entity);
+    entered.entries.push(entry);
     return next;
   }
 
-  next.set(stateCode, [entity]);
+  next.set(stateCode, { indices: next.size === 0 ? dirtyRows : [entity], entries: [entry] });
   return next;
+};
+
+const getEnteredEffectIndices = (entered: EnteredEffectRows): readonly EntityIndex[] => {
+  if (entered.indices.length === entered.entries.length) return entered.indices;
+
+  const indices: EntityIndex[] = new Array(entered.entries.length);
+  for (let index = 0; index < entered.entries.length; index += 1) {
+    indices[index] = entered.entries[index].entity;
+  }
+  return indices;
 };
 
 const postProcessIdentityRowsWithoutLifecycle = (
@@ -278,6 +300,7 @@ const postProcessAcceptedRows = (
   accepted: readonly EntityIndex[],
   flags: PostProcessingFlags,
   previousStateCodeForAccepted: number | undefined,
+  knownValidStateCodeForAccepted: number | undefined,
 ): AcceptedRowsPostProcessing => {
   if (
     previousStateCodeForAccepted !== undefined &&
@@ -294,7 +317,7 @@ const postProcessAcceptedRows = (
   }
 
   let dirtyRows: EntityIndex[] | undefined;
-  let enteredByState: Map<number, EntityIndex[]> | undefined;
+  let enteredByState: Map<number, EnteredEffectRows> | undefined;
   let cleanupRemovesAcceptedRows = false;
   const canSkipCleanStateValidation = previousStateCodeForAccepted !== undefined;
   const stateCodeByEntity = store.stateCode;
@@ -308,7 +331,10 @@ const postProcessAcceptedRows = (
     const stateCode = stateCodeByEntity[entity];
     const previousStateCode = previousStateCodeForAccepted ?? previousStateCodeByEntity[entity];
     const dirty = stateCode !== previousStateCode;
-    if (dirty || !canSkipCleanStateValidation) assertValidStateCode(store, entity, stateCode);
+    const knownValid =
+      previousStateCodeForAccepted !== undefined &&
+      (stateCode === previousStateCodeForAccepted || stateCode === knownValidStateCodeForAccepted);
+    if ((dirty || !canSkipCleanStateValidation) && !knownValid) assertValidStateCode(store, entity, stateCode);
     rowVersion[entity] += 1;
 
     let despawned = false;
@@ -331,8 +357,14 @@ const postProcessAcceptedRows = (
       continue;
     }
 
-    if (flags.scheduleEffects && !despawned && stateCode >= 0 && effectsByStateCode[stateCode]) {
-      enteredByState = appendEnteredEffectRow(enteredByState, stateCode, entity);
+    if (flags.scheduleEffects && transaction && !despawned && stateCode >= 0 && effectsByStateCode[stateCode]) {
+      enteredByState = appendEnteredEffectRow(
+        enteredByState,
+        transaction.runtime.entityStore,
+        stateCode,
+        entity,
+        dirtyRows,
+      );
     }
   }
 
@@ -410,7 +442,7 @@ const getAcceptedIndices = (batch: ReducerBatch): readonly EntityIndex[] => {
 };
 
 const applyDefaultTransitions = (batch: ReducerBatch, accepted: readonly EntityIndex[]): DefaultTransitionResult => {
-  const fastPathNextState = applyIdentityDefaultTransitions(batch, accepted);
+  const fastPathNextState = applySingleStateDefaultTransitions(batch, accepted);
   if (fastPathNextState !== undefined) return fastPathNextState;
 
   let firstNextState: string | undefined;
@@ -433,35 +465,69 @@ const applyDefaultTransitions = (batch: ReducerBatch, accepted: readonly EntityI
   return { firstNextState, previousStateCodeForAccepted: undefined };
 };
 
-const getSingleStateIdentitySource = (
+const getAcceptedSingleStateSource = (
   batch: ReducerBatch,
   accepted: readonly EntityIndex[],
 ): number | undefined => {
   if (!batch.accepted || batch.eventCode === undefined) return undefined;
 
   const plan = batch.store.metadata.reducePlansByEventCode[batch.eventCode];
-  if (!plan?.allDefaultTransitionsIdentity) return undefined;
-  if (plan.acceptStateCodes.length !== 1) return undefined;
+  /* v8 ignore next -- accepted public batches are compiled from event metadata and have a reduce plan. */
+  if (!plan) return undefined;
 
-  const sourceCode = plan.acceptStateCodes[0];
-  const buckets = batch.store.acceptStateBucketsByEventCode[batch.eventCode];
-  if (!buckets || buckets.length !== 1 || buckets[0] !== accepted) return undefined;
+  for (const sourceCode of plan.acceptStateCodes) {
+    if (sourceCode >= 0 && batch.store.stateBuckets[sourceCode] === accepted) return sourceCode;
+  }
 
-  return sourceCode;
+  return undefined;
 };
 
-const applyIdentityDefaultTransitions = (
+const applySingleStateDefaultTransitions = (
   batch: ReducerBatch,
   accepted: readonly EntityIndex[],
 ): DefaultTransitionResult | undefined => {
-  const sourceCode = getSingleStateIdentitySource(batch, accepted);
+  const sourceCode = getAcceptedSingleStateSource(batch, accepted);
   if (sourceCode === undefined) return undefined;
 
-  syncPendingPrevStateCode(batch.store);
+  const store = batch.store;
+  const eventCode = batch.eventCode!;
+  const cell = eventCode * store.metadata.stateSlotCount + sourceCode + 1;
+  const targetCode = store.metadata.transitionTable[cell];
+
+  /* v8 ignore next -- accepted state bucket is built from accepting transition metadata. */
+  if (targetCode === ENTITY_NO_TRANSITION) return undefined;
+  if (targetCode === ENTITY_INVALID_TRANSITION_TARGET) {
+    throw runtimeError(
+      `actor '${store.templateKey}' transition '${batch.action.type}' targets unknown state '${store.metadata.transitionTargetByCell[cell]}'`,
+    );
+  }
+
+  if (targetCode === sourceCode) {
+    syncPendingPrevStateCode(store);
+    return {
+      firstNextState: getEntityStateName(store.metadata, sourceCode),
+      previousStateCodeForAccepted: sourceCode,
+      knownValidStateCodeForAccepted: sourceCode,
+    };
+  }
+
+  const previousStateCodeByEntity = store.prevStateCode;
+  const stateCodeByEntity = store.stateCode;
+  for (let index = 0; index < accepted.length; index += 1) {
+    const entity = accepted[index];
+    if (stateCodeByEntity[entity] !== sourceCode) {
+      throw runtimeError(
+        `actor '${store.templateKey}' has invalid stateCode ${stateCodeByEntity[entity]} for entity ${entity}`,
+      );
+    }
+    previousStateCodeByEntity[entity] = sourceCode;
+    stateCodeByEntity[entity] = targetCode;
+  }
 
   return {
-    firstNextState: getEntityStateName(batch.store.metadata, sourceCode),
+    firstNextState: getEntityStateName(store.metadata, targetCode),
     previousStateCodeForAccepted: sourceCode,
+    knownValidStateCodeForAccepted: targetCode,
   };
 };
 
@@ -482,6 +548,7 @@ const reduceAcceptedBatch = (
     let accepted: readonly EntityIndex[] = [];
     let firstNextState: string | undefined;
     let previousStateCodeForAccepted: number | undefined;
+    let knownValidStateCodeForAccepted: number | undefined;
     const defaultTransitionsStartedAt = trace?.now();
     try {
       accepted = getAcceptedIndices(batch);
@@ -489,6 +556,7 @@ const reduceAcceptedBatch = (
       const defaultTransitions = applyDefaultTransitions(batch, accepted);
       firstNextState = defaultTransitions.firstNextState;
       previousStateCodeForAccepted = defaultTransitions.previousStateCodeForAccepted;
+      knownValidStateCodeForAccepted = defaultTransitions.knownValidStateCodeForAccepted;
     } finally {
       recordEntityTracePhase(trace, "entities.reduce.publicBatch.defaultTransitions", defaultTransitionsStartedAt);
     }
@@ -523,6 +591,7 @@ const reduceAcceptedBatch = (
         accepted,
         getPostProcessingFlags(batch.store, plan, options),
         previousStateCodeForAccepted,
+        knownValidStateCodeForAccepted,
       );
     } finally {
       recordEntityTracePhase(trace, "entities.reduce.publicBatch.postProcess", postProcessStartedAt);
