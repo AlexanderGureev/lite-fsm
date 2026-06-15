@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { MachineManager } from "@lite-fsm/core";
+import { definePlugin, defineStorageRuntime, LiteFsmError, MachineManager } from "@lite-fsm/core";
 import {
   attachTransitionTraceSession,
   createTransitionTraceSession,
@@ -240,6 +240,98 @@ describe("core transition trace runtime", () => {
     expect(record.phases.find((phase) => phase.key === "core.bucket.reduce.instance")).toMatchObject({
       runtimeKind: "instance",
     });
+  });
+
+  it("включенный collector видит reduce phase для template-scoped storage runtime", () => {
+    const collector = installCollector();
+    const storage = defineStorageRuntime().create({
+      kind: "trace-template-storage",
+      validateTemplate() {},
+      compileTemplate() {},
+      createRuntimeState() {
+        return {};
+      },
+      createPublicInitialState() {
+        return { count: 0 };
+      },
+      acceptsEvent({ action }) {
+        return action.type === "TICK";
+      },
+      reduce({ dispatch, template }) {
+        const current = dispatch.nextState[template.key] as { readonly count: number };
+        dispatch.nextState = {
+          ...dispatch.nextState,
+          [template.key]: { count: current.count + 1 },
+        };
+      },
+      commit() {},
+    });
+    const plugin = definePlugin().create({ name: "trace-template-storage", storage: [storage] });
+    const manager = MachineManager(
+      {
+        counter: {
+          storage: "trace-template-storage",
+          config: { IDLE: { TICK: "IDLE" } },
+          initialState: "IDLE",
+          initialContext: {},
+        },
+      },
+      { plugins: [plugin] as const },
+    );
+
+    manager.transition({ type: "TICK" });
+
+    expect(manager.getState()).toEqual({ counter: { count: 1 } });
+    expect(collector.records[0]!.phases).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: "core.bucket.reduce.trace-template-storage",
+          runtimeKind: "trace-template-storage",
+        }),
+      ]),
+    );
+  });
+
+  it("skipDelivery записывает rootReducer phase при включенном collector", () => {
+    const collector = installCollector();
+    const plugin = definePlugin().create({
+      name: "trace-skip-delivery",
+      intercept() {
+        return { skipDelivery: true };
+      },
+    });
+    const manager = MachineManager(
+      {
+        counter: {
+          config: { IDLE: { GO: "ACTIVE" }, ACTIVE: {} },
+          initialState: "IDLE",
+          initialContext: {},
+        },
+      },
+      { plugins: [plugin] },
+    );
+
+    manager.transition({ type: "GO" });
+
+    expect(manager.getState().counter).toEqual({ state: "IDLE", context: {} });
+    expect(collector.records[0]!.phases.map((phase) => phase.key)).toContain("core.rootReducer");
+  });
+
+  it("записывает undefined actionType для action с нестроковым type", () => {
+    const collector = installCollector();
+    const manager = MachineManager({
+      counter: {
+        config: { IDLE: { GO: "ACTIVE" }, ACTIVE: {} },
+        initialState: "IDLE",
+        initialContext: {},
+      },
+    });
+    const action = { type: 1 } as never;
+
+    expect(() => manager.transition(action)).toThrow(LiteFsmError);
+
+    expect(manager.getState().counter).toEqual({ state: "IDLE", context: {} });
+    expect(collector.records[0]).toMatchObject({ actionType: undefined, depth: 0, status: "error" });
   });
 
   it("thrown reducer сохраняет исходную ошибку и завершает trace со статусом error", () => {
