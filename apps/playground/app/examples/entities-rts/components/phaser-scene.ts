@@ -48,6 +48,10 @@ const HP_BAR_OFFSET_SCALE = 0.9;
 const HP_BAR_BG_HEIGHT = 24;
 const HP_BAR_FILL_HEIGHT = 16;
 const HP_BAR_HORIZONTAL_PADDING = 14;
+const SIMULATION_TICK_RATE = 30;
+const FIXED_SIMULATION_STEP_MS = 1_000 / SIMULATION_TICK_RATE;
+const MAX_SIMULATION_FRAME_DELTA_MS = 100;
+const MAX_SIMULATION_STEPS_PER_FRAME = 4;
 
 type DragState = {
   start: Point;
@@ -274,8 +278,8 @@ class UnitSpriteRenderer {
 
     const highlight =
       this.selected.get(key) ??
-      this.scene
-        .add.image(units.movement.x[entity], units.movement.y[entity], TEXTURES.selected)
+      this.scene.add
+        .image(units.movement.x[entity], units.movement.y[entity], TEXTURES.selected)
         .setOrigin(0.5, 0.5)
         .setDepth(7);
 
@@ -396,6 +400,8 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
     private maxZoom = 1;
     private zoomMultiplier = 1;
     private startupCenterFrames = 8;
+    private simulationAccumulatorMs = 0;
+    private simulationNowMs = 0;
     private readonly pressedCameraKeys = new Set<string>();
 
     private readonly handleCameraZoomCommand = (event: Event) => {
@@ -473,18 +479,18 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
       this.bindInput();
     }
 
-    update(time: number, delta: number) {
+    update(_time: number, delta: number) {
       this.fitCameraToMap();
 
-      const deltaMs = Math.max(0, delta);
-      this.panCameraFromKeyboard(deltaMs);
-      metrics.recordFrame(deltaMs);
+      const frameDeltaMs = Math.max(0, delta);
+      const simulationDeltaMs = Math.min(MAX_SIMULATION_FRAME_DELTA_MS, frameDeltaMs);
+      this.panCameraFromKeyboard(frameDeltaMs);
+      metrics.recordFrame(frameDeltaMs);
 
       if (manager.getState().gameSession.state === "READY") {
-        const tickStartedAt = metrics.now();
-        manager.transition({ type: "TICK", payload: { now: time, deltaMs } });
-        metrics.recordTickMs(metrics.now() - tickStartedAt);
-        metrics.recordSimulationMetrics(readRtsSpatialMetrics(manager));
+        this.runFixedSimulation(simulationDeltaMs);
+      } else {
+        this.simulationAccumulatorMs = 0;
       }
 
       const syncStartedAt = metrics.now();
@@ -496,6 +502,28 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
         this.centerCameraOnMap();
         this.startupCenterFrames -= 1;
       }
+    }
+
+    private runFixedSimulation(frameDeltaMs: number) {
+      this.simulationAccumulatorMs += frameDeltaMs;
+
+      let steps = 0;
+      while (this.simulationAccumulatorMs >= FIXED_SIMULATION_STEP_MS && steps < MAX_SIMULATION_STEPS_PER_FRAME) {
+        this.simulationAccumulatorMs -= FIXED_SIMULATION_STEP_MS;
+        this.simulationNowMs += FIXED_SIMULATION_STEP_MS;
+
+        const tickStartedAt = metrics.now();
+        manager.transition({
+          type: "TICK",
+          payload: { now: this.simulationNowMs, deltaMs: FIXED_SIMULATION_STEP_MS },
+        });
+        metrics.recordTickMs(metrics.now() - tickStartedAt);
+        metrics.recordSimulationMetrics(readRtsSpatialMetrics(manager));
+
+        steps += 1;
+      }
+
+      if (steps === MAX_SIMULATION_STEPS_PER_FRAME) this.simulationAccumulatorMs = 0;
     }
 
     private fitCameraToMap() {
