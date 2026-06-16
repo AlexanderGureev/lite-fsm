@@ -12,12 +12,6 @@ export const ENEMY_INTENT = {
 
 export type Events = AppEvents;
 
-const distanceSquared = (leftX: number, leftY: number, rightX: number, rightY: number) => {
-  const dx = rightX - leftX;
-  const dy = rightY - leftY;
-  return dx * dx + dy * dy;
-};
-
 export const enemyAi = createMachine({
   storage: "entity",
   config: {
@@ -53,14 +47,25 @@ export const enemyAi = createMachine({
     const combat = access.get("unitCombat");
     const spatial = access.get("rtsSpatialIndex").index;
     const hero = spatial.heroEntity();
+    const combatAttackRange = combat.attackRange;
+    const healthHp = health.hp;
+    const identityRadius = identity.radius;
+    const movementX = movement.x;
+    const movementY = movement.y;
+    const heroAlive = hero !== null && isUnitAlive(health, hero);
+    const heroX = heroAlive ? movementX[hero] : 0;
+    const heroY = heroAlive ? movementY[hero] : 0;
+    const heroRadius = heroAlive ? identityRadius[hero] : 0;
 
     for (const entity of self.indices) {
       self.intent[entity] = ENEMY_INTENT.IDLE;
 
-      if (hero === null || !isUnitAlive(health, entity) || !isUnitAlive(health, hero)) continue;
+      if (!heroAlive || healthHp[entity] <= 0) continue;
 
-      const range = combat.attackRange[entity] + identity.radius[hero];
-      const distance = distanceSquared(movement.x[entity], movement.y[entity], movement.x[hero], movement.y[hero]);
+      const range = combatAttackRange[entity] + heroRadius;
+      const dx = heroX - movementX[entity];
+      const dy = heroY - movementY[entity];
+      const distance = dx * dx + dy * dy;
 
       self.intent[entity] = distance <= range * range ? ENEMY_INTENT.HOLD_ATTACK_RANGE : ENEMY_INTENT.CHASE_HERO;
     }

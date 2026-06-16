@@ -7,6 +7,7 @@ import {
   UNIT_COMMAND,
   UNIT_FACTION,
   UNIT_KIND,
+  type GameConfig,
 } from "../../../apps/playground/app/examples/entities-rts/store";
 import { createRtsMetricsAdapter } from "../../../apps/playground/app/examples/entities-rts/store/metrics";
 import { readUnitViews, unitSelected } from "../../../apps/playground/app/examples/entities-rts/store/selectors";
@@ -30,11 +31,24 @@ const runTicks = (manager: ReturnType<typeof makeTestStore>, count: number, delt
   }
 };
 
+const completeSpawn = (manager: ReturnType<typeof makeTestStore>) => {
+  for (let tick = 0; tick < 1_000 && manager.getState().gameSession.state !== "READY"; tick += 1) {
+    manager.transition({ type: "SPAWN_TICK", payload: { now: tick * 16, deltaMs: 16 } });
+  }
+
+  expect(manager.getState().gameSession.state).toBe("READY");
+};
+
+const startGame = (manager: ReturnType<typeof makeTestStore>, config: GameConfig) => {
+  manager.transition({ type: "GAME_START", payload: config });
+  completeSpawn(manager);
+};
+
 describe("runtime simulation для entities RTS", () => {
   it("выбирает только player units и очищает выбор при клике по enemy", () => {
     const manager = makeTestStore();
 
-    manager.transition({ type: "GAME_START", payload: { enemyCount: 2, allyCount: 2, seed: "selection" } });
+    startGame(manager, { enemyCount: 2, allyCount: 2, seed: "selection" });
 
     const units = readUnitViews(manager);
 
@@ -75,7 +89,7 @@ describe("runtime simulation для entities RTS", () => {
   it("назначает приказ движения выбранным units и сохраняет formation offsets", () => {
     const manager = makeTestStore();
 
-    manager.transition({ type: "GAME_START", payload: { enemyCount: 0, allyCount: 2, seed: "movement" } });
+    startGame(manager, { enemyCount: 0, allyCount: 2, seed: "movement" });
 
     const units = readUnitViews(manager);
     const beforeHeroX = units.movement.x[entity(0)];
@@ -106,7 +120,7 @@ describe("runtime simulation для entities RTS", () => {
   it("unitCommand сбрасывает arrived MOVE в IDLE на TICK", () => {
     const manager = makeTestStore();
 
-    manager.transition({ type: "GAME_START", payload: { enemyCount: 0, allyCount: 1, seed: "command-arrival" } });
+    startGame(manager, { enemyCount: 0, allyCount: 1, seed: "command-arrival" });
 
     const units = readUnitViews(manager);
     const hero = entity(0);
@@ -124,7 +138,7 @@ describe("runtime simulation для entities RTS", () => {
   it("enemyAi выставляет CHASE_HERO и HOLD_ATTACK_RANGE в контролируемом сценарии", () => {
     const manager = makeTestStore();
 
-    manager.transition({ type: "GAME_START", payload: { enemyCount: 1, allyCount: 1, seed: "enemy-intent" } });
+    startGame(manager, { enemyCount: 1, allyCount: 1, seed: "enemy-intent" });
 
     const units = readUnitViews(manager);
     const enemyAi = manager.entities().get("enemyAi");
@@ -149,7 +163,7 @@ describe("runtime simulation для entities RTS", () => {
   it("enemies атакуют hero через incomingDamage и unitHealth на одном TICK", () => {
     const manager = makeTestStore();
 
-    manager.transition({ type: "GAME_START", payload: { enemyCount: 1, allyCount: 1, seed: "incoming-damage" } });
+    startGame(manager, { enemyCount: 1, allyCount: 1, seed: "incoming-damage" });
 
     const units = readUnitViews(manager);
     const hero = entity(0);
@@ -169,7 +183,7 @@ describe("runtime simulation для entities RTS", () => {
   it("назначает attack-move и союзники удаляют погибших enemies через lifecycle", () => {
     const manager = makeTestStore();
 
-    manager.transition({ type: "GAME_START", payload: { enemyCount: 8, allyCount: 2, seed: "attack-move" } });
+    startGame(manager, { enemyCount: 8, allyCount: 2, seed: "attack-move" });
 
     const units = readUnitViews(manager);
     const initialCount = units.identity.count;
@@ -191,7 +205,7 @@ describe("runtime simulation для entities RTS", () => {
   it("enemy units идут к hero по tick simulation и атакуют его в радиусе", () => {
     const manager = makeTestStore();
 
-    manager.transition({ type: "GAME_START", payload: { enemyCount: 40, allyCount: 1, seed: "enemy-attack" } });
+    startGame(manager, { enemyCount: 40, allyCount: 1, seed: "enemy-attack" });
 
     const units = readUnitViews(manager);
     const hero = entity(0);
@@ -207,7 +221,7 @@ describe("runtime simulation для entities RTS", () => {
   it("смерть hero переводит gameSession в GAME_OVER", () => {
     const manager = makeTestStore();
 
-    manager.transition({ type: "GAME_START", payload: { enemyCount: 300, allyCount: 1, seed: "hero-death" } });
+    startGame(manager, { enemyCount: 300, allyCount: 1, seed: "hero-death" });
 
     for (let tick = 0; tick < 150 && manager.getState().gameSession.state !== "GAME_OVER"; tick += 1) {
       manager.transition({ type: "TICK", payload: { now: tick * 1_000, deltaMs: 1_000 } });

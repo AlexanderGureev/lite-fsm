@@ -6,7 +6,7 @@ import type { MetricsAdapter } from "../store/metrics";
 import { entityIdForUnitIndex, readUnitViews, unitSelected, type UnitViews } from "../store/selectors";
 import { RTS_MAP } from "../store/spawn/placement";
 import type { Point } from "../store/types";
-import { UNIT_FACTION, UNIT_KIND } from "../store/unit-model";
+import { UNIT_FACTION, UNIT_KIND, UNIT_SELECTION } from "../store/unit-model";
 
 export type PhaserApi = typeof import("phaser");
 
@@ -52,6 +52,8 @@ const SIMULATION_TICK_RATE = 30;
 const FIXED_SIMULATION_STEP_MS = 1_000 / SIMULATION_TICK_RATE;
 const MAX_SIMULATION_FRAME_DELTA_MS = 100;
 const MAX_SIMULATION_STEPS_PER_FRAME = 4;
+const MAX_SPAWN_STEPS_PER_FRAME = 1;
+const SPAWN_RENDER_CREATE_BUDGET = 768;
 
 type DragState = {
   start: Point;
@@ -60,6 +62,8 @@ type DragState = {
 
 type UnitView = {
   sprite: PhaserImage;
+  hpRate: number;
+  kind: number;
 };
 
 type HpBarView = {
@@ -192,6 +196,7 @@ class UnitSpriteRenderer {
   private readonly selected = new Map<number, PhaserImage>();
   private readonly hpBars = new Map<number, HpBarView>();
   private readonly liveEntities = new Set<number>();
+  private loadingSyncCursor = 0;
 
   constructor(
     private readonly scene: import("phaser").Scene,
@@ -210,11 +215,13 @@ class UnitSpriteRenderer {
     this.selected.clear();
     this.hpBars.clear();
     this.liveEntities.clear();
+    this.loadingSyncCursor = 0;
   }
 
   sync() {
     const units = readUnitViews(this.manager);
     this.liveEntities.clear();
+    this.loadingSyncCursor = units.identity.count;
 
     for (let index = 0; index < units.capacity; index += 1) {
       const entity = index as EntityIndex;
@@ -227,45 +234,87 @@ class UnitSpriteRenderer {
     this.cleanupMissing();
   }
 
+  syncLoading(maxCreates: number) {
+    const units = readUnitViews(this.manager);
+    const capacity = units.capacity;
+    let created = 0;
+    let index = Math.min(this.loadingSyncCursor, capacity);
+
+    while (index < capacity && created < maxCreates) {
+      const entity = index as EntityIndex;
+      if (isUnitAlive(units.health, entity) && !this.sprites.has(index)) {
+        this.syncUnit(units, entity);
+        created += 1;
+      }
+
+      index += 1;
+    }
+
+    this.loadingSyncCursor = index;
+  }
+
   private syncUnit(units: UnitViews, entity: EntityIndex) {
     const key = Number(entity);
     const kind = units.identity.kind[entity];
     const size = displaySizeForKind(kind);
     const texture = textureForKind(kind);
-    const view = this.sprites.get(key) ?? this.createUnitView(key, units, entity, texture);
+    const view = this.sprites.get(key) ?? this.createUnitView(key, units, entity, kind, texture, size);
     const hpRate = Math.max(0, Math.min(1, units.health.hp[entity] / units.health.maxHp[entity]));
 
-    view.sprite.setTexture(texture);
     view.sprite.setPosition(units.movement.x[entity], units.movement.y[entity]);
-    view.sprite.setDepth(depthForKind(kind));
-    view.sprite.setDisplaySize(size, size);
-    view.sprite.setAlpha(0.74 + hpRate * 0.26);
 
-    if (kind === UNIT_KIND.ENEMY && hpRate < 0.5) {
-      view.sprite.setTint(0xffc05b);
-    } else if (kind === UNIT_KIND.HERO && hpRate < 0.25) {
-      view.sprite.setTint(0xff786b);
-    } else {
-      view.sprite.clearTint();
+    if (view.kind !== kind) {
+      view.kind = kind;
+      view.sprite.setTexture(texture);
+      view.sprite.setDepth(depthForKind(kind));
+      view.sprite.setDisplaySize(size, size);
     }
 
-    this.syncSelection(units, entity, size);
-    this.syncHpBar(units, entity, size, hpRate);
+    if (view.hpRate !== hpRate) {
+      view.hpRate = hpRate;
+      view.sprite.setAlpha(0.74 + hpRate * 0.26);
+
+      if (kind === UNIT_KIND.ENEMY && hpRate < 0.5) {
+        view.sprite.setTint(0xffc05b);
+      } else if (kind === UNIT_KIND.HERO && hpRate < 0.25) {
+        view.sprite.setTint(0xff786b);
+      } else {
+        view.sprite.clearTint();
+      }
+    }
+
+    if (kind === UNIT_KIND.ENEMY && hpRate >= 1) return;
+
+    const selected = unitSelected(units, entity);
+    this.syncSelection(units, entity, size, kind, selected);
+    this.syncHpBar(units, entity, size, kind, selected, hpRate);
   }
 
-  private createUnitView(key: number, units: UnitViews, entity: EntityIndex, texture: string) {
+  private createUnitView(
+    key: number,
+    units: UnitViews,
+    entity: EntityIndex,
+    kind: number,
+    texture: string,
+    size: number,
+  ) {
     const view = {
-      sprite: this.scene.add.image(units.movement.x[entity], units.movement.y[entity], texture).setOrigin(0.5, 0.5),
+      hpRate: -1,
+      kind,
+      sprite: this.scene.add
+        .image(units.movement.x[entity], units.movement.y[entity], texture)
+        .setOrigin(0.5, 0.5)
+        .setDepth(depthForKind(kind))
+        .setDisplaySize(size, size),
     };
 
     this.sprites.set(key, view);
     return view;
   }
 
-  private syncSelection(units: UnitViews, entity: EntityIndex, size: number) {
+  private syncSelection(units: UnitViews, entity: EntityIndex, size: number, kind: number, selected: number) {
     const key = Number(entity);
-    const selected = unitSelected(units, entity);
-    const shouldShow = selected === 1 || units.identity.kind[entity] === UNIT_KIND.HERO;
+    const shouldShow = selected === UNIT_SELECTION.SELECTED || kind === UNIT_KIND.HERO;
 
     if (!shouldShow) {
       const stale = this.selected.get(key);
@@ -286,16 +335,20 @@ class UnitSpriteRenderer {
     this.selected.set(key, highlight);
     highlight.setPosition(units.movement.x[entity], units.movement.y[entity]);
     highlight.setDisplaySize(size * 1.5, size * 1.5);
-    highlight.setAlpha(selected === 1 ? 0.95 : 0.34);
+    highlight.setAlpha(selected === UNIT_SELECTION.SELECTED ? 0.95 : 0.34);
   }
 
-  private syncHpBar(units: UnitViews, entity: EntityIndex, size: number, hpRate: number) {
+  private syncHpBar(
+    units: UnitViews,
+    entity: EntityIndex,
+    size: number,
+    kind: number,
+    selected: number,
+    hpRate: number,
+  ) {
     const key = Number(entity);
-    const selected = unitSelected(units, entity);
     const shouldShow =
-      units.identity.kind[entity] === UNIT_KIND.HERO ||
-      selected === 1 ||
-      (units.identity.kind[entity] === UNIT_KIND.ENEMY && hpRate < 1);
+      kind === UNIT_KIND.HERO || selected === UNIT_SELECTION.SELECTED || (kind === UNIT_KIND.ENEMY && hpRate < 1);
 
     if (!shouldShow) {
       const stale = this.hpBars.get(key);
@@ -415,6 +468,8 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
     private readonly handleWindowKeyDown = (event: KeyboardEvent) => {
       if (keyboardTargetIsEditable(event.target)) return;
 
+      if (manager.getState().gameSession.state === "SPAWNING") return;
+
       const panVector = cameraPanVectorForCode(event.code);
       if (panVector) {
         event.preventDefault();
@@ -484,17 +539,24 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
 
       const frameDeltaMs = Math.max(0, delta);
       const simulationDeltaMs = Math.min(MAX_SIMULATION_FRAME_DELTA_MS, frameDeltaMs);
-      this.panCameraFromKeyboard(frameDeltaMs);
+      const sessionState = manager.getState().gameSession.state;
+      if (sessionState !== "SPAWNING") this.panCameraFromKeyboard(frameDeltaMs);
       metrics.recordFrame(frameDeltaMs);
 
-      if (manager.getState().gameSession.state === "READY") {
-        this.runFixedSimulation(simulationDeltaMs);
+      if (sessionState === "READY") {
+        this.runFixedSimulation(simulationDeltaMs, "TICK");
+      } else if (sessionState === "SPAWNING") {
+        this.runFixedSimulation(simulationDeltaMs, "SPAWN_TICK");
       } else {
         this.simulationAccumulatorMs = 0;
       }
 
       const syncStartedAt = metrics.now();
-      this.unitRenderer?.sync();
+      if (sessionState === "SPAWNING") {
+        this.unitRenderer?.syncLoading(SPAWN_RENDER_CREATE_BUDGET);
+      } else {
+        this.unitRenderer?.sync();
+      }
       metrics.recordSyncMs(metrics.now() - syncStartedAt);
       metrics.publish();
 
@@ -504,26 +566,27 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
       }
     }
 
-    private runFixedSimulation(frameDeltaMs: number) {
+    private runFixedSimulation(frameDeltaMs: number, actionType: "TICK" | "SPAWN_TICK") {
       this.simulationAccumulatorMs += frameDeltaMs;
 
+      const maxSteps = actionType === "SPAWN_TICK" ? MAX_SPAWN_STEPS_PER_FRAME : MAX_SIMULATION_STEPS_PER_FRAME;
       let steps = 0;
-      while (this.simulationAccumulatorMs >= FIXED_SIMULATION_STEP_MS && steps < MAX_SIMULATION_STEPS_PER_FRAME) {
+      while (this.simulationAccumulatorMs >= FIXED_SIMULATION_STEP_MS && steps < maxSteps) {
         this.simulationAccumulatorMs -= FIXED_SIMULATION_STEP_MS;
         this.simulationNowMs += FIXED_SIMULATION_STEP_MS;
 
         const tickStartedAt = metrics.now();
         manager.transition({
-          type: "TICK",
+          type: actionType,
           payload: { now: this.simulationNowMs, deltaMs: FIXED_SIMULATION_STEP_MS },
         });
         metrics.recordTickMs(metrics.now() - tickStartedAt);
-        metrics.recordSimulationMetrics(readRtsSpatialMetrics(manager));
+        if (actionType === "TICK") metrics.recordSimulationMetrics(readRtsSpatialMetrics(manager));
 
         steps += 1;
       }
 
-      if (steps === MAX_SIMULATION_STEPS_PER_FRAME) this.simulationAccumulatorMs = 0;
+      if (steps === maxSteps) this.simulationAccumulatorMs = 0;
     }
 
     private fitCameraToMap() {
@@ -720,7 +783,7 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
         return;
       }
 
-      const entityId = entityIdForUnitIndex(units, entity, manager.getState().gameSession.context.config.allyCount);
+      const entityId = entityIdForUnitIndex(units, entity);
       if (!entityId) {
         manager.transition({ type: "CLEAR_SELECTION" });
         return;

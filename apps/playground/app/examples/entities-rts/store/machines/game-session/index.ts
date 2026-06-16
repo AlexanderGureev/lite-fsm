@@ -18,7 +18,11 @@ export const gameSession = createMachine({
   config: {
     CONFIGURING: {
       GAME_CONFIG_CHANGED: null,
-      GAME_START: "READY",
+      GAME_START: "SPAWNING",
+    },
+    SPAWNING: {
+      GAME_SPAWN_COMPLETED: "READY",
+      GAME_RESTART: "CONFIGURING",
     },
     READY: {
       GAME_PAUSE: "PAUSED",

@@ -6,6 +6,7 @@ import type { RuntimeDeps } from "./deps";
 import { enemyAi } from "./machines/enemy-ai";
 import { gameMap } from "./machines/game-map";
 import { gameSession } from "./machines/game-session";
+import { gameSpawn } from "./machines/game-spawn";
 import { rtsSpatialIndex } from "./machines/rts-spatial-index";
 import { unitCombat } from "./machines/unit-combat";
 import { unitCommand } from "./machines/unit-command";
@@ -14,13 +15,29 @@ import { unitIdentity } from "./machines/unit-identity";
 import { unitMovement } from "./machines/unit-movement";
 import { unitOrders } from "./machines/unit-orders";
 import { unitSelection } from "./machines/unit-selection";
-import { createGameStartSpawnPlan } from "./spawn/placement";
+import { createEnemySpawnBatchPlan, createGameStartSpawnPlan, createPlayerSpawnBatchPlan } from "./spawn/placement";
 import { spawnEvents } from "./spawn-events";
+import type { PlannedUnitSpawn } from "./unit-model";
 import type { AppEvents } from "./types";
+
+const unitToEntitySpawnSpec = (unit: PlannedUnitSpawn) => ({
+  id: unit.id,
+  groupTag: unit.groupTag,
+  actors: {
+    unitIdentity: unit.identity,
+    unitMovement: unit.movement,
+    unitHealth: unit.health,
+    unitCombat: unit.combat,
+    ...(unit.selection ? { unitSelection: unit.selection } : {}),
+    ...(unit.command ? { unitCommand: unit.command } : {}),
+    ...(unit.enemyAi ? { enemyAi: unit.enemyAi } : {}),
+  },
+});
 
 export const machines = {
   gameMap,
   gameSession,
+  gameSpawn,
   unitOrders,
   unitIdentity,
   rtsSpatialIndex,
@@ -40,19 +57,7 @@ export const spawn = defineEntitySpawn(
   spawnEvents,
 )({
   GAME_START: (payload) => [
-    ...createGameStartSpawnPlan(payload).map((unit) => ({
-      id: unit.id,
-      groupTag: unit.groupTag,
-      actors: {
-        unitIdentity: unit.identity,
-        unitMovement: unit.movement,
-        unitHealth: unit.health,
-        unitCombat: unit.combat,
-        ...(unit.selection ? { unitSelection: unit.selection } : {}),
-        ...(unit.command ? { unitCommand: unit.command } : {}),
-        ...(unit.enemyAi ? { enemyAi: unit.enemyAi } : {}),
-      },
-    })),
+    ...createGameStartSpawnPlan(payload).map(unitToEntitySpawnSpec),
     {
       id: "system/rts-spatial-index",
       groupTag: "system",
@@ -61,6 +66,8 @@ export const spawn = defineEntitySpawn(
       },
     },
   ],
+  SPAWN_PLAYER_BATCH: (payload) => createPlayerSpawnBatchPlan(payload).map(unitToEntitySpawnSpec),
+  SPAWN_ENEMY_BATCH: (payload) => createEnemySpawnBatchPlan(payload).map(unitToEntitySpawnSpec),
 });
 
 export const makeStore = (deps: RuntimeDeps) => {

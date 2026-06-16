@@ -58,6 +58,7 @@ export const unitCommand = createMachine({
         const access = entities();
         const movement = access.get("unitMovement");
         const health = access.get("unitHealth");
+        const maxArrivalDistanceSquared = TARGET_ARRIVAL_DISTANCE * TARGET_ARRIVAL_DISTANCE;
 
         for (const entity of self.indices) {
           if (!isUnitAlive(health, entity)) continue;
@@ -65,7 +66,7 @@ export const unitCommand = createMachine({
 
           const dx = self.targetX[entity] - movement.x[entity];
           const dy = self.targetY[entity] - movement.y[entity];
-          if (Math.hypot(dx, dy) > TARGET_ARRIVAL_DISTANCE) continue;
+          if (dx * dx + dy * dy > maxArrivalDistanceSquared) continue;
 
           self.command[entity] = UNIT_COMMAND.IDLE;
         }

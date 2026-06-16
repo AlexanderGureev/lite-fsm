@@ -1,5 +1,5 @@
-import { applyGameConfigPatch, DEFAULT_GAME_CONFIG } from "../config";
-import type { GameConfig } from "../types";
+import { normalizeGameConfig } from "../config";
+import type { GameConfig, UnitSpawnBatchPayload } from "../types";
 import {
   UNIT_COMMAND,
   UNIT_FACTION,
@@ -11,7 +11,6 @@ import {
   type UnitIdentitySpawnPayload,
   type UnitMovementSpawnPayload,
 } from "../unit-model";
-import { createFormationTargets } from "../machines/unit-orders/formation";
 import { createSeededRandom, randomBetween, randomInt } from "./random";
 
 export const RTS_MAP = {
@@ -24,6 +23,10 @@ export const RTS_MAP = {
 const ENEMY_GROUP_SIZE = 80;
 const ENEMY_EDGE_PADDING = 160;
 const ENEMY_GROUP_SPREAD = 220;
+const PLAYER_FORMATION_SPACING = 24;
+
+export const DEFAULT_ENEMY_SPAWN_BATCH_SIZE = 512;
+export const DEFAULT_PLAYER_SPAWN_BATCH_SIZE = 512;
 
 const heroStats = {
   radius: 18,
@@ -66,6 +69,7 @@ const createUnitComponents = (values: UnitSpawnValues): Omit<PlannedUnitSpawn, "
       kind: values.kind,
       faction: values.faction,
       radius: values.radius,
+      unitIndex: values.unitIndex,
     },
     movement: {
       x: values.x,
@@ -127,10 +131,143 @@ const enemyAnchorForGroup = (group: number, random: () => number) => {
 
 const clampToMap = (value: number, max: number) => Math.min(max, Math.max(0, value));
 
+const playerFormationPointForIndex = (config: GameConfig, allyIndex: number) => {
+  const unitCount = Math.max(0, Math.trunc(config.allyCount));
+  const index = Math.max(0, Math.trunc(allyIndex));
+  const columns = Math.ceil(Math.sqrt(unitCount));
+  const rows = Math.ceil(unitCount / columns);
+  const left = ((columns - 1) * PLAYER_FORMATION_SPACING) / 2;
+  const top = ((rows - 1) * PLAYER_FORMATION_SPACING) / 2;
+  const column = index % columns;
+  const row = Math.floor(index / columns);
+
+  return {
+    x: RTS_MAP.centerX + column * PLAYER_FORMATION_SPACING - left,
+    y: RTS_MAP.centerY + 84 + row * PLAYER_FORMATION_SPACING - top,
+  };
+};
+
+const createEnemyAnchors = (config: GameConfig) => {
+  const groupCount = Math.max(1, Math.ceil(config.enemyCount / ENEMY_GROUP_SIZE));
+  const anchorX = new Float32Array(groupCount);
+  const anchorY = new Float32Array(groupCount);
+  const random = createSeededRandom(config.seed);
+
+  for (let group = 0; group < groupCount; group += 1) {
+    const anchor = enemyAnchorForGroup(group, random);
+    anchorX[group] = anchor.x;
+    anchorY[group] = anchor.y;
+  }
+
+  return { anchorX, anchorY, groupCount };
+};
+
+const createEnemyUnit = (
+  config: GameConfig,
+  anchors: ReturnType<typeof createEnemyAnchors>,
+  enemyIndex: number,
+): PlannedUnitSpawn => {
+  const random = createSeededRandom(`${config.seed}:enemy:${enemyIndex}`);
+  const group = randomInt(random, 0, anchors.groupCount);
+  const angle = randomBetween(random, 0, Math.PI * 2);
+  const distance = randomBetween(random, 0, ENEMY_GROUP_SPREAD);
+  const x = clampToMap(anchors.anchorX[group] + Math.cos(angle) * distance, RTS_MAP.width);
+  const y = clampToMap(anchors.anchorY[group] + Math.sin(angle) * distance, RTS_MAP.height);
+
+  return {
+    id: `unit/enemy/${enemyIndex}`,
+    groupTag: "enemy",
+    ...createUnitComponents({
+      x,
+      y,
+      kind: UNIT_KIND.ENEMY,
+      faction: UNIT_FACTION.ENEMY,
+      unitIndex: enemyIndex,
+      ...enemyStats,
+    }),
+  };
+};
+
+const createPlayerUnit = (config: GameConfig, allyIndex: number): PlannedUnitSpawn => {
+  const point = playerFormationPointForIndex(config, allyIndex);
+  const playerUnitHp = config.playerUnitHp;
+
+  return {
+    id: `unit/ally/${allyIndex}`,
+    groupTag: "player",
+    ...createUnitComponents({
+      x: point.x,
+      y: point.y,
+      kind: UNIT_KIND.ALLY,
+      faction: UNIT_FACTION.PLAYER,
+      unitIndex: allyIndex,
+      formationOffsetX: point.x - RTS_MAP.centerX,
+      formationOffsetY: point.y - RTS_MAP.centerY,
+      ...allyStats,
+      hp: playerUnitHp ?? allyStats.hp,
+    }),
+  };
+};
+
+export const playerSpawnBatchCount = (targetPlayerUnitCount: number, spawnedPlayerUnitCount: number) =>
+  Math.min(
+    DEFAULT_PLAYER_SPAWN_BATCH_SIZE,
+    Math.max(0, Math.trunc(targetPlayerUnitCount) - Math.max(0, Math.trunc(spawnedPlayerUnitCount))),
+  );
+
+export const enemySpawnBatchCount = (targetEnemyCount: number, spawnedEnemyCount: number) =>
+  Math.min(
+    DEFAULT_ENEMY_SPAWN_BATCH_SIZE,
+    Math.max(0, Math.trunc(targetEnemyCount) - Math.max(0, Math.trunc(spawnedEnemyCount))),
+  );
+
+export const initialPlayerSpawnBatchCount = (config: GameConfig) =>
+  playerSpawnBatchCount(normalizeGameConfig(config).allyCount, 0);
+
+export const initialEnemySpawnBatchCount = (config: GameConfig) => {
+  const normalized = normalizeGameConfig(config);
+
+  return initialPlayerSpawnBatchCount(normalized) >= normalized.allyCount
+    ? enemySpawnBatchCount(normalized.enemyCount, 0)
+    : 0;
+};
+
+export const createPlayerSpawnBatchPlan = (payload: UnitSpawnBatchPayload): readonly PlannedUnitSpawn[] => {
+  const config = normalizeGameConfig(payload.config);
+  const start = Math.min(config.allyCount, Math.max(0, Math.trunc(payload.start)));
+  const count = Math.min(Math.max(0, Math.trunc(payload.count)), config.allyCount - start);
+  if (count <= 0) return [];
+
+  const plan = new Array<PlannedUnitSpawn>(count);
+
+  for (let offset = 0; offset < count; offset += 1) {
+    plan[offset] = createPlayerUnit(config, start + offset);
+  }
+
+  return plan;
+};
+
+export const createEnemySpawnBatchPlan = (payload: UnitSpawnBatchPayload): readonly PlannedUnitSpawn[] => {
+  const config = normalizeGameConfig(payload.config);
+  const start = Math.min(config.enemyCount, Math.max(0, Math.trunc(payload.start)));
+  const count = Math.min(Math.max(0, Math.trunc(payload.count)), config.enemyCount - start);
+  if (count <= 0) return [];
+
+  const anchors = createEnemyAnchors(config);
+  const plan = new Array<PlannedUnitSpawn>(count);
+
+  for (let offset = 0; offset < count; offset += 1) {
+    plan[offset] = createEnemyUnit(config, anchors, start + offset);
+  }
+
+  return plan;
+};
+
 export const createGameStartSpawnPlan = (config: GameConfig): readonly PlannedUnitSpawn[] => {
-  const normalized = applyGameConfigPatch(DEFAULT_GAME_CONFIG, config);
-  const random = createSeededRandom(normalized.seed);
-  const plan = new Array<PlannedUnitSpawn>(normalized.enemyCount + normalized.allyCount + 1);
+  const normalized = normalizeGameConfig(config);
+  const initialPlayerUnitCount = initialPlayerSpawnBatchCount(normalized);
+  const initialEnemyCount = initialEnemySpawnBatchCount(normalized);
+  const plan = new Array<PlannedUnitSpawn>(initialPlayerUnitCount + initialEnemyCount + 1);
   const playerUnitHp = normalized.playerUnitHp;
   const heroX = RTS_MAP.centerX;
   const heroY = RTS_MAP.centerY;
@@ -144,62 +281,30 @@ export const createGameStartSpawnPlan = (config: GameConfig): readonly PlannedUn
       y: heroY,
       kind: UNIT_KIND.HERO,
       faction: UNIT_FACTION.PLAYER,
+      unitIndex: 0,
       ...heroStats,
       hp: playerUnitHp ?? heroStats.hp,
     }),
   };
   cursor += 1;
 
-  const allyTargets = createFormationTargets({ x: heroX, y: heroY + 84 }, normalized.allyCount, { spacing: 24 });
-  for (let index = 0; index < allyTargets.count; index += 1) {
-    const x = allyTargets.x[index];
-    const y = allyTargets.y[index];
-
-    plan[cursor] = {
-      id: `unit/ally/${index}`,
-      groupTag: "player",
-      ...createUnitComponents({
-        x,
-        y,
-        kind: UNIT_KIND.ALLY,
-        faction: UNIT_FACTION.PLAYER,
-        formationOffsetX: x - heroX,
-        formationOffsetY: y - heroY,
-        ...allyStats,
-        hp: playerUnitHp ?? allyStats.hp,
-      }),
-    };
+  const players = createPlayerSpawnBatchPlan({
+    config: normalized,
+    start: 0,
+    count: initialPlayerUnitCount,
+  });
+  for (const player of players) {
+    plan[cursor] = player;
     cursor += 1;
   }
 
-  const groupCount = Math.max(1, Math.ceil(normalized.enemyCount / ENEMY_GROUP_SIZE));
-  const anchorX = new Float32Array(groupCount);
-  const anchorY = new Float32Array(groupCount);
-
-  for (let group = 0; group < groupCount; group += 1) {
-    const anchor = enemyAnchorForGroup(group, random);
-    anchorX[group] = anchor.x;
-    anchorY[group] = anchor.y;
-  }
-
-  for (let index = 0; index < normalized.enemyCount; index += 1) {
-    const group = randomInt(random, 0, groupCount);
-    const angle = randomBetween(random, 0, Math.PI * 2);
-    const distance = randomBetween(random, 0, ENEMY_GROUP_SPREAD);
-    const x = clampToMap(anchorX[group] + Math.cos(angle) * distance, RTS_MAP.width);
-    const y = clampToMap(anchorY[group] + Math.sin(angle) * distance, RTS_MAP.height);
-
-    plan[cursor] = {
-      id: `unit/enemy/${index}`,
-      groupTag: "enemy",
-      ...createUnitComponents({
-        x,
-        y,
-        kind: UNIT_KIND.ENEMY,
-        faction: UNIT_FACTION.ENEMY,
-        ...enemyStats,
-      }),
-    };
+  const enemies = createEnemySpawnBatchPlan({
+    config: normalized,
+    start: 0,
+    count: initialEnemyCount,
+  });
+  for (const enemy of enemies) {
+    plan[cursor] = enemy;
     cursor += 1;
   }
 

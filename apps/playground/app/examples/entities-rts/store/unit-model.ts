@@ -24,6 +24,7 @@ export type UnitIdentitySpawnPayload = {
   kind: number;
   faction: number;
   radius: number;
+  unitIndex: number;
 };
 
 export type UnitMovementSpawnPayload = {

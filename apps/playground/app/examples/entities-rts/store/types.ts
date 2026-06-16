@@ -13,6 +13,12 @@ export type GameConfig = {
 
 export type GameConfigPatch = Partial<GameConfig>;
 
+export type UnitSpawnBatchPayload = {
+  config: GameConfig;
+  start: number;
+  count: number;
+};
+
 export type Point = {
   x: number;
   y: number;
@@ -26,6 +32,10 @@ export type SelectionRect = Point & {
 export type AppEvents =
   | FSMEvent<"GAME_CONFIG_CHANGED", GameConfigPatch>
   | FSMEvent<"GAME_START", GameConfig>
+  | FSMEvent<"SPAWN_TICK", { now: number; deltaMs: number }>
+  | FSMEvent<"SPAWN_PLAYER_BATCH", UnitSpawnBatchPayload>
+  | FSMEvent<"SPAWN_ENEMY_BATCH", UnitSpawnBatchPayload>
+  | FSMEvent<"GAME_SPAWN_COMPLETED">
   | FSMEvent<"GAME_RESTART">
   | FSMEvent<"GAME_PAUSE">
   | FSMEvent<"GAME_RESUME">

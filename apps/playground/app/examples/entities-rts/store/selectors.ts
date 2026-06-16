@@ -36,13 +36,13 @@ export type UnitViews = ReturnType<typeof readUnitViews>;
 export const unitSelected = (units: UnitViews, entity: EntityIndex) =>
   units.selection.has(entity) ? units.selection.selected[entity] : UNIT_SELECTION.UNSELECTED;
 
-export const entityIdForUnitIndex = (units: UnitViews, entity: EntityIndex, allyCount: number): string | null => {
+export const entityIdForUnitIndex = (units: UnitViews, entity: EntityIndex): string | null => {
   const kind = units.identity.kind[entity];
-  const index = Number(entity);
+  const unitIndex = units.identity.unitIndex[entity];
 
   if (kind === UNIT_KIND.HERO) return "unit/hero";
-  if (kind === UNIT_KIND.ALLY && index > 0) return `unit/ally/${index - 1}`;
-  if (kind === UNIT_KIND.ENEMY) return `unit/enemy/${index - allyCount - 1}`;
+  if (kind === UNIT_KIND.ALLY && unitIndex >= 0) return `unit/ally/${unitIndex}`;
+  if (kind === UNIT_KIND.ENEMY && unitIndex >= 0) return `unit/enemy/${unitIndex}`;
 
   return null;
 };

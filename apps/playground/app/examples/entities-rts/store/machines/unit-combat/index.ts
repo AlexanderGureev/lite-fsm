@@ -7,12 +7,6 @@ import { isUnitAlive } from "../unit-health";
 
 const TARGET_BUFFER_SIZE = 64;
 
-const distanceSquared = (leftX: number, leftY: number, rightX: number, rightY: number) => {
-  const dx = rightX - leftX;
-  const dy = rightY - leftY;
-  return dx * dx + dy * dy;
-};
-
 export type Events = AppEvents;
 
 export const unitCombat = createMachine({
@@ -67,49 +61,61 @@ export const unitCombat = createMachine({
         const health = access.get("unitHealth");
         const spatial = access.get("rtsSpatialIndex").index;
         const hero = spatial.heroEntity();
+        const attackCooldownMs = self.attackCooldownMs;
+        const attackDamage = self.attackDamage;
+        const attackRange = self.attackRange;
+        const attackTimerMs = self.attackTimerMs;
+        const incomingDamage = self.incomingDamage;
+        const healthHp = health.hp;
+        const identityFaction = identity.faction;
+        const identityRadius = identity.radius;
+        const movementX = movement.x;
+        const movementY = movement.y;
+        const heroAlive = hero !== null && isUnitAlive(health, hero);
+        const heroX = heroAlive ? movementX[hero] : 0;
+        const heroY = heroAlive ? movementY[hero] : 0;
+        const heroRadius = heroAlive ? identityRadius[hero] : 0;
 
-        const inRange = (attacker: EntityIndex, target: EntityIndex) => {
-          const range = self.attackRange[attacker] + identity.radius[target];
-          const distance = distanceSquared(movement.x[attacker], movement.y[attacker], movement.x[target], movement.y[target]);
-          return distance <= range * range;
-        };
-
-        const nearestEnemy = (attacker: EntityIndex): EntityIndex | null => {
-          const count = spatial.collectEnemyNeighborsAt(movement.x[attacker], movement.y[attacker], self.targetBuffer);
-          let nearest: EntityIndex | null = null;
-          let nearestDistance = Number.POSITIVE_INFINITY;
-
-          for (let index = 0; index < count; index += 1) {
-            const candidate = self.targetBuffer[index] as EntityIndex;
-            if (!isUnitAlive(health, candidate) || identity.faction[candidate] !== UNIT_FACTION.ENEMY) continue;
-            if (!inRange(attacker, candidate)) continue;
-
-            const distance = distanceSquared(movement.x[attacker], movement.y[attacker], movement.x[candidate], movement.y[candidate]);
-            if (distance >= nearestDistance) continue;
-
-            nearest = candidate;
-            nearestDistance = distance;
-          }
-
-          return nearest;
-        };
-
-        const heroTarget = (attacker: EntityIndex): EntityIndex | null =>
-          hero !== null && isUnitAlive(health, hero) && inRange(attacker, hero) ? hero : null;
-
-        for (const entity of self.indices) self.incomingDamage[entity] = 0;
+        for (const entity of self.indices) incomingDamage[entity] = 0;
 
         for (const entity of self.indices) {
-          if (!isUnitAlive(health, entity)) continue;
+          if (healthHp[entity] <= 0) continue;
 
-          self.attackTimerMs[entity] = Math.max(0, self.attackTimerMs[entity] - deltaMs);
-          if (self.attackTimerMs[entity] > 0) continue;
+          attackTimerMs[entity] = Math.max(0, attackTimerMs[entity] - deltaMs);
+          if (attackTimerMs[entity] > 0) continue;
 
-          const target = identity.faction[entity] === UNIT_FACTION.PLAYER ? nearestEnemy(entity) : heroTarget(entity);
+          let target: EntityIndex | null = null;
+          const attackerX = movementX[entity];
+          const attackerY = movementY[entity];
+          const rangeBase = attackRange[entity];
+
+          if (identityFaction[entity] === UNIT_FACTION.PLAYER) {
+            const count = spatial.collectEnemyNeighborsAt(attackerX, attackerY, self.targetBuffer);
+            let nearestDistance = Number.POSITIVE_INFINITY;
+
+            for (let index = 0; index < count; index += 1) {
+              const candidate = self.targetBuffer[index] as EntityIndex;
+              const range = rangeBase + identityRadius[candidate];
+              const dx = movementX[candidate] - attackerX;
+              const dy = movementY[candidate] - attackerY;
+              const distance = dx * dx + dy * dy;
+
+              if (distance > range * range || distance >= nearestDistance) continue;
+
+              target = candidate;
+              nearestDistance = distance;
+            }
+          } else if (heroAlive) {
+            const range = rangeBase + heroRadius;
+            const dx = heroX - attackerX;
+            const dy = heroY - attackerY;
+            if (dx * dx + dy * dy <= range * range) target = hero;
+          }
+
           if (target === null) continue;
 
-          self.incomingDamage[target] += self.attackDamage[entity];
-          self.attackTimerMs[entity] = self.attackCooldownMs[entity];
+          incomingDamage[target] += attackDamage[entity];
+          attackTimerMs[entity] = attackCooldownMs[entity];
         }
         return;
       }

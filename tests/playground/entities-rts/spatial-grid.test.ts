@@ -8,7 +8,8 @@ import {
   resetSpatialGrid,
 } from "../../../apps/playground/app/examples/entities-rts/store/machines/rts-spatial-index/spatial-grid";
 
-const readNeighbors = (buffer: Int32Array, count: number) => Array.from(buffer.slice(0, count)).sort((left, right) => left - right);
+const readNeighbors = (buffer: Int32Array, count: number) =>
+  Array.from(buffer.slice(0, count)).sort((left, right) => left - right);
 
 describe("spatial grid для RTS", () => {
   it("строит grid за один проход и ищет только соседние клетки", () => {
@@ -43,6 +44,22 @@ describe("spatial grid для RTS", () => {
     );
 
     expect(collectSpatialNeighbors(grid, { x: 1, y: 1 }, out)).toBe(2);
+  });
+
+  it("ограничивает число samples явным лимитом", () => {
+    const grid = createSpatialGrid({ width: 32, height: 32, cellSize: 16, maxEntities: 4 });
+    const out = new Int32Array(4);
+
+    buildSpatialGrid(
+      grid,
+      {
+        x: Float32Array.from([2, 4, 6, 8]),
+        y: Float32Array.from([2, 4, 6, 8]),
+      },
+      4,
+    );
+
+    expect(collectSpatialNeighbors(grid, { x: 1, y: 1 }, out, 3)).toBe(3);
   });
 
   it("строит grid по sparse entity indices после lifecycle removal", () => {

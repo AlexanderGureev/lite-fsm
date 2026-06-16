@@ -4,12 +4,12 @@ import { createMachine } from "../../create-machine";
 import { RTS_MAP } from "../../spawn/placement";
 import type { AppEvents, Point } from "../../types";
 import { UNIT_FACTION, UNIT_KIND } from "../../unit-model";
-import { isUnitAlive } from "../unit-health";
 import { createFlowField, flowCellIndexForPoint, readFlowDirectionAt, type FlowField } from "./flow-field";
 import {
-  buildSpatialGridForEntities,
   collectSpatialNeighborsAt,
   createSpatialGrid,
+  insertSpatialGridEntityAt,
+  resetSpatialGridHeads,
   resetSpatialGrid,
   type SpatialGrid,
 } from "./spatial-grid";
@@ -26,8 +26,8 @@ export type RtsSimulationMetrics = {
 export type RtsSpatialIndexView = {
   heroEntity(): EntityIndex | null;
   heroPosition(out: Point): Point | null;
-  collectUnitNeighborsAt(x: number, y: number, out: Int32Array): number;
-  collectEnemyNeighborsAt(x: number, y: number, out: Int32Array): number;
+  collectUnitNeighborsAt(x: number, y: number, out: Int32Array, limit?: number): number;
+  collectEnemyNeighborsAt(x: number, y: number, out: Int32Array, limit?: number): number;
   readFlowDirectionAt(x: number, y: number, out: Point): Point;
   readMetrics(): RtsSimulationMetrics;
 };
@@ -76,8 +76,8 @@ const exposeRtsSpatialIndexView = (resource: RtsSpatialIndexResource): RtsSpatia
     out.y = resource.heroY;
     return out;
   },
-  collectUnitNeighborsAt: (x, y, out) => collectSpatialNeighborsAt(resource.unitGrid, x, y, out),
-  collectEnemyNeighborsAt: (x, y, out) => collectSpatialNeighborsAt(resource.enemyGrid, x, y, out),
+  collectUnitNeighborsAt: (x, y, out, limit) => collectSpatialNeighborsAt(resource.unitGrid, x, y, out, limit),
+  collectEnemyNeighborsAt: (x, y, out, limit) => collectSpatialNeighborsAt(resource.enemyGrid, x, y, out, limit),
   readFlowDirectionAt(x, y, out) {
     if (resource.hero === null || resource.flowField === null) {
       out.x = 0;
@@ -147,8 +147,11 @@ export const rtsSpatialIndex = createMachine({
     const movement = access.get("unitMovement");
     const health = access.get("unitHealth");
     const capacity = slotCount(movement.x);
-    const aliveEntities: EntityIndex[] = [];
-    const enemyEntities: EntityIndex[] = [];
+    const healthHp = health.hp;
+    const identityFaction = identity.faction;
+    const identityKind = identity.kind;
+    const movementX = movement.x;
+    const movementY = movement.y;
 
     self.index.metrics.flowFieldRebuildMs = 0;
     self.index.metrics.spatialGridBuildMs = 0;
@@ -158,25 +161,29 @@ export const rtsSpatialIndex = createMachine({
     self.index.unitGrid = ensureGridCapacity(self.index.unitGrid, UNIT_GRID_CELL_SIZE, capacity);
     self.index.enemyGrid = ensureGridCapacity(self.index.enemyGrid, ENEMY_LOOKUP_CELL_SIZE, capacity);
 
+    const spatialStartedAt = now();
+    resetSpatialGridHeads(self.index.unitGrid);
+    resetSpatialGridHeads(self.index.enemyGrid);
+
     for (let index = 0; index < capacity; index += 1) {
       const entity = index as EntityIndex;
-      if (!isUnitAlive(health, entity)) continue;
+      if (!health.has(entity) || healthHp[entity] <= 0) continue;
 
-      aliveEntities.push(entity);
+      const x = movementX[entity];
+      const y = movementY[entity];
+      insertSpatialGridEntityAt(self.index.unitGrid, entity, x, y);
 
-      if (identity.kind[entity] === UNIT_KIND.HERO) {
+      if (identityKind[entity] === UNIT_KIND.HERO) {
         self.index.hero = entity;
-        self.index.heroX = movement.x[entity];
-        self.index.heroY = movement.y[entity];
+        self.index.heroX = x;
+        self.index.heroY = y;
       }
 
-      if (identity.faction[entity] === UNIT_FACTION.ENEMY) enemyEntities.push(entity);
+      if (identityFaction[entity] === UNIT_FACTION.ENEMY) {
+        insertSpatialGridEntityAt(self.index.enemyGrid, entity, x, y);
+      }
     }
 
-    const positions = { x: movement.x, y: movement.y };
-    const spatialStartedAt = now();
-    buildSpatialGridForEntities(self.index.unitGrid, positions, aliveEntities);
-    buildSpatialGridForEntities(self.index.enemyGrid, positions, enemyEntities);
     self.index.metrics.spatialGridBuildMs = now() - spatialStartedAt;
 
     if (self.index.hero === null) {

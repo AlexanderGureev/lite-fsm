@@ -7,6 +7,7 @@ import {
   ActivityIcon,
   Gamepad2Icon,
   HeartPulseIcon,
+  LoaderCircleIcon,
   PauseIcon,
   PlayIcon,
   RotateCcwIcon,
@@ -462,13 +463,28 @@ function OverlaySeparator() {
 function ArmedShell({ manager, metrics }: { manager: AppStore; metrics: MetricsAdapter }) {
   const transition = useTransition();
   const state = useSelector((snapshot) => snapshot.gameSession);
+  const spawnState = useSelector((snapshot) => snapshot.gameSpawn);
   const config = state.context.config;
+  const isSpawning = state.state === "SPAWNING";
   const isPaused = state.state === "PAUSED";
   const isGameOver = state.state === "GAME_OVER";
   const stats = useRtsEntityStats(manager, state.state !== "CONFIGURING");
   const performanceMetrics = useRtsPerformanceMetrics(metrics, state.state !== "CONFIGURING");
   const heroPercent = stats.heroMaxHp > 0 ? Math.max(0, Math.round((stats.heroHp / stats.heroMaxHp) * 100)) : 0;
-  const statusLabel = isGameOver ? "GAME OVER" : isPaused ? "PAUSED" : "LIVE";
+  const spawnTarget = spawnState.context.targetPlayerUnitCount + spawnState.context.targetEnemyCount;
+  const spawnedPlayerUnits = spawnState.context.spawnedPlayerUnitCount;
+  const spawnedEnemies = spawnState.context.spawnedEnemyCount;
+  const spawnedUnits = spawnedPlayerUnits + spawnedEnemies;
+  const spawnProgress = spawnTarget > 0 ? Math.min(100, Math.round((spawnedUnits / spawnTarget) * 100)) : 100;
+  const statusLabel = isGameOver ? "GAME OVER" : isPaused ? "PAUSED" : isSpawning ? "SPAWNING" : "LIVE";
+  const enemySpawnDetail =
+    spawnState.state === "IDLE" ? "complete" : `${formatCount(spawnState.context.enemyBatchSize)}/batch`;
+  const playerSpawnDetail =
+    spawnState.state === "IDLE" ? "complete" : `${formatCount(spawnState.context.playerBatchSize)}/batch`;
+  const activeSpawnBatchSize =
+    spawnedPlayerUnits < spawnState.context.targetPlayerUnitCount
+      ? spawnState.context.playerBatchSize
+      : spawnState.context.enemyBatchSize;
 
   return (
     <section className="relative min-h-[calc(100svh-6.5rem)] w-full overflow-hidden bg-[#101612]">
@@ -486,7 +502,8 @@ function ArmedShell({ manager, metrics }: { manager: AppStore; metrics: MetricsA
             <span
               className={cn(
                 "inline-flex h-7 items-center rounded-pill px-2.5 text-fine-print font-semibold",
-                !isPaused && !isGameOver && "bg-[#66f0a7]/16 text-[#9cf4c3]",
+                !isPaused && !isGameOver && !isSpawning && "bg-[#66f0a7]/16 text-[#9cf4c3]",
+                isSpawning && "bg-[#8fd4ff]/16 text-[#b7e6ff]",
                 isPaused && "bg-[#f6e27a]/18 text-[#f6e27a]",
                 isGameOver && "bg-[#ff786b]/18 text-[#ff9a90]",
               )}
@@ -497,7 +514,7 @@ function ArmedShell({ manager, metrics }: { manager: AppStore; metrics: MetricsA
               type="button"
               variant="ghost"
               onClick={() => transition({ type: isPaused ? "GAME_RESUME" : "GAME_PAUSE" })}
-              disabled={isGameOver}
+              disabled={isGameOver || isSpawning}
               className="h-9 rounded-pill bg-[#f4faf5] px-3 text-caption-strong text-[#151916] hover:bg-[#d8f4e4]"
             >
               {isPaused ? <PlayIcon data-icon="inline-start" /> : <PauseIcon data-icon="inline-start" />}
@@ -614,6 +631,20 @@ function ArmedShell({ manager, metrics }: { manager: AppStore; metrics: MetricsA
                 <span className="text-caption-strong text-[#f4faf5]">{formatCount(config.enemyCount)}</span>
               </div>
               <div className="flex items-center justify-between gap-3">
+                <span>spawned player units</span>
+                <span className="text-caption-strong text-[#f4faf5]">
+                  {formatCount(spawnedPlayerUnits)}/{formatCount(spawnState.context.targetPlayerUnitCount)}
+                  <span className="ml-2 font-normal text-[#b8c5bd]">{playerSpawnDetail}</span>
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span>spawned enemies</span>
+                <span className="text-caption-strong text-[#f4faf5]">
+                  {formatCount(spawnState.context.spawnedEnemyCount)}/{formatCount(spawnState.context.targetEnemyCount)}
+                  <span className="ml-2 font-normal text-[#b8c5bd]">{enemySpawnDetail}</span>
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
                 <span>runs</span>
                 <span className="text-caption-strong text-[#f4faf5]">{state.context.startedRuns}</span>
               </div>
@@ -652,6 +683,44 @@ function ArmedShell({ manager, metrics }: { manager: AppStore; metrics: MetricsA
           </div>
         </div>
       </div>
+
+      {isSpawning ? (
+        <div className="absolute inset-0 z-30 grid place-items-center bg-[#101612]/82 px-4 text-center backdrop-blur-[2px]">
+          <div className="flex w-full max-w-md flex-col items-center gap-4 rounded-lg border border-[#d7f6e0]/16 bg-[#151916]/96 px-6 py-6 text-[#f4faf5] shadow-product sm:px-8 sm:py-7">
+            <span className="flex size-12 items-center justify-center rounded-md border border-[#8fd4ff]/30 bg-[#8fd4ff]/12 text-[#b7e6ff]">
+              <LoaderCircleIcon className="size-6 animate-spin" />
+            </span>
+            <div className="grid gap-1">
+              <span className="text-fine-print font-semibold tracking-[0.08em] text-[#8fd4ff] uppercase">
+                SPAWNING
+              </span>
+              <p className="text-tagline text-[#f4faf5]">Forces loading</p>
+            </div>
+            <div className="w-full">
+              <div className="mb-2 flex items-center justify-between gap-3 text-caption text-[#b8c5bd]">
+                <span>{formatCount(spawnedUnits)} units</span>
+                <span>{formatCount(spawnTarget)}</span>
+              </div>
+              <div className="h-2.5 overflow-hidden rounded-pill bg-[#253329]">
+                <div
+                  className="h-full rounded-pill bg-[#8fd4ff] transition-all duration-150"
+                  style={{ width: `${spawnProgress}%` }}
+                />
+              </div>
+              <div className="mt-2 flex items-center justify-between gap-3 text-caption text-[#819289]">
+                <span>{spawnProgress}%</span>
+                <span>
+                  {formatCount(spawnedPlayerUnits)}/{formatCount(spawnState.context.targetPlayerUnitCount)} players
+                </span>
+              </div>
+              <div className="mt-1 flex items-center justify-between gap-3 text-caption text-[#819289]">
+                <span>{formatCount(spawnedEnemies)}/{formatCount(spawnState.context.targetEnemyCount)} enemies</span>
+                <span>{formatCount(activeSpawnBatchSize)}/batch</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {isPaused ? (
         <div className="absolute inset-0 z-20 grid place-items-center bg-[#101612]/72 px-4 text-center">

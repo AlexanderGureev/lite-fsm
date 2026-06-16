@@ -19,12 +19,28 @@ const tick = (manager: ReturnType<typeof makeTestStore>) => {
   manager.transition({ type: "TICK", payload: { now: 16, deltaMs: 16 } });
 };
 
+const completeSpawn = (manager: ReturnType<typeof makeTestStore>) => {
+  for (let frame = 0; frame < 1_000 && manager.getState().gameSession.state !== "READY"; frame += 1) {
+    manager.transition({ type: "SPAWN_TICK", payload: { now: frame * 16, deltaMs: 16 } });
+  }
+
+  expect(manager.getState().gameSession.state).toBe("READY");
+};
+
+const startGame = (
+  manager: ReturnType<typeof makeTestStore>,
+  payload: { enemyCount: number; allyCount: number; seed: string },
+) => {
+  manager.transition({ type: "GAME_START", payload });
+  completeSpawn(manager);
+};
+
 describe("rtsSpatialIndex для entities RTS", () => {
   it("после GAME_START и TICK публикует hero через query-only view", () => {
     const manager = makeTestStore();
     const out = { x: 0, y: 0 };
 
-    manager.transition({ type: "GAME_START", payload: { enemyCount: 2, allyCount: 1, seed: "spatial-hero" } });
+    startGame(manager, { enemyCount: 2, allyCount: 1, seed: "spatial-hero" });
     tick(manager);
 
     const view = manager.entities().get("rtsSpatialIndex").index;
@@ -36,7 +52,7 @@ describe("rtsSpatialIndex для entities RTS", () => {
   it("возвращает enemy neighbors из enemyGrid", () => {
     const manager = makeTestStore();
 
-    manager.transition({ type: "GAME_START", payload: { enemyCount: 2, allyCount: 1, seed: "spatial-enemies" } });
+    startGame(manager, { enemyCount: 2, allyCount: 1, seed: "spatial-enemies" });
     tick(manager);
 
     const units = readUnitViews(manager);
@@ -52,7 +68,7 @@ describe("rtsSpatialIndex для entities RTS", () => {
     const manager = makeTestStore();
     const out = new Int32Array(8);
 
-    manager.transition({ type: "GAME_START", payload: { enemyCount: 2, allyCount: 1, seed: "spatial-reset-a" } });
+    startGame(manager, { enemyCount: 2, allyCount: 1, seed: "spatial-reset-a" });
     tick(manager);
 
     const units = readUnitViews(manager);
@@ -68,7 +84,7 @@ describe("rtsSpatialIndex для entities RTS", () => {
     expect(view.heroEntity()).toBeNull();
     expect(view.collectEnemyNeighborsAt(staleX, staleY, out)).toBe(0);
 
-    manager.transition({ type: "GAME_START", payload: { enemyCount: 0, allyCount: 1, seed: "spatial-reset-b" } });
+    startGame(manager, { enemyCount: 0, allyCount: 1, seed: "spatial-reset-b" });
     tick(manager);
 
     expect(view.heroEntity()).not.toBeNull();
@@ -79,7 +95,7 @@ describe("rtsSpatialIndex для entities RTS", () => {
   it("публикует timings через readMetrics", () => {
     const manager = makeTestStore();
 
-    manager.transition({ type: "GAME_START", payload: { enemyCount: 1, allyCount: 1, seed: "spatial-metrics" } });
+    startGame(manager, { enemyCount: 1, allyCount: 1, seed: "spatial-metrics" });
     tick(manager);
 
     const metrics = manager.entities().get("rtsSpatialIndex").index.readMetrics();

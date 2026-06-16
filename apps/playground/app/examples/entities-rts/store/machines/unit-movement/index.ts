@@ -5,14 +5,12 @@ import { RTS_MAP } from "../../spawn/placement";
 import type { AppEvents } from "../../types";
 import { UNIT_COMMAND, UNIT_FACTION } from "../../unit-model";
 import { ENEMY_INTENT } from "../enemy-ai";
-import { isUnitAlive } from "../unit-health";
 
 const TARGET_ARRIVAL_DISTANCE = 6;
 const SEPARATION_FORCE = 1.4;
 const SEPARATION_SAMPLE_LIMIT = 12;
-const NEIGHBOR_BUFFER_SIZE = 64;
-
-const clampToMap = (value: number, max: number) => Math.min(max, Math.max(0, value));
+const SEPARATION_COLLECT_LIMIT = 12;
+const NEIGHBOR_BUFFER_SIZE = SEPARATION_COLLECT_LIMIT;
 
 export type Events = AppEvents;
 
@@ -70,74 +68,67 @@ export const unitMovement = createMachine({
         const command = access.get("unitCommand");
         const enemyAi = access.get("enemyAi");
         const spatial = access.get("rtsSpatialIndex").index;
+        const commandValue = command.command;
+        const commandTargetX = command.targetX;
+        const commandTargetY = command.targetY;
+        const enemyIntent = enemyAi.intent;
+        const healthHp = health.hp;
+        const identityFaction = identity.faction;
+        const identityRadius = identity.radius;
+        const movementSpeed = self.speed;
+        const movementVx = self.vx;
+        const movementVy = self.vy;
+        const movementX = self.x;
+        const movementY = self.y;
 
-        const stop = (entity: EntityIndex) => {
-          self.vx[entity] = 0;
-          self.vy[entity] = 0;
-        };
+        for (const entity of self.indices) {
+          if (healthHp[entity] <= 0) {
+            movementVx[entity] = 0;
+            movementVy[entity] = 0;
+            continue;
+          }
 
-        const readSeparation = (entity: EntityIndex) => {
-          const neighborCount = spatial.collectUnitNeighborsAt(self.x[entity], self.y[entity], self.neighborBuffer);
-          let x = 0;
-          let y = 0;
+          const entityX = movementX[entity];
+          const entityY = movementY[entity];
+          const neighborCount = spatial.collectUnitNeighborsAt(
+            entityX,
+            entityY,
+            self.neighborBuffer,
+            SEPARATION_COLLECT_LIMIT,
+          );
+          let separationX = 0;
+          let separationY = 0;
           let samples = 0;
 
           for (let index = 0; index < neighborCount && samples < SEPARATION_SAMPLE_LIMIT; index += 1) {
             const neighbor = self.neighborBuffer[index] as EntityIndex;
-            if (neighbor === entity || !isUnitAlive(health, neighbor)) continue;
+            if (neighbor === entity || healthHp[neighbor] <= 0) continue;
 
-            const awayX = self.x[entity] - self.x[neighbor];
-            const awayY = self.y[entity] - self.y[neighbor];
-            const minDistance = identity.radius[entity] + identity.radius[neighbor] + 4;
+            const awayX = entityX - movementX[neighbor];
+            const awayY = entityY - movementY[neighbor];
+            const minDistance = identityRadius[entity] + identityRadius[neighbor] + 4;
             const currentDistanceSquared = awayX * awayX + awayY * awayY;
 
             if (currentDistanceSquared <= 0 || currentDistanceSquared >= minDistance * minDistance) continue;
 
             const currentDistance = Math.sqrt(currentDistanceSquared);
             const strength = (minDistance - currentDistance) / minDistance;
-            x += (awayX / currentDistance) * strength;
-            y += (awayY / currentDistance) * strength;
+            separationX += (awayX / currentDistance) * strength;
+            separationY += (awayY / currentDistance) * strength;
             samples += 1;
           }
 
-          return { x, y };
-        };
-
-        const moveBy = (entity: EntityIndex, desiredX: number, desiredY: number) => {
-          const length = Math.hypot(desiredX, desiredY);
-
-          if (length <= 0.0001 || deltaSeconds === 0) {
-            stop(entity);
-            return;
-          }
-
-          const vx = (desiredX / length) * self.speed[entity];
-          const vy = (desiredY / length) * self.speed[entity];
-
-          self.vx[entity] = vx;
-          self.vy[entity] = vy;
-          self.x[entity] = clampToMap(self.x[entity] + vx * deltaSeconds, RTS_MAP.width);
-          self.y[entity] = clampToMap(self.y[entity] + vy * deltaSeconds, RTS_MAP.height);
-        };
-
-        for (const entity of self.indices) {
-          if (!isUnitAlive(health, entity)) {
-            stop(entity);
-            continue;
-          }
-
-          const separation = readSeparation(entity);
-          let desiredX = separation.x * SEPARATION_FORCE;
-          let desiredY = separation.y * SEPARATION_FORCE;
+          let desiredX = separationX * SEPARATION_FORCE;
+          let desiredY = separationY * SEPARATION_FORCE;
+          const faction = identityFaction[entity];
 
           if (
-            identity.faction[entity] === UNIT_FACTION.PLAYER &&
-            command.has(entity) &&
-            (command.command[entity] === UNIT_COMMAND.MOVE || command.command[entity] === UNIT_COMMAND.ATTACK_MOVE)
+            faction === UNIT_FACTION.PLAYER &&
+            (commandValue[entity] === UNIT_COMMAND.MOVE || commandValue[entity] === UNIT_COMMAND.ATTACK_MOVE)
           ) {
-            const targetDx = command.targetX[entity] - self.x[entity];
-            const targetDy = command.targetY[entity] - self.y[entity];
-            const targetDistance = Math.hypot(targetDx, targetDy);
+            const targetDx = commandTargetX[entity] - entityX;
+            const targetDy = commandTargetY[entity] - entityY;
+            const targetDistance = Math.sqrt(targetDx * targetDx + targetDy * targetDy);
 
             if (targetDistance > TARGET_ARRIVAL_DISTANCE) {
               desiredX += targetDx / targetDistance;
@@ -145,15 +136,31 @@ export const unitMovement = createMachine({
             }
           }
 
-          if (identity.faction[entity] === UNIT_FACTION.ENEMY && enemyAi.has(entity)) {
-            if (enemyAi.intent[entity] === ENEMY_INTENT.CHASE_HERO) {
-              spatial.readFlowDirectionAt(self.x[entity], self.y[entity], self.flowDirection);
+          if (faction === UNIT_FACTION.ENEMY) {
+            if (enemyIntent[entity] === ENEMY_INTENT.CHASE_HERO) {
+              spatial.readFlowDirectionAt(entityX, entityY, self.flowDirection);
               desiredX += self.flowDirection.x;
               desiredY += self.flowDirection.y;
             }
           }
 
-          moveBy(entity, desiredX, desiredY);
+          const length = Math.sqrt(desiredX * desiredX + desiredY * desiredY);
+
+          if (length <= 0.0001 || deltaSeconds === 0) {
+            movementVx[entity] = 0;
+            movementVy[entity] = 0;
+            continue;
+          }
+
+          const vx = (desiredX / length) * movementSpeed[entity];
+          const vy = (desiredY / length) * movementSpeed[entity];
+          const nextX = entityX + vx * deltaSeconds;
+          const nextY = entityY + vy * deltaSeconds;
+
+          movementVx[entity] = vx;
+          movementVy[entity] = vy;
+          movementX[entity] = nextX < 0 ? 0 : nextX > RTS_MAP.width ? RTS_MAP.width : nextX;
+          movementY[entity] = nextY < 0 ? 0 : nextY > RTS_MAP.height ? RTS_MAP.height : nextY;
         }
         return;
       }

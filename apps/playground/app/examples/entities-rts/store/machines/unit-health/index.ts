@@ -6,15 +6,16 @@ import { UNIT_KIND } from "../../unit-model";
 
 export type Events = AppEvents;
 
-// unitHealth владеет жизненным циклом ALIVE/DEAD, поэтому "жив ли юнит" — это одна
-// проверка состояния, а не набор условий по нескольким store. Мертвые не-герои
-// деспавнятся в том же TICK, а смерть героя останавливает симуляцию, поэтому любой
-// присутствующий юнит, который читает система, считается живым, если состояние ALIVE.
+// unitHealth владеет жизненным циклом ALIVE/DEAD и колонкой `hp`. В горячем пути
+// признак жизни читается из собственной колонки, чтобы reducers не выполняли
+// строковую проверку состояния для каждого соседнего юнита.
 type UnitHealthLiveness = {
-  state(entity: EntityIndex): string | undefined;
+  has(entity: EntityIndex): boolean;
+  readonly hp: { readonly [entity: number]: number };
 };
 
-export const isUnitAlive = (health: UnitHealthLiveness, entity: EntityIndex) => health.state(entity) === "ALIVE";
+export const isUnitAlive = (health: UnitHealthLiveness, entity: EntityIndex) =>
+  health.has(entity) && health.hp[entity] > 0;
 
 export const unitHealth = createMachine({
   storage: "entity",
@@ -65,7 +66,6 @@ export const unitHealth = createMachine({
         }
         return;
       }
-
     }
   },
   effects: {

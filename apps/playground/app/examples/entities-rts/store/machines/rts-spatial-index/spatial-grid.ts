@@ -28,11 +28,15 @@ const assertPositiveGridConfig = (config: SpatialGridConfig) => {
   }
 };
 
-const clamp = (value: number, max: number) => Math.min(max, Math.max(0, value));
+const clampGridCoordinate = (value: number, max: number) => {
+  if (value <= 0) return 0;
+  if (value >= max) return max;
+  return value;
+};
 
 const cellIndexForCoordinates = (grid: Pick<SpatialGrid, "columns" | "rows" | "cellSize">, x: number, y: number) => {
-  const column = clamp(Math.floor(x / grid.cellSize), grid.columns - 1);
-  const row = clamp(Math.floor(y / grid.cellSize), grid.rows - 1);
+  const column = clampGridCoordinate(Math.floor(x / grid.cellSize), grid.columns - 1);
+  const row = clampGridCoordinate(Math.floor(y / grid.cellSize), grid.rows - 1);
   return row * grid.columns + column;
 };
 
@@ -62,14 +66,30 @@ export const resetSpatialGrid = (grid: SpatialGrid) => {
   grid.next.fill(-1);
 };
 
+export const resetSpatialGridHeads = (grid: SpatialGrid) => {
+  grid.heads.fill(-1);
+};
+
+export const insertSpatialGridEntity = (grid: SpatialGrid, positions: SpatialGridPositions, entity: number) => {
+  if (entity < 0 || entity >= grid.next.length) return;
+
+  insertSpatialGridEntityAt(grid, entity, positions.x[entity], positions.y[entity]);
+};
+
+export const insertSpatialGridEntityAt = (grid: SpatialGrid, entity: number, x: number, y: number) => {
+  if (entity < 0 || entity >= grid.next.length) return;
+
+  const cell = cellIndexForCoordinates(grid, x, y);
+  grid.next[entity] = grid.heads[cell];
+  grid.heads[cell] = entity;
+};
+
 export const buildSpatialGrid = (grid: SpatialGrid, positions: SpatialGridPositions, count: number) => {
   resetSpatialGrid(grid);
 
   const boundedCount = Math.min(Math.max(0, Math.trunc(count)), grid.next.length);
   for (let entity = 0; entity < boundedCount; entity += 1) {
-    const cell = cellIndexForCoordinates(grid, positions.x[entity], positions.y[entity]);
-    grid.next[entity] = grid.heads[cell];
-    grid.heads[cell] = entity;
+    insertSpatialGridEntity(grid, positions, entity);
   }
 };
 
@@ -81,18 +101,24 @@ export const buildSpatialGridForEntities = (
   resetSpatialGrid(grid);
 
   for (const entity of entities) {
-    if (entity < 0 || entity >= grid.next.length) continue;
-
-    const cell = cellIndexForCoordinates(grid, positions.x[entity], positions.y[entity]);
-    grid.next[entity] = grid.heads[cell];
-    grid.heads[cell] = entity;
+    insertSpatialGridEntity(grid, positions, entity);
   }
 };
 
-export const collectSpatialNeighborsAt = (grid: SpatialGrid, x: number, y: number, out: Int32Array) => {
+export const collectSpatialNeighborsAt = (
+  grid: SpatialGrid,
+  x: number,
+  y: number,
+  out: Int32Array,
+  limit = out.length,
+) => {
   let count = 0;
-  const centerColumn = clamp(Math.floor(x / grid.cellSize), grid.columns - 1);
-  const centerRow = clamp(Math.floor(y / grid.cellSize), grid.rows - 1);
+  const boundedLimit = limit < out.length ? limit : out.length;
+  const maxCount = boundedLimit > 0 ? boundedLimit | 0 : 0;
+  if (maxCount === 0) return 0;
+
+  const centerColumn = clampGridCoordinate(Math.floor(x / grid.cellSize), grid.columns - 1);
+  const centerRow = clampGridCoordinate(Math.floor(y / grid.cellSize), grid.rows - 1);
   const minColumn = Math.max(0, centerColumn - 1);
   const maxColumn = Math.min(grid.columns - 1, centerColumn + 1);
   const minRow = Math.max(0, centerRow - 1);
@@ -105,7 +131,7 @@ export const collectSpatialNeighborsAt = (grid: SpatialGrid, x: number, y: numbe
       for (let entity = grid.heads[cell]; entity !== -1; entity = grid.next[entity]) {
         out[count] = entity;
         count += 1;
-        if (count === out.length) return count;
+        if (count === maxCount) return count;
       }
     }
   }
@@ -113,5 +139,5 @@ export const collectSpatialNeighborsAt = (grid: SpatialGrid, x: number, y: numbe
   return count;
 };
 
-export const collectSpatialNeighbors = (grid: SpatialGrid, point: Point, out: Int32Array) =>
-  collectSpatialNeighborsAt(grid, point.x, point.y, out);
+export const collectSpatialNeighbors = (grid: SpatialGrid, point: Point, out: Int32Array, limit?: number) =>
+  collectSpatialNeighborsAt(grid, point.x, point.y, out, limit);
