@@ -10,6 +10,8 @@ export type ReadonlyEntityColumn<T> = {
   readonly [entity: EntityIndex]: T;
 };
 
+type Prettify<Value> = { [Key in keyof Value]: Value[Key] } & {};
+
 type EntityActorMachine = {
   readonly storage: "entity";
   readonly config: object;
@@ -40,7 +42,7 @@ export type EntityStateFor<
 type EntityActorStoreViewFor<
   AppMachines extends MachineStore,
   Key extends EntityActorKey<AppMachines>,
-> = {
+> = Prettify<{
   readonly count: number;
   readonly version: number;
   has(entity: EntityIndex): boolean;
@@ -49,7 +51,7 @@ type EntityActorStoreViewFor<
   readonly [Field in keyof EntityContextFor<AppMachines, Key>]: ReadonlyEntityColumn<
     EntityContextFor<AppMachines, Key>[Field]
   >;
-};
+}>;
 
 export type EntityAccess<AppMachines extends MachineStore> = {
   get<Key extends EntityActorKey<AppMachines>>(key: Key): EntityActorStoreViewFor<AppMachines, Key>;

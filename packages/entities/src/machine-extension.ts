@@ -15,6 +15,8 @@ import type { EntityAccess, ReadonlyEntityColumn } from "./runtime/access";
 
 export declare const entityStateMetadata: unique symbol;
 
+type Prettify<Value> = { [Key in keyof Value]: Value[Key] } & {};
+
 export type EntityMachineInput<
   ContextSchema extends EntityContextSchema = EntityContextSchema,
   SpawnSchema extends EntitySpawnSchema = EntitySpawnSchema,
@@ -104,17 +106,15 @@ type AnyEntityMachineStore = Record<
 >;
 
 type EntityReducerEntityAccess<AppDeps> =
-  AppDeps extends { readonly entities: () => infer Access }
-    ? Access extends EntityAccess<infer _AppMachines extends MachineStore>
-      ? Access
-      : EntityAccess<AnyEntityMachineStore>
+  AppDeps extends { readonly entities: () => EntityAccess<infer AppMachines extends MachineStore> }
+    ? EntityAccess<AppMachines>
     : EntityAccess<AnyEntityMachineStore>;
 
 export type EntityReducerStates<Config extends object> = {
   readonly [State in ActorPublicState<Config>]: number;
 };
 
-export type EntityReducerSelf<ContextSchema extends EntityContextSchema, Config extends object = object> = {
+export type EntityReducerSelf<ContextSchema extends EntityContextSchema, Config extends object = object> = Prettify<{
   readonly indices: readonly EntityIndex[];
   readonly states: EntityReducerStates<Config>;
   readonly presence: Uint8Array;
@@ -123,9 +123,9 @@ export type EntityReducerSelf<ContextSchema extends EntityContextSchema, Config 
   readonly rowVersion: Uint32Array;
   has(entity: EntityIndex): boolean;
   entityId(entity: EntityIndex): string;
-} & EntityReducerColumns<ContextSchema>;
+} & EntityReducerColumns<ContextSchema>>;
 
-export type EntityEffectSelf<ContextSchema extends EntityContextSchema, Config extends object = object> = {
+export type EntityEffectSelf<ContextSchema extends EntityContextSchema, Config extends object = object> = Prettify<{
   readonly indices: readonly EntityIndex[];
   readonly states: EntityReducerStates<Config>;
   readonly presence: ReadonlyEntityColumn<number>;
@@ -134,7 +134,7 @@ export type EntityEffectSelf<ContextSchema extends EntityContextSchema, Config e
   readonly rowVersion: ReadonlyEntityColumn<number>;
   has(entity: EntityIndex): boolean;
   entityId(entity: EntityIndex): string;
-} & EntityEffectColumns<ContextSchema>;
+} & EntityEffectColumns<ContextSchema>>;
 
 type EntityPlainAction<Events extends AnyEvent> = Events & { readonly meta?: never };
 
