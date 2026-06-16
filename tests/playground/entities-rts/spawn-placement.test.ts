@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   createGameStartSpawnPlan,
   RTS_MAP,
-} from "../../../apps/playground/app/examples/entities-rts/store/sim/spawn-placement";
+} from "../../../apps/playground/app/examples/entities-rts/store/spawn/placement";
 import { UNIT_FACTION, UNIT_KIND } from "../../../apps/playground/app/examples/entities-rts/store/unit-model";
 
 describe("spawn placement для RTS", () => {

@@ -4,7 +4,7 @@ import {
   createFlowField,
   flowCellIndexForPoint,
   readFlowDirection,
-} from "../../../apps/playground/app/examples/entities-rts/store/sim/flow-field";
+} from "../../../apps/playground/app/examples/entities-rts/store/machines/rts-spatial-index/flow-field";
 
 describe("flow field для RTS", () => {
   it("строит плотное поле направлений к клетке героя", () => {

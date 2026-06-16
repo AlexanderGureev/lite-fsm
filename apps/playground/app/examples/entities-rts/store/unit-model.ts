@@ -58,6 +58,8 @@ export type UnitCommandSpawnPayload = {
   formationOffsetY: number;
 };
 
+export type EnemyAiSpawnPayload = {};
+
 export type PlannedUnitSpawn = {
   id: string;
   groupTag: string;
@@ -67,4 +69,5 @@ export type PlannedUnitSpawn = {
   combat: UnitCombatSpawnPayload;
   selection?: UnitSelectionSpawnPayload;
   command?: UnitCommandSpawnPayload;
+  enemyAi?: EnemyAiSpawnPayload;
 };

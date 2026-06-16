@@ -1,6 +1,6 @@
-import { createMachine } from "../create-machine";
-import { applyGameConfigPatch, DEFAULT_GAME_CONFIG, normalizeGameConfig } from "../config";
-import type { AppEvents, GameConfig } from "../types";
+import { createMachine } from "../../create-machine";
+import { applyGameConfigPatch, DEFAULT_GAME_CONFIG, normalizeGameConfig } from "../../config";
+import type { AppEvents, GameConfig } from "../../types";
 
 type Context = {
   config: GameConfig;

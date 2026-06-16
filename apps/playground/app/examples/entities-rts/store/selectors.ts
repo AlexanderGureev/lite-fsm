@@ -38,6 +38,7 @@ export type UnitCombatView = EntityActorView<"ACTIVE" | "DISABLED" | "__RESOLVED
   readonly attackDamage: NumericColumn;
   readonly attackCooldownMs: NumericColumn;
   readonly attackTimerMs: NumericColumn;
+  readonly incomingDamage: NumericColumn;
 };
 
 export type UnitSelectionView = EntityActorView<"ACTIVE" | "DISABLED" | "__RESOLVED"> & {

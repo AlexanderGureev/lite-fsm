@@ -6,7 +6,7 @@ import {
   collectSpatialNeighbors,
   createSpatialGrid,
   resetSpatialGrid,
-} from "../../../apps/playground/app/examples/entities-rts/store/sim/spatial-grid";
+} from "../../../apps/playground/app/examples/entities-rts/store/machines/rts-spatial-index/spatial-grid";
 
 const readNeighbors = (buffer: Int32Array, count: number) => Array.from(buffer.slice(0, count)).sort((left, right) => left - right);
 

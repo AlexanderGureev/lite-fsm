@@ -1,11 +1,11 @@
 import type { EntityIndex } from "@lite-fsm/entities";
 
-import { createMachine } from "../create-machine";
-import { createUnitCommandAssignmentBatch, createUnitSelectionBatch } from "../sim/batches";
-import { createFormationTargets } from "../sim/formation";
-import { RTS_MAP } from "../sim/spawn-placement";
-import type { AppEvents, Point, SelectionRect } from "../types";
-import { UNIT_COMMAND, UNIT_SELECTION } from "../unit-model";
+import { createMachine } from "../../create-machine";
+import { RTS_MAP } from "../../spawn/placement";
+import type { AppEvents, Point, SelectionRect } from "../../types";
+import { UNIT_COMMAND, UNIT_SELECTION } from "../../unit-model";
+import { createUnitCommandAssignmentBatch, createUnitSelectionBatch } from "./batches";
+import { createFormationTargets } from "./formation";
 
 const FORMATION_SPACING = 28;
 

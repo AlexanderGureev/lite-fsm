@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createFormationTargets } from "../../../apps/playground/app/examples/entities-rts/store/sim/formation";
+import { createFormationTargets } from "../../../apps/playground/app/examples/entities-rts/store/machines/unit-orders/formation";
 
 describe("formation helper для RTS", () => {
   it("возвращает разные target positions для группы", () => {

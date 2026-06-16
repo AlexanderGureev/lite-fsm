@@ -1,13 +1,6 @@
 import type { FSMEvent } from "@lite-fsm/core";
 
-import type {
-  UnitCombatBatchPayload,
-  UnitCommandAssignmentBatchPayload,
-  UnitCommandStateBatchPayload,
-  UnitHealthDamageBatchPayload,
-  UnitMovementBatchPayload,
-  UnitSelectionBatchPayload,
-} from "./sim/batches";
+import type { UnitCommandAssignmentBatchPayload, UnitSelectionBatchPayload } from "./machines/unit-orders/batches";
 
 export type RtsPresetId = "small" | "medium" | "stress";
 
@@ -45,10 +38,6 @@ export type AppEvents =
   | FSMEvent<"UNIT_SELECTION_UPDATED", UnitSelectionBatchPayload>
   | FSMEvent<"UNIT_SELECTION_RESOLVED">
   | FSMEvent<"UNIT_COMMAND_ASSIGNED", UnitCommandAssignmentBatchPayload>
-  | FSMEvent<"UNIT_COMMANDS_UPDATED", UnitCommandStateBatchPayload>
   | FSMEvent<"UNIT_COMMAND_RESOLVED">
-  | FSMEvent<"UNIT_MOVEMENT_UPDATED", UnitMovementBatchPayload>
-  | FSMEvent<"UNIT_COMBAT_TIMERS_UPDATED", UnitCombatBatchPayload>
-  | FSMEvent<"UNIT_DAMAGE_APPLIED", UnitHealthDamageBatchPayload>
   | FSMEvent<"UNIT_DIED", { entityId: string }>
   | FSMEvent<"HERO_DEAD">;

@@ -11,7 +11,7 @@ import {
   type UnitIdentitySpawnPayload,
   type UnitMovementSpawnPayload,
 } from "../unit-model";
-import { createFormationTargets } from "./formation";
+import { createFormationTargets } from "../machines/unit-orders/formation";
 import { createSeededRandom, randomBetween, randomInt } from "./random";
 
 export const RTS_MAP = {
@@ -86,7 +86,12 @@ const createUnitComponents = (values: UnitSpawnValues): Omit<PlannedUnitSpawn, "
     },
   };
 
-  if (values.faction !== UNIT_FACTION.PLAYER) return components;
+  if (values.faction !== UNIT_FACTION.PLAYER) {
+    return {
+      ...components,
+      enemyAi: {},
+    };
+  }
 
   return {
     ...components,

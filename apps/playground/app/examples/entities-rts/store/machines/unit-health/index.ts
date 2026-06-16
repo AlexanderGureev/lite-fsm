@@ -1,8 +1,8 @@
 import { i32 } from "@lite-fsm/entities";
 
-import { createMachine } from "../create-machine";
-import type { AppEvents } from "../types";
-import { UNIT_KIND } from "../unit-model";
+import { createMachine } from "../../create-machine";
+import type { AppEvents } from "../../types";
+import { UNIT_KIND } from "../../unit-model";
 
 export type Events = AppEvents;
 
@@ -13,7 +13,7 @@ export const unitHealth = createMachine({
       ENTITY_SPAWNED: "ALIVE",
     },
     ALIVE: {
-      UNIT_DAMAGE_APPLIED: null,
+      TICK: null,
       ENTITY_DESPAWNED: "__RESOLVED",
     },
     DEAD: {
@@ -29,7 +29,7 @@ export const unitHealth = createMachine({
     hp: i32(),
     maxHp: i32(),
   },
-  reducer: (_state, action, { payloadFor, self }) => {
+  reducer: (_state, action, { entities, payloadFor, self }) => {
     switch (action.type) {
       case "ENTITY_SPAWNED":
         for (const entity of self.indices) {
@@ -41,14 +41,21 @@ export const unitHealth = createMachine({
         }
         return;
 
-      case "UNIT_DAMAGE_APPLIED":
-        for (const entity of self.indices) {
-          if (action.payload.touched[entity] !== 1) continue;
+      case "TICK": {
+        const combat = entities().get("unitCombat");
 
-          self.hp[entity] = Math.max(0, self.hp[entity] - action.payload.damage[entity]);
+        for (const entity of self.indices) {
+          if (!combat.has(entity)) continue;
+
+          const damage = combat.incomingDamage[entity];
+          if (damage <= 0) continue;
+
+          self.hp[entity] = Math.max(0, self.hp[entity] - damage);
           if (self.hp[entity] <= 0) self.stateCode[entity] = self.states.DEAD;
         }
         return;
+      }
+
     }
   },
   effects: {

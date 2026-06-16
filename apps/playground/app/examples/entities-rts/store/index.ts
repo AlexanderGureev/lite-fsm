@@ -3,10 +3,10 @@ import { defineEntitySpawn, entitiesPlugin } from "@lite-fsm/entities";
 import { immerMiddleware } from "@lite-fsm/middleware/immer";
 
 import type { RuntimeDeps } from "./deps";
+import { enemyAi } from "./machines/enemy-ai";
 import { gameMap } from "./machines/game-map";
 import { gameSession } from "./machines/game-session";
-import { rtsSimulation } from "./machines/rts-simulation";
-import { rtsSimulationTick } from "./machines/rts-simulation-tick";
+import { rtsSpatialIndex } from "./machines/rts-spatial-index";
 import { unitCombat } from "./machines/unit-combat";
 import { unitCommand } from "./machines/unit-command";
 import { unitHealth } from "./machines/unit-health";
@@ -14,22 +14,22 @@ import { unitIdentity } from "./machines/unit-identity";
 import { unitMovement } from "./machines/unit-movement";
 import { unitOrders } from "./machines/unit-orders";
 import { unitSelection } from "./machines/unit-selection";
-import { createGameStartSpawnPlan } from "./sim/spawn-placement";
+import { createGameStartSpawnPlan } from "./spawn/placement";
 import { spawnEvents } from "./spawn-events";
 import type { AppEvents } from "./types";
 
 export const machines = {
   gameMap,
   gameSession,
-  rtsSimulation,
-  rtsSimulationTick,
   unitOrders,
   unitIdentity,
-  unitMovement,
-  unitHealth,
+  rtsSpatialIndex,
   unitCombat,
-  unitSelection,
+  unitHealth,
   unitCommand,
+  enemyAi,
+  unitMovement,
+  unitSelection,
 };
 
 export type AppMachines = typeof machines;
@@ -50,13 +50,14 @@ export const spawn = defineEntitySpawn(
         unitCombat: unit.combat,
         ...(unit.selection ? { unitSelection: unit.selection } : {}),
         ...(unit.command ? { unitCommand: unit.command } : {}),
+        ...(unit.enemyAi ? { enemyAi: unit.enemyAi } : {}),
       },
     })),
     {
-      id: "system/rts-simulation-tick",
+      id: "system/rts-spatial-index",
       groupTag: "system",
       actors: {
-        rtsSimulationTick: {},
+        rtsSpatialIndex: {},
       },
     },
   ],
@@ -85,5 +86,6 @@ export { useManager, useSelector, useTransition } from "./hooks";
 export { DEFAULT_GAME_CONFIG, GAME_PRESETS } from "./config";
 export { spawnEvents } from "./spawn-events";
 export { UNIT_COMMAND, UNIT_FACTION, UNIT_KIND } from "./unit-model";
+export { ENEMY_INTENT } from "./machines/enemy-ai";
 export type { AppDeps, RuntimeDeps } from "./deps";
 export type { AppEvents, GameConfig, RtsPresetId } from "./types";

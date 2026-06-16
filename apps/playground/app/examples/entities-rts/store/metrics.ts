@@ -1,4 +1,4 @@
-import type { RtsSimulationMetrics } from "./sim/runtime";
+import type { RtsSimulationMetrics } from "./machines/rts-spatial-index";
 
 export const RTS_METRICS_WINDOW = 120;
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { EntityIndex } from "@lite-fsm/entities";
 
 import {
+  ENEMY_INTENT,
   makeStore,
   UNIT_COMMAND,
   UNIT_FACTION,
@@ -9,9 +10,11 @@ import {
 } from "../../../apps/playground/app/examples/entities-rts/store";
 import { createRtsMetricsAdapter } from "../../../apps/playground/app/examples/entities-rts/store/metrics";
 import { readUnitViews, unitSelected } from "../../../apps/playground/app/examples/entities-rts/store/selectors";
-import { RTS_MAP } from "../../../apps/playground/app/examples/entities-rts/store/sim/spawn-placement";
+import { RTS_MAP } from "../../../apps/playground/app/examples/entities-rts/store/spawn/placement";
 
 const entity = (index: number) => index as EntityIndex;
+
+const mutableColumn = (column: ArrayLike<number>) => column as { [entity: EntityIndex]: number };
 
 const makeTestStore = () =>
   makeStore({
@@ -68,7 +71,7 @@ describe("runtime simulation для entities RTS", () => {
     expect(unitSelected(units, entity(2))).toBe(0);
   });
 
-  it("назначает приказ движения выбранным units одним batch event и сохраняет formation offsets", () => {
+  it("назначает приказ движения выбранным units и сохраняет formation offsets", () => {
     const manager = makeTestStore();
 
     manager.transition({ type: "GAME_START", payload: { enemyCount: 0, allyCount: 2, seed: "movement" } });
@@ -97,6 +100,69 @@ describe("runtime simulation для entities RTS", () => {
     manager.transition({ type: "TICK", payload: { now: 16, deltaMs: 100 } });
 
     expect(units.movement.x[entity(0)]).toBeGreaterThan(beforeHeroX);
+  });
+
+  it("unitCommand сбрасывает arrived MOVE в IDLE на TICK", () => {
+    const manager = makeTestStore();
+
+    manager.transition({ type: "GAME_START", payload: { enemyCount: 0, allyCount: 1, seed: "command-arrival" } });
+
+    const units = readUnitViews(manager);
+    const hero = entity(0);
+
+    manager.transition({ type: "SELECT_ENTITY", payload: { entityId: "unit/hero" } });
+    manager.transition({ type: "ISSUE_MOVE", payload: { x: units.movement.x[hero], y: units.movement.y[hero] } });
+
+    expect(units.command.command[hero]).toBe(UNIT_COMMAND.MOVE);
+
+    manager.transition({ type: "TICK", payload: { now: 16, deltaMs: 16 } });
+
+    expect(units.command.command[hero]).toBe(UNIT_COMMAND.IDLE);
+  });
+
+  it("enemyAi выставляет CHASE_HERO и HOLD_ATTACK_RANGE в контролируемом сценарии", () => {
+    const manager = makeTestStore();
+
+    manager.transition({ type: "GAME_START", payload: { enemyCount: 1, allyCount: 1, seed: "enemy-intent" } });
+
+    const units = readUnitViews(manager);
+    const enemyAi = manager.entities().get("enemyAi");
+    const enemy = entity(2);
+
+    mutableColumn(units.movement.x)[enemy] = RTS_MAP.centerX + 1_000;
+    mutableColumn(units.movement.y)[enemy] = RTS_MAP.centerY;
+
+    manager.transition({ type: "TICK", payload: { now: 16, deltaMs: 16 } });
+
+    expect(enemyAi.intent[enemy]).toBe(ENEMY_INTENT.CHASE_HERO);
+
+    mutableColumn(units.movement.x)[enemy] = RTS_MAP.centerX + 40;
+    mutableColumn(units.movement.y)[enemy] = RTS_MAP.centerY;
+    mutableColumn(units.health.hp)[enemy] = units.health.maxHp[enemy];
+
+    manager.transition({ type: "TICK", payload: { now: 32, deltaMs: 16 } });
+
+    expect(enemyAi.intent[enemy]).toBe(ENEMY_INTENT.HOLD_ATTACK_RANGE);
+  });
+
+  it("enemies атакуют hero через incomingDamage и unitHealth на одном TICK", () => {
+    const manager = makeTestStore();
+
+    manager.transition({ type: "GAME_START", payload: { enemyCount: 1, allyCount: 1, seed: "incoming-damage" } });
+
+    const units = readUnitViews(manager);
+    const hero = entity(0);
+    const enemy = entity(2);
+    const initialHeroHp = units.health.hp[hero];
+
+    mutableColumn(units.movement.x)[enemy] = RTS_MAP.centerX + 40;
+    mutableColumn(units.movement.y)[enemy] = RTS_MAP.centerY;
+    mutableColumn(units.health.hp)[enemy] = units.health.maxHp[enemy];
+
+    manager.transition({ type: "TICK", payload: { now: 16, deltaMs: 1_000 } });
+
+    expect(units.combat.incomingDamage[hero]).toBeGreaterThan(0);
+    expect(units.health.hp[hero]).toBeLessThan(initialHeroHp);
   });
 
   it("назначает attack-move и союзники удаляют погибших enemies через lifecycle", () => {

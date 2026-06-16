@@ -1,6 +1,6 @@
-import { createMachine } from "../create-machine";
-import { RTS_MAP } from "../sim/spawn-placement";
-import type { AppEvents } from "../types";
+import { createMachine } from "../../create-machine";
+import { RTS_MAP } from "../../spawn/placement";
+import type { AppEvents } from "../../types";
 
 type Context = typeof RTS_MAP;
 

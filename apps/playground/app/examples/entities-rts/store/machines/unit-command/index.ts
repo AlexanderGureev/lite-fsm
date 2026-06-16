@@ -1,8 +1,10 @@
 import { f32, u8 } from "@lite-fsm/entities";
 
-import { createMachine } from "../create-machine";
-import type { AppEvents } from "../types";
-import { UNIT_COMMAND } from "../unit-model";
+import { createMachine } from "../../create-machine";
+import type { AppEvents } from "../../types";
+import { UNIT_COMMAND } from "../../unit-model";
+
+const TARGET_ARRIVAL_DISTANCE = 6;
 
 export type Events = AppEvents;
 
@@ -13,8 +15,8 @@ export const unitCommand = createMachine({
       ENTITY_SPAWNED: "ACTIVE",
     },
     ACTIVE: {
+      TICK: null,
       UNIT_COMMAND_ASSIGNED: null,
-      UNIT_COMMANDS_UPDATED: null,
       UNIT_DIED: "DISABLED",
       ENTITY_DESPAWNED: "__RESOLVED",
     },
@@ -37,7 +39,7 @@ export const unitCommand = createMachine({
     formationOffsetX: f32(),
     formationOffsetY: f32(),
   },
-  reducer: (_state, action, { payloadFor, self }) => {
+  reducer: (_state, action, { entities, payloadFor, self }) => {
     switch (action.type) {
       case "ENTITY_SPAWNED":
         for (const entity of self.indices) {
@@ -51,6 +53,25 @@ export const unitCommand = createMachine({
         }
         return;
 
+      case "TICK": {
+        const access = entities();
+        const movement = access.get("unitMovement");
+        const health = access.get("unitHealth");
+
+        for (const entity of self.indices) {
+          if (!movement.has(entity) || !health.has(entity)) continue;
+          if (health.state(entity) !== "ALIVE" || health.hp[entity] <= 0) continue;
+          if (self.command[entity] !== UNIT_COMMAND.MOVE && self.command[entity] !== UNIT_COMMAND.ATTACK_MOVE) continue;
+
+          const dx = self.targetX[entity] - movement.x[entity];
+          const dy = self.targetY[entity] - movement.y[entity];
+          if (Math.hypot(dx, dy) > TARGET_ARRIVAL_DISTANCE) continue;
+
+          self.command[entity] = UNIT_COMMAND.IDLE;
+        }
+        return;
+      }
+
       case "UNIT_COMMAND_ASSIGNED":
         for (const entity of self.indices) {
           if (action.payload.touched[entity] !== 1) continue;
@@ -60,13 +81,6 @@ export const unitCommand = createMachine({
           self.targetY[entity] = action.payload.targetY[entity];
           self.formationOffsetX[entity] = action.payload.formationOffsetX[entity];
           self.formationOffsetY[entity] = action.payload.formationOffsetY[entity];
-        }
-        return;
-
-      case "UNIT_COMMANDS_UPDATED":
-        for (const entity of self.indices) {
-          if (action.payload.touched[entity] !== 1) continue;
-          self.command[entity] = action.payload.command[entity];
         }
         return;
 

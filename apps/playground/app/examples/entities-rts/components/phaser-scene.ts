@@ -11,8 +11,7 @@ import {
   unitSelected,
   type UnitViews,
 } from "../store/selectors";
-import { readRtsSimulationMetrics } from "../store/sim/runtime";
-import { RTS_MAP } from "../store/sim/spawn-placement";
+import { RTS_MAP } from "../store/spawn/placement";
 import type { Point } from "../store/types";
 import { UNIT_FACTION, UNIT_KIND } from "../store/unit-model";
 
@@ -391,6 +390,8 @@ const hasSelectedPlayerUnits = (units: UnitViews) => {
   return false;
 };
 
+const readRtsSpatialMetrics = (manager: AppStore) => manager.entities().get("rtsSpatialIndex").index.readMetrics();
+
 export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, metrics: MetricsAdapter) =>
   class EntitiesRtsScene extends Phaser.Scene {
     private unitRenderer?: UnitSpriteRenderer;
@@ -490,7 +491,7 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
         const tickStartedAt = metrics.now();
         manager.transition({ type: "TICK", payload: { now: time, deltaMs } });
         metrics.recordTickMs(metrics.now() - tickStartedAt);
-        metrics.recordSimulationMetrics(readRtsSimulationMetrics());
+        metrics.recordSimulationMetrics(readRtsSpatialMetrics(manager));
       }
 
       const syncStartedAt = metrics.now();

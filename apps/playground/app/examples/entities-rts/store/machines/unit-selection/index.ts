@@ -1,8 +1,8 @@
 import { u8 } from "@lite-fsm/entities";
 
-import { createMachine } from "../create-machine";
-import type { AppEvents } from "../types";
-import { UNIT_SELECTION } from "../unit-model";
+import { createMachine } from "../../create-machine";
+import type { AppEvents } from "../../types";
+import { UNIT_SELECTION } from "../../unit-model";
 
 export type Events = AppEvents;
 

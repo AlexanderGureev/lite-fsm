@@ -1,7 +1,7 @@
 import { f32, u8 } from "@lite-fsm/entities";
 
-import { createMachine } from "../create-machine";
-import type { AppEvents } from "../types";
+import { createMachine } from "../../create-machine";
+import type { AppEvents } from "../../types";
 
 export type Events = AppEvents;
 

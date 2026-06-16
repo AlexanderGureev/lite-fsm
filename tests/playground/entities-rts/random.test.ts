@@ -4,7 +4,7 @@ import {
   createSeededRandom,
   randomBetween,
   randomInt,
-} from "../../../apps/playground/app/examples/entities-rts/store/sim/random";
+} from "../../../apps/playground/app/examples/entities-rts/store/spawn/random";
 
 describe("seeded random для RTS", () => {
   it("создает повторяемую последовательность для seed", () => {
