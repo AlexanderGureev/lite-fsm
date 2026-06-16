@@ -18,8 +18,8 @@ export type SpatialGrid = {
 };
 
 export type SpatialGridPositions = {
-  x: ArrayLike<number>;
-  y: ArrayLike<number>;
+  readonly x: { readonly [index: number]: number };
+  readonly y: { readonly [index: number]: number };
 };
 
 const assertPositiveGridConfig = (config: SpatialGridConfig) => {

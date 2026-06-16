@@ -5,6 +5,7 @@ import { RTS_MAP } from "../../spawn/placement";
 import type { AppEvents } from "../../types";
 import { UNIT_COMMAND, UNIT_FACTION } from "../../unit-model";
 import { ENEMY_INTENT } from "../enemy-ai";
+import { isUnitAlive } from "../unit-health";
 
 const TARGET_ARRIVAL_DISTANCE = 6;
 const SEPARATION_FORCE = 1.4;
@@ -67,7 +68,6 @@ export const unitMovement = createMachine({
         const identity = access.get("unitIdentity");
         const health = access.get("unitHealth");
         const command = access.get("unitCommand");
-        const combat = access.get("unitCombat");
         const enemyAi = access.get("enemyAi");
         const spatial = access.get("rtsSpatialIndex").index;
 
@@ -84,8 +84,7 @@ export const unitMovement = createMachine({
 
           for (let index = 0; index < neighborCount && samples < SEPARATION_SAMPLE_LIMIT; index += 1) {
             const neighbor = self.neighborBuffer[index] as EntityIndex;
-            if (neighbor === entity || !self.has(neighbor) || !identity.has(neighbor) || !health.has(neighbor)) continue;
-            if (health.state(neighbor) !== "ALIVE" || health.hp[neighbor] <= 0) continue;
+            if (neighbor === entity || !isUnitAlive(health, neighbor)) continue;
 
             const awayX = self.x[entity] - self.x[neighbor];
             const awayY = self.y[entity] - self.y[neighbor];
@@ -122,13 +121,7 @@ export const unitMovement = createMachine({
         };
 
         for (const entity of self.indices) {
-          if (
-            !identity.has(entity) ||
-            !health.has(entity) ||
-            !combat.has(entity) ||
-            health.state(entity) !== "ALIVE" ||
-            health.hp[entity] <= 0
-          ) {
+          if (!isUnitAlive(health, entity)) {
             stop(entity);
             continue;
           }

@@ -2,6 +2,7 @@ import { u8 } from "@lite-fsm/entities";
 
 import { createMachine } from "../../create-machine";
 import type { AppEvents } from "../../types";
+import { isUnitAlive } from "../unit-health";
 
 export const ENEMY_INTENT = {
   IDLE: 0,
@@ -56,22 +57,7 @@ export const enemyAi = createMachine({
     for (const entity of self.indices) {
       self.intent[entity] = ENEMY_INTENT.IDLE;
 
-      if (
-        hero === null ||
-        !identity.has(entity) ||
-        !movement.has(entity) ||
-        !health.has(entity) ||
-        !combat.has(entity) ||
-        health.state(entity) !== "ALIVE" ||
-        health.hp[entity] <= 0 ||
-        !identity.has(hero) ||
-        !movement.has(hero) ||
-        !health.has(hero) ||
-        health.state(hero) !== "ALIVE" ||
-        health.hp[hero] <= 0
-      ) {
-        continue;
-      }
+      if (hero === null || !isUnitAlive(health, entity) || !isUnitAlive(health, hero)) continue;
 
       const range = combat.attackRange[entity] + identity.radius[hero];
       const distance = distanceSquared(movement.x[entity], movement.y[entity], movement.x[hero], movement.y[hero]);

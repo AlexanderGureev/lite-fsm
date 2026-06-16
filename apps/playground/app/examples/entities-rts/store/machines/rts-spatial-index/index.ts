@@ -4,6 +4,7 @@ import { createMachine } from "../../create-machine";
 import { RTS_MAP } from "../../spawn/placement";
 import type { AppEvents, Point } from "../../types";
 import { UNIT_FACTION, UNIT_KIND } from "../../unit-model";
+import { isUnitAlive } from "../unit-health";
 import { createFlowField, flowCellIndexForPoint, readFlowDirectionAt, type FlowField } from "./flow-field";
 import {
   buildSpatialGridForEntities,
@@ -109,9 +110,8 @@ const resetIndex = (resource: RtsSpatialIndexResource) => {
   resource.metrics.spatialGridBuildMs = 0;
 };
 
-const columnLength = (column: ArrayLike<number>) => column.length;
-
-const asEntityIndex = (index: number) => index as EntityIndex;
+// Read-view колонки скрывают length; длина backing TypedArray — это число слотов.
+const slotCount = (column: { readonly length?: number }) => column.length ?? 0;
 
 export const rtsSpatialIndex = createMachine({
   storage: "entity",
@@ -146,7 +146,7 @@ export const rtsSpatialIndex = createMachine({
     const identity = access.get("unitIdentity");
     const movement = access.get("unitMovement");
     const health = access.get("unitHealth");
-    const capacity = columnLength(movement.x as ArrayLike<number>);
+    const capacity = slotCount(movement.x);
     const aliveEntities: EntityIndex[] = [];
     const enemyEntities: EntityIndex[] = [];
 
@@ -159,9 +159,8 @@ export const rtsSpatialIndex = createMachine({
     self.index.enemyGrid = ensureGridCapacity(self.index.enemyGrid, ENEMY_LOOKUP_CELL_SIZE, capacity);
 
     for (let index = 0; index < capacity; index += 1) {
-      const entity = asEntityIndex(index);
-      if (!identity.has(entity) || !movement.has(entity) || !health.has(entity)) continue;
-      if (health.state(entity) !== "ALIVE" || health.hp[entity] <= 0) continue;
+      const entity = index as EntityIndex;
+      if (!isUnitAlive(health, entity)) continue;
 
       aliveEntities.push(entity);
 
@@ -174,17 +173,10 @@ export const rtsSpatialIndex = createMachine({
       if (identity.faction[entity] === UNIT_FACTION.ENEMY) enemyEntities.push(entity);
     }
 
+    const positions = { x: movement.x, y: movement.y };
     const spatialStartedAt = now();
-    buildSpatialGridForEntities(
-      self.index.unitGrid,
-      { x: movement.x as ArrayLike<number>, y: movement.y as ArrayLike<number> },
-      aliveEntities,
-    );
-    buildSpatialGridForEntities(
-      self.index.enemyGrid,
-      { x: movement.x as ArrayLike<number>, y: movement.y as ArrayLike<number> },
-      enemyEntities,
-    );
+    buildSpatialGridForEntities(self.index.unitGrid, positions, aliveEntities);
+    buildSpatialGridForEntities(self.index.enemyGrid, positions, enemyEntities);
     self.index.metrics.spatialGridBuildMs = now() - spatialStartedAt;
 
     if (self.index.hero === null) {

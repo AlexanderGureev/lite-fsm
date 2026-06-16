@@ -1,16 +1,9 @@
 import type { EntityIndex } from "@lite-fsm/entities";
 
 import type { AppStore } from "../store";
+import { isUnitAlive } from "../store/machines/unit-health";
 import type { MetricsAdapter } from "../store/metrics";
-import {
-  asEntityIndex,
-  entityIdForUnitIndex,
-  readUnitViews,
-  unitColumnLength,
-  unitIsAlive,
-  unitSelected,
-  type UnitViews,
-} from "../store/selectors";
+import { entityIdForUnitIndex, readUnitViews, unitSelected, type UnitViews } from "../store/selectors";
 import { RTS_MAP } from "../store/spawn/placement";
 import type { Point } from "../store/types";
 import { UNIT_FACTION, UNIT_KIND } from "../store/unit-model";
@@ -219,9 +212,9 @@ class UnitSpriteRenderer {
     const units = readUnitViews(this.manager);
     this.liveEntities.clear();
 
-    for (let index = 0; index < unitColumnLength(units); index += 1) {
-      const entity = asEntityIndex(index);
-      if (!unitIsAlive(units, entity)) continue;
+    for (let index = 0; index < units.capacity; index += 1) {
+      const entity = index as EntityIndex;
+      if (!isUnitAlive(units.health, entity)) continue;
 
       this.liveEntities.add(index);
       this.syncUnit(units, entity);
@@ -359,9 +352,9 @@ const findUnitAt = (
   let nearest: EntityIndex | null = null;
   let nearestDistance = Number.POSITIVE_INFINITY;
 
-  for (let index = 0; index < unitColumnLength(units); index += 1) {
-    const entity = asEntityIndex(index);
-    if (!unitIsAlive(units, entity)) continue;
+  for (let index = 0; index < units.capacity; index += 1) {
+    const entity = index as EntityIndex;
+    if (!isUnitAlive(units.health, entity)) continue;
     if (options.faction !== undefined && units.identity.faction[entity] !== options.faction) continue;
 
     const hitRadius = Math.max(
@@ -381,9 +374,9 @@ const findUnitAt = (
 };
 
 const hasSelectedPlayerUnits = (units: UnitViews) => {
-  for (let index = 0; index < unitColumnLength(units); index += 1) {
-    const entity = asEntityIndex(index);
-    if (!unitIsAlive(units, entity)) continue;
+  for (let index = 0; index < units.capacity; index += 1) {
+    const entity = index as EntityIndex;
+    if (!isUnitAlive(units.health, entity)) continue;
     if (units.identity.faction[entity] === UNIT_FACTION.PLAYER && unitSelected(units, entity) === 1) return true;
   }
 

@@ -14,7 +14,8 @@ import { RTS_MAP } from "../../../apps/playground/app/examples/entities-rts/stor
 
 const entity = (index: number) => index as EntityIndex;
 
-const mutableColumn = (column: ArrayLike<number>) => column as { [entity: EntityIndex]: number };
+const mutableColumn = (column: { readonly [entity: EntityIndex]: number }) =>
+  column as { [entity: EntityIndex]: number };
 
 const makeTestStore = () =>
   makeStore({

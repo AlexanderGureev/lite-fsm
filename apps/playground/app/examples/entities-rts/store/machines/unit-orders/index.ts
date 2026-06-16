@@ -4,6 +4,7 @@ import { createMachine } from "../../create-machine";
 import { RTS_MAP } from "../../spawn/placement";
 import type { AppEvents, Point, SelectionRect } from "../../types";
 import { UNIT_COMMAND, UNIT_SELECTION } from "../../unit-model";
+import { isUnitAlive } from "../unit-health";
 import { createUnitCommandAssignmentBatch, createUnitSelectionBatch } from "./batches";
 import { createFormationTargets } from "./formation";
 
@@ -14,10 +15,6 @@ type Context = {};
 export type Events = AppEvents;
 
 const initialContext: Context = {};
-
-const asEntityIndex = (index: number) => index as EntityIndex;
-
-const columnLength = (column: ArrayLike<number>) => column.length;
 
 const clampToMap = (value: number, max: number) => Math.min(max, Math.max(0, value));
 
@@ -56,7 +53,7 @@ export const unitOrders = createMachine({
     state.state = nextState;
   },
   effects: {
-    SELECTING_BY_RECT: ({ action, entities, transition }) => {
+    SELECTING_BY_RECT: ({ action, entities, getState, transition }) => {
       if (action.type !== "SELECT_RECT") {
         transition({ type: "UNIT_SELECTION_RESOLVED" });
         return;
@@ -67,13 +64,12 @@ export const unitOrders = createMachine({
       const movement = access.get("unitMovement");
       const health = access.get("unitHealth");
       const selection = access.get("unitSelection");
-      const capacity = columnLength(movement.x as ArrayLike<number>);
+      const capacity = getState().unitMovement.capacity;
       const batch = createUnitSelectionBatch(capacity);
 
       for (let index = 0; index < capacity; index += 1) {
-        const entity = asEntityIndex(index);
-        if (!selection.has(entity) || !movement.has(entity) || !health.has(entity)) continue;
-        if (health.state(entity) !== "ALIVE" || health.hp[entity] <= 0) continue;
+        const entity = index as EntityIndex;
+        if (!selection.has(entity) || !isUnitAlive(health, entity)) continue;
 
         const isInside =
           movement.x[entity] >= rect.minX &&
@@ -88,46 +84,39 @@ export const unitOrders = createMachine({
       transition({ type: "UNIT_SELECTION_UPDATED", payload: batch });
       transition({ type: "UNIT_SELECTION_RESOLVED" });
     },
-    ISSUING_COMMAND: ({ action, entities, transition }) => {
+    ISSUING_COMMAND: ({ action, entities, getState, transition }) => {
       if (action.type !== "ISSUE_MOVE" && action.type !== "ISSUE_ATTACK_MOVE") {
         transition({ type: "UNIT_COMMAND_RESOLVED" });
         return;
       }
 
       const access = entities();
-      const movement = access.get("unitMovement");
       const health = access.get("unitHealth");
       const selection = access.get("unitSelection");
       const command = access.get("unitCommand");
-      const capacity = columnLength(movement.x as ArrayLike<number>);
-      let selectedCount = 0;
+      const capacity = getState().unitMovement.capacity;
+      const selected: EntityIndex[] = [];
 
       for (let index = 0; index < capacity; index += 1) {
-        const entity = asEntityIndex(index);
-        if (!command.has(entity) || !selection.has(entity) || !health.has(entity)) continue;
-        if (health.state(entity) !== "ALIVE" || health.hp[entity] <= 0) continue;
-        if (selection.selected[entity] === UNIT_SELECTION.SELECTED) selectedCount += 1;
+        const entity = index as EntityIndex;
+        if (!command.has(entity) || !selection.has(entity) || !isUnitAlive(health, entity)) continue;
+        if (selection.selected[entity] === UNIT_SELECTION.SELECTED) selected.push(entity);
       }
 
-      if (selectedCount === 0) {
+      if (selected.length === 0) {
         transition({ type: "UNIT_COMMAND_RESOLVED" });
         return;
       }
 
       const target: Point = action.payload;
-      const targets = createFormationTargets(target, selectedCount, { spacing: FORMATION_SPACING });
+      const targets = createFormationTargets(target, selected.length, { spacing: FORMATION_SPACING });
       const batch = createUnitCommandAssignmentBatch(capacity);
       const nextCommand = action.type === "ISSUE_MOVE" ? UNIT_COMMAND.MOVE : UNIT_COMMAND.ATTACK_MOVE;
-      let targetIndex = 0;
 
-      for (let index = 0; index < capacity; index += 1) {
-        const entity = asEntityIndex(index);
-        if (!command.has(entity) || !selection.has(entity) || !health.has(entity)) continue;
-        if (health.state(entity) !== "ALIVE" || health.hp[entity] <= 0) continue;
-        if (selection.selected[entity] !== UNIT_SELECTION.SELECTED) continue;
-
-        const targetX = clampToMap(targets.x[targetIndex], RTS_MAP.width);
-        const targetY = clampToMap(targets.y[targetIndex], RTS_MAP.height);
+      for (let order = 0; order < selected.length; order += 1) {
+        const entity = selected[order];
+        const targetX = clampToMap(targets.x[order], RTS_MAP.width);
+        const targetY = clampToMap(targets.y[order], RTS_MAP.height);
 
         batch.touched[entity] = 1;
         batch.command[entity] = nextCommand;
@@ -135,7 +124,6 @@ export const unitOrders = createMachine({
         batch.targetY[entity] = targetY;
         batch.formationOffsetX[entity] = targetX - target.x;
         batch.formationOffsetY[entity] = targetY - target.y;
-        targetIndex += 1;
       }
 
       transition({ type: "UNIT_COMMAND_ASSIGNED", payload: batch });

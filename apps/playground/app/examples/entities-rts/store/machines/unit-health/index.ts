@@ -1,10 +1,20 @@
-import { i32 } from "@lite-fsm/entities";
+import { i32, type EntityIndex } from "@lite-fsm/entities";
 
 import { createMachine } from "../../create-machine";
 import type { AppEvents } from "../../types";
 import { UNIT_KIND } from "../../unit-model";
 
 export type Events = AppEvents;
+
+// unitHealth владеет жизненным циклом ALIVE/DEAD, поэтому "жив ли юнит" — это одна
+// проверка состояния, а не набор условий по нескольким store. Мертвые не-герои
+// деспавнятся в том же TICK, а смерть героя останавливает симуляцию, поэтому любой
+// присутствующий юнит, который читает система, считается живым, если состояние ALIVE.
+type UnitHealthLiveness = {
+  state(entity: EntityIndex): string | undefined;
+};
+
+export const isUnitAlive = (health: UnitHealthLiveness, entity: EntityIndex) => health.state(entity) === "ALIVE";
 
 export const unitHealth = createMachine({
   storage: "entity",

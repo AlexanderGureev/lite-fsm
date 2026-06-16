@@ -3,6 +3,7 @@ import { f32, u8 } from "@lite-fsm/entities";
 import { createMachine } from "../../create-machine";
 import type { AppEvents } from "../../types";
 import { UNIT_COMMAND } from "../../unit-model";
+import { isUnitAlive } from "../unit-health";
 
 const TARGET_ARRIVAL_DISTANCE = 6;
 
@@ -59,8 +60,7 @@ export const unitCommand = createMachine({
         const health = access.get("unitHealth");
 
         for (const entity of self.indices) {
-          if (!movement.has(entity) || !health.has(entity)) continue;
-          if (health.state(entity) !== "ALIVE" || health.hp[entity] <= 0) continue;
+          if (!isUnitAlive(health, entity)) continue;
           if (self.command[entity] !== UNIT_COMMAND.MOVE && self.command[entity] !== UNIT_COMMAND.ATTACK_MOVE) continue;
 
           const dx = self.targetX[entity] - movement.x[entity];
