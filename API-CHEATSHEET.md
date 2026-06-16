@@ -7,7 +7,7 @@
 | Импорт                                                         | Runtime exports                                                                                                                                                                                                                                                                                                                                             |
 | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `@lite-fsm/core`                                               | `createMachine`, `createConfig`, `createReducer`, `createEffect`, `createActorMeta`, `definePlugin`, `defineStorageRuntime`, `Machine`, `defineMachine`, `MachineManager`, `LiteFsmError`                                                                                                                                                                   |
-| `@lite-fsm/entities`                                           | alpha: `entitiesPlugin`, `defineSpawnEvents`, `defineEntitySpawn`, `spawnEvent`, schema descriptors `f32`/`i16`/`i32`/`u8`/`string`/`optional`; storage kind `"entity"`, lifecycle guards, `despawnOn`, entity effects/reactions, public spawn events, `meta.entityId` routing, `snapshot.storage.entity`, lightweight public slices и `manager.entities()` |
+| `@lite-fsm/entities`                                           | alpha: `entitiesPlugin`, `defineSpawnEvents`, `defineEntitySpawn`, `spawnEvent`, schema descriptors `f32`/`i16`/`i32`/`u8`/`string`/`optional`; storage kind `"entity"`, lifecycle guards, `despawnOn`, entity reducer `entities()`, entity effects/reactions, public spawn events, `meta.entityId` routing, `snapshot.storage.entity`, lightweight public slices и `manager.entities()` |
 | `@lite-fsm/entities/react`                                     | alpha: `useEntitySnapshot`, `useEntityCount`, `useEntityList`                                                                                                                                                                                                                                                                                               |
 | `@lite-fsm/persist`                                            | `persistManager`, `createJsonStorage`                                                                                                                                                                                                                                                                                                                       |
 | `@lite-fsm/persist/react`                                      | `usePersistStatuses`, `useIsPersistRestoring`                                                                                                                                                                                                                                                                                                               |
@@ -807,16 +807,21 @@ Entity-машина типизируется через `TypedCreateMachineFn<P,
 
 ### Reducer
 
-`reducer(_state, action, { self, payloadFor })` выполняется один раз для всего батча затронутых строк; первый аргумент не используется.
+`reducer(_state, action, { self, entities, payloadFor })` выполняется один раз для всего батча затронутых строк; первый аргумент не используется. Для `storage: "entity"` это entity system reducer: он мутирует только `self`, а другие entity stores читает через `entities()`.
 
-| `self` / `payloadFor`                        | Что даёт                                                  |
-| -------------------------------------------- | --------------------------------------------------------- |
-| `self.indices`                               | `EntityIndex[]` строк текущего батча                      |
-| `self.<column>[entity]`                      | чтение и запись значения колонки для строк из `self.indices` |
-| `self.states.<STATE>`                        | числовой код состояния                                    |
-| `self.stateCode[entity] = self.states.<S>`   | планирует переход строки в состояние `<S>`                |
-| `self.has(entity)` · `self.entityId(entity)` | наличие и строковый id строки                             |
-| `payloadFor(entity)`                         | данные спавна строки (валидно на `ENTITY_SPAWNED`)        |
+| Контекст                                    | Что даёт                                                                  |
+| ------------------------------------------ | ------------------------------------------------------------------------- |
+| `self.indices`                             | `EntityIndex[]` строк текущего reducer batch                              |
+| `self.<column>[entity]`                    | чтение и запись значения колонки текущей машины                           |
+| `self.states.<STATE>`                      | числовой код состояния                                                    |
+| `self.stateCode[entity] = self.states.<S>` | планирует переход строки в состояние `<S>`                                |
+| `self.has(entity)` · `self.entityId(entity)` | наличие и строковый id строки                                           |
+| `entities()`                               | live read view всего entity runtime; доступен на `ENTITY_SPAWNED`, public events и routed events |
+| `payloadFor(entity)`                       | данные спавна строки; валидно только на `ENTITY_SPAWNED`                  |
+
+`entities()` в reducer возвращает live view, а не snapshot. Reducer видит изменения stores, чьи reducers уже выполнились раньше в том же `transition`; порядок entity templates в `machines` является simulation contract. Перед чтением optional row чужого store проверяйте `view.has(entity)`. Store views из `entities()` доступны только для чтения; запись разрешена только в `self`.
+
+Reducer sync-only: без deps, без `transition`, без Promise, async work и внешних side effects. `self`, `entities()` и store views нельзя сохранять после возврата reducer.
 
 ### Effects и reactions
 
@@ -866,16 +871,16 @@ const spawn = defineEntitySpawn(machines, spawnEvents)({
 
 ### Чтение состояния
 
-`manager.entities()` — manager extension плагина; возвращает корневой доступ ко всем хранилищам.
+`manager.entities()` — manager extension плагина; возвращает root access ко всем entity stores.
 
 | API                  | Возвращает                                                                                         |
 | -------------------- | -------------------------------------------------------------------------------------------------- |
 | `entities().get(key)`   | представление шаблона: `count`, `version`, `has(entity)`, `state(entity)` и колонки только для чтения |
-| `entities().maybe(key)` | то же без строгих scoped-проверок доступа в dev                                                    |
+| `entities().maybe(key)` | на root access возвращает такой же read-only view; отличие от `get` по scoped validation относится к effects/reactions |
 
 Строки индексируются по `EntityIndex` (`view.x[entity]`). Читайте значения колонок только после `view.has(entity) === true`; колонки удалённых строк могут содержать устаревшие значения и не являются public state. `dehydrate()` сериализует удалённые слоты с defaults из `initialContext`, а не с runtime values. `version` actor store и entity store — monotonic invalidation token, не счетчик строк или отдельных мутаций.
 
-Передавайте `manager.entities` в deps (`setDependencies({ entities: manager.entities })`), чтобы `reducer`/`effects`/`reactions` читали кросс-машинные колонки.
+Reducer получает root access через storage runtime и не выполняет scoped validation. `AppDeps.entities: () => EntityAccess<AppMachines>` задаёт строгие ключи и колонки для reducer/effects/reactions на уровне типов. В effects/reactions runtime создает scoped access: `get` проверяет scope в dev, `maybe` возвращает view без этой проверки; для этих слоев `manager.entities` нужно передать через `setDependencies({ entities: manager.entities })`.
 
 ### React
 

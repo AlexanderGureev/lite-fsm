@@ -145,25 +145,49 @@ if (view.has(entity)) {
 
 ## Reducer
 
-`reducer` получает `{ self, payloadFor }` и выполняется один раз для всего батча затронутых строк. Первый аргумент (`state`) не используется в entity-машинах.
+`storage: "entity"` reducer является entity system reducer: он выполняется один раз для батча затронутых строк, читает root entity runtime через `entities()` и мутирует только `self` текущей машины. Первый аргумент (`state`) не используется в entity-машинах.
 
-`self` даёт доступ к колонкам и метаданным строк:
+`self` даёт доступ к колонкам и метаданным строк текущего батча:
 
-- `self.indices` — индексы (`EntityIndex`) строк текущего батча.
-- `self.<column>[entity]` — чтение и запись значения колонки.
+- `self.indices` — индексы (`EntityIndex`) строк текущего reducer batch.
+- `self.<column>[entity]` — чтение и запись значения колонки текущей машины.
 - `self.states.<STATE>` — числовой код состояния; запись `self.stateCode[entity] = self.states.expired` планирует переход строки.
 - `self.has(entity)`, `self.entityId(entity)` — проверка наличия и строковый id строки.
 - `payloadFor(entity)` — данные спавна для строки (валидно на `ENTITY_SPAWNED`).
+- `entities()` — live read view всего entity runtime, доступный на `ENTITY_SPAWNED`, public events и routed events.
+
+`entities()` в reducer — live view, а не snapshot на начало события. Reducer видит записи entity reducers, которые уже выполнились раньше в текущем `transition`, и не видит будущие записи reducers, которые стоят позже. Порядок entity machines в объекте `machines` является simulation contract для одного event.
+
+`self.indices` ограничивает строки текущего батча, а `entities()` читает все entity stores без scoped validation по этому батчу. Перед чтением optional row другого store проверяйте `view.has(entity)`. Представления, полученные через `entities().get(...)`, типизированы только для чтения: писать можно только в `self`. Runtime не добавляет proxy или freeze для защиты от обхода типов через `as any`.
 
 ```ts
-reducer(_state, action, { self }) {
+reducer(_state, action, { self, entities, payloadFor }) {
+  if (action.type === "ENTITY_SPAWNED") {
+    for (const entity of self.indices) {
+      const payload = payloadFor(entity);
+      self.x[entity] = payload.x;
+      self.y[entity] = payload.y;
+      self.vx[entity] = payload.vx;
+      self.vy[entity] = payload.vy;
+    }
+    return;
+  }
+
   if (action.type !== "TICK") return;
+
+  const health = entities().get("health");
+
   for (const entity of self.indices) {
-    self.ticksLeft[entity] -= 1;
-    if (self.ticksLeft[entity] <= 0) self.stateCode[entity] = self.states.expired;
+    if (!health.has(entity) || health.hp[entity] <= 0) continue;
+    self.x[entity] += self.vx[entity];
+    self.y[entity] += self.vy[entity];
   }
 }
 ```
+
+Reducer должен быть синхронным и детерминированным: в контекст не передаются deps или `transition`, нельзя возвращать Promise, запускать async work, IO или внешние side effects. `self`, `entities()` и store views действуют только во время текущего вызова reducer; не сохраняйте их для последующего использования.
+
+Для hot-path entity state не используйте цепочку `reaction -> orchestrator -> scratch -> flush events`. Переносите расчёт в entity system reducer, оставляя `reactions` для внешней синхронизации, а `effects` — для редких событий, удаления сущностей и async/IO.
 
 ## Effects
 
@@ -234,14 +258,16 @@ const spawn = defineEntitySpawn(
 
 ## Чтение состояния
 
-`manager.entities()` возвращает корневой доступ ко всем хранилищам:
+`manager.entities()` возвращает корневой доступ ко всем entity stores:
 
 - `entities().get(key)` — представление шаблона: `count`, `version`, `has(entity)`, `state(entity)` и колонки только для чтения. Строки индексируются по `EntityIndex` (`view.x[entity]`).
-- `entities().maybe(key)` — то же, но без строгих проверок доступа в dev.
+- `entities().maybe(key)` — на root access возвращает такой же read-only view; отличие от `get` по scoped validation относится к effects/reactions.
 
 Значение колонки является публичным состоянием только для живой строки: сначала проверяйте `view.has(entity) === true`. После `has(entity) === false` значения `view.<column>[entity]` могут оставаться устаревшими до повторного использования слота и не являются частью публичного контракта. `dehydrate()` не публикует runtime values удалённых слотов: в JSON для них записываются defaults из `initialContext`.
 
 `version` у entity store и actor store — монотонный invalidation token. Он меняется при видимом изменении хранилища, но точная величина инкремента не является счетчиком строк, событий или мутаций.
+
+В reducer поле `entities()` предоставляет тот же root access object через storage runtime и не выполняет scoped validation. Для строгих ключей и колонок в reducer объявите `AppDeps.entities: () => EntityAccess<AppMachines>` в типе, который передаётся в `EntitiesPlugin<AppDeps>`; runtime reducer не читает это поле из deps. В effects и reactions runtime создает scoped access: там `get` проверяет текущий scope в dev, а `maybe` возвращает view без этой проверки. Для effects и reactions передавайте `manager.entities` через `manager.setDependencies(...)`.
 
 ## React
 

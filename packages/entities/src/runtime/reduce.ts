@@ -538,6 +538,7 @@ const getBatchReducePlan = (batch: ReducerBatch): EntityReducePlan | undefined =
 };
 
 const reduceAcceptedBatch = (
+  runtime: EntityRuntimeState,
   batch: ReducerBatch,
   transaction: EntityDispatchTransaction | undefined,
   options: ReduceAcceptedBatchOptions = {},
@@ -566,16 +567,22 @@ const reduceAcceptedBatch = (
     try {
       if (reducer) {
         const nextState = firstNextState!;
-        reducer(
+        const result = reducer(
           { state: nextState, context: {} },
           batch.action,
           {
             nextState,
             config: batch.store.metadata.config,
             self: getActorReducerSelf(batch.store, accepted),
+            entities: () => runtime.access,
             payloadFor: createPayloadFor(batch.store, batch.payloadByEntity),
           },
         );
+        if (result instanceof Promise) {
+          throw runtimeError(
+            `reducer for actor '${batch.store.templateKey}' and event '${batch.action.type}' returned a Promise; entity reducers are sync-only`,
+          );
+        }
       }
     } finally {
       recordEntityTracePhase(trace, "entities.reduce.publicBatch.userReducer", userReducerStartedAt);
@@ -711,6 +718,7 @@ const reduceStagedSpawnLifecycle = (
 
   for (const batch of spawnBatches) {
     reduceAcceptedBatch(
+      runtime,
       {
         store: batch.store,
         indices: batch.indices,
@@ -916,15 +924,20 @@ const flushEntityLifecycleCleanup = (
     const lifecycleStartedAt = trace?.now();
     try {
       for (const batch of cleanupPlan.lifecycleBatches) {
-        const reduced = reduceAcceptedBatch(batch, transaction, {
-          scheduleDespawnOn: false,
-          scheduleEffects: false,
-          scheduleReactions: false,
-          scheduleTerminal: false,
-          onAccepted(accepted) {
-            appendLifecycleReactionBatch(transaction, reactionBatches, batch.store, batch.eventCode, accepted);
+        const reduced = reduceAcceptedBatch(
+          runtime,
+          batch,
+          transaction,
+          {
+            scheduleDespawnOn: false,
+            scheduleEffects: false,
+            scheduleReactions: false,
+            scheduleTerminal: false,
+            onAccepted(accepted) {
+              appendLifecycleReactionBatch(transaction, reactionBatches, batch.store, batch.eventCode, accepted);
+            },
           },
-        });
+        );
         touched = touched || reduced;
       }
       runEntityReactionBatches(runtime, reactionBatches, {
@@ -1002,6 +1015,7 @@ export const reduceEntityBucket = (
 
     for (const batch of publicBatches) {
       if (reduceAcceptedBatch(
+        runtime,
         {
           store: batch.store,
           indices: batch.indices,

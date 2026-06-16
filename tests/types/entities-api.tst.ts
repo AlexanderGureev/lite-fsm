@@ -533,6 +533,9 @@ describe("@lite-fsm/entities — этап 5 spawn API types", () => {
       typeof movementActor.config
     >;
     const entity = 0 as EntityIndex;
+    const access = meta.entities();
+    const anyActor = access.get("anyActor");
+    const maybeActor = access.maybe("anyActor");
     const payload = meta.payloadFor(entity);
     const x = meta.self.x[entity];
     const label = meta.self.label[entity];
@@ -550,6 +553,10 @@ describe("@lite-fsm/entities — этап 5 spawn API types", () => {
     expect(meta.self.stateCode).type.toBe<Int16Array>();
     expect(meta.self.prevStateCode).type.toBe<Int16Array>();
     expect(meta.self.rowVersion).type.toBe<Uint32Array>();
+    expect(meta.entities).type.toBeAssignableTo<() => EntityAccess<any>>();
+    expect(anyActor.count).type.toBe<number>();
+    expect(anyActor.version).type.toBe<number>();
+    expect(maybeActor.count).type.toBe<number>();
     expect(x).type.toBe<number>();
     expect(label).type.toBe<string>();
     expect(stateCode).type.toBe<number>();
@@ -585,6 +592,8 @@ describe("@lite-fsm/entities — этап 5 spawn API types", () => {
       },
       reducer(_state, _action, meta) {
         const entity = meta.self.indices[0];
+        const access = meta.entities();
+        const anyActor = access.get("anyActor");
         const payload = meta.payloadFor(entity);
 
         expect(meta.self.indices).type.toBe<readonly EntityIndex[]>();
@@ -597,6 +606,7 @@ describe("@lite-fsm/entities — этап 5 spawn API types", () => {
         expect(meta.self.prevStateCode[entity]).type.toBe<number>();
         expect(meta.self.has(entity)).type.toBe<boolean>();
         expect(meta.self.entityId(entity)).type.toBe<string>();
+        expect(anyActor.count).type.toBe<number>();
         expect(payload.x).type.toBe<number>();
         expect(payload.label).type.toBe<string | null>();
 
@@ -794,6 +804,221 @@ describe("@lite-fsm/entities — этап 5 spawn API types", () => {
 
     type PublicEvents = MachineEvents<{ readonly plainActor: typeof plainActor }>;
     type _NoAutoSpawnEvents = Assert<Equal<Extract<PublicEvents, SpawnEvents>, never>>;
+  });
+});
+
+describe("@lite-fsm/entities — строгий доступ entities() в reducer types", () => {
+  type AppEvent = FSMEvent<"TICK"> | FSMEvent<"HIT"> | FSMEvent<"SPAWN_INSTANCE">;
+  const basePlugin = entitiesPlugin();
+  const basePlugins = [basePlugin] as const;
+  const createBaseMachine: TypedCreateMachineFn<AppEvent, {}, typeof basePlugins> = createMachine;
+  const movementInitialContext = {
+    x: f32(),
+    y: f32(),
+  } as const;
+  const movementSpawnSchema = {
+    x: f32(),
+    y: f32(),
+  } as const;
+
+  const unitMovement = createBaseMachine({
+    storage: "entity",
+    initialState: "__INIT",
+    initialContext: movementInitialContext,
+    spawnSchema: movementSpawnSchema,
+    config: {
+      __INIT: { ENTITY_SPAWNED: "alive" },
+      alive: { HIT: "alive", TICK: "alive" },
+    },
+  });
+
+  const unitHealth = createBaseMachine({
+    storage: "entity",
+    initialState: "__INIT",
+    initialContext: {
+      hp: i32(),
+    },
+    spawnSchema: {
+      hp: i32(),
+    },
+    config: {
+      __INIT: { ENTITY_SPAWNED: "alive" },
+      alive: { HIT: "alive", TICK: "alive" },
+    },
+  });
+
+  const nonEntityMachine = createBaseMachine({
+    config: {
+      idle: { TICK: "idle" },
+    },
+    initialState: "idle",
+    initialContext: {},
+  });
+
+  const instanceActor = createBaseMachine({
+    storage: "instance",
+    initialState: "__INIT",
+    initialContext: {
+      attempts: 0,
+    },
+    config: {
+      __INIT: { SPAWN_INSTANCE: "ready" },
+      ready: { HIT: "ready", TICK: "ready" },
+    },
+  });
+
+  const machines = { unitMovement, unitHealth, nonEntityMachine, instanceActor };
+  type AppMachines = typeof machines;
+  type StrictDeps = {
+    readonly entities: () => EntityAccess<AppMachines>;
+  };
+  const createStrictMachine: TypedCreateMachineFn<AppEvent, StrictDeps, EntitiesPlugin<StrictDeps>> = createMachine;
+
+  test("AppDeps.entities задает strict reducer keys и read-only foreign columns", () => {
+    createStrictMachine({
+      storage: "entity",
+      initialState: "__INIT",
+      initialContext: {
+        x: f32(),
+        y: f32(),
+      },
+      spawnSchema: {
+        x: f32(),
+        y: f32(),
+      },
+      config: {
+        __INIT: { ENTITY_SPAWNED: "alive" },
+        alive: { HIT: "alive", TICK: "alive" },
+      },
+      reducer(_state, _action, { self, entities, payloadFor }) {
+        const entity = self.indices[0];
+        const health = entities().get("unitHealth");
+        const hp = health.hp[entity];
+        const payload = payloadFor(entity);
+
+        expect(hp).type.toBe<number>();
+        expect(payload.x).type.toBe<number>();
+        expect(payload.y).type.toBe<number>();
+
+        self.x[entity] = payload.x;
+        self.y[entity] = payload.y;
+
+        // @ts-expect-error!
+        health.hp[entity] = 0;
+        // @ts-expect-error!
+        entities().get("nonEntityMachine");
+        // @ts-expect-error!
+        entities().get("instanceActor");
+      },
+    });
+  });
+
+  test("без AppDeps.entities reducer получает широкий EntityAccess", () => {
+    const createWithoutEntities: TypedCreateMachineFn<AppEvent, {}, EntitiesPlugin<{}>> = createMachine;
+
+    createWithoutEntities({
+      storage: "entity",
+      initialState: "__INIT",
+      initialContext: {
+        x: f32(),
+      },
+      spawnSchema: {},
+      config: {
+        __INIT: { ENTITY_SPAWNED: "alive" },
+        alive: { TICK: "alive" },
+      },
+      reducer(_state, _action, meta) {
+        const entity = meta.self.indices[0];
+        const anyActor = meta.entities().get("anyEntityActor");
+
+        meta.entities().get("nonEntityMachine");
+
+        expect(meta.entities).type.toBeAssignableTo<() => EntityAccess<any>>();
+        expect(anyActor.count).type.toBe<number>();
+        expect(anyActor.has(entity)).type.toBe<boolean>();
+      },
+    });
+  });
+
+  test("несовместимый AppDeps.entities fallback-ит reducer на широкий EntityAccess", () => {
+    type InvalidDeps = {
+      readonly entities: () => { readonly get: (key: "unitHealth") => unknown };
+    };
+    const createInvalidDepsMachine: TypedCreateMachineFn<AppEvent, InvalidDeps, EntitiesPlugin<InvalidDeps>> =
+      createMachine;
+
+    createInvalidDepsMachine({
+      storage: "entity",
+      initialState: "__INIT",
+      initialContext: {
+        x: f32(),
+      },
+      spawnSchema: {},
+      config: {
+        __INIT: { ENTITY_SPAWNED: "alive" },
+        alive: { TICK: "alive" },
+      },
+      reducer(_state, _action, meta) {
+        const fallbackActor = meta.entities().get("nonEntityMachine");
+
+        expect(meta.entities).type.toBeAssignableTo<() => EntityAccess<any>>();
+        expect(fallbackActor.version).type.toBe<number>();
+      },
+    });
+  });
+
+  test("EntityReducerContext сохраняет arity и требует entities в object literal", () => {
+    type Context = EntityReducerContext<
+      typeof movementInitialContext,
+      typeof movementSpawnSchema,
+      typeof unitMovement.config
+    >;
+    const self = null as unknown as Context["self"];
+    const validContext: Context = {
+      self,
+      entities: () => null as unknown as ReturnType<Context["entities"]>,
+      payloadFor: (_entity) => ({ x: 1, y: 2 }),
+    };
+
+    expect(validContext.entities().get("anyActor").count).type.toBe<number>();
+
+    // @ts-expect-error!
+    const missingEntities: Context = {
+      self,
+      payloadFor: (_entity) => ({ x: 1, y: 2 }),
+    };
+
+    expect(missingEntities.self).type.toBe<Context["self"]>();
+  });
+
+  test('обычный reducer и storage: "instance" reducer не получают entities', () => {
+    createStrictMachine({
+      config: {
+        idle: { TICK: "idle" },
+      },
+      initialState: "idle",
+      initialContext: {},
+      reducer(_state, _action, meta) {
+        // @ts-expect-error!
+        meta.entities;
+      },
+    });
+
+    createStrictMachine({
+      storage: "instance",
+      initialState: "__INIT",
+      initialContext: {
+        attempts: 0,
+      },
+      config: {
+        __INIT: { SPAWN_INSTANCE: "ready" },
+        ready: { HIT: "ready", TICK: "ready" },
+      },
+      reducer(_state, _action, meta) {
+        // @ts-expect-error!
+        meta.entities;
+      },
+    });
   });
 });
 

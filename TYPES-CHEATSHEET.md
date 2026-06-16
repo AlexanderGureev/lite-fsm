@@ -391,7 +391,8 @@ const movement = createMachine({
   initialContext: { x: f32({ default: 0 }) },
   spawnSchema: { x: f32() },
   config: { __INIT: { ENTITY_SPAWNED: "active" }, active: { TICK: "active" } },
-  reducer(_state, action, { self, payloadFor }) {
+  reducer(_state, action, { self, entities, payloadFor }) {
+    const view = entities().get("movement");
     /* batch по self.indices */
   },
 });
@@ -412,10 +413,29 @@ const movement = createMachine({
 
 | Тип                                          | Форма                                                                                                                                                                                                                                                            |
 | -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `EntityReducerContext<Ctx, Spawn, Config>`   | `{ self: EntityReducerSelf<Ctx, Config>; payloadFor(entity: EntityIndex): <значения спавна по Spawn> }`                                                                                                                                                          |
+| `EntityReducerContext<Ctx, Spawn, Config, AppDeps = unknown>` | `{ self: EntityReducerSelf<Ctx, Config>; entities: () => <EntityAccess из AppDeps.entities или широкий fallback>; payloadFor(entity: EntityIndex): <значения спавна по Spawn> }`                                                                                 |
 | `EntityReducerSelf<Ctx, Config>`             | mutable колонки `Ctx` (`Float32Array` / `Int16Array` / `Int32Array` / `Uint8Array` / `string[]`) + `indices: readonly EntityIndex[]`, `states: Record<PublicState, number>`, `presence`, `stateCode`, `prevStateCode`, `rowVersion`, `has(entity)`, `entityId(entity)` |
 
+`entities()` в `EntityReducerContext` доступен на `ENTITY_SPAWNED`, public events и routed events. Если `AppDeps` содержит `readonly entities: () => EntityAccess<AppMachines>`, reducer получает строгие entity keys и колонки из `AppMachines`. Если `AppDeps.entities` отсутствует или несовместим с `EntityAccess<...>`, тип fallback — широкий `EntityAccess` с `get(string)`.
+
+```ts
+type AppMachines = typeof machines;
+type AppDeps = {
+  readonly entities: () => EntityAccess<AppMachines>;
+};
+
+const createAppMachine: TypedCreateMachineFn<
+  AppEvent,
+  AppDeps,
+  EntitiesPlugin<AppDeps>
+> = createMachine;
+```
+
+Store views из `entities()` типизируются только для чтения: запись в колонку чужого view является ошибкой TypeScript, а `self.hp[entity] = 0` разрешён только в reducer владельца колонки. Обычные reducers и `storage: "instance"` reducers не получают поле `entities`.
+
 `payloadFor(entity)` валиден на `ENTITY_SPAWNED`. Запись `self.stateCode[entity] = self.states.<STATE>` планирует переход строки. Reducer и `reactions.ENTITY_DESPAWNED` могут читать колонки удаляемой строки до физического удаления; финальную внешнюю синхронизацию выполняйте через reaction, а не через state `effects` целевого состояния.
+
+Entity reducer является sync-only: в контекст не входят deps и `transition`, Promise result является runtime error. `self`, `entities()` и store views нельзя сохранять после возврата reducer.
 
 `reactions` получают sync-only зависимости. `self.indices` имеет тип `readonly EntityIndex[]` и является представлением текущего вызова. `self`, `self.indices`, объект `deps` и представления из `entities()` нельзя сохранять или мутировать после завершения reaction.
 
@@ -425,7 +445,7 @@ const movement = createMachine({
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `EntityAccess<AppMachines>`  | `{ get(key), maybe(key) }`; per-template view `{ count, version, has(entity), state(entity), <column> }`. Колонки только для чтения, индекс по `EntityIndex`; `state(entity)` сужается до `ActorPublicState<Config> \| undefined` |
 
-`manager.entities()` — manager extension плагина типа `() => EntityAccess<AppMachines>`. Передайте `manager.entities` в deps (`setDependencies({ entities: manager.entities })`), чтобы reducer/effects/reactions читали кросс-машинные колонки. `get` строго проверяет scoped-доступ в dev, `maybe` — нет.
+`manager.entities()` — manager extension плагина типа `() => EntityAccess<AppMachines>` и root access ко всем entity stores. Reducer получает root access через storage runtime без scoped validation; `AppDeps.entities` является источником строгих типов. В effects/reactions runtime создает scoped access: `get` проверяет scope в dev, `maybe` возвращает view без этой проверки. Для effects/reactions передайте `manager.entities` в deps (`setDependencies({ entities: manager.entities })`).
 
 Колонки удалённых строк не являются public state: после `has(entity) === false` значения `view.<column>[entity]` могут быть устаревшими. `dehydrate()` сериализует удалённые слоты через defaults из `initialContext`. `version` actor store и entity store — monotonic invalidation token, а не счетчик строк, событий или отдельных мутаций.
 

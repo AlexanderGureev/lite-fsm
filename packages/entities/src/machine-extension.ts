@@ -2,6 +2,7 @@ import type {
   ActorPublicState,
   AnyEvent,
   ManagerAction,
+  MachineStore,
   ReadonlyManagerAction,
   StorageDependentField,
   StorageDependentTypeLambda,
@@ -10,7 +11,7 @@ import type {
 import type { EntityContextSchema, EntitySpawnPayload, EntitySpawnSchema } from "./schema";
 import type { EntityIndex } from "./plugin";
 import type { LiteFsmEntityLifecycleEvents } from "./runtime/lifecycle";
-import type { ReadonlyEntityColumn } from "./runtime/access";
+import type { EntityAccess, ReadonlyEntityColumn } from "./runtime/access";
 
 export declare const entityStateMetadata: unique symbol;
 
@@ -39,7 +40,7 @@ export type EntityMachineExtension<
       readonly storage: "entity";
       readonly internalEvents: LiteFsmEntityLifecycleEvents;
       readonly input: EntityMachineInput<ContextSchema, SpawnSchema, Config, AppDeps>;
-      readonly reducerContext: StorageDependentField<EntityReducerContextLambda>;
+      readonly reducerContext: StorageDependentField<EntityReducerContextLambda<AppDeps>>;
       readonly effectDeps: StorageDependentField<EntityEffectDepsLambda>;
       readonly reactionDeps: StorageDependentField<EntityReactionDepsLambda<AppDeps>>;
       readonly resultMetadata: <Input extends EntityMachineInput<ContextSchema, SpawnSchema, Config>>(input: Input) => {
@@ -90,6 +91,24 @@ type EntityReducerColumns<ContextSchema extends EntityContextSchema> = {
 type EntityEffectColumns<ContextSchema extends EntityContextSchema> = {
   readonly [Field in keyof ContextSchema]: ReadonlyEntityColumn<EntitySpawnPayload<ContextSchema>[Field]>;
 };
+
+type AnyEntityMachineStore = Record<
+  string,
+  {
+    readonly storage: "entity";
+    readonly initialState: "__INIT";
+    readonly config: object;
+    readonly initialContext: EntityContextSchema;
+    readonly spawnSchema: EntitySpawnSchema;
+  }
+>;
+
+type EntityReducerEntityAccess<AppDeps> =
+  AppDeps extends { readonly entities: () => infer Access }
+    ? Access extends EntityAccess<infer _AppMachines extends MachineStore>
+      ? Access
+      : EntityAccess<AnyEntityMachineStore>
+    : EntityAccess<AnyEntityMachineStore>;
 
 export type EntityReducerStates<Config extends object> = {
   readonly [State in ActorPublicState<Config>]: number;
@@ -176,21 +195,23 @@ export type EntityReducerContext<
   ContextSchema extends EntityContextSchema,
   SpawnSchema extends EntitySpawnSchema,
   Config extends object = object,
+  AppDeps = unknown,
 > = {
   readonly self: EntityReducerSelf<ContextSchema, Config>;
+  readonly entities: () => EntityReducerEntityAccess<AppDeps>;
   payloadFor(entity: EntityIndex): EntitySpawnPayload<SpawnSchema>;
 };
 
-type EntityReducerContextForInput<Input> = Input extends {
+type EntityReducerContextForInput<Input, AppDeps> = Input extends {
   readonly initialContext: infer ContextSchema extends EntityContextSchema;
   readonly spawnSchema: infer SpawnSchema extends EntitySpawnSchema;
   readonly config: infer Config extends object;
 }
-  ? EntityReducerContext<ContextSchema, SpawnSchema, Config>
+  ? EntityReducerContext<ContextSchema, SpawnSchema, Config, AppDeps>
   : never;
 
-interface EntityReducerContextLambda extends StorageDependentTypeLambda {
-  readonly type: this extends { readonly input: infer Input } ? EntityReducerContextForInput<Input> : never;
+interface EntityReducerContextLambda<AppDeps> extends StorageDependentTypeLambda {
+  readonly type: this extends { readonly input: infer Input } ? EntityReducerContextForInput<Input, AppDeps> : never;
 }
 
 type EntityEffectDepsForInput<Input> = Input extends {
