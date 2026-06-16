@@ -5,9 +5,11 @@ import type { MetricsAdapter } from "../store/metrics";
 import {
   asEntityIndex,
   entityIdForUnitIndex,
+  readUnitViews,
   unitColumnLength,
-  type UnitActorView,
   unitIsAlive,
+  unitSelected,
+  type UnitViews,
 } from "../store/selectors";
 import { readRtsSimulationMetrics } from "../store/sim/runtime";
 import { RTS_MAP } from "../store/sim/spawn-placement";
@@ -215,7 +217,7 @@ class UnitSpriteRenderer {
   }
 
   sync() {
-    const units = this.manager.entities().get("unitActor");
+    const units = readUnitViews(this.manager);
     this.liveEntities.clear();
 
     for (let index = 0; index < unitColumnLength(units); index += 1) {
@@ -229,16 +231,16 @@ class UnitSpriteRenderer {
     this.cleanupMissing();
   }
 
-  private syncUnit(units: UnitActorView, entity: EntityIndex) {
+  private syncUnit(units: UnitViews, entity: EntityIndex) {
     const key = Number(entity);
-    const kind = units.kind[entity];
+    const kind = units.identity.kind[entity];
     const size = displaySizeForKind(kind);
     const texture = textureForKind(kind);
     const view = this.sprites.get(key) ?? this.createUnitView(key, units, entity, texture);
-    const hpRate = Math.max(0, Math.min(1, units.hp[entity] / units.maxHp[entity]));
+    const hpRate = Math.max(0, Math.min(1, units.health.hp[entity] / units.health.maxHp[entity]));
 
     view.sprite.setTexture(texture);
-    view.sprite.setPosition(units.x[entity], units.y[entity]);
+    view.sprite.setPosition(units.movement.x[entity], units.movement.y[entity]);
     view.sprite.setDepth(depthForKind(kind));
     view.sprite.setDisplaySize(size, size);
     view.sprite.setAlpha(0.74 + hpRate * 0.26);
@@ -255,18 +257,19 @@ class UnitSpriteRenderer {
     this.syncHpBar(units, entity, size, hpRate);
   }
 
-  private createUnitView(key: number, units: UnitActorView, entity: EntityIndex, texture: string) {
+  private createUnitView(key: number, units: UnitViews, entity: EntityIndex, texture: string) {
     const view = {
-      sprite: this.scene.add.image(units.x[entity], units.y[entity], texture).setOrigin(0.5, 0.5),
+      sprite: this.scene.add.image(units.movement.x[entity], units.movement.y[entity], texture).setOrigin(0.5, 0.5),
     };
 
     this.sprites.set(key, view);
     return view;
   }
 
-  private syncSelection(units: UnitActorView, entity: EntityIndex, size: number) {
+  private syncSelection(units: UnitViews, entity: EntityIndex, size: number) {
     const key = Number(entity);
-    const shouldShow = units.selected[entity] === 1 || units.kind[entity] === UNIT_KIND.HERO;
+    const selected = unitSelected(units, entity);
+    const shouldShow = selected === 1 || units.identity.kind[entity] === UNIT_KIND.HERO;
 
     if (!shouldShow) {
       const stale = this.selected.get(key);
@@ -279,20 +282,24 @@ class UnitSpriteRenderer {
 
     const highlight =
       this.selected.get(key) ??
-      this.scene.add.image(units.x[entity], units.y[entity], TEXTURES.selected).setOrigin(0.5, 0.5).setDepth(7);
+      this.scene
+        .add.image(units.movement.x[entity], units.movement.y[entity], TEXTURES.selected)
+        .setOrigin(0.5, 0.5)
+        .setDepth(7);
 
     this.selected.set(key, highlight);
-    highlight.setPosition(units.x[entity], units.y[entity]);
+    highlight.setPosition(units.movement.x[entity], units.movement.y[entity]);
     highlight.setDisplaySize(size * 1.5, size * 1.5);
-    highlight.setAlpha(units.selected[entity] === 1 ? 0.95 : 0.34);
+    highlight.setAlpha(selected === 1 ? 0.95 : 0.34);
   }
 
-  private syncHpBar(units: UnitActorView, entity: EntityIndex, size: number, hpRate: number) {
+  private syncHpBar(units: UnitViews, entity: EntityIndex, size: number, hpRate: number) {
     const key = Number(entity);
+    const selected = unitSelected(units, entity);
     const shouldShow =
-      units.kind[entity] === UNIT_KIND.HERO ||
-      units.selected[entity] === 1 ||
-      (units.kind[entity] === UNIT_KIND.ENEMY && hpRate < 1);
+      units.identity.kind[entity] === UNIT_KIND.HERO ||
+      selected === 1 ||
+      (units.identity.kind[entity] === UNIT_KIND.ENEMY && hpRate < 1);
 
     if (!shouldShow) {
       const stale = this.hpBars.get(key);
@@ -305,21 +312,21 @@ class UnitSpriteRenderer {
     }
 
     const width = Math.max(HP_BAR_MIN_WIDTH, size * HP_BAR_WIDTH_SCALE);
-    const y = units.y[entity] - size * HP_BAR_OFFSET_SCALE;
+    const y = units.movement.y[entity] - size * HP_BAR_OFFSET_SCALE;
     const bar =
       this.hpBars.get(key) ??
       ({
-        bg: this.scene.add.image(units.x[entity], y, TEXTURES.hpBg).setOrigin(0.5, 0.5).setDepth(8),
+        bg: this.scene.add.image(units.movement.x[entity], y, TEXTURES.hpBg).setOrigin(0.5, 0.5).setDepth(8),
         fill: this.scene.add
-          .image(units.x[entity] - width / 2, y, TEXTURES.hpFill)
+          .image(units.movement.x[entity] - width / 2, y, TEXTURES.hpFill)
           .setOrigin(0, 0.5)
           .setDepth(9),
       } satisfies HpBarView);
 
     this.hpBars.set(key, bar);
-    bar.bg.setPosition(units.x[entity], y);
+    bar.bg.setPosition(units.movement.x[entity], y);
     bar.bg.setDisplaySize(width + HP_BAR_HORIZONTAL_PADDING, HP_BAR_BG_HEIGHT);
-    bar.fill.setPosition(units.x[entity] - width / 2, y);
+    bar.fill.setPosition(units.movement.x[entity] - width / 2, y);
     bar.fill.setDisplaySize(Math.max(1, width * hpRate), HP_BAR_FILL_HEIGHT);
   }
 
@@ -346,7 +353,7 @@ class UnitSpriteRenderer {
 }
 
 const findUnitAt = (
-  units: UnitActorView,
+  units: UnitViews,
   point: Point,
   options: { faction?: number; radiusMultiplier?: number; minimumRadius?: number } = {},
 ) => {
@@ -356,13 +363,14 @@ const findUnitAt = (
   for (let index = 0; index < unitColumnLength(units); index += 1) {
     const entity = asEntityIndex(index);
     if (!unitIsAlive(units, entity)) continue;
-    if (options.faction !== undefined && units.faction[entity] !== options.faction) continue;
+    if (options.faction !== undefined && units.identity.faction[entity] !== options.faction) continue;
 
     const hitRadius = Math.max(
       options.minimumRadius ?? 0,
-      Math.max(units.radius[entity], displaySizeForKind(units.kind[entity]) * 0.5) * (options.radiusMultiplier ?? 1),
+      Math.max(units.identity.radius[entity], displaySizeForKind(units.identity.kind[entity]) * 0.5) *
+        (options.radiusMultiplier ?? 1),
     );
-    const distance = squaredDistance(point, { x: units.x[entity], y: units.y[entity] });
+    const distance = squaredDistance(point, { x: units.movement.x[entity], y: units.movement.y[entity] });
 
     if (distance > hitRadius * hitRadius || distance >= nearestDistance) continue;
 
@@ -373,11 +381,11 @@ const findUnitAt = (
   return nearest;
 };
 
-const hasSelectedPlayerUnits = (units: UnitActorView) => {
+const hasSelectedPlayerUnits = (units: UnitViews) => {
   for (let index = 0; index < unitColumnLength(units); index += 1) {
     const entity = asEntityIndex(index);
     if (!unitIsAlive(units, entity)) continue;
-    if (units.faction[entity] === UNIT_FACTION.PLAYER && units.selected[entity] === 1) return true;
+    if (units.identity.faction[entity] === UNIT_FACTION.PLAYER && unitSelected(units, entity) === 1) return true;
   }
 
   return false;
@@ -668,7 +676,7 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
     }
 
     private issueLeftClick(point: Point) {
-      const units = manager.entities().get("unitActor");
+      const units = readUnitViews(manager);
       const entity = findUnitAt(units, point, { radiusMultiplier: 1.35, minimumRadius: 28 });
       const hasSelection = hasSelectedPlayerUnits(units);
 
@@ -681,7 +689,7 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
         return;
       }
 
-      if (units.faction[entity] !== UNIT_FACTION.PLAYER) {
+      if (units.identity.faction[entity] !== UNIT_FACTION.PLAYER) {
         if (hasSelection) {
           manager.transition({ type: "ISSUE_ATTACK_MOVE", payload: point });
         } else {
@@ -700,7 +708,7 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
     }
 
     private issueRightClick(point: Point) {
-      const units = manager.entities().get("unitActor");
+      const units = readUnitViews(manager);
       const enemy = findUnitAt(units, point, {
         faction: UNIT_FACTION.ENEMY,
         radiusMultiplier: 1.8,

@@ -46,7 +46,7 @@ import {
   type RtsMetricsSnapshot,
   type RtsTimingStats,
 } from "../store/metrics";
-import { readRtsEntityStats, type RtsEntityStats } from "../store/selectors";
+import { readRtsEntityStats, readUnitViews, type RtsEntityStats } from "../store/selectors";
 
 type GameLike = {
   destroy: (removeCanvas?: boolean, noReturn?: boolean) => void;
@@ -128,14 +128,14 @@ function useRtsEntityStats(manager: AppStore, enabled: boolean) {
 
     const readStats = (time: number) => {
       if (time - lastRead >= 120) {
-        setStats(readRtsEntityStats(manager.entities().get("unitActor")));
+        setStats(readRtsEntityStats(readUnitViews(manager)));
         lastRead = time;
       }
 
       frame = window.requestAnimationFrame(readStats);
     };
 
-    setStats(readRtsEntityStats(manager.entities().get("unitActor")));
+    setStats(readRtsEntityStats(readUnitViews(manager)));
     frame = window.requestAnimationFrame(readStats);
 
     return () => window.cancelAnimationFrame(frame);

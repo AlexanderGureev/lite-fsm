@@ -15,22 +15,42 @@ export const UNIT_COMMAND = {
   ATTACK_MOVE: 2,
 } as const;
 
-export type UnitActorSpawnPayload = {
+export const UNIT_SELECTION = {
+  UNSELECTED: 0,
+  SELECTED: 1,
+} as const;
+
+export type UnitIdentitySpawnPayload = {
+  kind: number;
+  faction: number;
+  radius: number;
+};
+
+export type UnitMovementSpawnPayload = {
   x: number;
   y: number;
   vx: number;
   vy: number;
-  kind: number;
-  faction: number;
-  radius: number;
   speed: number;
+};
+
+export type UnitHealthSpawnPayload = {
   hp: number;
   maxHp: number;
+};
+
+export type UnitCombatSpawnPayload = {
   attackRange: number;
   attackDamage: number;
   attackCooldownMs: number;
   attackTimerMs: number;
+};
+
+export type UnitSelectionSpawnPayload = {
   selected: number;
+};
+
+export type UnitCommandSpawnPayload = {
   command: number;
   targetX: number;
   targetY: number;
@@ -41,5 +61,10 @@ export type UnitActorSpawnPayload = {
 export type PlannedUnitSpawn = {
   id: string;
   groupTag: string;
-  unit: UnitActorSpawnPayload;
+  identity: UnitIdentitySpawnPayload;
+  movement: UnitMovementSpawnPayload;
+  health: UnitHealthSpawnPayload;
+  combat: UnitCombatSpawnPayload;
+  selection?: UnitSelectionSpawnPayload;
+  command?: UnitCommandSpawnPayload;
 };

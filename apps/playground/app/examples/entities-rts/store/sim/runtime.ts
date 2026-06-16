@@ -1,6 +1,7 @@
 import type { EntityIndex } from "@lite-fsm/entities";
 
 import type { Point } from "../types";
+import { createRtsSimulationBatch, resetRtsSimulationBatch, type RtsSimulationBatch } from "./batches";
 import { createFlowField, flowCellIndexForPoint, readFlowDirectionAt, type FlowField } from "./flow-field";
 import { buildSpatialGridForEntities, collectSpatialNeighborsAt, createSpatialGrid, type SpatialGrid } from "./spatial-grid";
 import { RTS_MAP } from "./spawn-placement";
@@ -16,6 +17,13 @@ export type RtsSimulationMetrics = {
   spatialGridBuildMs: number;
 };
 
+export type RtsTickScratch = {
+  hasCommandUpdate: boolean;
+  hasCombatUpdate: boolean;
+  hasDamageUpdate: boolean;
+  hasMovementUpdate: boolean;
+};
+
 type RuntimeScratch = {
   flowField: FlowField | null;
   unitGrid: SpatialGrid | null;
@@ -24,6 +32,8 @@ type RuntimeScratch = {
   neighborBuffer: Int32Array;
   aliveEntities: EntityIndex[];
   enemyEntities: EntityIndex[];
+  batch: RtsSimulationBatch;
+  tick: RtsTickScratch;
 };
 
 export type RtsSpatialGrids = {
@@ -39,6 +49,13 @@ const scratch: RuntimeScratch = {
   neighborBuffer: new Int32Array(64),
   aliveEntities: [],
   enemyEntities: [],
+  batch: createRtsSimulationBatch(1),
+  tick: {
+    hasCommandUpdate: false,
+    hasCombatUpdate: false,
+    hasDamageUpdate: false,
+    hasMovementUpdate: false,
+  },
 };
 
 const metrics: RtsSimulationMetrics = {
@@ -69,21 +86,44 @@ export const resetRtsSimulationRuntime = () => {
   scratch.neighborBuffer.fill(-1);
   scratch.aliveEntities.length = 0;
   scratch.enemyEntities.length = 0;
+  resetRtsSimulationBatch(scratch.batch, scratch.batch.projectedHp.length);
+  scratch.tick.hasCommandUpdate = false;
+  scratch.tick.hasCombatUpdate = false;
+  scratch.tick.hasDamageUpdate = false;
+  scratch.tick.hasMovementUpdate = false;
   metrics.flowFieldRebuildMs = 0;
   metrics.spatialGridBuildMs = 0;
 };
 
-export const beginRtsTickScratch = () => {
+const ensureSimulationBatch = (capacity: number) => {
+  if (scratch.batch.projectedHp.length >= capacity) return scratch.batch;
+
+  scratch.batch = createRtsSimulationBatch(Math.max(1, capacity));
+  return scratch.batch;
+};
+
+export const beginRtsTickScratch = (capacity: number) => {
   scratch.aliveEntities.length = 0;
   scratch.enemyEntities.length = 0;
+  scratch.tick.hasCommandUpdate = false;
+  scratch.tick.hasCombatUpdate = false;
+  scratch.tick.hasDamageUpdate = false;
+  scratch.tick.hasMovementUpdate = false;
   metrics.flowFieldRebuildMs = 0;
   metrics.spatialGridBuildMs = 0;
+
+  const batch = ensureSimulationBatch(capacity);
+  resetRtsSimulationBatch(batch, capacity);
 
   return {
     aliveEntities: scratch.aliveEntities,
     enemyEntities: scratch.enemyEntities,
+    batch,
+    tick: scratch.tick,
   };
 };
+
+export const readRtsTickScratch = () => scratch;
 
 export const ensureRtsFlowField = (hero: Point) => {
   if (scratch.flowField) {

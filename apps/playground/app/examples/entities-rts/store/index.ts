@@ -2,16 +2,34 @@ import { MachineManager, type MachinesState } from "@lite-fsm/core";
 import { defineEntitySpawn, entitiesPlugin } from "@lite-fsm/entities";
 import { immerMiddleware } from "@lite-fsm/middleware/immer";
 
-import type { AppDeps, RuntimeDeps } from "./deps";
+import type { RuntimeDeps } from "./deps";
+import { gameMap } from "./machines/game-map";
 import { gameSession } from "./machines/game-session";
-import { unitActor } from "./machines/unit-actor";
+import { rtsSimulation } from "./machines/rts-simulation";
+import { rtsSimulationTick } from "./machines/rts-simulation-tick";
+import { unitCombat } from "./machines/unit-combat";
+import { unitCommand } from "./machines/unit-command";
+import { unitHealth } from "./machines/unit-health";
+import { unitIdentity } from "./machines/unit-identity";
+import { unitMovement } from "./machines/unit-movement";
+import { unitOrders } from "./machines/unit-orders";
+import { unitSelection } from "./machines/unit-selection";
 import { createGameStartSpawnPlan } from "./sim/spawn-placement";
 import { spawnEvents } from "./spawn-events";
 import type { AppEvents } from "./types";
 
 export const machines = {
+  gameMap,
   gameSession,
-  unitActor,
+  rtsSimulation,
+  rtsSimulationTick,
+  unitOrders,
+  unitIdentity,
+  unitMovement,
+  unitHealth,
+  unitCombat,
+  unitSelection,
+  unitCommand,
 };
 
 export type AppMachines = typeof machines;
@@ -21,14 +39,27 @@ export const spawn = defineEntitySpawn(
   machines,
   spawnEvents,
 )({
-  GAME_START: (payload) =>
-    createGameStartSpawnPlan(payload).map((unit) => ({
+  GAME_START: (payload) => [
+    ...createGameStartSpawnPlan(payload).map((unit) => ({
       id: unit.id,
       groupTag: unit.groupTag,
       actors: {
-        unitActor: unit.unit,
+        unitIdentity: unit.identity,
+        unitMovement: unit.movement,
+        unitHealth: unit.health,
+        unitCombat: unit.combat,
+        ...(unit.selection ? { unitSelection: unit.selection } : {}),
+        ...(unit.command ? { unitCommand: unit.command } : {}),
       },
     })),
+    {
+      id: "system/rts-simulation-tick",
+      groupTag: "system",
+      actors: {
+        rtsSimulationTick: {},
+      },
+    },
+  ],
 });
 
 export const makeStore = (deps: RuntimeDeps) => {

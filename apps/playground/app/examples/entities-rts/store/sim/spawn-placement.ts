@@ -4,8 +4,12 @@ import {
   UNIT_COMMAND,
   UNIT_FACTION,
   UNIT_KIND,
+  UNIT_SELECTION,
   type PlannedUnitSpawn,
-  type UnitActorSpawnPayload,
+  type UnitCombatSpawnPayload,
+  type UnitHealthSpawnPayload,
+  type UnitIdentitySpawnPayload,
+  type UnitMovementSpawnPayload,
 } from "../unit-model";
 import { createFormationTargets } from "./formation";
 import { createSeededRandom, randomBetween, randomInt } from "./random";
@@ -48,34 +52,56 @@ const enemyStats = {
   attackCooldownMs: 900,
 };
 
-const createUnitPayload = (
-  values: Pick<
-    UnitActorSpawnPayload,
-    "x" | "y" | "kind" | "faction" | "radius" | "speed" | "hp" | "attackRange" | "attackDamage" | "attackCooldownMs"
-  > &
-    Partial<Pick<UnitActorSpawnPayload, "formationOffsetX" | "formationOffsetY">>,
-): UnitActorSpawnPayload => ({
-  x: values.x,
-  y: values.y,
-  vx: 0,
-  vy: 0,
-  kind: values.kind,
-  faction: values.faction,
-  radius: values.radius,
-  speed: values.speed,
-  hp: values.hp,
-  maxHp: values.hp,
-  attackRange: values.attackRange,
-  attackDamage: values.attackDamage,
-  attackCooldownMs: values.attackCooldownMs,
-  attackTimerMs: 0,
-  selected: 0,
-  command: UNIT_COMMAND.IDLE,
-  targetX: values.x,
-  targetY: values.y,
-  formationOffsetX: values.formationOffsetX ?? 0,
-  formationOffsetY: values.formationOffsetY ?? 0,
-});
+type UnitSpawnValues = UnitIdentitySpawnPayload &
+  Pick<UnitMovementSpawnPayload, "x" | "y" | "speed"> &
+  Pick<UnitHealthSpawnPayload, "hp"> &
+  Pick<UnitCombatSpawnPayload, "attackRange" | "attackDamage" | "attackCooldownMs"> & {
+    readonly formationOffsetX?: number;
+    readonly formationOffsetY?: number;
+  };
+
+const createUnitComponents = (values: UnitSpawnValues): Omit<PlannedUnitSpawn, "id" | "groupTag"> => {
+  const components: Omit<PlannedUnitSpawn, "id" | "groupTag"> = {
+    identity: {
+      kind: values.kind,
+      faction: values.faction,
+      radius: values.radius,
+    },
+    movement: {
+      x: values.x,
+      y: values.y,
+      vx: 0,
+      vy: 0,
+      speed: values.speed,
+    },
+    health: {
+      hp: values.hp,
+      maxHp: values.hp,
+    },
+    combat: {
+      attackRange: values.attackRange,
+      attackDamage: values.attackDamage,
+      attackCooldownMs: values.attackCooldownMs,
+      attackTimerMs: 0,
+    },
+  };
+
+  if (values.faction !== UNIT_FACTION.PLAYER) return components;
+
+  return {
+    ...components,
+    selection: {
+      selected: UNIT_SELECTION.UNSELECTED,
+    },
+    command: {
+      command: UNIT_COMMAND.IDLE,
+      targetX: values.x,
+      targetY: values.y,
+      formationOffsetX: values.formationOffsetX ?? 0,
+      formationOffsetY: values.formationOffsetY ?? 0,
+    },
+  };
+};
 
 const enemyAnchorForGroup = (group: number, random: () => number) => {
   const edge = group % 4;
@@ -108,7 +134,7 @@ export const createGameStartSpawnPlan = (config: GameConfig): readonly PlannedUn
   plan[cursor] = {
     id: "unit/hero",
     groupTag: "player",
-    unit: createUnitPayload({
+    ...createUnitComponents({
       x: heroX,
       y: heroY,
       kind: UNIT_KIND.HERO,
@@ -127,7 +153,7 @@ export const createGameStartSpawnPlan = (config: GameConfig): readonly PlannedUn
     plan[cursor] = {
       id: `unit/ally/${index}`,
       groupTag: "player",
-      unit: createUnitPayload({
+      ...createUnitComponents({
         x,
         y,
         kind: UNIT_KIND.ALLY,
@@ -161,7 +187,7 @@ export const createGameStartSpawnPlan = (config: GameConfig): readonly PlannedUn
     plan[cursor] = {
       id: `unit/enemy/${index}`,
       groupTag: "enemy",
-      unit: createUnitPayload({
+      ...createUnitComponents({
         x,
         y,
         kind: UNIT_KIND.ENEMY,
