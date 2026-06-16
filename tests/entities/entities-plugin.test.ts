@@ -13,6 +13,7 @@ import {
   i16,
   i32,
   optional,
+  resource,
   spawnEvent,
   string,
   u8,
@@ -233,6 +234,7 @@ describe("@lite-fsm/entities — этап 1 plugin shell", () => {
       "i16",
       "i32",
       "optional",
+      "resource",
       "spawnEvent",
       "string",
       "u8",
@@ -244,6 +246,7 @@ describe("@lite-fsm/entities — этап 1 plugin shell", () => {
     expect(entities.spawnEvent).toBe(spawnEvent);
     expect(entities.f32).toBe(f32);
     expect(entities.string).toBe(string);
+    expect(entities.resource).toBe(resource);
   });
 
   it("публикует root, react и package.json exports", () => {
@@ -548,6 +551,27 @@ describe("@lite-fsm/entities — этап 2 schema descriptors", () => {
     expect(error.message).toContain("default");
   });
 
+  it("бросает clear error для resource(...) в spawnSchema", () => {
+    for (const field of ["unitGrid", "has"] as const) {
+      const error = expectLiteFsmError(
+        () =>
+          MachineManager(
+            {
+              entity: {
+                ...createEntityTemplateWithSchema(),
+                spawnSchema: { [field]: resource(() => new Int32Array(1)) },
+              },
+            } as never,
+            { plugins: [entitiesPlugin()] as const },
+          ),
+        "LITE_FSM_INVALID_STORAGE_CONFIG",
+      );
+
+      expect(error.message).toContain(`spawnSchema.${field}`);
+      expect(error.message).toContain("resource(...) is not allowed in spawnSchema");
+    }
+  });
+
   it("бросает clear error для reserved column name", () => {
     const error = expectLiteFsmError(
       () =>
@@ -560,6 +584,126 @@ describe("@lite-fsm/entities — этап 2 schema descriptors", () => {
 
     expect(error.message).toContain("initialContext.count");
     expect(error.message).toContain("reserved");
+  });
+
+  it("бросает clear error для reserved resource name", () => {
+    const error = expectLiteFsmError(
+      () =>
+        MachineManager(
+          {
+            unitMovement: {
+              ...createEntityTemplateWithSchema(),
+              initialContext: { count: resource(() => ({ value: 1 })) },
+            } as never,
+          },
+          { plugins: [entitiesPlugin()] as const },
+        ),
+      "LITE_FSM_INVALID_STORAGE_CONFIG",
+    );
+
+    expect(error.message).toBe(
+      "[lite-fsm/entities] machine 'unitMovement' has invalid initialContext.count: field name is reserved.",
+    );
+  });
+
+  it("бросает clear error для resource names, совпадающих с self и store view", () => {
+    for (const field of ["has", "entityId", "state"] as const) {
+      const error = expectLiteFsmError(
+        () =>
+          MachineManager(
+            {
+              unitMovement: {
+                ...createEntityTemplateWithSchema(),
+                initialContext: { [field]: resource(() => ({ value: 1 })) },
+              } as never,
+            },
+            { plugins: [entitiesPlugin()] as const },
+          ),
+        "LITE_FSM_INVALID_STORAGE_CONFIG",
+      );
+
+      expect(error.message).toContain(`initialContext.${field}`);
+      expect(error.message).toContain("field name is reserved");
+    }
+  });
+
+  it("бросает clear error для неизвестного свойства resource descriptor", () => {
+    const error = expectLiteFsmError(
+      () =>
+        MachineManager(
+          {
+            unitMovement: {
+              ...createEntityTemplateWithSchema(),
+              initialContext: {
+                unitGrid: { ...resource(() => ({ value: 1 })), extra: true },
+              },
+            } as never,
+          },
+          { plugins: [entitiesPlugin()] as const },
+        ),
+      "LITE_FSM_INVALID_STORAGE_CONFIG",
+    );
+
+    expect(error.message).toBe(
+      "[lite-fsm/entities] machine 'unitMovement' has invalid initialContext.unitGrid: unknown descriptor property 'extra'.",
+    );
+  });
+
+  it("не применяет resource-only reserved names к column descriptors", () => {
+    const manager = MachineManager(
+      {
+        unitMovement: {
+          ...createEntityTemplate(),
+          initialContext: { has: f32(), entityId: string(), state: i32() },
+        },
+      } as never,
+      { plugins: [entitiesPlugin()] as const },
+    );
+
+    expect(manager.getState()).toEqual({ unitMovement: emptyEntitySlice });
+  });
+
+  it("бросает clear error для Promise из resource factory и expose", () => {
+    const factoryError = expectLiteFsmError(
+      () =>
+        MachineManager(
+          {
+            unitMovement: {
+              ...createEntityTemplateWithSchema(),
+              initialContext: {
+                unitGrid: resource(() => Promise.resolve({ value: 1 })),
+              },
+            } as never,
+          },
+          { plugins: [entitiesPlugin()] as const },
+        ),
+      "LITE_FSM_INVALID_STORAGE_CONFIG",
+    );
+    expect(factoryError.message).toBe(
+      "[lite-fsm/entities] machine 'unitMovement' resource 'unitGrid' factory returned a Promise; resource factories are sync-only.",
+    );
+
+    const exposeError = expectLiteFsmError(
+      () =>
+        MachineManager(
+          {
+            unitMovement: {
+              ...createEntityTemplateWithSchema(),
+              initialContext: {
+                unitGrid: resource(
+                  () => ({ value: 1 }),
+                  () => Promise.resolve({ value: 1 }),
+                ),
+              },
+            } as never,
+          },
+          { plugins: [entitiesPlugin()] as const },
+        ),
+      "LITE_FSM_INVALID_STORAGE_CONFIG",
+    );
+    expect(exposeError.message).toBe(
+      "[lite-fsm/entities] machine 'unitMovement' resource 'unitGrid' expose returned a Promise; resource expose functions are sync-only.",
+    );
   });
 
   it("бросает clear error для groupTag на template", () => {
@@ -768,6 +912,458 @@ describe("@lite-fsm/entities — этап 3 public state и manager.entities", (
     expect(store.count).toBe(0);
     expect(store.version).toBe(0);
     expect(store.x[0 as EntityIndex]).toBeUndefined();
+  });
+});
+
+describe("@lite-fsm/entities — resource fields runtime", () => {
+  const createResourceSpawnEvents = () =>
+    defineSpawnEvents({
+      SPAWN_RESOURCE_UNIT: spawnEvent<{ readonly id: string }>(),
+    });
+  const createResourceLeakageEvents = () =>
+    defineSpawnEvents({
+      SPAWN_LEAKAGE_UNIT: spawnEvent<{
+        readonly id: string;
+        readonly x: number;
+        readonly groupTag?: string;
+      }>(),
+    });
+
+  const spawnResourceUnit = (
+    manager: { transition(action: { readonly type: "SPAWN_RESOURCE_UNIT"; readonly payload: { readonly id: string } }): unknown },
+    id: string,
+  ): void => {
+    manager.transition({ type: "SPAWN_RESOURCE_UNIT", payload: { id } });
+  };
+  const spawnLeakageUnit = (
+    manager: {
+      transition(action: {
+        readonly type: "SPAWN_LEAKAGE_UNIT";
+        readonly payload: { readonly id: string; readonly x: number; readonly groupTag?: string };
+      }): unknown;
+    },
+    id: string,
+    x: number,
+    groupTag = "unit",
+  ): void => {
+    manager.transition({ type: "SPAWN_LEAKAGE_UNIT", payload: { id, x, groupTag } });
+  };
+  const createResourceLeakageManager = (counters: { factoryCalls: number; exposeCalls: number }) => {
+    const unitMovement = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { TICK: "READY" } },
+      initialState: "__INIT",
+      initialContext: {
+        x: f32(),
+        unitGrid: resource(
+          () => {
+            counters.factoryCalls += 1;
+            return { entries: [] as string[] };
+          },
+          (grid) => {
+            counters.exposeCalls += 1;
+            return {
+              entries: grid.entries,
+              size() {
+                return grid.entries.length;
+              },
+            };
+          },
+        ),
+        privateScratch: resource(() => ({ writes: 0 })),
+      },
+      spawnSchema: {
+        x: f32(),
+      },
+      reducer(
+        _slice: unknown,
+        action: { readonly type: string },
+        {
+          self,
+          payloadFor,
+        }: {
+          readonly self: any;
+          payloadFor(entity: EntityIndex): { readonly x: number };
+        },
+      ) {
+        if (action.type !== "ENTITY_SPAWNED") return;
+
+        for (const entity of self.indices) {
+          self.x[entity] = payloadFor(entity).x;
+          self.unitGrid.entries.push(self.entityId(entity));
+          self.privateScratch.writes += 1;
+        }
+      },
+    } as const;
+    const machines = { unitMovement };
+    const spawnEvents = createResourceLeakageEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_LEAKAGE_UNIT: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag ?? "unit",
+        actors: { unitMovement: { x: payload.x } },
+      }),
+    });
+
+    return { machines, manager: MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const }) };
+  };
+
+  it("compile metadata разделяет column schema и resource schema", () => {
+    const unitGrid = resource(
+      () => ({ ids: [] as string[] }),
+      (grid) => ({ ids: grid.ids }),
+    );
+    const privateScratch = resource(() => ({ writes: 0 }));
+    const metadata = compileEntityTemplate("unitMovement", {
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: {} },
+      initialContext: {
+        x: f32(),
+        unitGrid,
+        privateScratch,
+      },
+      spawnSchema: {},
+    });
+    const runtime = createEntityRuntimeState(
+      [{ key: "unitMovement", kind: "entity", data: metadata }],
+      {} as never,
+    );
+    const store = runtime.actorStores.unitMovement;
+
+    expect(Object.keys(metadata.initialContext)).toEqual(["x"]);
+    expect(Object.keys(metadata.resourceSchema).sort()).toEqual(["privateScratch", "unitGrid"]);
+    expect(Object.keys(store.columns)).toEqual(["x"]);
+    expect(Object.keys(store.resources).sort()).toEqual(["privateScratch", "unitGrid"]);
+    expect(Object.keys(store.resourceViews)).toEqual(["unitGrid"]);
+  });
+
+  it("factory и expose вызываются один раз на manager instance, а instances получают разные resources", () => {
+    type GridResource = { readonly id: number; readonly ids: string[] };
+    type GridView = { readonly id: number; readonly ids: readonly string[] };
+    const resources: GridResource[] = [];
+    const views: GridView[] = [];
+    const createUnitMovement = () => ({
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: {} },
+      initialState: "__INIT",
+      initialContext: {
+        unitGrid: resource(
+          () => {
+            const grid = { id: resources.length, ids: [] };
+            resources.push(grid);
+            return grid;
+          },
+          (grid) => {
+            const view = { id: grid.id, ids: grid.ids };
+            views.push(view);
+            return view;
+          },
+        ),
+        privateScratch: resource(() => ({ writes: 0 })),
+      },
+      spawnSchema: {},
+    } as const);
+
+    const firstMachines = { unitMovement: createUnitMovement() };
+    const firstManager = MachineManager(firstMachines, { plugins: [entitiesPlugin()] as const });
+    const firstView = firstManager.entities().get("unitMovement");
+
+    expect(firstManager.entities().get("unitMovement")).toBe(firstView);
+    expect(resources).toHaveLength(1);
+    expect(views).toHaveLength(1);
+    expect(firstView.unitGrid).toBe(views[0]);
+    expect(firstView.unitGrid.ids).toEqual([]);
+    expect(firstView.count).toBe(0);
+    expect(Object.prototype.hasOwnProperty.call(firstView, "privateScratch")).toBe(false);
+
+    const secondMachines = { unitMovement: createUnitMovement() };
+    const secondManager = MachineManager(secondMachines, { plugins: [entitiesPlugin()] as const });
+
+    expect(resources).toHaveLength(2);
+    expect(views).toHaveLength(2);
+    expect(resources[0]).not.toBe(resources[1]);
+    expect(firstManager.entities().get("unitMovement").unitGrid).toBe(views[0]);
+    expect(secondManager.entities().get("unitMovement").unitGrid).toBe(views[1]);
+  });
+
+  it("owner self mutates shared resource, а EntityAccess получает только exposed view", () => {
+    type UnitGrid = { readonly ids: string[]; ticks: number };
+    type PrivateScratch = { writes: number };
+    const selfKeysFrames: string[][] = [];
+    const createGrid = (): UnitGrid => ({ ids: [], ticks: 0 });
+    const unitMovement = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "READY" },
+        READY: { TICK: "READY", EXPIRE: "DEAD" },
+        DEAD: {},
+      },
+      initialState: "__INIT",
+      initialContext: {
+        x: f32(),
+        unitGrid: resource(createGrid, (grid) => ({
+          ids: grid.ids,
+          get ticks() {
+            return grid.ticks;
+          },
+        })),
+        privateScratch: resource((): PrivateScratch => ({ writes: 0 })),
+      },
+      spawnSchema: {},
+      despawnOn: "DEAD",
+      reducer(_slice: unknown, action: { readonly type: string }, { self }: { readonly self: any }) {
+        selfKeysFrames.push(Object.keys(self).sort());
+        if (action.type === "ENTITY_SPAWNED") {
+          for (const entity of self.indices) {
+            self.unitGrid.ids.push(self.entityId(entity));
+            self.privateScratch.writes += 1;
+          }
+          return;
+        }
+
+        if (action.type !== "TICK") return;
+
+        self.unitGrid.ticks += self.indices.length;
+        for (const entity of self.indices) self.unitGrid.ids.push(`tick:${self.entityId(entity)}`);
+      },
+    } as const;
+    const machines = { unitMovement };
+    const spawnEvents = createResourceSpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_RESOURCE_UNIT: (payload) => ({
+        id: payload.id,
+        groupTag: "unit",
+        actors: { unitMovement: {} },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+    const view = manager.entities().get("unitMovement");
+    const runtime = getEntityRuntimeState(manager.entities());
+    const store = runtime.actorStores.unitMovement;
+    const unitGridResource = store.resources.unitGrid;
+    const privateResource = store.resources.privateScratch as PrivateScratch;
+    const exposedView = store.resourceViews.unitGrid;
+
+    expect(view.count).toBe(0);
+    expect(view.unitGrid).toBe(exposedView);
+    expect(view.unitGrid.ids).toEqual([]);
+    expect(Object.prototype.propertyIsEnumerable.call(view, "unitGrid")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(view, "privateScratch")).toBe(false);
+
+    spawnResourceUnit(manager, "unit/a");
+    spawnResourceUnit(manager, "unit/b");
+
+    expect(store.resources.unitGrid).toBe(unitGridResource);
+    expect(store.resourceViews.unitGrid).toBe(exposedView);
+    expect(view.unitGrid).toBe(exposedView);
+    expect(view.unitGrid.ids).toEqual(["unit/a", "unit/b"]);
+    expect(privateResource.writes).toBe(2);
+    expect(selfKeysFrames[0]).toContain("unitGrid");
+    expect(selfKeysFrames[0]).toContain("privateScratch");
+
+    manager.transition({ type: "TICK" });
+
+    expect(store.resources.unitGrid).toBe(unitGridResource);
+    expect(view.unitGrid.ticks).toBe(2);
+    expect(view.unitGrid.ids).toEqual(["unit/a", "unit/b", "tick:unit/a", "tick:unit/b"]);
+
+    manager.transition({ type: "EXPIRE", meta: { entityId: "unit/a" } } as never);
+
+    expect(store.resources.unitGrid).toBe(unitGridResource);
+    expect(store.resourceViews.unitGrid).toBe(exposedView);
+    expect(view.has(0 as EntityIndex)).toBe(false);
+    expect(view.unitGrid.ids).toEqual(["unit/a", "unit/b", "tick:unit/a", "tick:unit/b"]);
+  });
+
+  it("effect и reaction self получают owner resources", () => {
+    const unitMovement = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "READY" },
+        READY: { TICK: "READY" },
+      },
+      initialState: "__INIT",
+      initialContext: {
+        lifecycleLog: resource(() => ({ events: [] as string[] })),
+      },
+      spawnSchema: {},
+      effects: {
+        READY: ({ self }: { readonly self: any }) => {
+          for (const entity of self.indices) self.lifecycleLog.events.push(`effect:${self.entityId(entity)}`);
+        },
+      },
+      reactions: {
+        TICK: ({ self }: { readonly self: any }) => {
+          for (const entity of self.indices) self.lifecycleLog.events.push(`reaction:${self.entityId(entity)}`);
+        },
+      },
+    } as const;
+    const machines = { unitMovement };
+    const spawnEvents = createResourceSpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_RESOURCE_UNIT: (payload) => ({
+        id: payload.id,
+        groupTag: "unit",
+        actors: { unitMovement: {} },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+    const runtime = getEntityRuntimeState(manager.entities());
+    const lifecycleLog = runtime.actorStores.unitMovement.resources.lifecycleLog as { readonly events: string[] };
+
+    spawnResourceUnit(manager, "unit/a");
+    manager.transition({ type: "TICK" });
+
+    expect(lifecycleLog.events).toEqual(["effect:unit/a", "reaction:unit/a"]);
+  });
+
+  it("dehydrate, getSnapshot и public state не публикуют resources", () => {
+    const harness = createResourceLeakageManager({ factoryCalls: 0, exposeCalls: 0 });
+    spawnLeakageUnit(harness.manager, "unit/a", 12);
+
+    const publicKeys = ["capacity", "count", "storage", "version"];
+    const dehydrated = harness.manager.dehydrate() as any;
+    const storage = dehydrated.storage.entity;
+    const actor = storage.actors.unitMovement;
+
+    expect(Object.keys(harness.manager.getState().unitMovement).sort()).toEqual(publicKeys);
+    expect(Object.keys((harness.manager.getSnapshot() as any).machines.unitMovement).sort()).toEqual(publicKeys);
+    expect(dehydrated.machines.unitMovement).toEqual(harness.manager.getState().unitMovement);
+    expect(dehydrated.machines.unitMovement).not.toHaveProperty("unitGrid");
+    expect(dehydrated.machines.unitMovement).not.toHaveProperty("privateScratch");
+    expect(actor.schema.columns).toEqual({ x: "f32" });
+    expect(actor.schema).not.toHaveProperty("resources");
+    expect(actor.columns).toEqual({ x: [12] });
+    expect(actor.columns).not.toHaveProperty("unitGrid");
+    expect(actor.columns).not.toHaveProperty("privateScratch");
+    expect(JSON.stringify(storage)).not.toContain("unitGrid");
+    expect(JSON.stringify(storage)).not.toContain("privateScratch");
+  });
+
+  it("getHydratedState preview и hydrate сохраняют resource identities и не вызывают factory/expose повторно", () => {
+    const counters = { factoryCalls: 0, exposeCalls: 0 };
+    const source = createResourceLeakageManager(counters);
+    spawnLeakageUnit(source.manager, "unit/incoming", 42, "enemy");
+    const snapshot = JSON.parse(JSON.stringify(source.manager.dehydrate()));
+
+    const target = createResourceLeakageManager(counters);
+    const runtime = getEntityRuntimeState(target.manager.entities());
+    const store = runtime.actorStores.unitMovement;
+    const resource = store.resources.unitGrid as { readonly entries: string[] };
+    const exposedView = store.resourceViews.unitGrid;
+    const publicView = target.manager.entities().get("unitMovement").unitGrid;
+    const callsAfterManagerCreation = { ...counters };
+    resource.entries.push("target-only");
+
+    const preview = target.manager.getHydratedState(snapshot);
+
+    expect(preview.unitMovement).toMatchObject({ storage: "entity", count: 1, capacity: 1 });
+    expect(target.manager.getState().unitMovement).toMatchObject({ storage: "entity", count: 0, capacity: 0 });
+    expect(counters).toEqual(callsAfterManagerCreation);
+    expect(store.resources.unitGrid).toBe(resource);
+    expect(store.resourceViews.unitGrid).toBe(exposedView);
+    expect(target.manager.entities().get("unitMovement").unitGrid).toBe(publicView);
+    expect(resource.entries).toEqual(["target-only"]);
+
+    target.manager.hydrate(snapshot);
+
+    expect(counters).toEqual(callsAfterManagerCreation);
+    expect(store.resources.unitGrid).toBe(resource);
+    expect(store.resourceViews.unitGrid).toBe(exposedView);
+    expect(target.manager.entities().get("unitMovement").unitGrid).toBe(publicView);
+    expect(resource.entries).toEqual(["target-only"]);
+    expect(target.manager.entities().get("unitMovement").x[0 as EntityIndex]).toBe(42);
+  });
+
+  it("React runtime readRow/readList возвращает column-only row snapshots", () => {
+    const harness = createResourceLeakageManager({ factoryCalls: 0, exposeCalls: 0 });
+    spawnLeakageUnit(harness.manager, "unit/a", 7, "enemy");
+    const runtime = getEntityRuntimeState(harness.manager.entities());
+    const reactRuntime = runtime.react;
+
+    expect(reactRuntime).toBeDefined();
+    const row = reactRuntime?.readRow("unitMovement", "unit/a", { mode: "commit" });
+    const list = reactRuntime?.readList("unitMovement", { groupTag: "enemy" }, { mode: "commit" });
+    const previewRow = reactRuntime?.readRow("unitMovement", "unit/a", {
+      mode: "preview",
+      snapshot: harness.manager.dehydrate().storage?.entity,
+    });
+
+    expect(row).toMatchObject({
+      entityId: "unit/a",
+      groupTag: "enemy",
+      state: "READY",
+      context: { x: 7 },
+    });
+    expect(row?.context).not.toHaveProperty("unitGrid");
+    expect(row?.context).not.toHaveProperty("privateScratch");
+    expect(list).toEqual(["unit/a"]);
+    expect(previewRow?.context).toEqual({ x: 7 });
+    expect(previewRow?.context).not.toHaveProperty("unitGrid");
+  });
+
+  it("staged spawn rollback восстанавливает columns, но resource state не является transactional", () => {
+    const spawnEvents = defineSpawnEvents({
+      SPAWN_ROLLBACK_UNIT: spawnEvent<{ readonly id: string; readonly x: number }>(),
+    });
+    const unitMovement = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: {} },
+      initialState: "__INIT",
+      initialContext: {
+        x: f32(),
+        spawnLog: resource(() => ({ ids: [] as string[] })),
+      },
+      spawnSchema: {
+        x: f32(),
+      },
+      reducer(
+        _slice: unknown,
+        action: { readonly type: string },
+        {
+          self,
+          payloadFor,
+        }: {
+          readonly self: any;
+          payloadFor(entity: EntityIndex): { readonly x: number };
+        },
+      ) {
+        if (action.type !== "ENTITY_SPAWNED") return;
+
+        for (const entity of self.indices) {
+          const payload = payloadFor(entity);
+          self.spawnLog.ids.push(self.entityId(entity));
+          self.x[entity] = payload.x;
+          if (payload.x < 0) throw new Error("spawn failed");
+        }
+      },
+    } as const;
+    const machines = { unitMovement };
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_ROLLBACK_UNIT: (payload) => ({
+        id: payload.id,
+        groupTag: "unit",
+        actors: { unitMovement: { x: payload.x } },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+    const runtime = getEntityRuntimeState(manager.entities());
+    const spawnLog = runtime.actorStores.unitMovement.resources.spawnLog as { readonly ids: string[] };
+
+    manager.transition({ type: "SPAWN_ROLLBACK_UNIT", payload: { id: "unit/a", x: 1 } });
+    const beforeRollbackColumn = manager.entities().get("unitMovement").x;
+
+    expect(() =>
+      manager.transition({ type: "SPAWN_ROLLBACK_UNIT", payload: { id: "unit/b", x: -1 } }),
+    ).toThrow("spawn failed");
+
+    const view = manager.entities().get("unitMovement");
+    expect(view.count).toBe(1);
+    expect(view.has(0 as EntityIndex)).toBe(true);
+    expect(runtime.entityStore.indexById["unit/b"]).toBeUndefined();
+    expect(runtime.actorStores.unitMovement.columns.x).not.toBe(beforeRollbackColumn);
+    expect(runtime.actorStores.unitMovement.columns.x).toHaveLength(1);
+    expect(view.x[0 as EntityIndex]).toBe(1);
+    expect(spawnLog.ids).toEqual(["unit/a", "unit/b"]);
   });
 });
 

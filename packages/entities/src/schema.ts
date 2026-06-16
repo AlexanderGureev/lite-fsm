@@ -1,6 +1,7 @@
 import { LiteFsmError } from "@lite-fsm/core";
 
 export const descriptorMarker: unique symbol = Symbol.for("lite-fsm.entities.schema-descriptor") as never;
+export const resourceDescriptorMarker: unique symbol = Symbol.for("lite-fsm.entities.resource-descriptor") as never;
 
 type NumericDescriptorKind = "f32" | "i16" | "i32" | "u8";
 type DescriptorKind = NumericDescriptorKind | "string";
@@ -47,17 +48,34 @@ type EntityOptionalDescriptor<Inner extends EntityScalarDescriptor<DescriptorKin
   readonly inner: Inner;
 };
 
+export type EntityResourceDescriptor<Owner, View, Exposed extends boolean> = {
+  readonly [resourceDescriptorMarker]: true;
+  readonly kind: "resource";
+  readonly factory: () => Owner;
+  readonly exposed: Exposed;
+  readonly ownerType?: Owner;
+  readonly viewType?: View;
+} & (Exposed extends true
+  ? { readonly expose: (resource: Owner) => View }
+  : { readonly expose?: undefined });
+
 export type EntityDescriptor = EntityScalarDescriptor<DescriptorKind>;
+export type AnyEntityResourceDescriptor =
+  | EntityResourceDescriptor<any, any, false>
+  | EntityResourceDescriptor<any, any, true>;
+export type EntityContextDescriptor = EntityDescriptor | AnyEntityResourceDescriptor;
 export type EntitySpawnDescriptor = EntityDescriptor | EntityOptionalDescriptor<EntityDescriptor>;
 
-export type EntityContextSchema = Readonly<Record<string, EntityDescriptor>>;
+export type EntityColumnSchema = Readonly<Record<string, EntityDescriptor>>;
+export type EntityContextSchema = Readonly<Record<string, EntityContextDescriptor>>;
+export type EntityResourceSchema = Readonly<Record<string, AnyEntityResourceDescriptor>>;
 export type EntitySpawnSchema = Readonly<Record<string, EntitySpawnDescriptor>>;
 
 type DescriptorValue<Descriptor> = Descriptor extends { readonly valueType?: infer Value } ? Value : never;
 type DescriptorColumn<Descriptor> = Descriptor extends { readonly columnType?: infer Column } ? Column : never;
 type DescriptorSpawnValue<Descriptor> = Descriptor extends { readonly spawnType?: infer Spawn } ? Spawn : never;
 
-const reservedColumnNames = new Set([
+const reservedStorageFieldNames = new Set([
   "count",
   "capacity",
   "ids",
@@ -73,6 +91,32 @@ const reservedColumnNames = new Set([
   "indices",
   "states",
 ]);
+
+const resourceOnlyReservedFieldNames = new Set([
+  "acceptedScratch",
+  "acceptStateBucketsByEventCode",
+  "entityId",
+  "entitiesByGroupTag",
+  "groupTagByIndex",
+  "groupTagPosition",
+  "has",
+  "metadata",
+  "pendingPrevStateCodeSync",
+  "pendingPrevStateCodeSyncMark",
+  "pendingPrevStateCodeSyncToken",
+  "prevStateCode",
+  "publicSlice",
+  "reducerSelf",
+  "resources",
+  "resourceViews",
+  "routingScratchVersion",
+  "state",
+  "stateBuckets",
+  "statePosition",
+  "templateKey",
+]);
+
+const isReservedSchemaFieldName = (name: string): boolean => reservedStorageFieldNames.has(name);
 
 const hasOwn = (value: object, key: PropertyKey): boolean => Object.prototype.hasOwnProperty.call(value, key);
 
@@ -98,11 +142,30 @@ export const string = (opts?: DescriptorOptions<string>): EntityScalarDescriptor
 export const optional = <Inner extends EntityDescriptor>(inner: Inner): EntityOptionalDescriptor<Inner> =>
   Object.freeze({ [descriptorMarker]: true, kind: "optional", inner }) as EntityOptionalDescriptor<Inner>;
 
+export function resource<Owner>(factory: () => Owner): EntityResourceDescriptor<Owner, never, false>;
+export function resource<Owner, View>(
+  factory: () => Owner,
+  expose: (resource: Owner) => View,
+): EntityResourceDescriptor<Owner, View, true>;
+export function resource<Owner, View>(
+  factory: () => Owner,
+  expose?: (resource: Owner) => View,
+): EntityResourceDescriptor<Owner, View, boolean> {
+  const descriptor = expose === undefined
+    ? { [resourceDescriptorMarker]: true, kind: "resource", factory, exposed: false }
+    : { [resourceDescriptorMarker]: true, kind: "resource", factory, expose, exposed: true };
+
+  return Object.freeze(descriptor) as EntityResourceDescriptor<Owner, View, boolean>;
+}
+
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
 
 const isEntityDescriptor = (value: unknown): value is EntitySpawnDescriptor =>
   isPlainObject(value) && Reflect.get(value, descriptorMarker) === true;
+
+export const isEntityResourceDescriptor = (value: unknown): value is AnyEntityResourceDescriptor =>
+  isPlainObject(value) && Reflect.get(value, resourceDescriptorMarker) === true;
 
 const isScalarDescriptor = (value: EntitySpawnDescriptor): value is EntityDescriptor =>
   value.kind === "f32" || value.kind === "i16" || value.kind === "i32" || value.kind === "u8" || value.kind === "string";
@@ -126,6 +189,18 @@ const describeObjectValue = (value: object): string => {
 const assertDescriptorShape = (machineKey: string, path: string, descriptor: EntitySpawnDescriptor): void => {
   for (const key of Object.keys(descriptor)) {
     if (key !== "kind" && key !== "default" && key !== "inner") {
+      throw schemaError(machineKey, path, `unknown descriptor property '${key}'`);
+    }
+  }
+};
+
+const assertResourceDescriptorShape = (
+  machineKey: string,
+  path: string,
+  descriptor: AnyEntityResourceDescriptor,
+): void => {
+  for (const key of Object.keys(descriptor)) {
+    if (key !== "kind" && key !== "factory" && key !== "expose" && key !== "exposed") {
       throw schemaError(machineKey, path, `unknown descriptor property '${key}'`);
     }
   }
@@ -156,6 +231,14 @@ const validateDescriptor = (
   optionalAllowed: boolean,
   defaultAllowed: boolean,
 ): void => {
+  if (isEntityResourceDescriptor(value)) {
+    if (optionalAllowed) {
+      throw schemaError(machineKey, path, "resource(...) is not allowed in spawnSchema");
+    }
+    assertResourceDescriptorShape(machineKey, path, value);
+    return;
+  }
+
   if (!isEntityDescriptor(value)) {
     if (value !== null && typeof value === "object") {
       throw schemaError(machineKey, path, describeObjectValue(value));
@@ -195,19 +278,59 @@ export const validateEntitySchema = (
   const optionalAllowed = path === "spawnSchema";
   const defaultAllowed = path === "initialContext";
   for (const [name, descriptor] of Object.entries(schema)) {
-    if (reservedColumnNames.has(name)) {
-      throw schemaError(machineKey, `${path}.${name}`, "column name is reserved");
+    const resourceDescriptor = isEntityResourceDescriptor(descriptor);
+    if (
+      isReservedSchemaFieldName(name) ||
+      (path === "initialContext" && resourceDescriptor && resourceOnlyReservedFieldNames.has(name))
+    ) {
+      throw schemaError(machineKey, `${path}.${name}`, "field name is reserved");
     }
     validateDescriptor(machineKey, `${path}.${name}`, descriptor, optionalAllowed, defaultAllowed);
   }
 };
 
+type EntitySchemaColumnKey<Schema extends EntityContextSchema> = string extends keyof Schema
+  ? string
+  : {
+      readonly [Field in keyof Schema]: Schema[Field] extends EntityDescriptor ? Field : never;
+    }[keyof Schema];
+
+type EntitySchemaResourceOwnerKey<Schema extends EntityContextSchema> = string extends keyof Schema
+  ? never
+  : {
+      readonly [Field in keyof Schema]: Schema[Field] extends EntityResourceDescriptor<any, any, boolean>
+        ? Field
+        : never;
+    }[keyof Schema];
+
+type EntitySchemaResourceExposedKey<Schema extends EntityContextSchema> = string extends keyof Schema
+  ? never
+  : {
+      readonly [Field in keyof Schema]: Schema[Field] extends EntityResourceDescriptor<any, any, true>
+        ? Field
+        : never;
+    }[keyof Schema];
+
+type ResourceOwner<Descriptor> =
+  Descriptor extends EntityResourceDescriptor<infer Owner, any, boolean> ? Owner : never;
+
+type ResourceView<Descriptor> =
+  Descriptor extends EntityResourceDescriptor<any, infer View, true> ? View : never;
+
 export type EntitySchemaValue<Schema extends EntityContextSchema> = {
-  readonly [Field in keyof Schema]: DescriptorValue<Schema[Field]>;
+  readonly [Field in EntitySchemaColumnKey<Schema>]: DescriptorValue<Schema[Field]>;
 };
 
 export type EntitySchemaColumns<Schema extends EntityContextSchema> = {
-  readonly [Field in keyof Schema]: DescriptorColumn<Schema[Field]>;
+  readonly [Field in EntitySchemaColumnKey<Schema>]: DescriptorColumn<Schema[Field]>;
+};
+
+export type EntitySchemaResourceOwners<Schema extends EntityContextSchema> = {
+  readonly [Field in EntitySchemaResourceOwnerKey<Schema>]: ResourceOwner<Schema[Field]>;
+};
+
+export type EntitySchemaResourceViews<Schema extends EntityContextSchema> = {
+  readonly [Field in EntitySchemaResourceExposedKey<Schema>]: ResourceView<Schema[Field]>;
 };
 
 export type EntitySpawnPayload<Schema extends EntitySpawnSchema> = {

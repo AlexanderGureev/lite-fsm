@@ -2,7 +2,7 @@ import { LiteFsmError } from "@lite-fsm/core";
 import type { ActorPublicState, MachineStore } from "@lite-fsm/core";
 
 import type { EntityIndex } from "../plugin";
-import type { EntitySchemaValue, EntityContextSchema } from "../schema";
+import type { EntitySchemaResourceViews, EntitySchemaValue, EntityContextSchema } from "../schema";
 import type { ColumnarActorStore, EntityRuntimeState } from "./state";
 import type { CapturedEntityScopeEntry } from "./transaction";
 
@@ -26,10 +26,17 @@ export type EntityActorKey<AppMachines extends MachineStore> = {
 export type EntityContextFor<
   AppMachines extends MachineStore,
   Key extends EntityActorKey<AppMachines>,
+> = EntityContextSchemaFor<AppMachines, Key> extends infer Context extends EntityContextSchema
+  ? EntitySchemaValue<Context>
+  : never;
+
+type EntityContextSchemaFor<
+  AppMachines extends MachineStore,
+  Key extends EntityActorKey<AppMachines>,
 > = AppMachines[Key] extends {
   readonly initialContext: infer Context extends EntityContextSchema;
 }
-  ? EntitySchemaValue<Context>
+  ? Context
   : never;
 
 export type EntityStateFor<
@@ -51,7 +58,7 @@ type EntityActorStoreViewFor<
   readonly [Field in keyof EntityContextFor<AppMachines, Key>]: ReadonlyEntityColumn<
     EntityContextFor<AppMachines, Key>[Field]
   >;
-}>;
+} & EntitySchemaResourceViews<EntityContextSchemaFor<AppMachines, Key>>>;
 
 export type EntityAccess<AppMachines extends MachineStore> = {
   get<Key extends EntityActorKey<AppMachines>>(key: Key): EntityActorStoreViewFor<AppMachines, Key>;
@@ -149,6 +156,17 @@ const attachStoreColumns = (view: EntityStoreView, store: ColumnarActorStore): v
   }
 };
 
+const attachStoreResourceViews = (view: EntityStoreView, store: ColumnarActorStore): void => {
+  for (const [resourceName, resourceView] of Object.entries(store.resourceViews)) {
+    Object.defineProperty(view, resourceName, {
+      enumerable: true,
+      configurable: true,
+      writable: false,
+      value: resourceView,
+    });
+  }
+};
+
 const storeViewByStore = new WeakMap<ColumnarActorStore, EntityStoreView>();
 
 export const rebindEntityStoreView = (store: ColumnarActorStore): void => {
@@ -156,6 +174,7 @@ export const rebindEntityStoreView = (store: ColumnarActorStore): void => {
   if (!view) return;
 
   attachStoreColumns(view, store);
+  attachStoreResourceViews(view, store);
 };
 
 const createStoreView = (runtime: EntityRuntimeState, key: string): EntityStoreView => {
@@ -181,6 +200,7 @@ const createStoreView = (runtime: EntityRuntimeState, key: string): EntityStoreV
   };
 
   attachStoreColumns(view, store);
+  attachStoreResourceViews(view, store);
   storeViewByStore.set(store, view);
   return view;
 };
@@ -224,6 +244,12 @@ const attachActorColumns = (self: Record<string, unknown>, store: ColumnarActorS
   }
 };
 
+const attachActorResources = (self: Record<string, unknown>, store: ColumnarActorStore): void => {
+  for (const [name, resource] of Object.entries(store.resources)) {
+    self[name] = resource;
+  }
+};
+
 export const createScopedEntitySelf = (
   runtime: EntityRuntimeState,
   store: ColumnarActorStore,
@@ -258,6 +284,7 @@ export const createScopedEntitySelf = (
   };
 
   attachActorColumns(self, store);
+  attachActorResources(self, store);
 
   return self;
 };
@@ -305,6 +332,7 @@ export const createReactionEntitySelf = (
   };
 
   attachActorColumns(self, store);
+  attachActorResources(self, store);
 
   return self;
 };

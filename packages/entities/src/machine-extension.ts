@@ -8,7 +8,14 @@ import type {
   StorageDependentTypeLambda,
 } from "@lite-fsm/core";
 
-import type { EntityContextSchema, EntitySpawnPayload, EntitySpawnSchema } from "./schema";
+import type {
+  EntityContextSchema,
+  EntitySchemaColumns,
+  EntitySchemaResourceOwners,
+  EntitySchemaValue,
+  EntitySpawnPayload,
+  EntitySpawnSchema,
+} from "./schema";
 import type { EntityIndex } from "./plugin";
 import type { LiteFsmEntityLifecycleEvents } from "./runtime/lifecycle";
 import type { EntityAccess, ReadonlyEntityColumn } from "./runtime/access";
@@ -74,24 +81,14 @@ export type EntityMachinePublicState<Metadata> = {
   readonly [entityStateMetadata]?: Metadata;
 };
 
-type DescriptorMutableColumn<Descriptor> = Descriptor extends { readonly kind: "f32" }
-  ? Float32Array
-  : Descriptor extends { readonly kind: "i16" }
-    ? Int16Array
-    : Descriptor extends { readonly kind: "i32" }
-      ? Int32Array
-      : Descriptor extends { readonly kind: "u8" }
-        ? Uint8Array
-        : Descriptor extends { readonly kind: "string" }
-          ? string[]
-          : never;
-
 type EntityReducerColumns<ContextSchema extends EntityContextSchema> = {
-  readonly [Field in keyof ContextSchema]: DescriptorMutableColumn<ContextSchema[Field]>;
+  readonly [Field in keyof EntitySchemaColumns<ContextSchema>]: EntitySchemaColumns<ContextSchema>[Field] extends readonly string[]
+    ? string[]
+    : EntitySchemaColumns<ContextSchema>[Field];
 };
 
 type EntityEffectColumns<ContextSchema extends EntityContextSchema> = {
-  readonly [Field in keyof ContextSchema]: ReadonlyEntityColumn<EntitySpawnPayload<ContextSchema>[Field]>;
+  readonly [Field in keyof EntitySchemaValue<ContextSchema>]: ReadonlyEntityColumn<EntitySchemaValue<ContextSchema>[Field]>;
 };
 
 type AnyEntityMachineStore = Record<
@@ -123,8 +120,13 @@ export type EntityReducerSelf<ContextSchema extends EntityContextSchema, Config 
   readonly rowVersion: Uint32Array;
   has(entity: EntityIndex): boolean;
   entityId(entity: EntityIndex): string;
-} & EntityReducerColumns<ContextSchema>>;
+} & EntityReducerColumns<ContextSchema> & EntitySchemaResourceOwners<ContextSchema>>;
 
+/**
+ * `self` в entity effects действует только в рамках текущего transition.
+ * Resource поля являются mutable owner objects текущего template; не сохраняй
+ * `self` или resource references для использования после async boundary.
+ */
 export type EntityEffectSelf<ContextSchema extends EntityContextSchema, Config extends object = object> = Prettify<{
   readonly indices: readonly EntityIndex[];
   readonly states: EntityReducerStates<Config>;
@@ -134,7 +136,7 @@ export type EntityEffectSelf<ContextSchema extends EntityContextSchema, Config e
   readonly rowVersion: ReadonlyEntityColumn<number>;
   has(entity: EntityIndex): boolean;
   entityId(entity: EntityIndex): string;
-} & EntityEffectColumns<ContextSchema>>;
+} & EntityEffectColumns<ContextSchema> & EntitySchemaResourceOwners<ContextSchema>>;
 
 type EntityPlainAction<Events extends AnyEvent> = Events & { readonly meta?: never };
 
@@ -155,6 +157,10 @@ export type EntityEffectDeps<
   readonly transition: EntityEffectTransition;
 };
 
+/**
+ * `self` в entity reactions имеет тот же transition-scope contract, что и
+ * effects: owner resources доступны как mutable objects только до async boundary.
+ */
 export type EntityReactionSelf<ContextSchema extends EntityContextSchema, Config extends object = object> =
   EntityEffectSelf<ContextSchema, Config>;
 

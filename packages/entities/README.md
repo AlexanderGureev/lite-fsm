@@ -10,6 +10,7 @@ Alpha-плагин для `lite-fsm`, который добавляет коло
 - Машина-шаблон с `storage: "entity"`: один `config`/`reducer` обслуживает все строки сразу.
 - Декларативный спавн: события спавна и рецепты, которые создают одну или несколько сущностей из одного payload.
 - Управляемый жизненный цикл: внутренние события `ENTITY_SPAWNED`/`ENTITY_DESPAWNED` и авто-удаление по `despawnOn`.
+- Runtime resources через `resource(...)`: общий объект шаблона на один manager instance для spatial grid, flow field, physics world, pathfinding cache и scratch buffers.
 - `effects` для диспатча новых событий и `reactions` для синхронизации с внешним миром (рендер, звук) без диспатча.
 - Маршрутизация по `entityId`, `groupId`, `groupTag` через `meta`.
 - Типобезопасный доступ к колонкам через `manager.entities()` и React-хуки.
@@ -111,9 +112,9 @@ if (view.has(entity)) {
 }
 ```
 
-## Модель данных: схемы и колонки
+## Модель данных: схемы, колонки и resources
 
-Сущность — это набор колонок. Поле описывается дескриптором, который задаёт тип столбца и значение по умолчанию.
+Авторитативные данные строки хранятся в колонках. Поле колонки описывается дескриптором, который задаёт тип столбца и значение по умолчанию.
 
 | Дескриптор    | Колонка        | Значение                                 |
 | ------------- | -------------- | ---------------------------------------- |
@@ -126,10 +127,76 @@ if (view.has(entity)) {
 
 Две схемы решают разные задачи:
 
-- `initialContext` — постоянные колонки строки. Дескрипторы требуют `default`, `optional(...)` запрещён.
-- `spawnSchema` — данные, приходящие при спавне. `default` запрещён, `optional(...)` разрешён (значение может быть `null`).
+- `initialContext` — постоянные колонки строки и template-level runtime resources. Дескрипторы колонок требуют `default`, `optional(...)` запрещён.
+- `spawnSchema` — данные, приходящие при спавне. `default` запрещён, `optional(...)` разрешён (значение может быть `null`), `resource(...)` запрещён.
 
-Часть имён зарезервирована рантаймом (`count`, `capacity`, `ids`, `version`, `presence`, `stateCode` и др.) и не может использоваться как имя колонки.
+Часть имён зарезервирована рантаймом (`count`, `capacity`, `ids`, `version`, `presence`, `stateCode` и др.) и не может использоваться как имя колонки или resource.
+
+### Runtime resources
+
+`resource(...)` объявляет template-level shared runtime field. Значение создаётся один раз при создании actor store внутри конкретного `MachineManager` instance и принадлежит шаблону, а не строке. Если передан `expose`, exposed view тоже создаётся один раз; owner object и exposed view сохраняют identity на время жизни менеджера. Resource не требует единственной активной строки, доступен как runtime ресурс шаблона и не индексируется по `EntityIndex`.
+
+```ts
+type SpatialGrid = {
+  clear(): void;
+  insert(entity: EntityIndex, x: number, y: number): void;
+  queryRadius(x: number, y: number, radius: number): readonly EntityIndex[];
+};
+
+type SpatialGridView = {
+  queryRadius(x: number, y: number, radius: number): readonly EntityIndex[];
+};
+
+declare function createSpatialGrid(): SpatialGrid;
+
+const movement = createMachine({
+  storage: "entity",
+  initialState: "__INIT",
+  initialContext: {
+    x: f32({ default: 0 }),
+    y: f32({ default: 0 }),
+    unitGrid: resource(
+      createSpatialGrid,
+      (grid): SpatialGridView => ({
+        queryRadius: grid.queryRadius.bind(grid),
+      }),
+    ),
+    scratch: resource(() => new Int32Array(256)),
+  },
+  spawnSchema: {
+    x: f32(),
+    y: f32(),
+  },
+  config: {
+    __INIT: { ENTITY_SPAWNED: "active" },
+    active: { TICK: "active" },
+  },
+  reducer(_state, action, { self }) {
+    if (action.type !== "TICK") return;
+
+    self.unitGrid.clear();
+    self.scratch.fill(-1);
+
+    for (const entity of self.indices) {
+      self.unitGrid.insert(entity, self.x[entity], self.y[entity]);
+    }
+  },
+});
+```
+
+Правила доступа:
+
+- `resource(factory)` создаёт private owner-only resource. Он доступен владельцу как `self.<resource>` в reducer, effect и reaction этого же шаблона, но отсутствует в `EntityAccess`.
+- `resource(factory, expose)` создаёт owner resource и публикует значение, возвращённое `expose`, в `entities().get(key)`. Consumer видит ровно exposed view, а не owner object.
+- Owner `self` получает mutable owner object. Например, `self.unitGrid.clear()` и `self.scratch.fill(...)` разрешены; `self.unitGrid` не является колонкой и не читается по индексу строки.
+- Exposed view доступен через `manager.entities()` и `entities()` даже при `0` active rows у шаблона. Без `expose` поле не публикуется.
+- `expose` отвечает за форму и безопасность consumer surface. Runtime не анализирует mutating methods и не создаёт proxy, freeze или deep-freeze для owner object или exposed view.
+
+Resource не является источником авторитативного состояния домена. Не используйте resource для `hp`, `command`, `selected`, `ownership` и других авторитативных фактов домена; колонки и spawn payload остаются источником данных строки. Resource подходит для детерминированных cache и рабочих структур, которые owner reducer пересобирает из колонок в порядке шаблонов: spatial grid, flow field, physics world, pathfinding cache, scratch buffers.
+
+Resource не входит в public state: `dehydrate()`, `hydrate()` payload, persistence, `MachinesState`, `manager.getSnapshot()`, selectors, `useEntitySnapshot` и `useEntityList` содержат только строки, состояния и колонки. `hydrate()` существующего manager не заменяет resource values и exposed views.
+
+Rollback для resource в v1 не реализован. Staged spawn rollback откатывает строки, колонки и индексы, но не восстанавливает мутации resource. Owner reducer должен сначала валидировать и читать входные данные, затем мутировать или пересобирать resource и не бросать ошибку после начала мутации. Для RTS-сценариев rebuild выполняется штатным событием, например `TICK`, без отдельного механизма восстановления resource.
 
 ## Жизненный цикл сущности
 
@@ -147,10 +214,11 @@ if (view.has(entity)) {
 
 `storage: "entity"` reducer является entity system reducer: он выполняется один раз для батча затронутых строк, читает root entity runtime через `entities()` и мутирует только `self` текущей машины. Первый аргумент (`state`) не используется в entity-машинах.
 
-`self` даёт доступ к колонкам и метаданным строк текущего батча:
+`self` даёт доступ к колонкам, owner resources и метаданным строк текущего батча:
 
 - `self.indices` — индексы (`EntityIndex`) строк текущего reducer batch.
 - `self.<column>[entity]` — чтение и запись значения колонки текущей машины.
+- `self.<resource>` — mutable owner resource текущего шаблона; значение общее для всех строк и не индексируется по `EntityIndex`.
 - `self.states.<STATE>` — числовой код состояния; запись `self.stateCode[entity] = self.states.expired` планирует переход строки.
 - `self.has(entity)`, `self.entityId(entity)` — проверка наличия и строковый id строки.
 - `payloadFor(entity)` — данные спавна для строки (валидно на `ENTITY_SPAWNED`).
@@ -321,5 +389,5 @@ function Unit({ id }: { id: string }) {
 
 ## Экспорты
 
-- Корень: `entitiesPlugin`, `defineEntitySpawn`, `defineSpawnEvents`, `spawnEvent`, дескрипторы `f32`/`i16`/`i32`/`u8`/`string`/`optional`, типы `EntitiesPlugin`, `EntityAccess`, `EntityId`, `EntityIndex` и др.
+- Корень: `entitiesPlugin`, `defineEntitySpawn`, `defineSpawnEvents`, `spawnEvent`, дескрипторы `f32`/`i16`/`i32`/`u8`/`string`/`optional`/`resource`, типы `EntitiesPlugin`, `EntityAccess`, `EntityId`, `EntityIndex` и др.
 - `@lite-fsm/entities/react`: `useEntitySnapshot`, `useEntityCount`, `useEntityList`.

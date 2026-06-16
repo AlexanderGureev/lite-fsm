@@ -9,6 +9,7 @@ import {
   i16,
   i32,
   optional,
+  resource,
   spawnEvent,
   string,
   u8,
@@ -48,6 +49,9 @@ import type { Assert, Equal } from "./_helpers";
 type DescriptorValue<Descriptor> = Descriptor extends { readonly valueType?: infer Value } ? Value : never;
 type DescriptorColumn<Descriptor> = Descriptor extends { readonly columnType?: infer Column } ? Column : never;
 type DescriptorSpawnValue<Descriptor> = Descriptor extends { readonly spawnType?: infer Spawn } ? Spawn : never;
+type ResourceOwner<Descriptor> = Descriptor extends { readonly factory: () => infer Owner } ? Owner : never;
+type ResourceView<Descriptor> = Descriptor extends { readonly expose: (resource: any) => infer View } ? View : never;
+type ResourceExposed<Descriptor> = Descriptor extends { readonly exposed: infer Exposed } ? Exposed : never;
 
 describe("@lite-fsm/entities — этап 1 public types", () => {
   test("entitiesPlugin возвращает runtime plugin, а EntitiesPlugin является type-only source", () => {
@@ -110,6 +114,140 @@ describe("@lite-fsm/entities — этап 2 schema descriptors и machine extens
     });
   });
 
+  test("resource descriptor выводит owner, exposed view и флаг expose", () => {
+    type SpatialGrid = {
+      clear(): void;
+      ownerOnly(): void;
+      queryRadius(x: number, y: number, radius: number): readonly EntityIndex[];
+    };
+    type SpatialGridView = {
+      readonly queryRadius: (x: number, y: number, radius: number) => readonly EntityIndex[];
+    };
+    const createSpatialGrid = (): SpatialGrid => ({
+      clear() {},
+      ownerOnly() {},
+      queryRadius: () => [] as readonly EntityIndex[],
+    });
+    const exposeSpatialGrid = (grid: SpatialGrid): SpatialGridView => ({
+      queryRadius: grid.queryRadius.bind(grid),
+    });
+    const unitGrid = resource(createSpatialGrid, exposeSpatialGrid);
+    const neighborBuffer = resource(() => new Int32Array(64));
+    const neverView = resource(
+      () => ({ read: (): number => 1 }),
+      (): never => {
+        throw new Error("view is intentionally unavailable");
+      },
+    );
+
+    expect(unitGrid.exposed).type.toBe<true>();
+    expect(neighborBuffer.exposed).type.toBe<false>();
+    expect(neverView.exposed).type.toBe<true>();
+
+    type _UnitGridOwner = Assert<Equal<ResourceOwner<typeof unitGrid>, SpatialGrid>>;
+    type _UnitGridView = Assert<Equal<ResourceView<typeof unitGrid>, SpatialGridView>>;
+    type _UnitGridExposed = Assert<Equal<ResourceExposed<typeof unitGrid>, true>>;
+    expect<ResourceOwner<typeof neighborBuffer>>().type.toBeAssignableTo<Int32Array>();
+    type _NeighborBufferView = Assert<Equal<ResourceView<typeof neighborBuffer>, never>>;
+    type _NeighborBufferExposed = Assert<Equal<ResourceExposed<typeof neighborBuffer>, false>>;
+    type _NeverViewValue = Assert<Equal<ResourceView<typeof neverView>, never>>;
+    type _NeverViewExposed = Assert<Equal<ResourceExposed<typeof neverView>, true>>;
+  });
+
+  test("resource участвует в author schema, self и EntityAccess без spawnSchema", () => {
+    type AppEvent = FSMEvent<"TICK">;
+    type SpatialGrid = {
+      clear(): void;
+      ownerOnly(): void;
+      queryRadius(x: number, y: number, radius: number): readonly EntityIndex[];
+    };
+    type SpatialGridView = {
+      readonly queryRadius: (x: number, y: number, radius: number) => readonly EntityIndex[];
+    };
+    const createSpatialGrid = (): SpatialGrid => ({
+      clear() {},
+      ownerOnly() {},
+      queryRadius: () => [] as readonly EntityIndex[],
+    });
+    const exposeSpatialGrid = (grid: SpatialGrid): SpatialGridView => ({
+      queryRadius: grid.queryRadius.bind(grid),
+    });
+    const entityPlugin = entitiesPlugin();
+    const plugins = [entityPlugin] as const;
+    const createAppMachine: TypedCreateMachineFn<AppEvent, {}, typeof plugins> = createMachine;
+    const movementInitialContext = {
+      x: f32(),
+      y: f32(),
+      unitGrid: resource(createSpatialGrid, exposeSpatialGrid),
+      neighborBuffer: resource(() => new Int32Array(64)),
+      neverView: resource(
+        () => ({ read: (): number => 1 }),
+        (): never => {
+          throw new Error("view is intentionally unavailable");
+        },
+      ),
+    } as const;
+
+    const movementActor = createAppMachine({
+      storage: "entity",
+      initialState: "__INIT",
+      initialContext: movementInitialContext,
+      spawnSchema: {
+        x: f32(),
+        y: f32(),
+      },
+      config: {
+        __INIT: { ENTITY_SPAWNED: "moving" },
+        moving: { TICK: "moving" },
+      },
+      reducer(_state, _action, { self }) {
+        const entity = self.indices[0];
+
+        self.x[entity] = 1;
+        self.y[entity] = 2;
+        self.unitGrid.clear();
+        self.unitGrid.ownerOnly();
+        self.neighborBuffer[0] = entity;
+        expect(self.neverView.read()).type.toBe<number>();
+
+        // @ts-expect-error!
+        self.unitGrid[entity];
+      },
+    });
+    const machines = { movementActor };
+    const access = null as unknown as EntityAccess<typeof machines>;
+    const movement = access.get("movementActor");
+    const entity = 0 as EntityIndex;
+
+    expect(movement.x[entity]).type.toBe<number>();
+    expect(movement.y[entity]).type.toBe<number>();
+    expect(movement.unitGrid.queryRadius(0, 0, 96)).type.toBe<readonly EntityIndex[]>();
+
+    type MovementKeys = keyof typeof movement;
+    type NeverViewType = typeof movement.neverView;
+    type Metadata = MachineResultMetadata<typeof movementActor>["entityContextSchema"];
+    type _PrivateResourceMissing = Assert<Equal<"neighborBuffer" extends MovementKeys ? true : false, false>>;
+    type _NeverViewResourcePresent = Assert<Equal<"neverView" extends MovementKeys ? true : false, true>>;
+    type _NeverViewType = Assert<Equal<NeverViewType, never>>;
+    type _AuthorSchema = Assert<Equal<Metadata, typeof movementInitialContext>>;
+    type _MetadataResourceOwner = Assert<Equal<ResourceOwner<Metadata["unitGrid"]>, SpatialGrid>>;
+    type _MetadataResourceView = Assert<Equal<ResourceView<Metadata["unitGrid"]>, SpatialGridView>>;
+    type _MetadataResourceExposed = Assert<Equal<ResourceExposed<Metadata["unitGrid"]>, true>>;
+    type _MetadataPrivateExposed = Assert<Equal<ResourceExposed<Metadata["neighborBuffer"]>, false>>;
+    const invalidSpawnSchema = { unitGrid: resource(createSpatialGrid) } as const;
+
+    // @ts-expect-error!
+    movement.unitGrid.ownerOnly();
+    // @ts-expect-error!
+    movement.neighborBuffer;
+    type _ResourceRejectedInSpawnSchema = EntityReducerContext<
+      typeof movementInitialContext,
+      // @ts-expect-error!
+      typeof invalidSpawnSchema,
+      typeof movementActor.config
+    >;
+  });
+
   test('wrapper с EntitiesPlugin<AppDeps> принимает storage: "entity"', () => {
     type AppEvent = FSMEvent<"TICK">;
     type AppDeps = { readonly api: { readonly load: () => Promise<void> } };
@@ -167,6 +305,155 @@ describe("@lite-fsm/entities — этап 2 schema descriptors и machine extens
       spawnSchema: {},
       config: { __INIT: { ENTITY_SPAWNED: "ALIVE" }, ALIVE: {} },
     });
+  });
+});
+
+describe("@lite-fsm/entities — resource reducer/effect/reaction types", () => {
+  type AppEvent = FSMEvent<"TICK"> | FSMEvent<"HIT">;
+  type SpatialGridView = {
+    queryRadius(x: number, y: number, radius: number): readonly EntityIndex[];
+    mutableFacade: {
+      touches: number;
+      mark(entity: EntityIndex): void;
+    };
+  };
+  type SpatialGrid = SpatialGridView & {
+    clear(): void;
+    insert(entity: EntityIndex, x: number, y: number): void;
+    ownerOnly(): void;
+  };
+  const createSpatialGrid = (): SpatialGrid => ({
+    mutableFacade: {
+      touches: 0,
+      mark() {},
+    },
+    clear() {},
+    insert() {},
+    ownerOnly() {},
+    queryRadius: () => [] as readonly EntityIndex[],
+  });
+  const exposeSpatialGrid = (grid: SpatialGrid): SpatialGridView => ({
+    queryRadius: grid.queryRadius.bind(grid),
+    mutableFacade: grid.mutableFacade,
+  });
+  const entityPlugin = entitiesPlugin();
+  const plugins = [entityPlugin] as const;
+  const createAppMachine: TypedCreateMachineFn<AppEvent, {}, typeof plugins> = createMachine;
+  const movementInitialContext = {
+    x: f32(),
+    y: f32(),
+    unitGrid: resource(createSpatialGrid, exposeSpatialGrid),
+    scratch: resource(() => new Int32Array(16)),
+  } as const;
+  const movementActor = createAppMachine({
+    storage: "entity",
+    initialState: "__INIT",
+    initialContext: movementInitialContext,
+    spawnSchema: {
+      x: f32(),
+      y: f32(),
+    },
+    config: {
+      __INIT: { ENTITY_SPAWNED: "active" },
+      active: { TICK: "active", HIT: "active" },
+    },
+    reducer(_state, _action, { self, payloadFor }) {
+      const entity = self.indices[0];
+      const payload = payloadFor(entity);
+
+      self.unitGrid.clear();
+      self.unitGrid.insert(entity, self.x[entity], self.y[entity]);
+      self.unitGrid.ownerOnly();
+      self.scratch[0] = entity;
+      self.x[entity] = payload.x;
+      self.y[entity] = payload.y;
+    },
+    effects: {
+      active: ({ self }) => {
+        const entity = self.indices[0];
+
+        self.unitGrid.clear();
+        self.unitGrid.insert(entity, self.x[entity], self.y[entity]);
+        self.unitGrid.ownerOnly();
+        self.scratch[0] = entity;
+
+        // @ts-expect-error!
+        self.x[entity] = 1;
+      },
+    },
+    reactions: {
+      TICK: ({ self }) => {
+        const entity = self.indices[0];
+
+        self.unitGrid.clear();
+        self.unitGrid.insert(entity, self.x[entity], self.y[entity]);
+        self.unitGrid.ownerOnly();
+        self.scratch[0] = entity;
+
+        // @ts-expect-error!
+        self.y[entity] = 1;
+      },
+    },
+  });
+  const machines = { movementActor };
+  type AppMachines = typeof machines;
+
+  test("consumer получает exact exposed view через get, maybe и manager.entities", () => {
+    const entity = 0 as EntityIndex;
+    const access = null as unknown as EntityAccess<AppMachines>;
+    const entities = null as unknown as () => EntityAccess<AppMachines>;
+    const manager = MachineManager(machines, { plugins });
+    const fromGet = access.get("movementActor");
+    const fromMaybe = access.maybe("movementActor");
+    const fromEntities = entities().get("movementActor");
+    const fromManager = manager.entities().get("movementActor");
+
+    expect(fromGet.unitGrid.queryRadius(0, 0, 96)).type.toBe<readonly EntityIndex[]>();
+    expect(fromMaybe.unitGrid.queryRadius(0, 0, 96)).type.toBe<readonly EntityIndex[]>();
+    expect(fromEntities.unitGrid.queryRadius(0, 0, 96)).type.toBe<readonly EntityIndex[]>();
+    expect(fromManager.unitGrid.queryRadius(0, 0, 96)).type.toBe<readonly EntityIndex[]>();
+    expect(fromGet.x[entity]).type.toBe<number>();
+
+    fromGet.unitGrid.mutableFacade.touches = 1;
+    fromGet.unitGrid.mutableFacade = {
+      touches: 2,
+      mark() {},
+    };
+
+    type _GetView = Assert<Equal<typeof fromGet.unitGrid, SpatialGridView>>;
+    type _MaybeView = Assert<Equal<typeof fromMaybe.unitGrid, SpatialGridView>>;
+    type _EntitiesView = Assert<Equal<typeof fromEntities.unitGrid, SpatialGridView>>;
+    type _ManagerView = Assert<Equal<typeof fromManager.unitGrid, SpatialGridView>>;
+    type PrivateResourceFallback = typeof fromGet & { readonly scratch: "missing" };
+    type _PrivateResourceMissingNotNever = Assert<Equal<PrivateResourceFallback["scratch"], "missing">>;
+
+    // @ts-expect-error!
+    fromGet.unitGrid.clear();
+    // @ts-expect-error!
+    fromGet.unitGrid.ownerOnly();
+    // @ts-expect-error!
+    fromGet.scratch;
+    // @ts-expect-error!
+    fromGet.x[entity] = 1;
+  });
+
+  test("fallback EntityAccess остается широким без вывода private resource owner", () => {
+    type Context = EntityReducerContext<
+      typeof movementInitialContext,
+      { readonly x: ReturnType<typeof f32>; readonly y: ReturnType<typeof f32> },
+      typeof movementActor.config
+    >;
+    const entity = 0 as EntityIndex;
+    const meta = null as unknown as Context;
+    const fallbackActor = meta.entities().get("unknownActor");
+    const fallbackField = fallbackActor.privateResource;
+
+    expect(fallbackField[entity]).type.toBe<string | number>();
+
+    // @ts-expect-error!
+    fallbackField.clear();
+    // @ts-expect-error!
+    fallbackField.ownerOnly();
   });
 });
 

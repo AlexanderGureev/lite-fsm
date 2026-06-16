@@ -1,6 +1,7 @@
 import { LiteFsmError } from "@lite-fsm/core";
 import type { MachineStore, StorageManagerContext, StorageTemplate } from "@lite-fsm/core";
 
+import type { EntityDescriptor } from "../schema";
 import { createEntityAccess, rebindEntityStoreView, type EntityAccess } from "./access";
 import {
   compileEntityRuntimeMetadata,
@@ -19,10 +20,7 @@ type EntityPublicStateSlice = {
 
 export type EntityColumn = Float32Array | Int16Array | Int32Array | Uint8Array | string[];
 
-type EntityContextDescriptor = {
-  readonly kind: "f32" | "i16" | "i32" | "u8" | "string";
-  readonly default?: number | string;
-};
+type EntityColumnDescriptor = EntityDescriptor;
 
 export type EntityStore = {
   count: number;
@@ -65,6 +63,8 @@ export type ColumnarActorStore = {
   routingScratchVersion: number;
   acceptStateBucketsByEventCode: EntityIndex[][][];
   columns: Record<string, EntityColumn>;
+  resources: Record<string, unknown>;
+  resourceViews: Record<string, unknown>;
   reducerSelf: EntityReducerSelfCache;
   publicSlice: EntityPublicStateSlice;
 };
@@ -100,18 +100,26 @@ export { compileEntityTemplate, ENTITY_INIT_STATE, ENTITY_INIT_STATE_CODE, getEn
 const runtimeError = (reason: string): LiteFsmError =>
   new LiteFsmError("LITE_FSM_INVALID_STORAGE_RUNTIME", `[lite-fsm/entities] ${reason}.`);
 
+const resourceConfigError = (templateKey: string, resourceKey: string, reason: string): LiteFsmError =>
+  new LiteFsmError(
+    "LITE_FSM_INVALID_STORAGE_CONFIG",
+    `[lite-fsm/entities] machine '${templateKey}' resource '${resourceKey}' ${reason}.`,
+  );
+
+const isPromise = (value: unknown): value is Promise<unknown> => value instanceof Promise;
+
 const emptyColumnFactories = {
   f32: () => new Float32Array(0),
   i16: () => new Int16Array(0),
   i32: () => new Int32Array(0),
   u8: () => new Uint8Array(0),
   string: () => [] as string[],
-} as const satisfies Record<EntityContextDescriptor["kind"], () => EntityColumn>;
+} as const satisfies Record<EntityColumnDescriptor["kind"], () => EntityColumn>;
 
-const createEmptyColumn = (descriptor: EntityContextDescriptor): EntityColumn =>
+const createEmptyColumn = (descriptor: EntityColumnDescriptor): EntityColumn =>
   emptyColumnFactories[descriptor.kind]();
 
-const growColumn = (column: EntityColumn, descriptor: EntityContextDescriptor, capacity: number): EntityColumn => {
+const growColumn = (column: EntityColumn, descriptor: EntityColumnDescriptor, capacity: number): EntityColumn => {
   if (column.length >= capacity) return column;
 
   if (descriptor.kind === "string") {
@@ -205,6 +213,9 @@ const createActorReducerSelf = (entityStore: EntityStore, store: ColumnarActorSt
   for (const name of Object.keys(store.metadata.initialContext)) {
     self[name] = store.columns[name];
   }
+  for (const [name, resource] of Object.entries(store.resources)) {
+    self[name] = resource;
+  }
 
   return self;
 };
@@ -219,6 +230,9 @@ export const rebindActorReducerSelf = (store: ColumnarActorStore): void => {
   for (const name of Object.keys(store.metadata.initialContext)) {
     reducerSelf[name] = store.columns[name];
   }
+  for (const [name, resource] of Object.entries(store.resources)) {
+    reducerSelf[name] = resource;
+  }
 };
 
 export const getActorReducerSelf = (
@@ -229,13 +243,50 @@ export const getActorReducerSelf = (
   return store.reducerSelf;
 };
 
+const createResourceValues = (
+  metadata: EntityTemplateMetadata,
+): { readonly resources: Record<string, unknown>; readonly resourceViews: Record<string, unknown> } => {
+  const resources = Object.create(null) as Record<string, unknown>;
+  const resourceViews = Object.create(null) as Record<string, unknown>;
+
+  for (const [name, descriptor] of Object.entries(metadata.resourceSchema)) {
+    const resource = descriptor.factory();
+    if (isPromise(resource)) {
+      throw resourceConfigError(
+        metadata.templateKey,
+        name,
+        "factory returned a Promise; resource factories are sync-only",
+      );
+    }
+
+    resources[name] = resource;
+
+    if (!descriptor.exposed) continue;
+
+    const expose = descriptor.expose as (resource: unknown) => unknown;
+    const view = expose(resource);
+    if (isPromise(view)) {
+      throw resourceConfigError(
+        metadata.templateKey,
+        name,
+        "expose returned a Promise; resource expose functions are sync-only",
+      );
+    }
+
+    resourceViews[name] = view;
+  }
+
+  return { resources, resourceViews };
+};
+
 const createColumnarActorStore = (metadata: EntityTemplateMetadata, entityStore: EntityStore): ColumnarActorStore => {
   const columns = Object.fromEntries(
     Object.entries(metadata.initialContext).map(([name, descriptor]) => [
       name,
-      createEmptyColumn(descriptor as EntityContextDescriptor),
+      createEmptyColumn(descriptor),
     ]),
   ) as Record<string, EntityColumn>;
+  const resourceValues = createResourceValues(metadata);
   const store: ColumnarActorStore = {
     templateKey: metadata.templateKey,
     metadata,
@@ -255,6 +306,8 @@ const createColumnarActorStore = (metadata: EntityTemplateMetadata, entityStore:
     routingScratchVersion: 0,
     acceptStateBucketsByEventCode: [],
     columns,
+    resources: resourceValues.resources,
+    resourceViews: resourceValues.resourceViews,
     reducerSelf: undefined as unknown as EntityReducerSelfCache,
     publicSlice: { storage: "entity", version: 0, count: 0, capacity: 0 },
   };
@@ -334,13 +387,13 @@ export const ensureActorCapacity = (store: ColumnarActorStore, capacity: number)
   store.pendingPrevStateCodeSyncMark = growUint32(store.pendingPrevStateCodeSyncMark, capacity);
 
   for (const [name, descriptor] of Object.entries(store.metadata.initialContext)) {
-    store.columns[name] = growColumn(store.columns[name], descriptor as EntityContextDescriptor, capacity);
+    store.columns[name] = growColumn(store.columns[name], descriptor, capacity);
   }
   rebindActorReducerSelf(store);
   rebindEntityStoreView(store);
 };
 
-export const getInitialColumnValue = (descriptor: EntityContextDescriptor): number | string => {
+export const getInitialColumnValue = (descriptor: EntityColumnDescriptor): number | string => {
   if (descriptor.default !== undefined) return descriptor.default;
   return descriptor.kind === "string" ? "" : 0;
 };
@@ -348,7 +401,7 @@ export const getInitialColumnValue = (descriptor: EntityContextDescriptor): numb
 export const writeInitialColumnValues = (store: ColumnarActorStore, entity: EntityIndex): void => {
   for (const [name, descriptor] of Object.entries(store.metadata.initialContext)) {
     const column = store.columns[name];
-    (column as Record<number, number | string>)[entity] = getInitialColumnValue(descriptor as EntityContextDescriptor);
+    (column as Record<number, number | string>)[entity] = getInitialColumnValue(descriptor);
   }
 };
 

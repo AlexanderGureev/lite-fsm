@@ -7,7 +7,7 @@
 | Импорт                       | Типы                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `@lite-fsm/core`             | весь `types.ts` + `interfaces.ts`: core (`FSMEvent`, `MachineConfig`, `CFG`, `MachineReducer`, `MachineEffect`), manager/snapshot/actor типы, `IMachineManager`, `Middleware`; plugin/storage helper-типы (`definePlugin`, `LiteFsmPlugin`, `ManagerExtension*`, `Storage*`). Контракты — в разделах ниже                                                                                  |
-| `@lite-fsm/entities`         | alpha: типы `EntityId`, `EntityIndex`, `EntitiesPlugin`, `EntityAccess`, `EntityMachineExtension`, `EntityReducerContext`, `EntityReducerSelf`, `LiteFsmEntityLifecycleEvents`, `SpawnEventsFrom`; runtime `entitiesPlugin()`, `defineSpawnEvents`, `defineEntitySpawn`, `spawnEvent` и column-helpers (`f32`, `i16`, `i32`, `u8`, `string`, `optional`)                                                                                                                |
+| `@lite-fsm/entities`         | alpha: типы `EntityId`, `EntityIndex`, `EntitiesPlugin`, `EntityAccess`, `EntityMachineExtension`, `EntityReducerContext`, `EntityReducerSelf`, `LiteFsmEntityLifecycleEvents`, `SpawnEventsFrom`; runtime `entitiesPlugin()`, `defineSpawnEvents`, `defineEntitySpawn`, `spawnEvent` и schema helpers (`f32`, `i16`, `i32`, `u8`, `string`, `optional`, `resource`)                                                                                                                |
 | `@lite-fsm/entities/react`   | alpha: `EntityRowSnapshot`, `EntityListOptions`, `TypedUseEntitySnapshotHook`, `TypedUseEntityCountHook`, `TypedUseEntityListHook`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `@lite-fsm/react`            | `FSMContextType`, `FSMContextProviderProps`, `FSMPersistLifecycle`, `FSMHydrationBoundaryProps`, `FSMStorageHydrationPreview`, typed hook aliases                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `@lite-fsm/persist`          | `MaybePromise`, `PersistedRecord`, `PersistStorage`, `PersistStatus`, `PersistRestoreSettledResult`, `PersistManagerOptions`, `PersistController`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
@@ -377,7 +377,7 @@ const cachePlugin = definePlugin<CacheEvents, AppEvents>().create({
 
 ## Entities (alpha)
 
-`@lite-fsm/entities` — alpha-плагин и storage runtime kind `"entity"`: колоночное (SoA) хранилище строк поверх машины-шаблона. Машина типизируется только через plugin-aware `TypedCreateMachineFn<P, D, EntitiesPlugin<D>>`; прямой core `createMachine` про kind `"entity"` не знает.
+`@lite-fsm/entities` — alpha-плагин и storage runtime kind `"entity"`: колоночное (SoA) хранилище строк поверх машины-шаблона с template-level runtime resources для cache и рабочих структур. Машина типизируется только через plugin-aware `TypedCreateMachineFn<P, D, EntitiesPlugin<D>>`; прямой core `createMachine` про kind `"entity"` не знает.
 
 ```ts
 type AppEvent = { readonly type: "TICK" };
@@ -401,11 +401,53 @@ const movement = createMachine({
 | Тип                                                          | Форма / назначение                                                                                                                                                                                                                                                                                                                                          |
 | ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `EntityId`                                                   | `string`; стабильный строковый id сущности                                                                                                                                                                                                                                                                                                                  |
-| `EntityIndex`                                               | branded `number`; индекс строки в колонках (`self.x[entity]`, `view.x[entity]`). Для public view значение колонки имеет смысл только при `view.has(entity) === true`                                                                                                                                                                                          |
+| `EntityIndex`                                               | branded `number`; индекс строки в колонках (`self.x[entity]`, `view.x[entity]`). Resources принадлежат шаблону и не индексируются по `EntityIndex`. Для public view значение колонки имеет смысл только при `view.has(entity) === true`                                                                                                                         |
 | `EntitiesPlugin<AppDeps = unknown, PluginEvents = never>`    | opaque `LiteFsmPlugin` value плагина. Третий generic `TypedCreateMachineFn<P, D, EntitiesPlugin<D>>` включает storage typing kind `"entity"`. `entitiesPlugin({ spawn })` выводит `PluginEvents` = public spawn events (`SpawnEventsFrom<...>`); `entitiesPlugin()` без спавна оставляет `never`                                                              |
 | `EntityMachineExtension<Ctx, Spawn, Config, AppDeps>`        | storage extension contract kind `"entity"`: fixed `input` (`storage`, `initialState: "__INIT"`, `initialContext`, `spawnSchema`, optional `despawnOn`, `reactions`), `internalEvents = LiteFsmEntityLifecycleEvents`, dependent `reducerContext` / `effectDeps` / `reactionDeps`, `resultMetadata`, `publicState`. Прикладной код берёт его через `EntitiesPlugin` |
 | `LiteFsmEntityLifecycleEvents`                              | `{ type: "ENTITY_SPAWNED" } \| { type: "ENTITY_DESPAWNED" }`; internal events машины-шаблона. Public dispatch запрещён runtime-ошибкой. `ENTITY_DESPAWNED` является локальным cleanup hook для удаляемых строк актёра                                                                            |
 | `SpawnEventsFrom<SpawnEvents>`                              | union public spawn events из `defineSpawnEvents(...)`: `{ type: Type; payload: Payload }`. Добавьте в `P` приложения, чтобы `manager.transition` принимал спавн                                                                                                                                                                                              |
+
+### Schema resources
+
+`resource(factory)` и `resource(factory, expose)` разрешены только в `initialContext` entity-машины. В `spawnSchema` resource descriptor является type error и runtime validation error.
+
+```ts
+type SpatialGrid = {
+  clear(): void;
+  ownerOnly(): void;
+  queryRadius(x: number, y: number, radius: number): readonly EntityIndex[];
+};
+
+type SpatialGridView = {
+  queryRadius(x: number, y: number, radius: number): readonly EntityIndex[];
+};
+
+const initialContext = {
+  x: f32({ default: 0 }),
+  unitGrid: resource(
+    (): SpatialGrid => ({
+      clear() {},
+      ownerOnly() {},
+      queryRadius: () => [],
+    }),
+    (grid): SpatialGridView => ({
+      queryRadius: grid.queryRadius.bind(grid),
+    }),
+  ),
+  scratch: resource(() => new Int32Array(256)),
+} as const;
+```
+
+| Поверхность                                  | Типовое правило                                                                 |
+| -------------------------------------------- | ------------------------------------------------------------------------------- |
+| Owner `self.unitGrid`                        | mutable owner type `SpatialGrid`; owner-only методы доступны                    |
+| Owner `self.scratch`                         | mutable owner type `Int32Array`; private resource остаётся доступен владельцу   |
+| Consumer `entities().get("movement").unitGrid` | ровно exposed `SpatialGridView`, который вернул `expose`                         |
+| Consumer private resource                    | ключ отсутствует в `EntityAccess`; он не представлен как property типа `never`  |
+| `MachineResultMetadata["entityContextSchema"]` | сохраняет author `initialContext` с column и resource descriptors                |
+| `spawnSchema`                                | принимает только spawn descriptors; `resource(...)` запрещён                    |
+
+Consumer view не преобразуется в read-only wrapper. Если внешний код должен видеть только safe facade, задайте эту форму в `expose`.
 
 ### Reducer и контекст строк
 
@@ -414,7 +456,7 @@ const movement = createMachine({
 | Тип                                          | Форма                                                                                                                                                                                                                                                            |
 | -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `EntityReducerContext<Ctx, Spawn, Config, AppDeps = unknown>` | `{ self: EntityReducerSelf<Ctx, Config>; entities: () => <EntityAccess из AppDeps.entities или широкий fallback>; payloadFor(entity: EntityIndex): <значения спавна по Spawn> }`                                                                                 |
-| `EntityReducerSelf<Ctx, Config>`             | mutable колонки `Ctx` (`Float32Array` / `Int16Array` / `Int32Array` / `Uint8Array` / `string[]`) + `indices: readonly EntityIndex[]`, `states: Record<PublicState, number>`, `presence`, `stateCode`, `prevStateCode`, `rowVersion`, `has(entity)`, `entityId(entity)` |
+| `EntityReducerSelf<Ctx, Config>`             | mutable колонки `Ctx` (`Float32Array` / `Int16Array` / `Int32Array` / `Uint8Array` / `string[]`) + mutable owner resources + `indices: readonly EntityIndex[]`, `states: Record<PublicState, number>`, `presence`, `stateCode`, `prevStateCode`, `rowVersion`, `has(entity)`, `entityId(entity)` |
 
 `entities()` в `EntityReducerContext` доступен на `ENTITY_SPAWNED`, public events и routed events. Если `AppDeps` содержит `readonly entities: () => EntityAccess<AppMachines>`, reducer получает строгие entity keys и колонки из `AppMachines`. Если `AppDeps.entities` отсутствует или несовместим с `EntityAccess<...>`, тип fallback — широкий `EntityAccess` с `get(string)`.
 
@@ -431,7 +473,7 @@ const createAppMachine: TypedCreateMachineFn<
 > = createMachine;
 ```
 
-Store views из `entities()` типизируются только для чтения: запись в колонку чужого view является ошибкой TypeScript, а `self.hp[entity] = 0` разрешён только в reducer владельца колонки. Обычные reducers и `storage: "instance"` reducers не получают поле `entities`.
+Store views из `entities()` типизируют колонки только для чтения: запись в колонку чужого view является ошибкой TypeScript, а `self.<column>[entity] = value` разрешён только в reducer владельца колонки. Exposed resource view имеет ровно тот тип, который вернул `expose`; private resources не входят в `EntityAccess`. Обычные reducers и `storage: "instance"` reducers не получают поле `entities`.
 
 `payloadFor(entity)` валиден на `ENTITY_SPAWNED`. Запись `self.stateCode[entity] = self.states.<STATE>` планирует переход строки. Reducer и `reactions.ENTITY_DESPAWNED` могут читать колонки удаляемой строки до физического удаления; финальную внешнюю синхронизацию выполняйте через reaction, а не через state `effects` целевого состояния.
 
@@ -443,11 +485,11 @@ Entity reducer является sync-only: в контекст не входят
 
 | Тип                          | Форма / назначение                                                                                                                                                  |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `EntityAccess<AppMachines>`  | `{ get(key), maybe(key) }`; per-template view `{ count, version, has(entity), state(entity), <column> }`. Колонки только для чтения, индекс по `EntityIndex`; `state(entity)` сужается до `ActorPublicState<Config> \| undefined` |
+| `EntityAccess<AppMachines>`  | `{ get(key), maybe(key) }`; per-template view `{ count, version, has(entity), state(entity), <column>, <exposed resource> }`. Колонки только для чтения, индекс по `EntityIndex`; exposed resources не индексируются по строке; `state(entity)` сужается до `ActorPublicState<Config> \| undefined` |
 
 `manager.entities()` — manager extension плагина типа `() => EntityAccess<AppMachines>` и root access ко всем entity stores. Reducer получает root access через storage runtime без scoped validation; `AppDeps.entities` является источником строгих типов. В effects/reactions runtime создает scoped access: `get` проверяет scope в dev, `maybe` возвращает view без этой проверки. Для effects/reactions передайте `manager.entities` в deps (`setDependencies({ entities: manager.entities })`).
 
-Колонки удалённых строк не являются public state: после `has(entity) === false` значения `view.<column>[entity]` могут быть устаревшими. `dehydrate()` сериализует удалённые слоты через defaults из `initialContext`. `version` actor store и entity store — monotonic invalidation token, а не счетчик строк, событий или отдельных мутаций.
+Колонки удалённых строк не являются public state: после `has(entity) === false` значения `view.<column>[entity]` могут быть устаревшими. Resources не входят в public state, snapshots, hydrate payload, persistence или React row snapshots. `dehydrate()` сериализует удалённые слоты через defaults из column descriptors. `version` actor store и entity store — monotonic invalidation token, а не счетчик строк, событий или отдельных мутаций.
 
 ### React (`@lite-fsm/entities/react`)
 

@@ -1,7 +1,13 @@
 import { LiteFsmError } from "@lite-fsm/core";
 import type { AnyEvent, ManagerAction } from "@lite-fsm/core";
 
-import type { EntityContextSchema, EntitySpawnSchema } from "../schema";
+import {
+  isEntityResourceDescriptor,
+  type EntityColumnSchema,
+  type EntityContextSchema,
+  type EntityResourceSchema,
+  type EntitySpawnSchema,
+} from "../schema";
 import { ENTITY_DESPAWNED } from "./lifecycle";
 
 export const ENTITY_INIT_STATE = "__INIT";
@@ -36,7 +42,8 @@ export type EntityReducePlan = {
 export type EntityTemplateMetadata = {
   readonly templateKey: string;
   readonly config: Record<string, Record<string, string | null | undefined> | undefined>;
-  readonly initialContext: EntityContextSchema;
+  readonly initialContext: EntityColumnSchema;
+  readonly resourceSchema: EntityResourceSchema;
   readonly spawnSchema: EntitySpawnSchema;
   readonly publicStates: readonly string[];
   readonly stateCodeByName: Readonly<Record<string, number>>;
@@ -81,6 +88,24 @@ const configError = (templateKey: string, reason: string): LiteFsmError =>
     "LITE_FSM_INVALID_STORAGE_CONFIG",
     `[lite-fsm/entities] machine '${templateKey}' has invalid storage: "entity" config: ${reason}.`,
   );
+
+const splitEntityContextSchema = (
+  schema: EntityContextSchema,
+): { readonly initialContext: EntityColumnSchema; readonly resourceSchema: EntityResourceSchema } => {
+  const initialContext = Object.create(null) as Record<string, EntityColumnSchema[string]>;
+  const resourceSchema = Object.create(null) as Record<string, EntityResourceSchema[string]>;
+
+  for (const [name, descriptor] of Object.entries(schema)) {
+    if (isEntityResourceDescriptor(descriptor)) {
+      resourceSchema[name] = descriptor;
+      continue;
+    }
+
+    initialContext[name] = descriptor;
+  }
+
+  return { initialContext, resourceSchema };
+};
 
 const getSourceStateCode = (
   metadata: Pick<EntityTemplateMetadata, "stateCodeByName">,
@@ -237,11 +262,13 @@ export const compileEntityTemplate = (
   const publicStates = Object.keys(config).filter((state) => !nonPublicStateNames.has(state));
   const stateCodeByName = Object.fromEntries(publicStates.map((state, index) => [state, index]));
   const eventTypes = collectTemplateEventTypes(config);
+  const contextSchema = splitEntityContextSchema(machine.initialContext);
 
   return {
     templateKey,
     config,
-    initialContext: machine.initialContext,
+    initialContext: contextSchema.initialContext,
+    resourceSchema: contextSchema.resourceSchema,
     spawnSchema: machine.spawnSchema,
     publicStates,
     stateCodeByName,
