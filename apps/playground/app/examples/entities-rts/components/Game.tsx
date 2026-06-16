@@ -30,7 +30,15 @@ import {
   type PhaserApi,
   type RtsCameraZoomAction,
 } from "./phaser-scene";
-import { GAME_PRESETS, makeStore, useSelector, useTransition, type AppStore, type GameConfig } from "../store";
+import {
+  DEFAULT_GAME_CONFIG,
+  GAME_PRESETS,
+  makeStore,
+  useSelector,
+  useTransition,
+  type AppStore,
+  type GameConfig,
+} from "../store";
 import type { RtsPresetId } from "../store";
 import {
   createRtsMetricsAdapter,
@@ -91,12 +99,16 @@ const readCountInput = (value: string) => {
 };
 
 const activePresetFor = (config: GameConfig) =>
-  presetEntries.find(
-    ([, preset]) =>
-      preset.config.enemyCount === config.enemyCount &&
-      preset.config.allyCount === config.allyCount &&
-      preset.config.seed === config.seed,
-  )?.[0];
+  presetEntries.find(([, preset]) => {
+    const presetConfig: GameConfig = preset.config;
+
+    return (
+      presetConfig.enemyCount === config.enemyCount &&
+      presetConfig.allyCount === config.allyCount &&
+      presetConfig.seed === config.seed &&
+      presetConfig.playerUnitHp === config.playerUnitHp
+    );
+  })?.[0];
 
 const dispatchCameraZoom = (action: RtsCameraZoomAction) => {
   window.dispatchEvent(new CustomEvent(RTS_CAMERA_ZOOM_EVENT, { detail: { action } }));
@@ -676,17 +688,38 @@ function GameShell({ manager, metrics }: { manager: AppStore; metrics: MetricsAd
   return <ArmedShell manager={manager} metrics={metrics} />;
 }
 
-export function Game() {
+type GameProps = {
+  autoStart?: boolean;
+  initialConfig?: GameConfig;
+};
+
+export function Game({ autoStart = false, initialConfig }: GameProps = {}) {
   const metrics = useMemo(() => createRtsMetricsAdapter(() => performance.now()), []);
-  const manager = useMemo<AppStore>(
-    () =>
-      makeStore({
-        metrics,
-        random: Math.random,
-        renderer: { reset: () => undefined },
-      }),
-    [metrics],
-  );
+  const initialEnemyCount = initialConfig?.enemyCount;
+  const initialAllyCount = initialConfig?.allyCount;
+  const initialSeed = initialConfig?.seed;
+  const initialPlayerUnitHp = initialConfig?.playerUnitHp;
+  const manager = useMemo<AppStore>(() => {
+    const nextManager = makeStore({
+      metrics,
+      random: Math.random,
+      renderer: { reset: () => undefined },
+    });
+
+    if (autoStart) {
+      nextManager.transition({
+        type: "GAME_START",
+        payload: {
+          enemyCount: initialEnemyCount ?? DEFAULT_GAME_CONFIG.enemyCount,
+          allyCount: initialAllyCount ?? DEFAULT_GAME_CONFIG.allyCount,
+          seed: initialSeed ?? DEFAULT_GAME_CONFIG.seed,
+          ...(initialPlayerUnitHp === undefined ? {} : { playerUnitHp: initialPlayerUnitHp }),
+        },
+      });
+    }
+
+    return nextManager;
+  }, [autoStart, initialAllyCount, initialEnemyCount, initialPlayerUnitHp, initialSeed, metrics]);
 
   return (
     <FSMContextProvider machineManager={manager}>

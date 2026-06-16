@@ -35,15 +35,29 @@ const sanitizeCount = (value: number | undefined, fallback: number, min: number)
   return Math.max(min, Math.trunc(value));
 };
 
-export const normalizeGameConfig = (config: GameConfig): GameConfig => ({
-  enemyCount: sanitizeCount(config.enemyCount, DEFAULT_GAME_CONFIG.enemyCount, 0),
-  allyCount: sanitizeCount(config.allyCount, DEFAULT_GAME_CONFIG.allyCount, 1),
-  seed: config.seed.trim() || DEFAULT_GAME_CONFIG.seed,
-});
+const sanitizeOptionalCount = (value: number | undefined, fallback: number | undefined, min: number) => {
+  if (value === undefined || !Number.isFinite(value)) return fallback;
+  return Math.max(min, Math.trunc(value));
+};
 
-export const applyGameConfigPatch = (current: GameConfig, patch: GameConfigPatch): GameConfig =>
-  normalizeGameConfig({
+export const normalizeGameConfig = (config: GameConfig): GameConfig => {
+  const playerUnitHp = sanitizeOptionalCount(config.playerUnitHp, undefined, 1);
+
+  return {
+    enemyCount: sanitizeCount(config.enemyCount, DEFAULT_GAME_CONFIG.enemyCount, 0),
+    allyCount: sanitizeCount(config.allyCount, DEFAULT_GAME_CONFIG.allyCount, 1),
+    seed: config.seed.trim() || DEFAULT_GAME_CONFIG.seed,
+    ...(playerUnitHp === undefined ? {} : { playerUnitHp }),
+  };
+};
+
+export const applyGameConfigPatch = (current: GameConfig, patch: GameConfigPatch): GameConfig => {
+  const playerUnitHp = sanitizeOptionalCount(patch.playerUnitHp, current.playerUnitHp, 1);
+
+  return normalizeGameConfig({
     enemyCount: sanitizeCount(patch.enemyCount, current.enemyCount, 0),
     allyCount: sanitizeCount(patch.allyCount, current.allyCount, 1),
     seed: patch.seed ?? current.seed,
+    ...(playerUnitHp === undefined ? {} : { playerUnitHp }),
   });
+};

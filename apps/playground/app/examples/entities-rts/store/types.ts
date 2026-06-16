@@ -6,6 +6,7 @@ export type GameConfig = {
   enemyCount: number;
   allyCount: number;
   seed: string;
+  playerUnitHp?: number;
 };
 
 export type GameConfigPatch = Partial<GameConfig>;

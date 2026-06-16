@@ -1,6 +1,12 @@
 import { applyGameConfigPatch, DEFAULT_GAME_CONFIG } from "../config";
 import type { GameConfig } from "../types";
-import { UNIT_COMMAND, UNIT_FACTION, UNIT_KIND, type PlannedUnitSpawn, type UnitActorSpawnPayload } from "../unit-model";
+import {
+  UNIT_COMMAND,
+  UNIT_FACTION,
+  UNIT_KIND,
+  type PlannedUnitSpawn,
+  type UnitActorSpawnPayload,
+} from "../unit-model";
 import { createFormationTargets } from "./formation";
 import { createSeededRandom, randomBetween, randomInt } from "./random";
 
@@ -43,7 +49,10 @@ const enemyStats = {
 };
 
 const createUnitPayload = (
-  values: Pick<UnitActorSpawnPayload, "x" | "y" | "kind" | "faction" | "radius" | "speed" | "hp" | "attackRange" | "attackDamage" | "attackCooldownMs"> &
+  values: Pick<
+    UnitActorSpawnPayload,
+    "x" | "y" | "kind" | "faction" | "radius" | "speed" | "hp" | "attackRange" | "attackDamage" | "attackCooldownMs"
+  > &
     Partial<Pick<UnitActorSpawnPayload, "formationOffsetX" | "formationOffsetY">>,
 ): UnitActorSpawnPayload => ({
   x: values.x,
@@ -91,6 +100,7 @@ export const createGameStartSpawnPlan = (config: GameConfig): readonly PlannedUn
   const normalized = applyGameConfigPatch(DEFAULT_GAME_CONFIG, config);
   const random = createSeededRandom(normalized.seed);
   const plan = new Array<PlannedUnitSpawn>(normalized.enemyCount + normalized.allyCount + 1);
+  const playerUnitHp = normalized.playerUnitHp;
   const heroX = RTS_MAP.centerX;
   const heroY = RTS_MAP.centerY;
   let cursor = 0;
@@ -104,6 +114,7 @@ export const createGameStartSpawnPlan = (config: GameConfig): readonly PlannedUn
       kind: UNIT_KIND.HERO,
       faction: UNIT_FACTION.PLAYER,
       ...heroStats,
+      hp: playerUnitHp ?? heroStats.hp,
     }),
   };
   cursor += 1;
@@ -124,6 +135,7 @@ export const createGameStartSpawnPlan = (config: GameConfig): readonly PlannedUn
         formationOffsetX: x - heroX,
         formationOffsetY: y - heroY,
         ...allyStats,
+        hp: playerUnitHp ?? allyStats.hp,
       }),
     };
     cursor += 1;

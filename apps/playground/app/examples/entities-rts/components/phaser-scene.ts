@@ -44,11 +44,16 @@ const CAMERA_ZOOM_STEP = 1.18;
 const CAMERA_MAX_ZOOM_MULTIPLIER = 3;
 const CAMERA_INITIAL_VIEW_WIDTH = 4_096;
 const CAMERA_KEYBOARD_PAN_SPEED = 760;
-const CAMERA_KEYBOARD_PAN_TAP_DISTANCE = 80;
 const MAP_GRID_MINOR_STEP = 128;
 const MAP_GRID_MAJOR_STEP = 512;
 const MAP_GRID_MINOR_WIDTH = 4;
 const MAP_GRID_MAJOR_WIDTH = 8;
+const HP_BAR_MIN_WIDTH = 76;
+const HP_BAR_WIDTH_SCALE = 1.8;
+const HP_BAR_OFFSET_SCALE = 0.9;
+const HP_BAR_BG_HEIGHT = 24;
+const HP_BAR_FILL_HEIGHT = 16;
+const HP_BAR_HORIZONTAL_PADDING = 14;
 
 type DragState = {
   start: Point;
@@ -81,6 +86,21 @@ const keyboardTargetIsEditable = (target: EventTarget | null) => {
   if (!(target instanceof HTMLElement)) return false;
   if (target.isContentEditable) return true;
   return target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT";
+};
+
+const cameraPanVectorForCode = (code: string) => {
+  switch (code) {
+    case "KeyA":
+      return { x: -1, y: 0 };
+    case "KeyD":
+      return { x: 1, y: 0 };
+    case "KeyW":
+      return { x: 0, y: -1 };
+    case "KeyS":
+      return { x: 0, y: 1 };
+    default:
+      return null;
+  }
 };
 
 const displaySizeForKind = (kind: number) => {
@@ -284,8 +304,8 @@ class UnitSpriteRenderer {
       return;
     }
 
-    const width = Math.max(24, size * 0.92);
-    const y = units.y[entity] - size * 0.62;
+    const width = Math.max(HP_BAR_MIN_WIDTH, size * HP_BAR_WIDTH_SCALE);
+    const y = units.y[entity] - size * HP_BAR_OFFSET_SCALE;
     const bar =
       this.hpBars.get(key) ??
       ({
@@ -298,9 +318,9 @@ class UnitSpriteRenderer {
 
     this.hpBars.set(key, bar);
     bar.bg.setPosition(units.x[entity], y);
-    bar.bg.setDisplaySize(width + 4, 7);
+    bar.bg.setDisplaySize(width + HP_BAR_HORIZONTAL_PADDING, HP_BAR_BG_HEIGHT);
     bar.fill.setPosition(units.x[entity] - width / 2, y);
-    bar.fill.setDisplaySize(Math.max(1, width * hpRate), 4);
+    bar.fill.setDisplaySize(Math.max(1, width * hpRate), HP_BAR_FILL_HEIGHT);
   }
 
   private cleanupMissing() {
@@ -387,19 +407,10 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
     private readonly handleWindowKeyDown = (event: KeyboardEvent) => {
       if (keyboardTargetIsEditable(event.target)) return;
 
-      if (
-        event.key === "ArrowUp" ||
-        event.key === "ArrowDown" ||
-        event.key === "ArrowLeft" ||
-        event.key === "ArrowRight"
-      ) {
+      const panVector = cameraPanVectorForCode(event.code);
+      if (panVector) {
         event.preventDefault();
-        this.pressedCameraKeys.add(event.key);
-        if (event.repeat) return;
-
-        const x = Number(event.key === "ArrowRight") - Number(event.key === "ArrowLeft");
-        const y = Number(event.key === "ArrowDown") - Number(event.key === "ArrowUp");
-        this.panCameraByKeyboardVector(x, y, CAMERA_KEYBOARD_PAN_TAP_DISTANCE / this.cameras.main.zoom);
+        this.pressedCameraKeys.add(event.code);
         return;
       }
 
@@ -429,7 +440,7 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
     };
 
     private readonly handleWindowKeyUp = (event: KeyboardEvent) => {
-      this.pressedCameraKeys.delete(event.key);
+      this.pressedCameraKeys.delete(event.code);
     };
 
     private readonly handleWindowBlur = () => {
@@ -556,11 +567,13 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
     }
 
     private panCameraFromKeyboard(deltaMs: number) {
-      const x = Number(this.pressedCameraKeys.has("ArrowRight")) - Number(this.pressedCameraKeys.has("ArrowLeft"));
-      const y = Number(this.pressedCameraKeys.has("ArrowDown")) - Number(this.pressedCameraKeys.has("ArrowUp"));
+      const x = Number(this.pressedCameraKeys.has("KeyD")) - Number(this.pressedCameraKeys.has("KeyA"));
+      const y = Number(this.pressedCameraKeys.has("KeyS")) - Number(this.pressedCameraKeys.has("KeyW"));
       if (x === 0 && y === 0) return;
 
       const camera = this.cameras.main;
+      if (!camera) return;
+
       const distance = (CAMERA_KEYBOARD_PAN_SPEED * deltaMs) / 1_000 / camera.zoom;
 
       this.panCameraByKeyboardVector(x, y, distance);
@@ -652,7 +665,6 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
 
         this.issueLeftClick(drag.current);
       });
-
     }
 
     private issueLeftClick(point: Point) {
