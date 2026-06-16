@@ -11,6 +11,8 @@ const SEPARATION_FORCE = 1.4;
 const SEPARATION_SAMPLE_LIMIT = 12;
 const SEPARATION_COLLECT_LIMIT = 12;
 const NEIGHBOR_BUFFER_SIZE = SEPARATION_COLLECT_LIMIT;
+const ENEMY_SEPARATION_HERO_RADIUS = 960;
+const ENEMY_SEPARATION_HERO_RADIUS_SQUARED = ENEMY_SEPARATION_HERO_RADIUS * ENEMY_SEPARATION_HERO_RADIUS;
 
 export type Events = AppEvents;
 
@@ -80,6 +82,10 @@ export const unitMovement = createMachine({
         const movementVy = self.vy;
         const movementX = self.x;
         const movementY = self.y;
+        const hero = spatial.heroEntity();
+        const heroAlive = hero !== null && healthHp[hero] > 0;
+        const heroX = heroAlive ? movementX[hero] : 0;
+        const heroY = heroAlive ? movementY[hero] : 0;
 
         for (const entity of self.indices) {
           if (healthHp[entity] <= 0) {
@@ -90,12 +96,15 @@ export const unitMovement = createMachine({
 
           const entityX = movementX[entity];
           const entityY = movementY[entity];
-          const neighborCount = spatial.collectUnitNeighborsAt(
-            entityX,
-            entityY,
-            self.neighborBuffer,
-            SEPARATION_COLLECT_LIMIT,
-          );
+          const faction = identityFaction[entity];
+          const shouldResolveSeparation =
+            faction === UNIT_FACTION.PLAYER ||
+            (heroAlive &&
+              (entityX - heroX) * (entityX - heroX) + (entityY - heroY) * (entityY - heroY) <=
+                ENEMY_SEPARATION_HERO_RADIUS_SQUARED);
+          const neighborCount = shouldResolveSeparation
+            ? spatial.collectUnitNeighborsAt(entityX, entityY, self.neighborBuffer, SEPARATION_COLLECT_LIMIT)
+            : 0;
           let separationX = 0;
           let separationY = 0;
           let samples = 0;
@@ -120,7 +129,6 @@ export const unitMovement = createMachine({
 
           let desiredX = separationX * SEPARATION_FORCE;
           let desiredY = separationY * SEPARATION_FORCE;
-          const faction = identityFaction[entity];
 
           if (
             faction === UNIT_FACTION.PLAYER &&

@@ -54,6 +54,8 @@ const MAX_SIMULATION_FRAME_DELTA_MS = 100;
 const MAX_SIMULATION_STEPS_PER_FRAME = 4;
 const MAX_SPAWN_STEPS_PER_FRAME = 1;
 const SPAWN_RENDER_CREATE_BUDGET = 768;
+const RENDER_CULL_MARGIN = 256;
+const MAX_VISIBLE_ENEMY_SPRITES = 8_000;
 
 type DragState = {
   start: Point;
@@ -62,6 +64,10 @@ type DragState = {
 
 type UnitView = {
   sprite: PhaserImage;
+  x: number;
+  y: number;
+  hp: number;
+  maxHp: number;
   hpRate: number;
   kind: number;
 };
@@ -69,6 +75,18 @@ type UnitView = {
 type HpBarView = {
   bg: PhaserImage;
   fill: PhaserImage;
+};
+
+type RenderBounds = {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+};
+
+type RenderPlan = {
+  bounds: RenderBounds;
+  enemyStride: number;
 };
 
 const clampToMap = (point: Point): Point => ({
@@ -220,12 +238,14 @@ class UnitSpriteRenderer {
 
   sync() {
     const units = readUnitViews(this.manager);
+    const plan = this.createRenderPlan(units);
     this.liveEntities.clear();
-    this.loadingSyncCursor = units.identity.count;
+    this.loadingSyncCursor = units.capacity;
 
     for (let index = 0; index < units.capacity; index += 1) {
       const entity = index as EntityIndex;
       if (!isUnitAlive(units.health, entity)) continue;
+      if (!this.unitShouldRender(units, entity, plan)) continue;
 
       this.liveEntities.add(index);
       this.syncUnit(units, entity);
@@ -236,13 +256,19 @@ class UnitSpriteRenderer {
 
   syncLoading(maxCreates: number) {
     const units = readUnitViews(this.manager);
+    const plan = this.createRenderPlan(units);
     const capacity = units.capacity;
     let created = 0;
     let index = Math.min(this.loadingSyncCursor, capacity);
 
     while (index < capacity && created < maxCreates) {
       const entity = index as EntityIndex;
-      if (isUnitAlive(units.health, entity) && !this.sprites.has(index)) {
+      const shouldCreate =
+        isUnitAlive(units.health, entity) &&
+        this.unitShouldRender(units, entity, plan) &&
+        !this.sprites.has(index);
+
+      if (shouldCreate) {
         this.syncUnit(units, entity);
         created += 1;
       }
@@ -253,21 +279,88 @@ class UnitSpriteRenderer {
     this.loadingSyncCursor = index;
   }
 
+  private createRenderPlan(units: UnitViews): RenderPlan {
+    const bounds = this.renderBounds();
+    let visibleEnemies = 0;
+
+    for (let index = 0; index < units.capacity; index += 1) {
+      const entity = index as EntityIndex;
+      if (!isUnitAlive(units.health, entity)) continue;
+      if (units.identity.faction[entity] !== UNIT_FACTION.ENEMY) continue;
+      if (!this.unitIntersectsBounds(units, entity, bounds)) continue;
+
+      visibleEnemies += 1;
+    }
+
+    return {
+      bounds,
+      enemyStride:
+        visibleEnemies > MAX_VISIBLE_ENEMY_SPRITES ? Math.ceil(visibleEnemies / MAX_VISIBLE_ENEMY_SPRITES) : 1,
+    };
+  }
+
+  private renderBounds(): RenderBounds {
+    const camera = this.scene.cameras.main;
+    const worldView = camera.worldView;
+
+    return {
+      left: worldView.x - RENDER_CULL_MARGIN,
+      right: worldView.right + RENDER_CULL_MARGIN,
+      top: worldView.y - RENDER_CULL_MARGIN,
+      bottom: worldView.bottom + RENDER_CULL_MARGIN,
+    };
+  }
+
+  private unitShouldRender(units: UnitViews, entity: EntityIndex, plan: RenderPlan) {
+    if (!this.unitIntersectsBounds(units, entity, plan.bounds)) return false;
+    if (plan.enemyStride <= 1 || units.identity.faction[entity] !== UNIT_FACTION.ENEMY) return true;
+
+    const unitIndex = units.identity.unitIndex[entity];
+    return unitIndex < 0 || unitIndex % plan.enemyStride === 0;
+  }
+
+  private unitIntersectsBounds(units: UnitViews, entity: EntityIndex, bounds: RenderBounds) {
+    const x = units.movement.x[entity];
+    const y = units.movement.y[entity];
+    const radius = displaySizeForKind(units.identity.kind[entity]) * 0.5;
+
+    return (
+      x + radius >= bounds.left &&
+      x - radius <= bounds.right &&
+      y + radius >= bounds.top &&
+      y - radius <= bounds.bottom
+    );
+  }
+
   private syncUnit(units: UnitViews, entity: EntityIndex) {
     const key = Number(entity);
     const kind = units.identity.kind[entity];
     const size = displaySizeForKind(kind);
     const texture = textureForKind(kind);
+    const x = units.movement.x[entity];
+    const y = units.movement.y[entity];
     const view = this.sprites.get(key) ?? this.createUnitView(key, units, entity, kind, texture, size);
-    const hpRate = Math.max(0, Math.min(1, units.health.hp[entity] / units.health.maxHp[entity]));
+    const hp = units.health.hp[entity];
+    const maxHp = units.health.maxHp[entity];
+    let hpRate = view.hpRate;
 
-    view.sprite.setPosition(units.movement.x[entity], units.movement.y[entity]);
+    if (view.x !== x || view.y !== y) {
+      view.x = x;
+      view.y = y;
+      view.sprite.setPosition(x, y);
+    }
 
     if (view.kind !== kind) {
       view.kind = kind;
       view.sprite.setTexture(texture);
       view.sprite.setDepth(depthForKind(kind));
       view.sprite.setDisplaySize(size, size);
+    }
+
+    if (view.hp !== hp || view.maxHp !== maxHp) {
+      view.hp = hp;
+      view.maxHp = maxHp;
+      hpRate = maxHp > 0 ? Math.max(0, Math.min(1, hp / maxHp)) : 0;
     }
 
     if (view.hpRate !== hpRate) {
@@ -298,14 +391,20 @@ class UnitSpriteRenderer {
     texture: string,
     size: number,
   ) {
+    const x = units.movement.x[entity];
+    const y = units.movement.y[entity];
     const view = {
+      hp: -1,
       hpRate: -1,
       kind,
+      maxHp: -1,
       sprite: this.scene.add
-        .image(units.movement.x[entity], units.movement.y[entity], texture)
+        .image(x, y, texture)
         .setOrigin(0.5, 0.5)
         .setDepth(depthForKind(kind))
         .setDisplaySize(size, size),
+      x,
+      y,
     };
 
     this.sprites.set(key, view);
@@ -453,6 +552,8 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
     private maxZoom = 1;
     private zoomMultiplier = 1;
     private startupCenterFrames = 8;
+    private renderDirty = true;
+    private lastSyncedSessionState: string | null = null;
     private simulationAccumulatorMs = 0;
     private simulationNowMs = 0;
     private readonly pressedCameraKeys = new Set<string>();
@@ -497,8 +598,14 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
 
       if (event.key === "Escape") {
         const state = manager.getState().gameSession.state;
-        if (state === "READY") manager.transition({ type: "GAME_PAUSE" });
-        if (state === "PAUSED") manager.transition({ type: "GAME_RESUME" });
+        if (state === "READY") {
+          manager.transition({ type: "GAME_PAUSE" });
+          this.renderDirty = true;
+        }
+        if (state === "PAUSED") {
+          manager.transition({ type: "GAME_RESUME" });
+          this.renderDirty = true;
+        }
       }
     };
 
@@ -535,35 +642,43 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
     }
 
     update(_time: number, delta: number) {
-      this.fitCameraToMap();
+      if (this.fitCameraToMap()) this.renderDirty = true;
 
       const frameDeltaMs = Math.max(0, delta);
       const simulationDeltaMs = Math.min(MAX_SIMULATION_FRAME_DELTA_MS, frameDeltaMs);
       const sessionState = manager.getState().gameSession.state;
-      if (sessionState !== "SPAWNING") this.panCameraFromKeyboard(frameDeltaMs);
+      if (sessionState !== "SPAWNING" && this.panCameraFromKeyboard(frameDeltaMs)) this.renderDirty = true;
       metrics.recordFrame(frameDeltaMs);
 
+      let simulationSteps = 0;
       if (sessionState === "READY") {
-        this.runFixedSimulation(simulationDeltaMs, "TICK");
+        simulationSteps = this.runFixedSimulation(simulationDeltaMs, "TICK");
       } else if (sessionState === "SPAWNING") {
-        this.runFixedSimulation(simulationDeltaMs, "SPAWN_TICK");
+        simulationSteps = this.runFixedSimulation(simulationDeltaMs, "SPAWN_TICK");
       } else {
         this.simulationAccumulatorMs = 0;
       }
 
-      const syncStartedAt = metrics.now();
-      if (sessionState === "SPAWNING") {
-        this.unitRenderer?.syncLoading(SPAWN_RENDER_CREATE_BUDGET);
-      } else {
-        this.unitRenderer?.sync();
-      }
-      metrics.recordSyncMs(metrics.now() - syncStartedAt);
-      metrics.publish();
+      if (simulationSteps > 0) this.renderDirty = true;
 
       if (this.startupCenterFrames > 0) {
         this.centerCameraOnMap();
         this.startupCenterFrames -= 1;
+        this.renderDirty = true;
       }
+
+      const shouldSync = this.renderDirty || this.lastSyncedSessionState !== sessionState;
+      const syncStartedAt = metrics.now();
+      if (sessionState === "SPAWNING") {
+        this.unitRenderer?.syncLoading(SPAWN_RENDER_CREATE_BUDGET);
+        this.renderDirty = false;
+      } else if (shouldSync) {
+        this.unitRenderer?.sync();
+        this.renderDirty = false;
+      }
+      this.lastSyncedSessionState = sessionState;
+      metrics.recordSyncMs(metrics.now() - syncStartedAt);
+      metrics.publish();
     }
 
     private runFixedSimulation(frameDeltaMs: number, actionType: "TICK" | "SPAWN_TICK") {
@@ -587,13 +702,14 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
       }
 
       if (steps === maxSteps) this.simulationAccumulatorMs = 0;
+      return steps;
     }
 
     private fitCameraToMap() {
       const camera = this.cameras.main;
       const width = Math.max(1, Math.floor(this.scale.gameSize.width || camera.width));
       const height = Math.max(1, Math.floor(this.scale.gameSize.height || camera.height));
-      if (this.cameraViewport.width === width && this.cameraViewport.height === height) return;
+      if (this.cameraViewport.width === width && this.cameraViewport.height === height) return false;
 
       this.cameraViewport = { width, height };
       camera.setSize(width, height);
@@ -606,6 +722,7 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
       camera.roundPixels = false;
       this.startupCenterFrames = Math.max(this.startupCenterFrames, 3);
       this.centerCameraOnMap();
+      return true;
     }
 
     private zoomCamera(direction: -1 | 1, pointer?: PhaserPointer) {
@@ -620,6 +737,7 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
         CAMERA_MAX_ZOOM_MULTIPLIER,
       );
       camera.setZoom(clampValue(this.baseZoom * this.zoomMultiplier, this.minZoom, this.maxZoom));
+      this.renderDirty = true;
 
       if (pointer && anchorBefore) {
         const anchorAfter = pointer.positionToCamera(camera) as Point;
@@ -637,6 +755,7 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
       this.zoomMultiplier = 1;
       this.cameras.main.setZoom(this.baseZoom);
       this.centerCameraOnMap();
+      this.renderDirty = true;
     }
 
     private centerCameraOnMap() {
@@ -644,6 +763,7 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
 
       camera.centerOn(RTS_MAP.centerX, RTS_MAP.centerY);
       this.clampCameraScroll();
+      this.renderDirty = true;
     }
 
     private clampCameraScroll() {
@@ -662,14 +782,15 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
     private panCameraFromKeyboard(deltaMs: number) {
       const x = Number(this.pressedCameraKeys.has("KeyD")) - Number(this.pressedCameraKeys.has("KeyA"));
       const y = Number(this.pressedCameraKeys.has("KeyS")) - Number(this.pressedCameraKeys.has("KeyW"));
-      if (x === 0 && y === 0) return;
+      if (x === 0 && y === 0) return false;
 
       const camera = this.cameras.main;
-      if (!camera) return;
+      if (!camera) return false;
 
       const distance = (CAMERA_KEYBOARD_PAN_SPEED * deltaMs) / 1_000 / camera.zoom;
 
       this.panCameraByKeyboardVector(x, y, distance);
+      return true;
     }
 
     private panCameraByKeyboardVector(x: number, y: number, distance: number) {
@@ -680,6 +801,7 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
       camera.scrollX += x * distance * diagonalScale;
       camera.scrollY += y * distance * diagonalScale;
       this.clampCameraScroll();
+      this.renderDirty = true;
     }
 
     private drawMap() {
@@ -753,6 +875,7 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
               height: drag.current.y - drag.start.y,
             },
           });
+          this.renderDirty = true;
           return;
         }
 
@@ -771,6 +894,7 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
         } else {
           manager.transition({ type: "CLEAR_SELECTION" });
         }
+        this.renderDirty = true;
         return;
       }
 
@@ -780,16 +904,19 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
         } else {
           manager.transition({ type: "CLEAR_SELECTION" });
         }
+        this.renderDirty = true;
         return;
       }
 
       const entityId = entityIdForUnitIndex(units, entity);
       if (!entityId) {
         manager.transition({ type: "CLEAR_SELECTION" });
+        this.renderDirty = true;
         return;
       }
 
       manager.transition({ type: "SELECT_ENTITY", payload: { entityId } });
+      this.renderDirty = true;
     }
 
     private issueRightClick(point: Point) {
@@ -801,6 +928,7 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
       });
 
       manager.transition({ type: enemy === null ? "ISSUE_MOVE" : "ISSUE_ATTACK_MOVE", payload: point });
+      this.renderDirty = true;
     }
 
     private worldPointFor(pointer: PhaserPointer): Point {
