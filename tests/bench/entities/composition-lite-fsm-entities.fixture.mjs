@@ -7,6 +7,7 @@ import {
   entitiesPlugin,
   f32,
   i32,
+  resource,
   spawnEvent,
   string as entityString,
 } from "../../../packages/entities/dist/index.js";
@@ -213,7 +214,7 @@ const createHealthActor = () =>
     },
   });
 
-const createTargetingActor = () =>
+const createTargetingActor = ({ reducerAccess = false } = {}) =>
   ({
     storage: "entity",
     initialState: "__INIT",
@@ -221,6 +222,16 @@ const createTargetingActor = () =>
       targetX: f32(),
       targetY: f32(),
       threat: i32(),
+      ...(reducerAccess
+        ? {
+            frameStats: resource(
+              () => ({ checksum: 0 }),
+              (stats) => ({
+                readChecksum: () => stats.checksum,
+              }),
+            ),
+          }
+        : {}),
     },
     spawnSchema: {
       targetX: f32(),
@@ -231,20 +242,47 @@ const createTargetingActor = () =>
       __INIT: { ENTITY_SPAWNED: "tracking" },
       tracking: { TICK: "tracking" },
     },
-    reducer(_state, action, { self, payloadFor }) {
-      for (const entity of self.indices) {
-        if (action.type === "ENTITY_SPAWNED") {
+    reducer(_state, action, { self, payloadFor, entities }) {
+      if (action.type === "ENTITY_SPAWNED") {
+        for (const entity of self.indices) {
           const payload = payloadFor(entity);
           self.targetX[entity] = payload.targetX;
           self.targetY[entity] = payload.targetY;
           self.threat[entity] = payload.threat;
-          continue;
         }
-
-        self.targetX[entity] += 0.25;
-        self.targetY[entity] -= 0.125;
-        self.threat[entity] += 1;
+        return;
       }
+
+      if (!reducerAccess) {
+        for (const entity of self.indices) {
+          self.targetX[entity] += 0.25;
+          self.targetY[entity] -= 0.125;
+          self.threat[entity] += 1;
+        }
+        return;
+      }
+
+      const access = entities();
+      const movement = access.get("movementActor");
+      const health = access.get("healthActor");
+      const targetX = self.targetX;
+      const targetY = self.targetY;
+      const threat = self.threat;
+      const movementX = movement.x;
+      const movementY = movement.y;
+      const healthHp = health.hp;
+      const healthArmor = health.armor;
+      let checksum = 0;
+
+      for (const entity of self.indices) {
+        targetX[entity] += 0.25 + movementX[entity] * 0.0001;
+        targetY[entity] -= 0.125 + movementY[entity] * 0.0001;
+        threat[entity] += 1 + (healthHp[entity] > 0 ? 1 : 0) + healthArmor[entity];
+        checksum +=
+          targetX[entity] + targetY[entity] + threat[entity] + movementX[entity] + movementY[entity] + healthHp[entity];
+      }
+
+      self.frameStats.checksum += checksum;
     },
   });
 
@@ -378,7 +416,7 @@ const createProjectileEntityRunner = (rowCount, mode) => {
   };
 };
 
-const createUnitFrameEntityRunner = (rowCount) => {
+const createUnitFrameEntityRunner = (rowCount, { reducerAccess = false } = {}) => {
   const spriteAccumulator = { value: 0 };
   const worldAccumulator = {
     checksum: 0,
@@ -392,7 +430,7 @@ const createUnitFrameEntityRunner = (rowCount) => {
   };
   const movementActor = createMovementActor();
   const healthActor = createHealthActor();
-  const targetingActor = createTargetingActor();
+  const targetingActor = createTargetingActor({ reducerAccess });
   const spriteSyncActor = createSpriteActor(spriteAccumulator);
   const machines = { movementActor, healthActor, targetingActor, spriteSyncActor };
   const spawn = createSpawn(machines, (index, payload) => ({
@@ -421,6 +459,7 @@ const createUnitFrameEntityRunner = (rowCount) => {
     },
   }));
   const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] });
+  const targetingStats = reducerAccess ? manager.entities().get("targetingActor").frameStats : undefined;
   manager.setDependencies({
     getState: manager.getState,
     entities: manager.entities,
@@ -433,7 +472,7 @@ const createUnitFrameEntityRunner = (rowCount) => {
     beforeSample: noop,
     run: () => manager.transition(tickAction),
     afterSample: noop,
-    read: () => spriteAccumulator.value + worldAccumulator.checksum,
+    read: () => spriteAccumulator.value + worldAccumulator.checksum + (targetingStats?.readChecksum() ?? 0),
   };
 };
 
@@ -504,6 +543,7 @@ const createSoaRows = (rowCount) => {
     ids,
     indexById: Object.create(null),
     checksum: 0,
+    targetingChecksum: 0,
     reportedUnits: 0,
     totalUnits: 0,
   };
@@ -615,7 +655,7 @@ const createCleanupSoaRunner = (rowCount) => {
   };
 };
 
-const createUnitFrameSoaRunner = (rowCount) => {
+const createUnitFrameSoaRunner = (rowCount, { reducerAccess = false } = {}) => {
   const rows = createSoaRows(rowCount);
 
   return {
@@ -635,12 +675,14 @@ const createUnitFrameSoaRunner = (rowCount) => {
         spriteIds,
         hp,
         maxHp,
+        armor,
         targetX,
         targetY,
         threat,
       } = rows;
       let acceptedCount = 0;
       let spriteChecksum = 0;
+      let targetingChecksum = 0;
       let worldChecksum = rowCount;
 
       for (let offset = 0; offset < rowCount; offset += 1) {
@@ -652,16 +694,25 @@ const createUnitFrameSoaRunner = (rowCount) => {
         x[entity] += dx[entity];
         y[entity] += dy[entity];
         if (hp[entity] < maxHp[entity]) hp[entity] += 1;
-        targetX[entity] += 0.25;
-        targetY[entity] -= 0.125;
-        threat[entity] += 1;
+        if (reducerAccess) {
+          targetX[entity] += 0.25 + x[entity] * 0.0001;
+          targetY[entity] -= 0.125 + y[entity] * 0.0001;
+          threat[entity] += 1 + (hp[entity] > 0 ? 1 : 0) + armor[entity];
+          targetingChecksum += targetX[entity] + targetY[entity] + threat[entity] + x[entity] + y[entity] + hp[entity];
+        } else {
+          targetX[entity] += 0.25;
+          targetY[entity] -= 0.125;
+          threat[entity] += 1;
+        }
         spriteChecksum += x[entity] + y[entity] + spriteIds[entity].length;
-        worldChecksum += hp[entity] + maxHp[entity] + x[entity] + y[entity] + targetX[entity] + targetY[entity] + threat[entity];
+        worldChecksum +=
+          hp[entity] + maxHp[entity] + x[entity] + y[entity] + targetX[entity] + targetY[entity] + threat[entity];
       }
 
       for (let offset = 0; offset < acceptedCount; offset += 1) rowVersion[accepted[offset]] += 1;
       rows.version += 1;
-      rows.checksum += spriteChecksum + worldChecksum;
+      rows.targetingChecksum += targetingChecksum;
+      rows.checksum += spriteChecksum + worldChecksum + targetingChecksum;
       rows.reportedUnits += acceptedCount;
       rows.totalUnits += rowCount;
     },
@@ -669,6 +720,12 @@ const createUnitFrameSoaRunner = (rowCount) => {
     read: () => rows.checksum,
   };
 };
+
+const createUnitFrameReducerAccessEntityRunner = (rowCount) =>
+  createUnitFrameEntityRunner(rowCount, { reducerAccess: true });
+
+const createUnitFrameReducerAccessSoaRunner = (rowCount) =>
+  createUnitFrameSoaRunner(rowCount, { reducerAccess: true });
 
 export const scenarioDefinitions = [
   {
@@ -702,6 +759,14 @@ export const scenarioDefinitions = [
     operationsPerSample: 5,
     createEntityRunner: createUnitFrameEntityRunner,
     createBaselineRunner: createUnitFrameSoaRunner,
+  },
+  {
+    key: "unit-frame-reducer-access",
+    label: "unit frame reducer access",
+    kind: "full-pipeline",
+    operationsPerSample: 5,
+    createEntityRunner: createUnitFrameReducerAccessEntityRunner,
+    createBaselineRunner: createUnitFrameReducerAccessSoaRunner,
   },
 ];
 

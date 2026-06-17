@@ -59,4 +59,9 @@ export const gameSession = createMachine({
         return;
     }
   },
+  effects: {
+    SPAWNING: ({ action, metrics }) => {
+      if (action.type === "GAME_START") metrics.reset();
+    },
+  },
 });

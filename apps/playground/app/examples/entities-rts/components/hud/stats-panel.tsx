@@ -139,7 +139,7 @@ export function StatsPanel({ heroPercent, stats, metrics, spawn, config, started
       <div className="mt-2.5 border-t border-[#d7f6e0]/12 pt-2.5">
         <div className="flex items-center justify-between gap-3">
           <p className="text-caption-strong text-[#f4faf5]">Метрики</p>
-          <span className="text-fine-print text-[#819289]">окно 120 кадров</span>
+          <span className="text-fine-print text-[#819289]">за игру</span>
         </div>
 
         <p className="mt-2 text-fine-print uppercase tracking-[0.08em] text-[#6f8378]">тайминги кадра</p>
