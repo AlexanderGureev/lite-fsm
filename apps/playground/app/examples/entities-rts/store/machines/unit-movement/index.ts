@@ -27,6 +27,7 @@ export const unitMovement = createMachine({
     },
     ACTIVE: {
       TICK: null,
+      UNITS_DIED: null,
       UNIT_DIED: "STOPPED",
       ENTITY_DESPAWNED: "__RESOLVED",
     },
@@ -182,6 +183,16 @@ export const unitMovement = createMachine({
         for (const entity of self.indices) {
           self.vx[entity] = 0;
           self.vy[entity] = 0;
+        }
+        return;
+
+      case "UNITS_DIED":
+        for (const entity of action.payload.entities) {
+          if (!self.has(entity)) continue;
+
+          self.vx[entity] = 0;
+          self.vy[entity] = 0;
+          self.stateCode[entity] = self.states.STOPPED;
         }
         return;
     }

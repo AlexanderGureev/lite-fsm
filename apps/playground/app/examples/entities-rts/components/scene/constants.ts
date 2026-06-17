@@ -56,8 +56,9 @@ export const SPAWN_RENDER_CREATE_BUDGET = 768;
 
 // Куллинг и уровень детализации (LOD).
 export const RENDER_CULL_MARGIN = 256;
-export const MAX_VISIBLE_ENEMY_SPRITES = 8_000;
-export const UNIT_DOT_LOD_MAX_ZOOM = 0.22;
+export const MAX_VISIBLE_ENEMY_SPRITES = 3_500;
+export const MAX_VISIBLE_ENEMY_DOTS = 8_000;
+export const UNIT_DOT_LOD_MAX_ZOOM = 0.42;
 export const LOD_STRIDE_ENTER_RATIO = 1.12;
 export const LOD_STRIDE_EXIT_RATIO = 0.72;
 export const MAX_LOD_STRIDE = 16;

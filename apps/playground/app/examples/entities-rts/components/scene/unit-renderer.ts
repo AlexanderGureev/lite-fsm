@@ -15,6 +15,7 @@ import {
   HP_BAR_GAP,
   HP_BAR_HORIZONTAL_PADDING,
   HP_BAR_MIN_WIDTH,
+  MAX_VISIBLE_ENEMY_DOTS,
   MAX_VISIBLE_ENEMY_SPRITES,
   MOVING_SPEED_THRESHOLD_SQUARED,
   SELECTION_DEPTH,
@@ -80,7 +81,7 @@ export class UnitSpriteRenderer {
   private dotLoadingCapacity = -1;
   private dotLoadingZoom = -1;
   private animTimeMs = 0;
-  private enemySpriteStride = 1;
+  private enemyStride = 1;
   private allyDotWorldSize = 0;
   private enemyDotWorldSize = 0;
 
@@ -112,7 +113,7 @@ export class UnitSpriteRenderer {
     this.loadingSyncCursor = 0;
     this.dotLoadingCapacity = -1;
     this.dotLoadingZoom = -1;
-    this.enemySpriteStride = 1;
+    this.enemyStride = 1;
   }
 
   sync() {
@@ -135,12 +136,12 @@ export class UnitSpriteRenderer {
       if (!this.unitIntersectsBounds(units, entity, plan.bounds)) continue;
 
       const kind = units.identity.kind[entity];
+      if (!this.unitShouldRender(units, entity, plan)) continue;
+
       if (plan.mode === "dot" && kind !== UNIT_KIND.HERO) {
         this.syncUnitDot(units, entity, kind);
         continue;
       }
-
-      if (!this.unitShouldRender(units, entity, kind, plan)) continue;
 
       this.liveEntities.add(index);
       this.syncUnit(units, entity);
@@ -184,7 +185,7 @@ export class UnitSpriteRenderer {
       const shouldCreate =
         isUnitAlive(units.health, entity) &&
         this.unitIntersectsBounds(units, entity, plan.bounds) &&
-        this.unitShouldRender(units, entity, kind, plan) &&
+        this.unitShouldRender(units, entity, plan) &&
         !this.sprites.has(index);
 
       if (shouldCreate) {
@@ -223,6 +224,7 @@ export class UnitSpriteRenderer {
   private createRenderPlan(units: UnitViews): RenderPlan {
     const bounds = renderBoundsForScene(this.scene);
     const mode = renderModeFor(this.scene);
+    const maxVisibleEnemies = mode === "dot" ? MAX_VISIBLE_ENEMY_DOTS : MAX_VISIBLE_ENEMY_SPRITES;
     let visibleEnemies = 0;
 
     for (let index = 0; index < units.capacity; index += 1) {
@@ -234,14 +236,12 @@ export class UnitSpriteRenderer {
       visibleEnemies += 1;
     }
 
-    if (mode === "sprite") {
-      this.enemySpriteStride = nextStableStride(visibleEnemies, MAX_VISIBLE_ENEMY_SPRITES, this.enemySpriteStride);
-    }
+    this.enemyStride = nextStableStride(visibleEnemies, maxVisibleEnemies, this.enemyStride);
 
     return {
       bounds,
       mode,
-      enemyStride: mode === "sprite" ? this.enemySpriteStride : 1,
+      enemyStride: this.enemyStride,
     };
   }
 
@@ -286,8 +286,7 @@ export class UnitSpriteRenderer {
     graphics.fillRect(x - dotHalf, y - dotHalf, dotSize, dotSize);
   }
 
-  private unitShouldRender(units: UnitViews, entity: EntityIndex, kind: number, plan: RenderPlan) {
-    if (plan.mode === "dot" && kind !== UNIT_KIND.HERO) return false;
+  private unitShouldRender(units: UnitViews, entity: EntityIndex, plan: RenderPlan) {
     if (plan.enemyStride <= 1 || units.identity.faction[entity] !== UNIT_FACTION.ENEMY) return true;
 
     const unitIndex = units.identity.unitIndex[entity];

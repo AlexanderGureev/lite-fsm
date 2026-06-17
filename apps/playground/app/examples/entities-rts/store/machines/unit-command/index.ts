@@ -18,6 +18,7 @@ export const unitCommand = createMachine({
     ACTIVE: {
       TICK: null,
       UNIT_COMMAND_ASSIGNED: null,
+      UNITS_DIED: null,
       UNIT_DIED: "DISABLED",
       ENTITY_DESPAWNED: "__RESOLVED",
     },
@@ -87,6 +88,15 @@ export const unitCommand = createMachine({
 
       case "UNIT_DIED":
         for (const entity of self.indices) self.command[entity] = UNIT_COMMAND.IDLE;
+        return;
+
+      case "UNITS_DIED":
+        for (const entity of action.payload.entities) {
+          if (!self.has(entity)) continue;
+
+          self.command[entity] = UNIT_COMMAND.IDLE;
+          self.stateCode[entity] = self.states.DISABLED;
+        }
         return;
     }
   },

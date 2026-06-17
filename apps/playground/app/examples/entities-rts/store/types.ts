@@ -1,4 +1,5 @@
 import type { FSMEvent } from "@lite-fsm/core";
+import type { EntityIndex } from "@lite-fsm/entities";
 
 import type { UnitCommandAssignmentBatchPayload, UnitSelectionBatchPayload } from "./machines/unit-orders/batches";
 import type { RtsMetricsSnapshot } from "./metrics";
@@ -63,6 +64,8 @@ export type AppEvents =
   | FSMEvent<"UNIT_COMMAND_ASSIGNED", UnitCommandAssignmentBatchPayload>
   | FSMEvent<"UNIT_COMMAND_RESOLVED">
   | FSMEvent<"UNIT_DIED", { entityId: string }>
+  | FSMEvent<"UNITS_DIED", { entities: readonly EntityIndex[] }>
   | FSMEvent<"ENEMY_KILLED", { entityId: string }>
+  | FSMEvent<"ENEMIES_KILLED", { count: number }>
   | FSMEvent<"BENCHMARK_REPORT_CAPTURED", RtsMetricsSnapshot>
   | FSMEvent<"HERO_DEAD">;

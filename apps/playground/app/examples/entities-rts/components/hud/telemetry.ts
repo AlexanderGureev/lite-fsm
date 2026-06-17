@@ -32,7 +32,9 @@ const EMPTY_METRICS: RtsMetricsSnapshot = {
   spatialGridBuildMs: 0,
 };
 
-// Сводка сущностей опрашивается из committed columns с троттлингом ~120 мс через rAF,
+const ENTITY_STATS_READ_INTERVAL_MS = 360;
+
+// Сводка сущностей опрашивается из committed columns с троттлингом через rAF,
 // чтобы HUD не перечитывал тысячи строк каждый кадр симуляции.
 export function useRtsEntityStats(manager: AppStore, enabled: boolean) {
   const [stats, setStats] = useState<RtsEntityStats>(EMPTY_STATS);
@@ -47,7 +49,7 @@ export function useRtsEntityStats(manager: AppStore, enabled: boolean) {
     let lastRead = 0;
 
     const readStats = (time: number) => {
-      if (time - lastRead >= 120) {
+      if (time - lastRead >= ENTITY_STATS_READ_INTERVAL_MS) {
         setStats(readRtsEntityStats(readUnitViews(manager)));
         lastRead = time;
       }

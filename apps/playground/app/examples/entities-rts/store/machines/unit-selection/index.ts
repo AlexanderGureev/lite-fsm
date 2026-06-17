@@ -16,6 +16,7 @@ export const unitSelection = createMachine({
       UNIT_SELECTION_UPDATED: null,
       SELECT_ENTITY: null,
       CLEAR_SELECTION: null,
+      UNITS_DIED: null,
       UNIT_DIED: "DISABLED",
       ENTITY_DESPAWNED: "__RESOLVED",
     },
@@ -53,6 +54,15 @@ export const unitSelection = createMachine({
       case "CLEAR_SELECTION":
       case "UNIT_DIED":
         for (const entity of self.indices) self.selected[entity] = UNIT_SELECTION.UNSELECTED;
+        return;
+
+      case "UNITS_DIED":
+        for (const entity of action.payload.entities) {
+          if (!self.has(entity)) continue;
+
+          self.selected[entity] = UNIT_SELECTION.UNSELECTED;
+          self.stateCode[entity] = self.states.DISABLED;
+        }
         return;
     }
   },

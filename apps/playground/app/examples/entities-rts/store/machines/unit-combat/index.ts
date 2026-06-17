@@ -17,6 +17,7 @@ export const unitCombat = createMachine({
     },
     ACTIVE: {
       TICK: null,
+      UNITS_DIED: null,
       UNIT_DIED: "DISABLED",
       ENTITY_DESPAWNED: "__RESOLVED",
     },
@@ -150,6 +151,18 @@ export const unitCombat = createMachine({
           self.incomingDamage[entity] = 0;
           self.projectileTargetEntity[entity] = -1;
           self.projectileDamage[entity] = 0;
+        }
+        return;
+
+      case "UNITS_DIED":
+        for (const entity of action.payload.entities) {
+          if (!self.has(entity)) continue;
+
+          self.attackTimerMs[entity] = 0;
+          self.incomingDamage[entity] = 0;
+          self.projectileTargetEntity[entity] = -1;
+          self.projectileDamage[entity] = 0;
+          self.stateCode[entity] = self.states.DISABLED;
         }
         return;
     }

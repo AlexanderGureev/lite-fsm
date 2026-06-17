@@ -15,6 +15,7 @@ import {
   type MetricsAdapter,
 } from "../../../apps/playground/app/examples/entities-rts/store/metrics";
 import {
+  readRtsEntityStats,
   readProjectileView,
   readUnitViews,
   unitSelected,
@@ -314,7 +315,7 @@ describe("runtime simulation для entities RTS", () => {
     startGame(manager, { enemyCount: 8, allyCount: 2, seed: "attack-move" });
 
     const units = readUnitViews(manager);
-    const initialCount = units.identity.count;
+    const initialEnemies = readRtsEntityStats(units).enemies;
 
     manager.transition({
       type: "SELECT_RECT",
@@ -327,7 +328,7 @@ describe("runtime simulation для entities RTS", () => {
 
     runTicks(manager, 60);
 
-    expect(units.identity.count).toBeLessThan(initialCount);
+    expect(readRtsEntityStats(units).enemies).toBeLessThan(initialEnemies);
     expect(manager.getState().gameSession.context.killedEnemyCount).toBeGreaterThan(0);
   });
 
@@ -387,6 +388,18 @@ describe("runtime simulation для entities RTS", () => {
       },
     });
     expect(report?.killsPerSecond).toBeGreaterThan(0);
+  });
+
+  it("учитывает batch уничтоженных enemies без отдельных событий на каждую строку", () => {
+    const manager = makeTestStore();
+
+    startGame(manager, { enemyCount: 3, allyCount: 0, seed: "benchmark-batch-complete" });
+
+    manager.transition({ type: "TICK", payload: { now: 100, deltaMs: 100 } });
+    manager.transition({ type: "ENEMIES_KILLED", payload: { count: 3 } });
+
+    expect(manager.getState().gameSession.state).toBe("BENCHMARK_COMPLETE");
+    expect(manager.getState().gameSession.context.killedEnemyCount).toBe(3);
   });
 
   it("смерть hero переводит gameSession в GAME_OVER", () => {

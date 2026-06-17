@@ -20,6 +20,7 @@ export const enemyAi = createMachine({
     },
     ACTIVE: {
       TICK: null,
+      UNITS_DIED: null,
       UNIT_DIED: "DISABLED",
       ENTITY_DESPAWNED: "__RESOLVED",
     },
@@ -35,6 +36,16 @@ export const enemyAi = createMachine({
   reducer: (_state, action, { entities, self }) => {
     if (action.type === "ENTITY_SPAWNED" || action.type === "UNIT_DIED") {
       for (const entity of self.indices) self.intent[entity] = ENEMY_INTENT.IDLE;
+      return;
+    }
+
+    if (action.type === "UNITS_DIED") {
+      for (const entity of action.payload.entities) {
+        if (!self.has(entity)) continue;
+
+        self.intent[entity] = ENEMY_INTENT.IDLE;
+        self.stateCode[entity] = self.states.DISABLED;
+      }
       return;
     }
 

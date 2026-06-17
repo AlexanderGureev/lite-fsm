@@ -42,6 +42,7 @@ export const gameSession = createMachine({
       GAME_RESTART: "CONFIGURING",
       TICK: null,
       ENEMY_KILLED: null,
+      ENEMIES_KILLED: null,
       SELECT_RECT: null,
       SELECT_ENTITY: null,
       CLEAR_SELECTION: null,
@@ -94,6 +95,15 @@ export const gameSession = createMachine({
         return;
       }
 
+      case "ENEMIES_KILLED": {
+        state.context.killedEnemyCount += Math.max(0, Math.trunc(action.payload.count));
+
+        if (state.context.config.enemyCount > 0 && state.context.killedEnemyCount >= state.context.config.enemyCount) {
+          state.state = "BENCHMARK_COMPLETE";
+        }
+        return;
+      }
+
       case "BENCHMARK_REPORT_CAPTURED":
         if (state.context.report !== null) return;
 
@@ -121,6 +131,9 @@ export const gameSession = createMachine({
   effects: {
     SPAWNING: ({ action, metrics }) => {
       if (action.type === "GAME_START") metrics.reset();
+    },
+    READY: ({ action, metrics }) => {
+      if (action.type === "GAME_SPAWN_COMPLETED") metrics.reset();
     },
   },
 });
