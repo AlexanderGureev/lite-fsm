@@ -45,6 +45,8 @@ export type UnitCombatSpawnPayload = {
   attackDamage: number;
   attackCooldownMs: number;
   attackTimerMs: number;
+  projectileSpeed: number;
+  projectileRadius: number;
 };
 
 export type UnitSelectionSpawnPayload = {

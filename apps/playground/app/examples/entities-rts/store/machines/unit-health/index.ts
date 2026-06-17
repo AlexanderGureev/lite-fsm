@@ -53,12 +53,15 @@ export const unitHealth = createMachine({
         return;
 
       case "TICK": {
-        const combat = entities().get("unitCombat");
+        const access = entities();
+        const combat = access.get("unitCombat");
+        const projectiles = access.get("unitProjectile").projectiles.readIncomingDamage();
 
         for (const entity of self.indices) {
           if (!combat.has(entity)) continue;
 
-          const damage = combat.incomingDamage[entity];
+          const projectileDamage = entity < projectiles.length ? projectiles[entity] : 0;
+          const damage = combat.incomingDamage[entity] + projectileDamage;
           if (damage <= 0) continue;
 
           self.hp[entity] = Math.max(0, self.hp[entity] - damage);

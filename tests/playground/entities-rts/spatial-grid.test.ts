@@ -4,6 +4,7 @@ import {
   buildSpatialGrid,
   buildSpatialGridForEntities,
   collectSpatialNeighbors,
+  collectSpatialNeighborsAroundAt,
   createSpatialGrid,
   resetSpatialGrid,
 } from "../../../apps/playground/app/examples/entities-rts/store/machines/rts-spatial-index/spatial-grid";
@@ -60,6 +61,24 @@ describe("spatial grid для RTS", () => {
     );
 
     expect(collectSpatialNeighbors(grid, { x: 1, y: 1 }, out, 3)).toBe(3);
+  });
+
+  it("ищет candidates в радиусе нескольких клеток", () => {
+    const grid = createSpatialGrid({ width: 100, height: 100, cellSize: 10, maxEntities: 5 });
+    const out = new Int32Array(8);
+
+    buildSpatialGrid(
+      grid,
+      {
+        x: Float32Array.from([5, 15, 45, 75, 95]),
+        y: Float32Array.from([5, 5, 5, 5, 95]),
+      },
+      5,
+    );
+
+    const count = collectSpatialNeighborsAroundAt(grid, 5, 5, 45, out);
+
+    expect(readNeighbors(out, count)).toEqual([0, 1, 2]);
   });
 
   it("строит grid по sparse entity indices после lifecycle removal", () => {

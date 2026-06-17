@@ -22,7 +22,8 @@
 Примеры:
 
 - `unitHealth` владеет `hp`, `maxHp`, состояниями `ALIVE`/`DEAD` и death lifecycle;
-- `unitCombat` владеет cooldown, attack stats и handoff-уроном;
+- `unitCombat` владеет cooldown, attack stats, прямым handoff-уроном и intent выстрела;
+- `unitProjectile` владеет пулом снарядов, их движением и handoff-уроном от снарядов;
 - `unitCommand` владеет приказом player unit и completion/arrival;
 - `enemyAi` владеет intent enemy unit;
 - `unitMovement` владеет `x/y/vx/vy`;
@@ -40,6 +41,9 @@ hero:
 
 enemy:
   unitIdentity + unitMovement + unitHealth + unitCombat + enemyAi
+
+projectiles:
+  системная строка + пул `unitProjectile` в `resource(...)`
 ```
 
 Actor реализует абстрактную механику для rows, которые подходят под его контракт:
@@ -47,6 +51,7 @@ Actor реализует абстрактную механику для rows, к
 - `unitMovement` двигает rows с movement data;
 - `unitHealth` применяет hp/death lifecycle;
 - `unitCombat` считает атаки для combat-capable rows;
+- `unitProjectile` двигает активные снаряды и передает попадания в `unitHealth`;
 - `unitCommand` описывает player-controlled command rows;
 - `enemyAi` описывает enemy-controlled intent rows.
 
@@ -134,6 +139,7 @@ Entity reducer — основной слой синхронной hot-path ло�
 ```text
 rtsSpatialIndex
 -> unitCombat
+-> unitProjectile
 -> unitHealth
 -> unitCommand
 -> enemyAi
@@ -143,8 +149,9 @@ rtsSpatialIndex
 Смысл порядка:
 
 - `rtsSpatialIndex` строит spatial resources по позициям на начало кадра;
-- `unitCombat` считает атаки;
-- `unitHealth` применяет damage и смерть;
+- `unitCombat` считает прямые атаки и intent выстрела;
+- `unitProjectile` обновляет пул снарядов и пишет handoff-урон от снарядов;
+- `unitHealth` применяет прямой урон и урон от снарядов, затем фиксирует смерть;
 - `unitCommand` завершает player commands;
 - `enemyAi` выбирает intent;
 - `unitMovement` двигает только живые rows по актуальным command/intent.
@@ -163,7 +170,9 @@ Columns — авторитативные или handoff-значения на к
 - `x`, `y`, `vx`, `vy`;
 - `command`;
 - `attackTimerMs`;
-- `incomingDamage`.
+- `incomingDamage`;
+- `projectileTargetEntity`;
+- `projectileDamage`.
 
 Для handoff columns всегда фиксируйте владельца и lifetime:
 
@@ -172,7 +181,9 @@ Columns — авторитативные или handoff-значения на к
 - кто читает;
 - до какого момента значение считается актуальным.
 
-`incomingDamage` допустим как hot-path handoff column: пишет только `unitCombat`, читает `unitHealth`, очищает владелец в начале своего `TICK`. Значение после `TICK` не является долговременным domain fact.
+`incomingDamage` допустим как hot-path handoff column для прямого урона: пишет только `unitCombat`, читает `unitHealth`, очищает владелец в начале своего `TICK`. Значение после `TICK` не является долговременным domain fact.
+
+Урон от снарядов должен иметь отдельного владельца. В RTS-примере `unitProjectile` держит SoA-пул снарядов и буфер урона по целям в `resource(...)`, очищает его в начале своего `TICK`, пишет попадания при движении снарядов, а `unitHealth` читает exposed buffer вместе с `unitCombat.incomingDamage`. `unitProjectile` не применяет `hp` и не dispatch-ит death lifecycle.
 
 Не используйте columns для runtime buffers или общих структур мира.
 
@@ -254,6 +265,10 @@ Cache не является вторым источником истины, ес
 unitMovement.x/y + unitHealth.hp + unitIdentity.faction
 -> rtsSpatialIndex.unitGrid resource
 -> query API для combat/movement
+
+unitCombat.projectileTargetEntity + unitMovement.x/y
+-> unitProjectile.projectiles resource
+-> exposed projectile damage buffer для unitHealth
 ```
 
 Анти-паттерн:
@@ -270,6 +285,7 @@ const scratch = createRuntimeScratch();
 
 ```text
 store/machines/unit-combat/index.ts
+store/machines/unit-projectile/index.ts
 store/machines/unit-movement/index.ts
 store/machines/rts-spatial-index/index.ts
 ```

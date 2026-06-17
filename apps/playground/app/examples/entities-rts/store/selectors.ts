@@ -33,6 +33,10 @@ export const readUnitViews = (manager: AppStore) => {
 
 export type UnitViews = ReturnType<typeof readUnitViews>;
 
+export const readProjectileView = (manager: AppStore) => manager.entities().get("unitProjectile").projectiles;
+
+export type ProjectileView = ReturnType<typeof readProjectileView>;
+
 export const unitSelected = (units: UnitViews, entity: EntityIndex) =>
   units.selection.has(entity) ? units.selection.selected[entity] : UNIT_SELECTION.UNSELECTED;
 

@@ -57,10 +57,12 @@ const expectedPlaygroundMachineKeys: Record<PlaygroundExampleId, string[]> = {
   "entities-rts": [
     "gameMap",
     "gameSession",
+    "gameSpawn",
     "unitOrders",
     "unitIdentity",
     "rtsSpatialIndex",
     "unitCombat",
+    "unitProjectile",
     "unitHealth",
     "unitCommand",
     "enemyAi",

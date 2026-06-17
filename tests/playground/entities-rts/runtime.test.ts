@@ -10,7 +10,11 @@ import {
   type GameConfig,
 } from "../../../apps/playground/app/examples/entities-rts/store";
 import { createRtsMetricsAdapter } from "../../../apps/playground/app/examples/entities-rts/store/metrics";
-import { readUnitViews, unitSelected } from "../../../apps/playground/app/examples/entities-rts/store/selectors";
+import {
+  readProjectileView,
+  readUnitViews,
+  unitSelected,
+} from "../../../apps/playground/app/examples/entities-rts/store/selectors";
 import { RTS_MAP } from "../../../apps/playground/app/examples/entities-rts/store/spawn/placement";
 
 const entity = (index: number) => index as EntityIndex;
@@ -178,6 +182,55 @@ describe("runtime simulation для entities RTS", () => {
 
     expect(units.combat.incomingDamage[hero]).toBeGreaterThan(0);
     expect(units.health.hp[hero]).toBeLessThan(initialHeroHp);
+  });
+
+  it("player units выпускают projectiles вместо мгновенного урона в радиусе", () => {
+    const manager = makeTestStore();
+
+    startGame(manager, { enemyCount: 1, allyCount: 1, seed: "player-projectiles" });
+
+    const units = readUnitViews(manager);
+    const projectiles = readProjectileView(manager);
+    const hero = entity(0);
+    const enemy = entity(2);
+    const initialEnemyHp = units.health.hp[enemy];
+
+    mutableColumn(units.movement.x)[enemy] = RTS_MAP.centerX + 90;
+    mutableColumn(units.movement.y)[enemy] = RTS_MAP.centerY;
+    mutableColumn(units.health.hp)[enemy] = units.health.maxHp[enemy];
+    mutableColumn(units.combat.attackTimerMs)[hero] = 0;
+
+    manager.transition({ type: "TICK", payload: { now: 16, deltaMs: 16 } });
+
+    expect(units.combat.incomingDamage[enemy]).toBe(0);
+    expect(units.health.hp[enemy]).toBe(initialEnemyHp);
+    expect(projectiles.readCount()).toBeGreaterThan(0);
+
+    runTicks(manager, 16, 16);
+
+    expect(units.health.hp[enemy]).toBeLessThan(initialEnemyHp);
+  });
+
+  it("attackRange расширяет поиск цели для player projectiles за пределами соседних grid cells", () => {
+    const manager = makeTestStore();
+
+    startGame(manager, { enemyCount: 1, allyCount: 1, seed: "long-range-projectiles" });
+
+    const units = readUnitViews(manager);
+    const projectiles = readProjectileView(manager);
+    const hero = entity(0);
+    const enemy = entity(2);
+
+    mutableColumn(units.movement.x)[enemy] = RTS_MAP.centerX + 1_600;
+    mutableColumn(units.movement.y)[enemy] = RTS_MAP.centerY;
+    mutableColumn(units.health.hp)[enemy] = units.health.maxHp[enemy];
+    mutableColumn(units.combat.attackRange)[hero] = 9_600;
+    mutableColumn(units.combat.attackTimerMs)[hero] = 0;
+
+    manager.transition({ type: "TICK", payload: { now: 16, deltaMs: 16 } });
+
+    expect(units.combat.projectileTargetEntity[hero]).toBe(enemy);
+    expect(projectiles.readCount()).toBeGreaterThan(0);
   });
 
   it("назначает attack-move и союзники удаляют погибших enemies через lifecycle", () => {

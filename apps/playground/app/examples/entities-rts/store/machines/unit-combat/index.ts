@@ -31,6 +31,10 @@ export const unitCombat = createMachine({
     attackCooldownMs: i32({ default: 0 }),
     attackTimerMs: i32({ default: 0 }),
     incomingDamage: i32({ default: 0 }),
+    projectileSpeed: f32({ default: 0 }),
+    projectileRadius: f32({ default: 0 }),
+    projectileTargetEntity: i32({ default: -1 }),
+    projectileDamage: i32({ default: 0 }),
     targetBuffer: resource(() => new Int32Array(TARGET_BUFFER_SIZE)),
   },
   spawnSchema: {
@@ -38,6 +42,8 @@ export const unitCombat = createMachine({
     attackDamage: i32(),
     attackCooldownMs: i32(),
     attackTimerMs: i32(),
+    projectileSpeed: f32(),
+    projectileRadius: f32(),
   },
   reducer: (_state, action, { entities, payloadFor, self }) => {
     switch (action.type) {
@@ -50,6 +56,10 @@ export const unitCombat = createMachine({
           self.attackCooldownMs[entity] = payload.attackCooldownMs;
           self.attackTimerMs[entity] = payload.attackTimerMs;
           self.incomingDamage[entity] = 0;
+          self.projectileSpeed[entity] = payload.projectileSpeed;
+          self.projectileRadius[entity] = payload.projectileRadius;
+          self.projectileTargetEntity[entity] = -1;
+          self.projectileDamage[entity] = 0;
         }
         return;
 
@@ -66,6 +76,8 @@ export const unitCombat = createMachine({
         const attackRange = self.attackRange;
         const attackTimerMs = self.attackTimerMs;
         const incomingDamage = self.incomingDamage;
+        const projectileDamage = self.projectileDamage;
+        const projectileTargetEntity = self.projectileTargetEntity;
         const healthHp = health.hp;
         const identityFaction = identity.faction;
         const identityRadius = identity.radius;
@@ -76,7 +88,11 @@ export const unitCombat = createMachine({
         const heroY = heroAlive ? movementY[hero] : 0;
         const heroRadius = heroAlive ? identityRadius[hero] : 0;
 
-        for (const entity of self.indices) incomingDamage[entity] = 0;
+        for (const entity of self.indices) {
+          incomingDamage[entity] = 0;
+          projectileTargetEntity[entity] = -1;
+          projectileDamage[entity] = 0;
+        }
 
         for (const entity of self.indices) {
           if (healthHp[entity] <= 0) continue;
@@ -90,7 +106,7 @@ export const unitCombat = createMachine({
           const rangeBase = attackRange[entity];
 
           if (identityFaction[entity] === UNIT_FACTION.PLAYER) {
-            const count = spatial.collectEnemyNeighborsAt(attackerX, attackerY, self.targetBuffer);
+            const count = spatial.collectEnemyNeighborsAroundAt(attackerX, attackerY, rangeBase, self.targetBuffer);
             let nearestDistance = Number.POSITIVE_INFINITY;
 
             for (let index = 0; index < count; index += 1) {
@@ -114,7 +130,12 @@ export const unitCombat = createMachine({
 
           if (target === null) continue;
 
-          incomingDamage[target] += attackDamage[entity];
+          if (identityFaction[entity] === UNIT_FACTION.PLAYER) {
+            projectileTargetEntity[entity] = target;
+            projectileDamage[entity] = attackDamage[entity];
+          } else {
+            incomingDamage[target] += attackDamage[entity];
+          }
           attackTimerMs[entity] = attackCooldownMs[entity];
         }
         return;
@@ -124,6 +145,8 @@ export const unitCombat = createMachine({
         for (const entity of self.indices) {
           self.attackTimerMs[entity] = 0;
           self.incomingDamage[entity] = 0;
+          self.projectileTargetEntity[entity] = -1;
+          self.projectileDamage[entity] = 0;
         }
         return;
     }

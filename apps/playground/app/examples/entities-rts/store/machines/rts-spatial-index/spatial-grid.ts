@@ -139,5 +139,81 @@ export const collectSpatialNeighborsAt = (
   return count;
 };
 
+const collectSpatialCellNeighbors = (
+  grid: SpatialGrid,
+  row: number,
+  column: number,
+  out: Int32Array,
+  count: number,
+  maxCount: number,
+) => {
+  if (row < 0 || row >= grid.rows || column < 0 || column >= grid.columns) return count;
+
+  const cell = row * grid.columns + column;
+
+  for (let entity = grid.heads[cell]; entity !== -1; entity = grid.next[entity]) {
+    out[count] = entity;
+    count += 1;
+    if (count === maxCount) return count;
+  }
+
+  return count;
+};
+
+export const collectSpatialNeighborsAroundAt = (
+  grid: SpatialGrid,
+  x: number,
+  y: number,
+  radius: number,
+  out: Int32Array,
+  limit = out.length,
+) => {
+  let count = 0;
+  const boundedLimit = limit < out.length ? limit : out.length;
+  const maxCount = boundedLimit > 0 ? boundedLimit | 0 : 0;
+  if (maxCount === 0) return 0;
+
+  const centerColumn = clampGridCoordinate(Math.floor(x / grid.cellSize), grid.columns - 1);
+  const centerRow = clampGridCoordinate(Math.floor(y / grid.cellSize), grid.rows - 1);
+  const cellRadius = Math.max(0, Math.ceil(Math.max(0, radius) / grid.cellSize));
+  const boundedCellRadius = Math.min(
+    cellRadius,
+    Math.max(centerRow, centerColumn, grid.rows - 1 - centerRow, grid.columns - 1 - centerColumn),
+  );
+
+  for (let ring = 0; ring <= boundedCellRadius; ring += 1) {
+    if (ring === 0) {
+      count = collectSpatialCellNeighbors(grid, centerRow, centerColumn, out, count, maxCount);
+      if (count === maxCount) return count;
+      continue;
+    }
+
+    const minRow = centerRow - ring;
+    const maxRow = centerRow + ring;
+    const minColumn = centerColumn - ring;
+    const maxColumn = centerColumn + ring;
+
+    for (let column = minColumn; column <= maxColumn; column += 1) {
+      count = collectSpatialCellNeighbors(grid, minRow, column, out, count, maxCount);
+      if (count === maxCount) return count;
+    }
+
+    for (let row = minRow + 1; row <= maxRow - 1; row += 1) {
+      count = collectSpatialCellNeighbors(grid, row, minColumn, out, count, maxCount);
+      if (count === maxCount) return count;
+
+      count = collectSpatialCellNeighbors(grid, row, maxColumn, out, count, maxCount);
+      if (count === maxCount) return count;
+    }
+
+    for (let column = minColumn; column <= maxColumn; column += 1) {
+      count = collectSpatialCellNeighbors(grid, maxRow, column, out, count, maxCount);
+      if (count === maxCount) return count;
+    }
+  }
+
+  return count;
+};
+
 export const collectSpatialNeighbors = (grid: SpatialGrid, point: Point, out: Int32Array, limit?: number) =>
   collectSpatialNeighborsAt(grid, point.x, point.y, out, limit);

@@ -3,7 +3,13 @@ import type { EntityIndex } from "@lite-fsm/entities";
 import type { AppStore } from "../store";
 import { isUnitAlive } from "../store/machines/unit-health";
 import type { MetricsAdapter } from "../store/metrics";
-import { entityIdForUnitIndex, readUnitViews, unitSelected, type UnitViews } from "../store/selectors";
+import {
+  entityIdForUnitIndex,
+  readProjectileView,
+  readUnitViews,
+  unitSelected,
+  type UnitViews,
+} from "../store/selectors";
 import { RTS_MAP } from "../store/spawn/placement";
 import { createSeededRandom } from "../store/spawn/random";
 import type { Point } from "../store/types";
@@ -31,6 +37,7 @@ const TEXTURES = {
   selected: "entities-rts-selected",
   hpBg: "entities-rts-hp-bg",
   hpFill: "entities-rts-hp-fill",
+  projectile: "entities-rts-projectile",
   ground: "entities-rts-ground",
   rock: "entities-rts-rock",
   tuft: "entities-rts-tuft",
@@ -62,6 +69,7 @@ const MAX_SPAWN_STEPS_PER_FRAME = 1;
 const SPAWN_RENDER_CREATE_BUDGET = 768;
 const RENDER_CULL_MARGIN = 256;
 const MAX_VISIBLE_ENEMY_SPRITES = 8_000;
+const PROJECTILE_RENDER_RADIUS = 12;
 const MOVING_SPEED_THRESHOLD_SQUARED = 1;
 
 type DragState = {
@@ -97,6 +105,14 @@ type RenderPlan = {
   enemyStride: number;
 };
 
+type ProjectileSpriteView = {
+  sprite: PhaserImage;
+  x: number;
+  y: number;
+  rotation: number;
+  radius: number;
+};
+
 const clampToMap = (point: Point): Point => ({
   x: Math.min(RTS_MAP.width, Math.max(0, point.x)),
   y: Math.min(RTS_MAP.height, Math.max(0, point.y)),
@@ -107,6 +123,21 @@ const squaredDistance = (left: Point, right: Point) => {
   const dy = right.y - left.y;
   return dx * dx + dy * dy;
 };
+
+const renderBoundsForScene = (scene: import("phaser").Scene): RenderBounds => {
+  const camera = scene.cameras.main;
+  const worldView = camera.worldView;
+
+  return {
+    left: worldView.x - RENDER_CULL_MARGIN,
+    right: worldView.right + RENDER_CULL_MARGIN,
+    top: worldView.y - RENDER_CULL_MARGIN,
+    bottom: worldView.bottom + RENDER_CULL_MARGIN,
+  };
+};
+
+const pointIntersectsBounds = (x: number, y: number, radius: number, bounds: RenderBounds) =>
+  x + radius >= bounds.left && x - radius <= bounds.right && y + radius >= bounds.top && y - radius <= bounds.bottom;
 
 const clampValue = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
@@ -397,15 +428,7 @@ const addGroundTexture = (scene: import("phaser").Scene, key: string) => {
   texture.refresh();
 };
 
-const ROCK_ART = [
-  "........",
-  "..lll...",
-  ".lgggl..",
-  ".gggggo.",
-  ".oggggo.",
-  ".soooos.",
-  "..sss...",
-];
+const ROCK_ART = ["........", "..lll...", ".lgggl..", ".gggggo.", ".oggggo.", ".soooos.", "..sss..."];
 
 const ROCK_PALETTE = { ".": "rgba(0,0,0,0)", s: "rgba(0,0,0,0.32)", o: "#2b302d", g: "#565d59", l: "#828984" };
 
@@ -434,6 +457,17 @@ const ensureGeneratedTextures = (scene: import("phaser").Scene) => {
   );
   addGeneratedTexture(scene, TEXTURES.hpBg, ["B"], { B: "#151916" }, 1);
   addGeneratedTexture(scene, TEXTURES.hpFill, ["H"], { H: "#66f0a7" }, 1);
+  addGeneratedTexture(
+    scene,
+    TEXTURES.projectile,
+    ["..p.", ".pPp", "pPPp", ".pPp", "..p."],
+    {
+      ".": transparent,
+      p: "#9ef6c4",
+      P: "#f7ffe1",
+    },
+    2,
+  );
 };
 
 class UnitSpriteRenderer {
@@ -494,9 +528,7 @@ class UnitSpriteRenderer {
     while (index < capacity && created < maxCreates) {
       const entity = index as EntityIndex;
       const shouldCreate =
-        isUnitAlive(units.health, entity) &&
-        this.unitShouldRender(units, entity, plan) &&
-        !this.sprites.has(index);
+        isUnitAlive(units.health, entity) && this.unitShouldRender(units, entity, plan) && !this.sprites.has(index);
 
       if (shouldCreate) {
         this.syncUnit(units, entity);
@@ -530,15 +562,7 @@ class UnitSpriteRenderer {
   }
 
   private renderBounds(): RenderBounds {
-    const camera = this.scene.cameras.main;
-    const worldView = camera.worldView;
-
-    return {
-      left: worldView.x - RENDER_CULL_MARGIN,
-      right: worldView.right + RENDER_CULL_MARGIN,
-      top: worldView.y - RENDER_CULL_MARGIN,
-      bottom: worldView.bottom + RENDER_CULL_MARGIN,
-    };
+    return renderBoundsForScene(this.scene);
   }
 
   private unitShouldRender(units: UnitViews, entity: EntityIndex, plan: RenderPlan) {
@@ -554,12 +578,7 @@ class UnitSpriteRenderer {
     const y = units.movement.y[entity];
     const radius = displaySizeForKind(units.identity.kind[entity]) * 0.5;
 
-    return (
-      x + radius >= bounds.left &&
-      x - radius <= bounds.right &&
-      y + radius >= bounds.top &&
-      y - radius <= bounds.bottom
-    );
+    return pointIntersectsBounds(x, y, radius, bounds);
   }
 
   private syncUnit(units: UnitViews, entity: EntityIndex) {
@@ -735,6 +754,99 @@ class UnitSpriteRenderer {
   }
 }
 
+class ProjectileSpriteRenderer {
+  private readonly sprites = new Map<number, ProjectileSpriteView>();
+  private readonly liveProjectiles = new Set<number>();
+
+  constructor(
+    private readonly scene: import("phaser").Scene,
+    private readonly manager: AppStore,
+  ) {}
+
+  reset() {
+    for (const view of this.sprites.values()) view.sprite.destroy();
+    this.sprites.clear();
+    this.liveProjectiles.clear();
+  }
+
+  sync() {
+    const projectiles = readProjectileView(this.manager);
+    const count = projectiles.readCount();
+    const bounds = renderBoundsForScene(this.scene);
+    const x = projectiles.readX();
+    const y = projectiles.readY();
+    const vx = projectiles.readVx();
+    const vy = projectiles.readVy();
+    const radius = projectiles.readRadius();
+
+    this.liveProjectiles.clear();
+
+    for (let index = 0; index < count; index += 1) {
+      const projectileRadius = Math.max(PROJECTILE_RENDER_RADIUS, radius[index] * 1.6);
+      if (!pointIntersectsBounds(x[index], y[index], projectileRadius, bounds)) continue;
+
+      this.liveProjectiles.add(index);
+      this.syncProjectile(index, x, y, vx, vy, projectileRadius);
+    }
+
+    this.cleanupMissing();
+  }
+
+  private syncProjectile(
+    index: number,
+    x: Float32Array,
+    y: Float32Array,
+    vx: Float32Array,
+    vy: Float32Array,
+    radius: number,
+  ) {
+    const rotation = Math.atan2(vy[index], vx[index]);
+    const view = this.sprites.get(index) ?? this.createProjectileView(index, x[index], y[index], radius, rotation);
+
+    if (view.x !== x[index] || view.y !== y[index]) {
+      view.x = x[index];
+      view.y = y[index];
+      view.sprite.setPosition(x[index], y[index]);
+    }
+
+    if (view.rotation !== rotation) {
+      view.rotation = rotation;
+      view.sprite.setRotation(rotation);
+    }
+
+    if (view.radius !== radius) {
+      view.radius = radius;
+      view.sprite.setDisplaySize(radius * 2, radius * 2);
+    }
+  }
+
+  private createProjectileView(index: number, x: number, y: number, radius: number, rotation: number) {
+    const view: ProjectileSpriteView = {
+      radius,
+      rotation,
+      sprite: this.scene.add
+        .image(x, y, TEXTURES.projectile)
+        .setOrigin(0.5, 0.5)
+        .setDepth(6)
+        .setDisplaySize(radius * 2, radius * 2)
+        .setRotation(rotation),
+      x,
+      y,
+    };
+
+    this.sprites.set(index, view);
+    return view;
+  }
+
+  private cleanupMissing() {
+    for (const [key, view] of this.sprites) {
+      if (this.liveProjectiles.has(key)) continue;
+      view.sprite.destroy();
+      this.sprites.delete(key);
+    }
+  }
+}
+
 const findUnitAt = (
   units: UnitViews,
   point: Point,
@@ -779,6 +891,7 @@ const readRtsSpatialMetrics = (manager: AppStore) => manager.entities().get("rts
 export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, metrics: MetricsAdapter) =>
   class EntitiesRtsScene extends Phaser.Scene {
     private unitRenderer?: UnitSpriteRenderer;
+    private projectileRenderer?: ProjectileSpriteRenderer;
     private selectionGraphics?: PhaserGraphics;
     private drag: DragState | null = null;
     private cameraViewport = { width: 0, height: 0 };
@@ -864,6 +977,7 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
       this.drawMap();
       this.selectionGraphics = this.add.graphics().setDepth(20);
       this.unitRenderer = new UnitSpriteRenderer(this, manager);
+      this.projectileRenderer = new ProjectileSpriteRenderer(this, manager);
       this.events.once("shutdown", () => {
         window.removeEventListener(RTS_CAMERA_ZOOM_EVENT, this.handleCameraZoomCommand);
         window.removeEventListener("keydown", this.handleWindowKeyDown);
@@ -871,8 +985,10 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
         window.removeEventListener("blur", this.handleWindowBlur);
         this.pressedCameraKeys.clear();
         this.unitRenderer?.reset();
+        this.projectileRenderer?.reset();
       });
       this.unitRenderer.sync();
+      this.projectileRenderer.sync();
       this.bindInput();
     }
 
@@ -906,9 +1022,11 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
       const syncStartedAt = metrics.now();
       if (sessionState === "SPAWNING") {
         this.unitRenderer?.syncLoading(SPAWN_RENDER_CREATE_BUDGET);
+        this.projectileRenderer?.sync();
         this.renderDirty = false;
       } else if (shouldSync) {
         this.unitRenderer?.sync();
+        this.projectileRenderer?.sync();
         this.renderDirty = false;
       }
       this.lastSyncedSessionState = sessionState;

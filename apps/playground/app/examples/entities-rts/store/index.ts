@@ -14,6 +14,7 @@ import { unitHealth } from "./machines/unit-health";
 import { unitIdentity } from "./machines/unit-identity";
 import { unitMovement } from "./machines/unit-movement";
 import { unitOrders } from "./machines/unit-orders";
+import { unitProjectile } from "./machines/unit-projectile";
 import { unitSelection } from "./machines/unit-selection";
 import { createEnemySpawnBatchPlan, createGameStartSpawnPlan, createPlayerSpawnBatchPlan } from "./spawn/placement";
 import { spawnEvents } from "./spawn-events";
@@ -42,6 +43,7 @@ export const machines = {
   unitIdentity,
   rtsSpatialIndex,
   unitCombat,
+  unitProjectile,
   unitHealth,
   unitCommand,
   enemyAi,
@@ -63,6 +65,13 @@ export const spawn = defineEntitySpawn(
       groupTag: "system",
       actors: {
         rtsSpatialIndex: {},
+      },
+    },
+    {
+      id: "system/unit-projectiles",
+      groupTag: "system",
+      actors: {
+        unitProjectile: {},
       },
     },
   ],

@@ -194,6 +194,8 @@ const movement = createMachine({
 
 Resource не является источником авторитативного состояния домена. Не используйте resource для `hp`, `command`, `selected`, `ownership` и других авторитативных фактов домена; колонки и spawn payload остаются источником данных строки. Resource подходит для детерминированных cache и рабочих структур, которые owner reducer пересобирает из колонок в порядке шаблонов: spatial grid, flow field, physics world, pathfinding cache, scratch buffers.
 
+Для большого числа временных объектов, например снарядов, предпочтителен system actor с SoA-пулом внутри `resource(...)`, если каждый объект живет недолго и не требует отдельного entity lifecycle. Такой owner reducer обновляет пул батчем, переиспользует typed buffers, удаляет элементы через swap и публикует только узкий read view или handoff buffer. Авторитативный эффект попадания все равно должен применяться владельцем доменной колонки, например `health` читает damage buffer и меняет `hp`.
+
 Resource не входит в public state: `dehydrate()`, `hydrate()` payload, persistence, `MachinesState`, `manager.getSnapshot()`, selectors, `useEntitySnapshot` и `useEntityList` содержат только строки, состояния и колонки. `hydrate()` существующего manager не заменяет resource values и exposed views.
 
 Rollback для resource в v1 не реализован. Staged spawn rollback откатывает строки, колонки и индексы, но не восстанавливает мутации resource. Owner reducer должен сначала валидировать и читать входные данные, затем мутировать или пересобирать resource и не бросать ошибку после начала мутации. Для RTS-сценариев rebuild выполняется штатным событием, например `TICK`, без отдельного механизма восстановления resource.

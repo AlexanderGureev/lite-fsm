@@ -6,6 +6,7 @@ import type { AppEvents, Point } from "../../types";
 import { UNIT_FACTION, UNIT_KIND } from "../../unit-model";
 import { createFlowField, flowCellIndexForPoint, readFlowDirectionAt, type FlowField } from "./flow-field";
 import {
+  collectSpatialNeighborsAroundAt,
   collectSpatialNeighborsAt,
   createSpatialGrid,
   insertSpatialGridEntityAt,
@@ -13,6 +14,7 @@ import {
   resetSpatialGrid,
   type SpatialGrid,
 } from "./spatial-grid";
+import { slotCount } from "../column-slot-count";
 
 const FLOW_CELL_SIZE = 96;
 const UNIT_GRID_CELL_SIZE = 48;
@@ -28,6 +30,7 @@ export type RtsSpatialIndexView = {
   heroPosition(out: Point): Point | null;
   collectUnitNeighborsAt(x: number, y: number, out: Int32Array, limit?: number): number;
   collectEnemyNeighborsAt(x: number, y: number, out: Int32Array, limit?: number): number;
+  collectEnemyNeighborsAroundAt(x: number, y: number, radius: number, out: Int32Array, limit?: number): number;
   readFlowDirectionAt(x: number, y: number, out: Point): Point;
   readMetrics(): RtsSimulationMetrics;
 };
@@ -78,6 +81,8 @@ const exposeRtsSpatialIndexView = (resource: RtsSpatialIndexResource): RtsSpatia
   },
   collectUnitNeighborsAt: (x, y, out, limit) => collectSpatialNeighborsAt(resource.unitGrid, x, y, out, limit),
   collectEnemyNeighborsAt: (x, y, out, limit) => collectSpatialNeighborsAt(resource.enemyGrid, x, y, out, limit),
+  collectEnemyNeighborsAroundAt: (x, y, radius, out, limit) =>
+    collectSpatialNeighborsAroundAt(resource.enemyGrid, x, y, radius, out, limit),
   readFlowDirectionAt(x, y, out) {
     if (resource.hero === null || resource.flowField === null) {
       out.x = 0;
@@ -109,9 +114,6 @@ const resetIndex = (resource: RtsSpatialIndexResource) => {
   resource.metrics.flowFieldRebuildMs = 0;
   resource.metrics.spatialGridBuildMs = 0;
 };
-
-// Read-view колонки скрывают length; длина backing TypedArray — это число слотов.
-const slotCount = (column: { readonly length?: number }) => column.length ?? 0;
 
 export const rtsSpatialIndex = createMachine({
   storage: "entity",
