@@ -104,4 +104,4 @@ export { spawnEvents } from "./spawn-events";
 export { UNIT_COMMAND, UNIT_FACTION, UNIT_KIND } from "./unit-model";
 export { ENEMY_INTENT } from "./machines/enemy-ai";
 export type { AppDeps, RuntimeDeps } from "./deps";
-export type { AppEvents, GameConfig, RtsPresetId } from "./types";
+export type { AppEvents, GameConfig, RtsBenchmarkReport, RtsPresetId } from "./types";

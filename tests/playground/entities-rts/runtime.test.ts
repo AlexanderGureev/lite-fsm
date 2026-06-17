@@ -9,7 +9,11 @@ import {
   UNIT_KIND,
   type GameConfig,
 } from "../../../apps/playground/app/examples/entities-rts/store";
-import { createRtsMetricsAdapter } from "../../../apps/playground/app/examples/entities-rts/store/metrics";
+import { captureRtsBenchmarkReport } from "../../../apps/playground/app/examples/entities-rts/store/benchmark-report";
+import {
+  createRtsMetricsAdapter,
+  type MetricsAdapter,
+} from "../../../apps/playground/app/examples/entities-rts/store/metrics";
 import {
   readProjectileView,
   readUnitViews,
@@ -22,9 +26,9 @@ const entity = (index: number) => index as EntityIndex;
 const mutableColumn = (column: { readonly [entity: EntityIndex]: number }) =>
   column as { [entity: EntityIndex]: number };
 
-const makeTestStore = () =>
+const makeTestStore = (metrics: MetricsAdapter = createRtsMetricsAdapter(() => 0)) =>
   makeStore({
-    metrics: createRtsMetricsAdapter(() => 0),
+    metrics,
     random: () => 0,
     renderer: { reset: () => undefined },
   });
@@ -324,6 +328,7 @@ describe("runtime simulation для entities RTS", () => {
     runTicks(manager, 60);
 
     expect(units.identity.count).toBeLessThan(initialCount);
+    expect(manager.getState().gameSession.context.killedEnemyCount).toBeGreaterThan(0);
   });
 
   it("enemy units идут к hero по tick simulation и атакуют его в радиусе", () => {
@@ -340,6 +345,48 @@ describe("runtime simulation для entities RTS", () => {
     expect(units.identity.kind[hero]).toBe(UNIT_KIND.HERO);
     expect(units.identity.faction[hero]).toBe(UNIT_FACTION.PLAYER);
     expect(units.health.hp[hero]).toBeLessThan(initialHeroHp);
+  });
+
+  it("завершает бенч, когда уничтожены все enemies, и фиксирует отчет", () => {
+    const metrics = createRtsMetricsAdapter(() => 0);
+    const manager = makeTestStore(metrics);
+
+    startGame(manager, { enemyCount: 2, allyCount: 0, seed: "benchmark-complete" });
+
+    manager.transition({ type: "TICK", payload: { now: 100, deltaMs: 100 } });
+    manager.transition({ type: "ENEMY_KILLED", payload: { entityId: "unit/enemy/0" } });
+
+    expect(manager.getState().gameSession.state).toBe("READY");
+
+    manager.transition({ type: "TICK", payload: { now: 200, deltaMs: 100 } });
+    manager.transition({ type: "ENEMY_KILLED", payload: { entityId: "unit/enemy/1" } });
+
+    expect(manager.getState().gameSession.state).toBe("BENCHMARK_COMPLETE");
+    expect(manager.getState().gameSession.context.killedEnemyCount).toBe(2);
+    expect(manager.getState().gameSession.context.elapsedMs).toBeGreaterThan(0);
+
+    metrics.recordFrame(16);
+    metrics.recordTickMs(2.5);
+    metrics.recordSyncMs(3.5);
+    metrics.recordSimulationMetrics({ flowFieldRebuildMs: 1.25, spatialGridBuildMs: 2.5 });
+
+    captureRtsBenchmarkReport(manager, metrics);
+
+    const report = manager.getState().gameSession.context.report;
+
+    expect(report).toMatchObject({
+      run: 1,
+      seed: "benchmark-complete",
+      enemyCount: 2,
+      allyCount: 1,
+      enemiesKilled: 2,
+      tickCount: expect.any(Number),
+      metrics: {
+        flowFieldRebuildMs: 1.25,
+        spatialGridBuildMs: 2.5,
+      },
+    });
+    expect(report?.killsPerSecond).toBeGreaterThan(0);
   });
 
   it("смерть hero переводит gameSession в GAME_OVER", () => {

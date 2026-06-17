@@ -1,13 +1,15 @@
 "use client";
 
-import { PlayIcon, RotateCcwIcon } from "lucide-react";
+import type { ReactNode } from "react";
+import { ActivityIcon, GaugeIcon, PlayIcon, RotateCcwIcon, SwordsIcon, TimerIcon, TrophyIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 import { useTransition } from "../../store";
+import type { RtsBenchmarkReport } from "../../store";
 import type { RtsEntityStats } from "../../store/selectors";
-import { formatCount } from "./format";
+import { formatCount, formatFps, formatMs, formatRate, formatSeconds } from "./format";
 import type { SpawnSummary } from "./model";
 
 export function MobileSummary({ heroPercent, stats }: { heroPercent: number; stats: RtsEntityStats }) {
@@ -111,6 +113,101 @@ export function GameOverOverlay() {
           <RotateCcwIcon data-icon="inline-start" />
           Настроить
         </Button>
+      </div>
+    </div>
+  );
+}
+
+function ReportMetric({
+  icon,
+  label,
+  value,
+  detail,
+}: {
+  icon: ReactNode;
+  label: string;
+  value: string;
+  detail?: string;
+}) {
+  return (
+    <div className="grid min-w-0 grid-cols-[auto_1fr] gap-3 rounded-md border border-[#d7f6e0]/12 bg-[#1d241f] p-3 text-left">
+      <span className="flex size-8 items-center justify-center rounded-md bg-[#253329] text-[#8fd4ff] [&_svg]:size-4">
+        {icon}
+      </span>
+      <div className="min-w-0">
+        <p className="text-fine-print text-[#819289]">{label}</p>
+        <p className="truncate text-caption-strong text-[#f4faf5]">{value}</p>
+        {detail ? <p className="mt-0.5 truncate text-fine-print text-[#819289]">{detail}</p> : null}
+      </div>
+    </div>
+  );
+}
+
+export function BenchmarkReportOverlay({ report }: { report: RtsBenchmarkReport | null }) {
+  const transition = useTransition();
+
+  return (
+    <div className="absolute inset-0 z-20 grid place-items-center bg-[#101612]/78 px-4 text-center">
+      <div className="flex w-full max-w-2xl flex-col gap-4 rounded-lg border border-[#d7f6e0]/14 bg-[#151916]/95 p-4 text-[#f4faf5] shadow-product sm:p-5">
+        <div className="flex flex-col items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 rounded-md bg-[#8fd4ff]/16 px-2.5 py-1 text-caption-strong text-[#b7e6ff] [&_svg]:size-3.5">
+            <TrophyIcon />
+            БЕНЧ ЗАВЕРШЕН
+          </span>
+          <p className="text-tagline text-[#f4faf5]">Все враги уничтожены</p>
+        </div>
+
+        {report ? (
+          <div className="grid gap-2 sm:grid-cols-2">
+            <ReportMetric
+              icon={<TimerIcon />}
+              label="длительность"
+              value={formatSeconds(report.elapsedMs)}
+              detail={`${formatCount(report.tickCount)} тиков`}
+            />
+            <ReportMetric
+              icon={<SwordsIcon />}
+              label="уничтожено"
+              value={`${formatCount(report.enemiesKilled)}/${formatCount(report.enemyCount)}`}
+              detail={`${formatRate(report.killsPerSecond)} при seed ${report.seed}`}
+            />
+            <ReportMetric
+              icon={<GaugeIcon />}
+              label="FPS"
+              value={formatFps(report.metrics.fps.average)}
+              detail={`мин ${formatFps(report.metrics.fps.min)} · макс ${formatFps(report.metrics.fps.max)}`}
+            />
+            <ReportMetric
+              icon={<ActivityIcon />}
+              label="тик-переход"
+              value={formatMs(report.metrics.tick.average)}
+              detail={`макс ${formatMs(report.metrics.tick.max)}`}
+            />
+            <ReportMetric
+              icon={<GaugeIcon />}
+              label="Phaser синх/рендер"
+              value={formatMs(report.metrics.sync.average)}
+              detail={`макс ${formatMs(report.metrics.sync.max)}`}
+            />
+            <ReportMetric
+              icon={<ActivityIcon />}
+              label="структуры"
+              value={formatMs(report.metrics.spatialGridBuildMs)}
+              detail={`flow field ${formatMs(report.metrics.flowFieldRebuildMs)}`}
+            />
+          </div>
+        ) : (
+          <div className="rounded-md border border-[#d7f6e0]/12 bg-[#1d241f] px-4 py-5 text-caption text-[#b8c5bd]">
+            Фиксация метрик
+          </div>
+        )}
+
+        <div className="flex justify-center">
+          <Button type="button" onClick={() => transition({ type: "GAME_RESTART" })} className="rounded-pill">
+            <RotateCcwIcon data-icon="inline-start" />
+            Настроить
+          </Button>
+        </div>
       </div>
     </div>
   );

@@ -2,7 +2,7 @@ import { i32, type EntityIndex } from "@lite-fsm/entities";
 
 import { createMachine } from "../../create-machine";
 import type { AppEvents } from "../../types";
-import { UNIT_KIND } from "../../unit-model";
+import { UNIT_FACTION, UNIT_KIND } from "../../unit-model";
 
 export type Events = AppEvents;
 
@@ -75,6 +75,7 @@ export const unitHealth = createMachine({
     DEAD: ({ entities, self, transition }) => {
       const identity = entities().get("unitIdentity");
       const despawnIds: string[] = [];
+      const killedEnemyIds: string[] = [];
       let heroDied = false;
 
       for (const entity of self.indices) {
@@ -87,11 +88,14 @@ export const unitHealth = createMachine({
           continue;
         }
 
+        if (identity.faction[entity] === UNIT_FACTION.ENEMY) killedEnemyIds.push(entityId);
+
         despawnIds.push(entityId);
       }
 
-      if (despawnIds.length > 0) transition.despawn(despawnIds);
       if (heroDied) transition.unscoped({ type: "HERO_DEAD" });
+      for (const entityId of killedEnemyIds) transition.unscoped({ type: "ENEMY_KILLED", payload: { entityId } });
+      if (despawnIds.length > 0) transition.despawn(despawnIds);
     },
   },
 });

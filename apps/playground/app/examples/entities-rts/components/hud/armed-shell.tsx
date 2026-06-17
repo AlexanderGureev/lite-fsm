@@ -7,7 +7,7 @@ import { useSelector } from "../../store";
 import { CommandBar } from "./command-bar";
 import { formatCount } from "./format";
 import type { GameStatus, SpawnSummary } from "./model";
-import { GameOverOverlay, MobileSummary, PausedOverlay, SpawningOverlay } from "./overlays";
+import { BenchmarkReportOverlay, GameOverOverlay, MobileSummary, PausedOverlay, SpawningOverlay } from "./overlays";
 import { StatsPanel } from "./stats-panel";
 import { useRtsEntityStats, useRtsPerformanceMetrics } from "./telemetry";
 
@@ -34,11 +34,19 @@ export function ArmedShell({ app }: { app: RtsApp }) {
   const isSpawning = session.state === "SPAWNING";
   const isPaused = session.state === "PAUSED";
   const isGameOver = session.state === "GAME_OVER";
+  const isBenchmarkComplete = session.state === "BENCHMARK_COMPLETE";
+  let statusLabel = "АКТИВНО";
+  if (isSpawning) statusLabel = "СПАВН";
+  if (isPaused) statusLabel = "ПАУЗА";
+  if (isBenchmarkComplete) statusLabel = "БЕНЧ ГОТОВ";
+  if (isGameOver) statusLabel = "ПОРАЖЕНИЕ";
+
   const status: GameStatus = {
     isSpawning,
     isPaused,
     isGameOver,
-    label: isGameOver ? "ПОРАЖЕНИЕ" : isPaused ? "ПАУЗА" : isSpawning ? "СПАВН" : "АКТИВНО",
+    isBenchmarkComplete,
+    label: statusLabel,
   };
 
   const heroPercent = stats.heroMaxHp > 0 ? Math.max(0, Math.round((stats.heroHp / stats.heroMaxHp) * 100)) : 0;
@@ -80,6 +88,7 @@ export function ArmedShell({ app }: { app: RtsApp }) {
             spawn={spawn}
             config={config}
             startedRuns={session.context.startedRuns}
+            report={session.context.report}
           />
         </div>
 
@@ -89,6 +98,7 @@ export function ArmedShell({ app }: { app: RtsApp }) {
       {isSpawning ? <SpawningOverlay spawn={spawn} /> : null}
       {isPaused ? <PausedOverlay /> : null}
       {isGameOver ? <GameOverOverlay /> : null}
+      {isBenchmarkComplete ? <BenchmarkReportOverlay report={session.context.report} /> : null}
     </section>
   );
 }

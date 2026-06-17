@@ -15,10 +15,10 @@ import {
 
 import { cn } from "@/lib/utils";
 
-import type { GameConfig } from "../../store";
+import type { GameConfig, RtsBenchmarkReport } from "../../store";
 import type { RtsMetricsSnapshot, RtsTimingStats } from "../../store/metrics";
 import type { RtsEntityStats } from "../../store/selectors";
-import { formatCount, formatFps, formatMs } from "./format";
+import { formatCount, formatFps, formatMs, formatRate, formatSeconds } from "./format";
 import type { SpawnSummary } from "./model";
 
 type StatsPanelProps = {
@@ -28,6 +28,7 @@ type StatsPanelProps = {
   spawn: SpawnSummary;
   config: GameConfig;
   startedRuns: number;
+  report: RtsBenchmarkReport | null;
 };
 
 function HudRow({ icon, label, value, detail }: { icon: ReactNode; label: string; value: string; detail?: string }) {
@@ -78,8 +79,9 @@ function MetricValueRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function StatsPanel({ heroPercent, stats, metrics, spawn, config, startedRuns }: StatsPanelProps) {
+export function StatsPanel({ heroPercent, stats, metrics, spawn, config, startedRuns, report }: StatsPanelProps) {
   const [statsOpen, setStatsOpen] = useState(false);
+  const displayedMetrics = report?.metrics ?? metrics;
 
   if (!statsOpen) {
     return (
@@ -91,7 +93,7 @@ export function StatsPanel({ heroPercent, stats, metrics, spawn, config, started
         className="pointer-events-auto hidden items-center gap-2 rounded-pill border border-[#d7f6e0]/14 bg-[#151916]/92 px-3 py-2 text-caption-strong text-[#f4faf5] shadow-product transition hover:bg-[#1d241f] md:inline-flex [&_svg]:size-4"
       >
         <GaugeIcon className="text-[#66f0a7]" />
-        <span>{formatFps(metrics.fps.current)} FPS</span>
+        <span>{report ? "отчет" : `${formatFps(displayedMetrics.fps.current)} FPS`}</span>
         <PanelRightOpenIcon className="text-[#b8c5bd]" />
       </button>
     );
@@ -139,20 +141,32 @@ export function StatsPanel({ heroPercent, stats, metrics, spawn, config, started
       <div className="mt-2.5 border-t border-[#d7f6e0]/12 pt-2.5">
         <div className="flex items-center justify-between gap-3">
           <p className="text-caption-strong text-[#f4faf5]">Метрики</p>
-          <span className="text-fine-print text-[#819289]">за игру</span>
+          <span className="text-fine-print text-[#819289]">{report ? "итог" : "за игру"}</span>
         </div>
+
+        {report ? (
+          <div className="mt-2 flex flex-col divide-y divide-[#d7f6e0]/8">
+            <MetricValueRow label="длительность" value={formatSeconds(report.elapsedMs)} />
+            <MetricValueRow
+              label="уничтожено"
+              value={`${formatCount(report.enemiesKilled)}/${formatCount(report.enemyCount)}`}
+            />
+            <MetricValueRow label="скорость" value={formatRate(report.killsPerSecond)} />
+            <MetricValueRow label="тики" value={formatCount(report.tickCount)} />
+          </div>
+        ) : null}
 
         <p className="mt-2 text-fine-print uppercase tracking-[0.08em] text-[#6f8378]">тайминги кадра</p>
         <div className="flex flex-col divide-y divide-[#d7f6e0]/8">
-          <TimingRow label="FPS" stats={metrics.fps} format={formatFps} />
-          <TimingRow label="Тик-переход" stats={metrics.tick} format={formatMs} />
-          <TimingRow label="Phaser синх/рендер" stats={metrics.sync} format={formatMs} />
+          <TimingRow label="FPS" stats={displayedMetrics.fps} format={formatFps} />
+          <TimingRow label="Тик-переход" stats={displayedMetrics.tick} format={formatMs} />
+          <TimingRow label="Phaser синх/рендер" stats={displayedMetrics.sync} format={formatMs} />
         </div>
 
         <p className="mt-2 text-fine-print uppercase tracking-[0.08em] text-[#6f8378]">пересборка структур</p>
         <div className="flex flex-col divide-y divide-[#d7f6e0]/8">
-          <MetricValueRow label="перестройка flow field" value={formatMs(metrics.flowFieldRebuildMs)} />
-          <MetricValueRow label="сборка spatial grid" value={formatMs(metrics.spatialGridBuildMs)} />
+          <MetricValueRow label="перестройка flow field" value={formatMs(displayedMetrics.flowFieldRebuildMs)} />
+          <MetricValueRow label="сборка spatial grid" value={formatMs(displayedMetrics.spatialGridBuildMs)} />
         </div>
       </div>
 

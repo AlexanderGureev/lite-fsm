@@ -1,4 +1,5 @@
 import type { AppStore } from "../store";
+import { captureRtsBenchmarkReport } from "../store/benchmark-report";
 import type { MetricsAdapter } from "../store/metrics";
 import { entityIdForUnitIndex, readProjectileView, readUnitViews } from "../store/selectors";
 import type { Point } from "../store/types";
@@ -150,16 +151,19 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
 
       const frameDeltaMs = Math.max(0, delta);
       const simulationDeltaMs = Math.min(MAX_SIMULATION_FRAME_DELTA_MS, frameDeltaMs);
-      const sessionState = manager.getState().gameSession.state;
-      if (sessionState !== "SPAWNING" && this.cameraController?.panFromKeyboard(frameDeltaMs, this.pressedCameraKeys)) {
+      const initialSessionState = manager.getState().gameSession.state;
+      if (
+        initialSessionState !== "SPAWNING" &&
+        this.cameraController?.panFromKeyboard(frameDeltaMs, this.pressedCameraKeys)
+      ) {
         this.renderDirty = true;
       }
       metrics.recordFrame(frameDeltaMs);
 
       let simulationSteps = 0;
-      if (sessionState === "READY") {
+      if (initialSessionState === "READY") {
         simulationSteps = this.runFixedSimulation(simulationDeltaMs, "TICK");
-      } else if (sessionState === "SPAWNING") {
+      } else if (initialSessionState === "SPAWNING") {
         simulationSteps = this.runFixedSimulation(simulationDeltaMs, "SPAWN_TICK");
       } else {
         this.simulationAccumulatorMs = 0;
@@ -169,6 +173,7 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
 
       if (this.cameraController?.applyStartupCentering()) this.renderDirty = true;
 
+      const sessionState = manager.getState().gameSession.state;
       const shouldSync = this.renderDirty || this.lastSyncedSessionState !== sessionState;
       const syncStartedAt = metrics.now();
       if (sessionState === "SPAWNING") {
@@ -196,6 +201,8 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
       const maxSteps = actionType === "SPAWN_TICK" ? MAX_SPAWN_STEPS_PER_FRAME : MAX_SIMULATION_STEPS_PER_FRAME;
       let steps = 0;
       while (this.simulationAccumulatorMs >= FIXED_SIMULATION_STEP_MS && steps < maxSteps) {
+        if (!this.canRunSimulationAction(actionType)) break;
+
         this.simulationAccumulatorMs -= FIXED_SIMULATION_STEP_MS;
         this.simulationNowMs += FIXED_SIMULATION_STEP_MS;
 
@@ -205,7 +212,10 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
           payload: { now: this.simulationNowMs, deltaMs: FIXED_SIMULATION_STEP_MS },
         });
         metrics.recordTickMs(metrics.now() - tickStartedAt);
-        if (actionType === "TICK") metrics.recordSimulationMetrics(readRtsSpatialMetrics(manager));
+        if (actionType === "TICK") {
+          metrics.recordSimulationMetrics(readRtsSpatialMetrics(manager));
+          captureRtsBenchmarkReport(manager, metrics);
+        }
 
         steps += 1;
       }
@@ -214,8 +224,14 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
       return steps;
     }
 
+    private canRunSimulationAction(actionType: "TICK" | "SPAWN_TICK") {
+      const sessionState = manager.getState().gameSession.state;
+      return actionType === "TICK" ? sessionState === "READY" : sessionState === "SPAWNING";
+    }
+
     private bindInput() {
       this.input.on("pointerdown", (pointer: PhaserPointer) => {
+        if (!this.canIssuePlayerCommand()) return;
         if (!pointer.leftButtonDown()) return;
         const start = this.worldPointFor(pointer);
         this.drag = { start, current: start };
@@ -265,6 +281,8 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
     }
 
     private issueLeftClick(point: Point) {
+      if (!this.canIssuePlayerCommand()) return;
+
       const units = readUnitViews(manager);
       const entity = findUnitAt(units, point, { radiusMultiplier: 1.35, minimumRadius: 28 });
       const hasSelection = hasSelectedPlayerUnits(units);
@@ -301,6 +319,8 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
     }
 
     private issueRightClick(point: Point) {
+      if (!this.canIssuePlayerCommand()) return;
+
       const units = readUnitViews(manager);
       const enemy = findUnitAt(units, point, {
         faction: UNIT_FACTION.ENEMY,
@@ -310,6 +330,10 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
 
       manager.transition({ type: enemy === null ? "ISSUE_MOVE" : "ISSUE_ATTACK_MOVE", payload: point });
       this.renderDirty = true;
+    }
+
+    private canIssuePlayerCommand() {
+      return manager.getState().gameSession.state === "READY";
     }
 
     private worldPointFor(pointer: PhaserPointer): Point {

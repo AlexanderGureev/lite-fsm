@@ -15,7 +15,7 @@ const dispatchCameraZoom = (action: RtsCameraZoomAction) => {
 
 export function CommandBar({ status }: { status: GameStatus }) {
   const transition = useTransition();
-  const { label, isSpawning, isPaused, isGameOver } = status;
+  const { label, isSpawning, isPaused, isGameOver, isBenchmarkComplete } = status;
 
   return (
     <div className="pointer-events-auto flex max-w-full flex-wrap items-center gap-2 rounded-lg border border-[#d7f6e0]/14 bg-[#151916]/92 px-3 py-2 text-[#f4faf5] shadow-product">
@@ -26,10 +26,11 @@ export function CommandBar({ status }: { status: GameStatus }) {
       <span
         className={cn(
           "inline-flex h-7 items-center rounded-pill px-2.5 text-fine-print font-semibold",
-          !isPaused && !isGameOver && !isSpawning && "bg-[#66f0a7]/16 text-[#9cf4c3]",
+          !isPaused && !isGameOver && !isSpawning && !isBenchmarkComplete && "bg-[#66f0a7]/16 text-[#9cf4c3]",
           isSpawning && "bg-[#8fd4ff]/16 text-[#b7e6ff]",
           isPaused && "bg-[#f6e27a]/18 text-[#f6e27a]",
           isGameOver && "bg-[#ff786b]/18 text-[#ff9a90]",
+          isBenchmarkComplete && "bg-[#8fd4ff]/16 text-[#b7e6ff]",
         )}
       >
         {label}
@@ -38,7 +39,7 @@ export function CommandBar({ status }: { status: GameStatus }) {
         type="button"
         variant="ghost"
         onClick={() => transition({ type: isPaused ? "GAME_RESUME" : "GAME_PAUSE" })}
-        disabled={isGameOver || isSpawning}
+        disabled={isGameOver || isSpawning || isBenchmarkComplete}
         className="h-9 rounded-pill bg-[#f4faf5] px-3 text-caption-strong text-[#151916] hover:bg-[#d8f4e4]"
       >
         {isPaused ? <PlayIcon data-icon="inline-start" /> : <PauseIcon data-icon="inline-start" />}

@@ -1,6 +1,7 @@
 import type { FSMEvent } from "@lite-fsm/core";
 
 import type { UnitCommandAssignmentBatchPayload, UnitSelectionBatchPayload } from "./machines/unit-orders/batches";
+import type { RtsMetricsSnapshot } from "./metrics";
 
 export type RtsPresetId = "small" | "medium" | "stress";
 
@@ -29,6 +30,18 @@ export type SelectionRect = Point & {
   height: number;
 };
 
+export type RtsBenchmarkReport = {
+  run: number;
+  seed: string;
+  enemyCount: number;
+  allyCount: number;
+  enemiesKilled: number;
+  elapsedMs: number;
+  tickCount: number;
+  killsPerSecond: number;
+  metrics: RtsMetricsSnapshot;
+};
+
 export type AppEvents =
   | FSMEvent<"GAME_CONFIG_CHANGED", GameConfigPatch>
   | FSMEvent<"GAME_START", GameConfig>
@@ -50,4 +63,6 @@ export type AppEvents =
   | FSMEvent<"UNIT_COMMAND_ASSIGNED", UnitCommandAssignmentBatchPayload>
   | FSMEvent<"UNIT_COMMAND_RESOLVED">
   | FSMEvent<"UNIT_DIED", { entityId: string }>
+  | FSMEvent<"ENEMY_KILLED", { entityId: string }>
+  | FSMEvent<"BENCHMARK_REPORT_CAPTURED", RtsMetricsSnapshot>
   | FSMEvent<"HERO_DEAD">;

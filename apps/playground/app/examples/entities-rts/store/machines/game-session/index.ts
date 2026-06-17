@@ -1,10 +1,14 @@
 import { createMachine } from "../../create-machine";
 import { applyGameConfigPatch, DEFAULT_GAME_CONFIG, normalizeGameConfig } from "../../config";
-import type { AppEvents, GameConfig } from "../../types";
+import type { AppEvents, GameConfig, RtsBenchmarkReport } from "../../types";
 
 type Context = {
   config: GameConfig;
   startedRuns: number;
+  killedEnemyCount: number;
+  elapsedMs: number;
+  tickCount: number;
+  report: RtsBenchmarkReport | null;
 };
 
 export type Events = AppEvents;
@@ -12,6 +16,15 @@ export type Events = AppEvents;
 const initialContext: Context = {
   config: DEFAULT_GAME_CONFIG,
   startedRuns: 0,
+  killedEnemyCount: 0,
+  elapsedMs: 0,
+  tickCount: 0,
+  report: null,
+};
+
+const killsPerSecond = (killedEnemyCount: number, elapsedMs: number) => {
+  if (elapsedMs <= 0) return 0;
+  return killedEnemyCount / (elapsedMs / 1_000);
 };
 
 export const gameSession = createMachine({
@@ -28,6 +41,7 @@ export const gameSession = createMachine({
       GAME_PAUSE: "PAUSED",
       GAME_RESTART: "CONFIGURING",
       TICK: null,
+      ENEMY_KILLED: null,
       SELECT_RECT: null,
       SELECT_ENTITY: null,
       CLEAR_SELECTION: null,
@@ -37,6 +51,10 @@ export const gameSession = createMachine({
     },
     PAUSED: {
       GAME_RESUME: "READY",
+      GAME_RESTART: "CONFIGURING",
+    },
+    BENCHMARK_COMPLETE: {
+      BENCHMARK_REPORT_CAPTURED: null,
       GAME_RESTART: "CONFIGURING",
     },
     GAME_OVER: {
@@ -56,6 +74,47 @@ export const gameSession = createMachine({
       case "GAME_START":
         state.context.config = normalizeGameConfig(action.payload);
         state.context.startedRuns += 1;
+        state.context.killedEnemyCount = 0;
+        state.context.elapsedMs = 0;
+        state.context.tickCount = 0;
+        state.context.report = null;
+        return;
+
+      case "TICK":
+        state.context.elapsedMs += Math.max(0, action.payload.deltaMs);
+        state.context.tickCount += 1;
+        return;
+
+      case "ENEMY_KILLED": {
+        state.context.killedEnemyCount += 1;
+
+        if (state.context.config.enemyCount > 0 && state.context.killedEnemyCount >= state.context.config.enemyCount) {
+          state.state = "BENCHMARK_COMPLETE";
+        }
+        return;
+      }
+
+      case "BENCHMARK_REPORT_CAPTURED":
+        if (state.context.report !== null) return;
+
+        state.context.report = {
+          run: state.context.startedRuns,
+          seed: state.context.config.seed,
+          enemyCount: state.context.config.enemyCount,
+          allyCount: state.context.config.allyCount,
+          enemiesKilled: state.context.killedEnemyCount,
+          elapsedMs: state.context.elapsedMs,
+          tickCount: state.context.tickCount,
+          killsPerSecond: killsPerSecond(state.context.killedEnemyCount, state.context.elapsedMs),
+          metrics: action.payload,
+        };
+        return;
+
+      case "GAME_RESTART":
+        state.context.killedEnemyCount = 0;
+        state.context.elapsedMs = 0;
+        state.context.tickCount = 0;
+        state.context.report = null;
         return;
     }
   },

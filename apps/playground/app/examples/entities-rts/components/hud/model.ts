@@ -6,6 +6,7 @@ export type GameStatus = {
   isSpawning: boolean;
   isPaused: boolean;
   isGameOver: boolean;
+  isBenchmarkComplete: boolean;
 };
 
 export type SpawnSummary = {

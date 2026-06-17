@@ -89,6 +89,15 @@ const resetSnapshotMetrics = (snapshot: RtsMetricsSnapshot) => {
   snapshot.spatialGridBuildMs = 0;
 };
 
+export const cloneRtsMetricsSnapshot = (snapshot: RtsMetricsSnapshot): RtsMetricsSnapshot => ({
+  version: snapshot.version,
+  fps: { ...snapshot.fps },
+  tick: { ...snapshot.tick },
+  sync: { ...snapshot.sync },
+  flowFieldRebuildMs: snapshot.flowFieldRebuildMs,
+  spatialGridBuildMs: snapshot.spatialGridBuildMs,
+});
+
 export const createRollingMetric = (_windowSize?: number) => createCumulativeMetric();
 
 // Local example note: the stress surface is one batched entity-storage TICK over
