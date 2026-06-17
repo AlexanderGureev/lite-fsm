@@ -11,7 +11,7 @@ import {
   type UnitIdentitySpawnPayload,
   type UnitMovementSpawnPayload,
 } from "../unit-model";
-import { createSeededRandom, randomBetween, randomInt } from "./random";
+import { createSeededRandom, randomBetween, randomInt, type RandomSource } from "./random";
 
 export const RTS_MAP = {
   width: 8_192,
@@ -26,8 +26,8 @@ const ENEMY_GROUP_TANGENT_SPREAD = 240;
 const ENEMY_GROUP_DEPTH_SPREAD = 280;
 const ENEMY_HORDE_SPREAD_REFERENCE_COUNT = 10_000;
 const ENEMY_MAX_SPREAD_MULTIPLIER = 1.55;
-const ENEMY_SPEED_MIN = 68;
-const ENEMY_SPEED_MAX = 104;
+const ENEMY_SPEED_MIN_FACTOR = 68 / 82;
+const ENEMY_SPEED_MAX_FACTOR = 104 / 82;
 const PLAYER_FORMATION_SPACING = 24;
 
 export const DEFAULT_ENEMY_SPAWN_BATCH_SIZE = 1024;
@@ -59,7 +59,7 @@ const allyStats = {
 
 const enemyStats = {
   radius: 7,
-  speed: 82,
+  speed: 182,
   hp: 45,
   attackRange: 54,
   attackDamage: 6,
@@ -163,7 +163,11 @@ const enemyHordeSpreadMultiplier = (enemyCount: number) => {
   return 1 + Math.min(1, hordeScale) * (ENEMY_MAX_SPREAD_MULTIPLIER - 1);
 };
 
-const enemySpeedForSpawn = (random: () => number) => randomBetween(random, ENEMY_SPEED_MIN, ENEMY_SPEED_MAX);
+export const enemySpeedForSpawn = (baseSpeed: number, random: RandomSource) => {
+  if (baseSpeed <= 0) return 0;
+
+  return randomBetween(random, baseSpeed * ENEMY_SPEED_MIN_FACTOR, baseSpeed * ENEMY_SPEED_MAX_FACTOR);
+};
 
 const playerFormationPointForIndex = (config: GameConfig, allyIndex: number) => {
   const unitCount = Math.max(0, Math.trunc(config.allyCount));
@@ -244,7 +248,7 @@ const createEnemyUnit = (
       faction: UNIT_FACTION.ENEMY,
       unitIndex: enemyIndex,
       ...enemyStats,
-      speed: enemySpeedForSpawn(random),
+      speed: enemySpeedForSpawn(enemyStats.speed, random),
     }),
   };
 };

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   createEnemySpawnBatchPlan,
+  enemySpeedForSpawn,
   createGameStartSpawnPlan,
   createPlayerSpawnBatchPlan,
   DEFAULT_ENEMY_SPAWN_BATCH_SIZE,
@@ -83,6 +84,12 @@ describe("spawn placement для RTS", () => {
     expect(Math.min(...speeds)).toBeGreaterThanOrEqual(68);
     expect(Math.max(...speeds)).toBeLessThanOrEqual(104);
     expect(maxEdgeDepth).toBeGreaterThan(520);
+  });
+
+  it("масштабирует вариативность enemy speed от базовой скорости", () => {
+    expect(enemySpeedForSpawn(164, () => 0)).toBe(136);
+    expect(enemySpeedForSpawn(164, () => 1)).toBe(208);
+    expect(enemySpeedForSpawn(0, () => 1)).toBe(0);
   });
 
   it("откладывает initial enemy batch пока player batch не закрывает allyCount", () => {
