@@ -82,7 +82,7 @@ type EntityReadSource = {
   readonly cache: EntityReadCache;
 };
 
-type EntityReadMode =
+export type EntityReadMode =
   | { readonly mode: "commit" }
   | { readonly mode: "preview"; readonly snapshot: unknown };
 

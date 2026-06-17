@@ -1,6 +1,7 @@
 import { LiteFsmError } from "@lite-fsm/core";
 import type { ActorPublicState, MachineStore } from "@lite-fsm/core";
 
+import { isDev } from "../internal";
 import type { EntityIndex } from "../plugin";
 import type { EntitySchemaResourceViews, EntitySchemaValue, EntityContextSchema } from "../schema";
 import type { ColumnarActorStore, EntityRuntimeState } from "./state";
@@ -104,9 +105,6 @@ const getKnownStore = (runtime: EntityRuntimeState, key: string): ColumnarActorS
 
   throw unknownEntityActor(key);
 };
-
-const isDev = (): boolean =>
-  (globalThis as { process?: { env?: { NODE_ENV?: string } } }).process?.env?.NODE_ENV !== "production";
 
 const scopedAccessError = (
   scope: EntityAccessScope,
@@ -238,16 +236,30 @@ const staleReactionScopeError = (entity: EntityIndex, reason: string): LiteFsmEr
     `[lite-fsm/entities] entity index ${entity} is stale in current entity reaction scope: ${reason}.`,
   );
 
-const attachActorColumns = (self: Record<string, unknown>, store: ColumnarActorStore): void => {
-  for (const [name, column] of Object.entries(store.columns)) {
-    self[name] = column;
-  }
+type ActorSelfCore = {
+  readonly indices: readonly EntityIndex[];
+  has(entity: EntityIndex): boolean;
+  entityId(entity: EntityIndex): string;
 };
 
-const attachActorResources = (self: Record<string, unknown>, store: ColumnarActorStore): void => {
-  for (const [name, resource] of Object.entries(store.resources)) {
-    self[name] = resource;
-  }
+export const assignActorSelfFields = (self: Record<string, unknown>, store: ColumnarActorStore): void => {
+  self.presence = store.presence;
+  self.stateCode = store.stateCode;
+  self.prevStateCode = store.prevStateCode;
+  self.rowVersion = store.rowVersion;
+  for (const [name, column] of Object.entries(store.columns)) self[name] = column;
+  for (const [name, resource] of Object.entries(store.resources)) self[name] = resource;
+};
+
+export const createActorSelf = (store: ColumnarActorStore, core: ActorSelfCore): Record<string, unknown> => {
+  const self: Record<string, unknown> = {
+    indices: core.indices,
+    states: store.metadata.stateCodeByName,
+    has: core.has,
+    entityId: core.entityId,
+  };
+  assignActorSelfFields(self, store);
+  return self;
 };
 
 export const createScopedEntitySelf = (
@@ -264,13 +276,9 @@ export const createScopedEntitySelf = (
     entriesByEntity = next;
     return next;
   };
-  const self: Record<string, unknown> = {
+
+  return createActorSelf(store, {
     indices: options.indices,
-    states: store.metadata.stateCodeByName,
-    presence: store.presence,
-    stateCode: store.stateCode,
-    prevStateCode: store.prevStateCode,
-    rowVersion: store.rowVersion,
     has(entity: EntityIndex) {
       const entry = getEntriesByEntity().get(entity);
       if (!entry) return false;
@@ -281,12 +289,7 @@ export const createScopedEntitySelf = (
       if (entry) return entry.id;
       throw outsideScopeError(options.scopeName, entity);
     },
-  };
-
-  attachActorColumns(self, store);
-  attachActorResources(self, store);
-
-  return self;
+  });
 };
 
 export const createReactionEntitySelf = (
@@ -303,13 +306,8 @@ export const createReactionEntitySelf = (
     return id !== undefined && id.length > 0;
   };
 
-  const self: Record<string, unknown> = {
+  return createActorSelf(store, {
     indices: scope.indices,
-    states: store.metadata.stateCodeByName,
-    presence: store.presence,
-    stateCode: store.stateCode,
-    prevStateCode: store.prevStateCode,
-    rowVersion: store.rowVersion,
     has(entity: EntityIndex) {
       return (
         entityIsInScope(entity) &&
@@ -329,12 +327,7 @@ export const createReactionEntitySelf = (
       if (id !== undefined && id.length > 0) return id;
       throw staleReactionScopeError(entity, "entity id is missing");
     },
-  };
-
-  attachActorColumns(self, store);
-  attachActorResources(self, store);
-
-  return self;
+  });
 };
 
 export const createReactionEntityAccess = (runtime: EntityRuntimeState): EntityAccess<MachineStore> =>

@@ -1,6 +1,6 @@
-import { LiteFsmError } from "@lite-fsm/core";
 import type { AnyEvent, ReadonlyManagerAction } from "@lite-fsm/core";
 
+import { hasOwn, isDev, isPlainObject, runtimeError as storageRuntimeError } from "../internal";
 import type { EntityIndex } from "../plugin";
 import type { EntitySpawnDescriptor } from "../spawn";
 import { hasSpawnRecipe, runSpawnRecipe } from "../spawn";
@@ -86,19 +86,7 @@ export const ENTITY_DESPAWN_ACTION_TYPE = "LITE_FSM_ENTITY_DESPAWN";
 const emptyDespawnScheduled = new Uint8Array();
 const transactionScratchByRuntime = new WeakMap<EntityRuntimeState, EntityTransactionScratch>();
 
-const hasOwn = (value: object, key: PropertyKey): boolean => Object.prototype.hasOwnProperty.call(value, key);
-
-const isPlainObject = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
-
-const runtimeError = (reason: string): LiteFsmError =>
-  new LiteFsmError("LITE_FSM_INVALID_STORAGE_RUNTIME", `[lite-fsm/entities] invalid entity spawn: ${reason}.`);
-
-const entityRuntimeError = (reason: string): LiteFsmError =>
-  new LiteFsmError("LITE_FSM_INVALID_STORAGE_RUNTIME", `[lite-fsm/entities] ${reason}.`);
-
-const isDev = (): boolean =>
-  (globalThis as { process?: { env?: { NODE_ENV?: string } } }).process?.env?.NODE_ENV !== "production";
+const runtimeError = (reason: string) => storageRuntimeError(`invalid entity spawn: ${reason}`);
 
 const getExplicitDespawnRequest = (options: unknown): ExplicitDespawnRequest | undefined => {
   if (options === null || typeof options !== "object") return undefined;
@@ -127,7 +115,7 @@ const scheduleCapturedEntityDespawn = (
   }
 
   if (isDev()) {
-    throw entityRuntimeError(
+    throw storageRuntimeError(
       `stale entity effect scope cannot despawn entity '${entry.id}' at index ${entry.entity}`,
     );
   }

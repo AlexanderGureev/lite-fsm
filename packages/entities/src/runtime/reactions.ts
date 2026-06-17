@@ -1,6 +1,6 @@
-import { LiteFsmError } from "@lite-fsm/core";
-import type { AnyEvent, ReadonlyManagerAction, StorageManagerContext } from "@lite-fsm/core";
+import type { AnyEvent, LiteFsmError, ReadonlyManagerAction, StorageManagerContext } from "@lite-fsm/core";
 
+import { runtimeError } from "../internal";
 import type { EntityIndex } from "../plugin";
 import {
   createReactionEntityAccess,
@@ -28,9 +28,6 @@ type ReactionScopeScratch = {
   readonly lifetime: { token: number };
   token: number;
 };
-
-const runtimeError = (reason: string): LiteFsmError =>
-  new LiteFsmError("LITE_FSM_INVALID_STORAGE_RUNTIME", `[lite-fsm/entities] ${reason}.`);
 
 const reactionScratchByRuntime = new WeakMap<EntityRuntimeState, ReactionScopeScratch>();
 

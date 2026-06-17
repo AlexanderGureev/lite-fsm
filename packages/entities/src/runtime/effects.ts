@@ -1,18 +1,19 @@
-import { LiteFsmError } from "@lite-fsm/core";
-import type { AnyEvent, ManagerAction, ReadonlyManagerAction, StorageManagerContext } from "@lite-fsm/core";
+import type { AnyEvent, LiteFsmError, ManagerAction, ReadonlyManagerAction, StorageManagerContext } from "@lite-fsm/core";
 
+import { isDev, runtimeError } from "../internal";
 import type { EntityIndex } from "../plugin";
 import {
   createScopedEntityAccess,
   createScopedEntitySelf,
   type EntityAccessScope,
 } from "./access";
-import type { EntityRuntimeState } from "./state";
+import type { ColumnarActorStore, EntityRuntimeState } from "./state";
 import {
   createEntityDespawnOptions,
   ENTITY_DESPAWN_ACTION_TYPE,
   getEntityTransaction,
   type CapturedEntityScopeEntry,
+  type EntityEffectBatch,
 } from "./transaction";
 
 export type EntityEffectInvocation = {
@@ -41,12 +42,6 @@ type RuntimeTransition = ((action: ManagerAction<AnyEvent>) => ManagerAction<Any
   unscoped(action: AnyEvent): ManagerAction<AnyEvent>;
   despawn(entity: string | readonly string[] | readonly EntityIndex[]): void;
 };
-
-const isDev = (): boolean =>
-  (globalThis as { process?: { env?: { NODE_ENV?: string } } }).process?.env?.NODE_ENV !== "production";
-
-const runtimeError = (reason: string): LiteFsmError =>
-  new LiteFsmError("LITE_FSM_INVALID_STORAGE_RUNTIME", `[lite-fsm/entities] ${reason}.`);
 
 const toManagerAction = (action: AnyEvent, meta: Record<string, unknown>): ManagerAction<AnyEvent> => ({
   ...action,
@@ -161,6 +156,75 @@ const unsupportedCondition = (): Promise<boolean> => {
   throw runtimeError("condition() is not supported in storage: \"entity\" effects");
 };
 
+const effectBatchScopeIsFresh = (
+  runtime: EntityRuntimeState,
+  store: ColumnarActorStore,
+  batch: EntityEffectBatch,
+): boolean =>
+  batch.capturedEntries !== undefined &&
+  batch.storeVersion === store.version &&
+  batch.entityStoreVersion === runtime.entityStore.version;
+
+const capturedEffectInvocation = (batch: EntityEffectBatch, eventType: string): EntityEffectInvocation => ({
+  storeKey: batch.store.templateKey,
+  stateCode: batch.stateCode,
+  indices: batch.indices,
+  scope: { sourceActor: batch.store.templateKey, eventType, entries: batch.capturedEntries! },
+});
+
+// Stale scope: пересобираем entries и compact indices по живым строкам перед вызовом effect.
+const recaptureEffectInvocation = (
+  runtime: EntityRuntimeState,
+  batch: EntityEffectBatch,
+  eventType: string,
+): EntityEffectInvocation | undefined => {
+  const store = batch.store;
+  const expectedStateCode = batch.stateCode;
+  const indices = batch.indices;
+  const presence = store.presence;
+  const stateCodeByEntity = store.stateCode;
+  const alive = runtime.entityStore.alive;
+  const idsByEntity = runtime.entityStore.ids;
+  const generation = runtime.entityStore.generation;
+
+  const entries: CapturedEntityScopeEntry[] = [];
+  let compactIndices: EntityIndex[] | undefined;
+  const ensureCompactIndices = (): EntityIndex[] => {
+    if (compactIndices) return compactIndices;
+
+    compactIndices = [];
+    for (let copyIndex = 0; copyIndex < entries.length; copyIndex += 1) {
+      compactIndices.push(entries[copyIndex].entity);
+    }
+    return compactIndices;
+  };
+
+  for (let index = 0; index < indices.length; index += 1) {
+    const entity = indices[index];
+    if (presence[entity] !== 1 || stateCodeByEntity[entity] !== expectedStateCode || alive[entity] !== 1) {
+      ensureCompactIndices();
+      continue;
+    }
+
+    const id = idsByEntity[entity];
+    if (id === undefined || id.length === 0) {
+      ensureCompactIndices();
+      continue;
+    }
+    entries.push({ entity, generation: generation[entity], id });
+    compactIndices?.push(entity);
+  }
+
+  if (entries.length === 0) return undefined;
+
+  return {
+    storeKey: store.templateKey,
+    stateCode: expectedStateCode,
+    indices: compactIndices ?? indices,
+    scope: { sourceActor: store.templateKey, eventType, entries },
+  };
+};
+
 export const resolveEntityEffectInvocations = (
   runtime: EntityRuntimeState,
   ctx: EffectResolveContext,
@@ -168,79 +232,18 @@ export const resolveEntityEffectInvocations = (
   const transaction = getEntityTransaction(ctx.dispatch);
   if (!transaction || transaction.effectBatches.length === 0) return [];
 
+  const eventType = ctx.action.type;
   const invocations: EntityEffectInvocation[] = [];
   for (const batch of transaction.effectBatches) {
-    const store = batch.store;
-    const expectedStateCode = batch.stateCode;
-    const effect = store.metadata.effectsByStateCode[expectedStateCode];
-    if (!effect) continue;
+    if (!batch.store.metadata.effectsByStateCode[batch.stateCode]) continue;
 
-    if (
-      batch.capturedEntries &&
-      batch.storeVersion === store.version &&
-      batch.entityStoreVersion === runtime.entityStore.version
-    ) {
-      invocations.push({
-        storeKey: store.templateKey,
-        stateCode: expectedStateCode,
-        indices: batch.indices,
-        scope: {
-          sourceActor: store.templateKey,
-          eventType: ctx.action.type,
-          entries: batch.capturedEntries,
-        },
-      });
+    if (effectBatchScopeIsFresh(runtime, batch.store, batch)) {
+      invocations.push(capturedEffectInvocation(batch, eventType));
       continue;
     }
 
-    const entries: CapturedEntityScopeEntry[] = [];
-    let compactIndices: EntityIndex[] | undefined;
-    const indices = batch.indices;
-    const presence = store.presence;
-    const stateCodeByEntity = store.stateCode;
-    const alive = runtime.entityStore.alive;
-    const idsByEntity = runtime.entityStore.ids;
-    const generation = runtime.entityStore.generation;
-    const ensureCompactIndices = (): EntityIndex[] => {
-      if (compactIndices) return compactIndices;
-
-      compactIndices = [];
-      for (let copyIndex = 0; copyIndex < entries.length; copyIndex += 1) {
-        compactIndices.push(entries[copyIndex].entity);
-      }
-      return compactIndices;
-    };
-    for (let index = 0; index < indices.length; index += 1) {
-      const entity = indices[index];
-      if (presence[entity] !== 1 || stateCodeByEntity[entity] !== expectedStateCode) {
-        ensureCompactIndices();
-        continue;
-      }
-      if (alive[entity] !== 1) {
-        ensureCompactIndices();
-        continue;
-      }
-
-      const id = idsByEntity[entity];
-      if (id === undefined || id.length === 0) {
-        ensureCompactIndices();
-        continue;
-      }
-      entries.push({ entity, generation: generation[entity], id });
-      compactIndices?.push(entity);
-    }
-    if (entries.length === 0) continue;
-
-    invocations.push({
-      storeKey: store.templateKey,
-      stateCode: expectedStateCode,
-      indices: compactIndices ?? indices,
-      scope: {
-        sourceActor: store.templateKey,
-        eventType: ctx.action.type,
-        entries,
-      },
-    });
+    const recaptured = recaptureEffectInvocation(runtime, batch, eventType);
+    if (recaptured) invocations.push(recaptured);
   }
 
   return invocations;

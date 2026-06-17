@@ -42,8 +42,10 @@ import {
 import { throwTransitionGuardError, type GuardedCallbackRunner, type TransitionGuardPhase } from "./transitionGuard";
 import {
   attachTransitionTraceSession,
+  createTraceSpanRunner,
   createTransitionTraceSession,
   readTransitionTraceSession,
+  type TraceSpanRunner,
   type TransitionTraceStatus,
 } from "./transitionTrace";
 
@@ -313,9 +315,33 @@ export const createMachineManagerFactory = (preset: RuntimePreset): MachineManag
       rootReducer = cb(rootReducer);
     };
 
+    // skipDelivery держит state без изменений; обычный путь прогоняет rootReducer и затем
+    // даёт storage runtimes пройти commit для slice, заменённых replaceReducer'ом напрямую.
+    const runReduce = (dispatch: StorageDispatchLifecycleContext, prevState: MachinesState<S>, runPhase: TraceSpanRunner) => {
+      if (dispatch.skipDelivery) {
+        runPhase("core.rootReducer", () => {
+          dispatch.nextState = prevState as RootState;
+        });
+        return;
+      }
+
+      const nextState = runPhase("core.rootReducer", (): MachinesState<S> => {
+        const reduced: MachinesState<S> | undefined = rootReducer(prevState, narrowAction(dispatch.action));
+        if (reduced === undefined) throw new Error(VOID_REDUCER_ERROR);
+        return reduced;
+      });
+
+      runPhase("core.markExternallyChangedBuckets", () => {
+        if (nextState !== prevState) {
+          bucketRuntime.markExternallyChangedBuckets(prevState as RootState, nextState as RootState, dispatch);
+        }
+      });
+      dispatch.nextState = nextState as RootState;
+    };
+
     const coreTransition = (action: RuntimeAction): RuntimeAction => {
       const dispatch = requireActiveDispatch();
-      const trace = readTransitionTraceSession(dispatch.dispatch);
+      const runPhase = createTraceSpanRunner(readTransitionTraceSession(dispatch.dispatch));
       if (dispatch.nextCalled) {
         throw new Error("[lite-fsm] middleware called next() more than once for a single transition.");
       }
@@ -325,117 +351,30 @@ export const createMachineManagerFactory = (preset: RuntimePreset): MachineManag
       dispatch.prevState = prevState as RootState;
       dispatch.nextState = prevState as RootState;
       setCurrentAction(dispatch, widenAction(action));
-      const beforeReduceStartedAt = trace?.now();
-      let beforeReduce: ReturnType<typeof bucketRuntime.beforeReduce>;
-      try {
-        beforeReduce = bucketRuntime.beforeReduce(widenAction(action), dispatch);
-      } finally {
-        if (trace && beforeReduceStartedAt !== undefined) {
-          trace.record("core.beforeReduce.total", beforeReduceStartedAt);
-        }
-      }
+
+      const beforeReduce = runPhase("core.beforeReduce.total", () =>
+        bucketRuntime.beforeReduce(widenAction(action), dispatch),
+      );
       if (beforeReduce.type === "drop") {
         dispatch.outcome = { type: "drop", action: dispatch.originalAction };
         return narrowAction(dispatch.originalAction);
       }
 
       setCurrentAction(dispatch, beforeReduce.action);
-      const interceptorsStartedAt = trace?.now();
-      try {
-        runActionInterceptors(dispatch);
-      } finally {
-        if (trace && interceptorsStartedAt !== undefined) trace.record("core.interceptors", interceptorsStartedAt);
-      }
+      runPhase("core.interceptors", () => runActionInterceptors(dispatch));
+      runPhase("core.hooks.beforeReduce", () => runDispatchHooks("beforeReduce", dispatch));
+      runReduce(dispatch, prevState, runPhase);
+      runPhase("core.hooks.afterReduce", () => runDispatchHooks("afterReduce", dispatch));
+      runPhase("core.hooks.beforeCommit", () => runDispatchHooks("beforeCommit", dispatch));
+      runPhase("core.commit.total", () => bucketRuntime.commit(dispatch));
 
-      const beforeReduceHooksStartedAt = trace?.now();
-      try {
-        runDispatchHooks("beforeReduce", dispatch);
-      } finally {
-        if (trace && beforeReduceHooksStartedAt !== undefined) {
-          trace.record("core.hooks.beforeReduce", beforeReduceHooksStartedAt);
-        }
-      }
-
-      const rootReducerStartedAt = trace?.now();
-      if (dispatch.skipDelivery) {
-        try {
-          dispatch.nextState = prevState as RootState;
-        } finally {
-          if (trace && rootReducerStartedAt !== undefined) trace.record("core.rootReducer", rootReducerStartedAt);
-        }
-      } else {
-        let nextState: MachinesState<S> | undefined;
-        try {
-          nextState = rootReducer(prevState, narrowAction(dispatch.action));
-          if (nextState === undefined) throw new Error(VOID_REDUCER_ERROR);
-        } finally {
-          if (trace && rootReducerStartedAt !== undefined) trace.record("core.rootReducer", rootReducerStartedAt);
-        }
-
-        const markStartedAt = trace?.now();
-        try {
-          // replaceReducer может заменить slice, которым владеет storage runtime,
-          // без вызова его reducer. Такой owner все равно должен пройти commit.
-          if (nextState !== prevState) {
-            bucketRuntime.markExternallyChangedBuckets(prevState as RootState, nextState as RootState, dispatch);
-          }
-        } finally {
-          if (trace && markStartedAt !== undefined) {
-            trace.record("core.markExternallyChangedBuckets", markStartedAt);
-          }
-        }
-        dispatch.nextState = nextState as RootState;
-      }
-
-      const afterReduceHooksStartedAt = trace?.now();
-      try {
-        runDispatchHooks("afterReduce", dispatch);
-      } finally {
-        if (trace && afterReduceHooksStartedAt !== undefined) {
-          trace.record("core.hooks.afterReduce", afterReduceHooksStartedAt);
-        }
-      }
-
-      const beforeCommitHooksStartedAt = trace?.now();
-      try {
-        runDispatchHooks("beforeCommit", dispatch);
-      } finally {
-        if (trace && beforeCommitHooksStartedAt !== undefined) {
-          trace.record("core.hooks.beforeCommit", beforeCommitHooksStartedAt);
-        }
-      }
-
-      const commitStartedAt = trace?.now();
-      try {
-        bucketRuntime.commit(dispatch);
-      } finally {
-        if (trace && commitStartedAt !== undefined) trace.record("core.commit.total", commitStartedAt);
-      }
       state = dispatch.nextState as MachinesState<S>;
       /* v8 ignore next */
       if (IS_DEV) deepFreeze(state);
-      const beforeSubscribersHooksStartedAt = trace?.now();
-      try {
-        runDispatchHooks("beforeSubscribers", dispatch);
-      } finally {
-        if (trace && beforeSubscribersHooksStartedAt !== undefined) {
-          trace.record("core.hooks.beforeSubscribers", beforeSubscribersHooksStartedAt);
-        }
-      }
 
-      const reactionsStartedAt = trace?.now();
-      try {
-        bucketRuntime.runReactions(dispatch.action, dispatch);
-      } finally {
-        if (trace && reactionsStartedAt !== undefined) trace.record("core.reactions.total", reactionsStartedAt);
-      }
-
-      const subscribersStartedAt = trace?.now();
-      try {
-        invokeSubscribers(prevState, state, narrowAction(dispatch.action));
-      } finally {
-        if (trace && subscribersStartedAt !== undefined) trace.record("core.subscribers", subscribersStartedAt);
-      }
+      runPhase("core.hooks.beforeSubscribers", () => runDispatchHooks("beforeSubscribers", dispatch));
+      runPhase("core.reactions.total", () => bucketRuntime.runReactions(dispatch.action, dispatch));
+      runPhase("core.subscribers", () => invokeSubscribers(prevState, state, narrowAction(dispatch.action)));
       return narrowAction(dispatch.action);
     };
 
@@ -466,34 +405,21 @@ export const createMachineManagerFactory = (preset: RuntimePreset): MachineManag
 
       const traceAction = action as { readonly type?: unknown } | null | undefined;
       const trace = createTransitionTraceSession(typeof traceAction?.type === "string" ? traceAction.type : undefined);
+      const runPhase = createTraceSpanRunner(trace);
       const transitionStartedAt = trace?.now();
       let traceStatus: TransitionTraceStatus = "ok";
       try {
-        const assertStartedAt = trace?.now();
-        try {
-          assertUserAction(action);
-        } finally {
-          if (trace && assertStartedAt !== undefined) trace.record("core.assertUserAction", assertStartedAt);
-        }
+        runPhase("core.assertUserAction", () => assertUserAction(action));
         const widened = widenAction(action);
-        const createDispatchStartedAt = trace?.now();
-        let dispatch: StorageDispatchLifecycleContext;
-        try {
-          dispatch = createDispatch(widened, options);
-          attachTransitionTraceSession(dispatch.dispatch, trace);
-        } finally {
-          if (trace && createDispatchStartedAt !== undefined) {
-            trace.record("core.createDispatch", createDispatchStartedAt);
-          }
-        }
+        const dispatch = runPhase("core.createDispatch", () => {
+          const created = createDispatch(widened, options);
+          attachTransitionTraceSession(created.dispatch, trace);
+          return created;
+        });
 
-        const prepareStartedAt = trace?.now();
-        let prepareOutcome: ReturnType<typeof bucketRuntime.prepareAction>;
-        try {
-          prepareOutcome = bucketRuntime.prepareAction(widened, options, dispatch);
-        } finally {
-          if (trace && prepareStartedAt !== undefined) trace.record("core.prepareAction.total", prepareStartedAt);
-        }
+        const prepareOutcome = runPhase("core.prepareAction.total", () =>
+          bucketRuntime.prepareAction(widened, options, dispatch),
+        );
         if (prepareOutcome.type === "drop") return action;
         setCurrentAction(dispatch, prepareOutcome.action);
 
@@ -509,31 +435,9 @@ export const createMachineManagerFactory = (preset: RuntimePreset): MachineManag
         if (dispatch.outcome.type === "drop") return narrowAction(dispatch.outcome.action);
         if (!dispatch.nextCalled) return committed;
 
-        const beforeEffectsHooksStartedAt = trace?.now();
-        try {
-          runDispatchHooks("beforeEffects", dispatch);
-        } finally {
-          if (trace && beforeEffectsHooksStartedAt !== undefined) {
-            trace.record("core.hooks.beforeEffects", beforeEffectsHooksStartedAt);
-          }
-        }
-
-        const effectsStartedAt = trace?.now();
-        try {
-          bucketRuntime.runEffects(dispatch);
-        } finally {
-          if (trace && effectsStartedAt !== undefined) trace.record("core.effects.total", effectsStartedAt);
-        }
-
-        const afterEffectsHooksStartedAt = trace?.now();
-        try {
-          runDispatchHooks("afterEffects", dispatch);
-        } finally {
-          if (trace && afterEffectsHooksStartedAt !== undefined) {
-            trace.record("core.hooks.afterEffects", afterEffectsHooksStartedAt);
-          }
-        }
-
+        runPhase("core.hooks.beforeEffects", () => runDispatchHooks("beforeEffects", dispatch));
+        runPhase("core.effects.total", () => bucketRuntime.runEffects(dispatch));
+        runPhase("core.hooks.afterEffects", () => runDispatchHooks("afterEffects", dispatch));
         return narrowAction(dispatch.action);
       } catch (error) {
         traceStatus = "error";

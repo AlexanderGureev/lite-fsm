@@ -1,6 +1,7 @@
 import { LiteFsmError } from "@lite-fsm/core";
 import type { AnyEvent, ManagerAction } from "@lite-fsm/core";
 
+import { hasOwn } from "../internal";
 import {
   isEntityResourceDescriptor,
   type EntityColumnSchema,
@@ -81,8 +82,6 @@ const terminalStateNameByCode: Readonly<Record<number, string>> = {
   [ENTITY_CANCELLED_STATE_CODE]: "__CANCELLED",
 };
 
-const hasOwn = (value: object, key: PropertyKey): boolean => Object.prototype.hasOwnProperty.call(value, key);
-
 const configError = (templateKey: string, reason: string): LiteFsmError =>
   new LiteFsmError(
     "LITE_FSM_INVALID_STORAGE_CONFIG",
@@ -125,10 +124,10 @@ const getTargetStateCode = (
 
 const stateSlotForCode = (code: number): number => code + 1;
 
-const isTerminalStateCode = (code: number): boolean =>
+export const isTerminalStateCode = (code: number): boolean =>
   code === ENTITY_RESOLVED_STATE_CODE || code === ENTITY_REJECTED_STATE_CODE || code === ENTITY_CANCELLED_STATE_CODE;
 
-const hasDespawnOnStates = (despawnStateMask: Uint8Array): boolean => {
+export const hasDespawnOnStates = (despawnStateMask: Uint8Array): boolean => {
   for (let stateCode = 0; stateCode < despawnStateMask.length; stateCode += 1) {
     if (despawnStateMask[stateCode] === 1) return true;
   }

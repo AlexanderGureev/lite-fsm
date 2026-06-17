@@ -1,6 +1,6 @@
-import { LiteFsmError } from "@lite-fsm/core";
 import type { StorageReduceBucketContext } from "@lite-fsm/core";
 
+import { runtimeError } from "../internal";
 import type { EntityIndex } from "../plugin";
 import { ENTITY_NO_TRANSITION, type EntityTemplateMetadata } from "./compile";
 import type { ColumnarActorStore, EntityActorRowRef, EntityRuntimeState } from "./state";
@@ -12,9 +12,6 @@ export type EntityPublicReducerBatch = {
   readonly indices: readonly EntityIndex[];
   readonly accepted: true;
 };
-
-const runtimeError = (reason: string): LiteFsmError =>
-  new LiteFsmError("LITE_FSM_INVALID_STORAGE_RUNTIME", `[lite-fsm/entities] ${reason}.`);
 
 const transitionCell = (metadata: EntityTemplateMetadata, eventCode: number, stateCode: number): number => {
   const stateSlot = stateCode + 1;

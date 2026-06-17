@@ -1,6 +1,7 @@
 import { defineStorageRuntime, LiteFsmError } from "@lite-fsm/core";
 import type { LiteFsmStorageRuntimeDefinition, StorageCreatePublicInitialStateContext } from "@lite-fsm/core";
 
+import { hasOwn } from "../internal";
 import type { EntityMachineExtension } from "../machine-extension";
 import { validateEntitySchema, type EntityContextSchema, type EntitySpawnSchema } from "../schema";
 import { invokeEntityEffect, resolveEntityEffectInvocations, type EntityEffectInvocation } from "./effects";
@@ -10,7 +11,7 @@ import { createEntityReactRuntime } from "./react";
 import { runEntityReactions } from "./reactions";
 import { dehydrateEntityRuntime, hydrateEntityRuntime, type EntitySnapshot } from "./snapshot";
 import type { EntityTemplateMetadata } from "./compile";
-import { readEntityTransitionTraceSession, recordEntityTracePhase } from "./transitionTrace";
+import { traceDispatchPhase } from "./transitionTrace";
 import {
   asEntityRuntimeState,
   compileEntityTemplate,
@@ -40,8 +41,6 @@ export type EntityStorageDefinition<AppDeps = unknown> = LiteFsmStorageRuntimeDe
 >;
 
 const ENTITY_STORAGE_KIND = "entity";
-
-const hasOwn = (value: object, key: PropertyKey): boolean => Object.prototype.hasOwnProperty.call(value, key);
 
 const invalidEntityTemplate = (machineKey: string, reason: string): LiteFsmError =>
   new LiteFsmError(
@@ -155,56 +154,36 @@ export const entityStorageRuntime: EntityStorageDefinition<unknown> =
       return createEntityPublicInitialState(asEntityRuntimeState(state), template);
     },
     prepareAction({ action, dispatch, state }) {
-      const trace = readEntityTransitionTraceSession(dispatch);
-      const startedAt = trace?.now();
-      try {
+      traceDispatchPhase(dispatch, "entities.prepare.transaction", () => {
         assertPublicEntityLifecycleDispatch(action.type);
         prepareEntityTransaction(dispatch, asEntityRuntimeState(state));
-      } finally {
-        recordEntityTracePhase(trace, "entities.prepare.transaction", startedAt);
-      }
+      });
     },
     reduceBucket(ctx) {
       return reduceEntityBucket(asEntityRuntimeState(ctx.state), ctx);
     },
     commit({ state, dispatch }) {
-      const trace = readEntityTransitionTraceSession(dispatch);
-      const startedAt = trace?.now();
-      try {
+      traceDispatchPhase(dispatch, "entities.commit.restorePublicSlices", () => {
         dispatch.nextState = restorePublicSlices(asEntityRuntimeState(state), dispatch.nextState);
-      } finally {
-        recordEntityTracePhase(trace, "entities.commit.restorePublicSlices", startedAt);
-      }
+      });
     },
     effects: {
       resolveInvocations(ctx) {
-        const trace = readEntityTransitionTraceSession(ctx.dispatch);
-        const startedAt = trace?.now();
-        try {
-          return resolveEntityEffectInvocations(asEntityRuntimeState(ctx.state), ctx);
-        } finally {
-          recordEntityTracePhase(trace, "entities.effects.resolve", startedAt);
-        }
+        return traceDispatchPhase(ctx.dispatch, "entities.effects.resolve", () =>
+          resolveEntityEffectInvocations(asEntityRuntimeState(ctx.state), ctx),
+        );
       },
       invoke(ctx) {
-        const trace = readEntityTransitionTraceSession(ctx.dispatch);
-        const startedAt = trace?.now();
-        try {
+        traceDispatchPhase(ctx.dispatch, "entities.effects.invoke", () => {
           invokeEntityEffect(asEntityRuntimeState(ctx.state), ctx.invocation, ctx);
-        } finally {
-          recordEntityTracePhase(trace, "entities.effects.invoke", startedAt);
-        }
+        });
       },
     },
     reactions: {
       run(ctx) {
-        const trace = readEntityTransitionTraceSession(ctx.dispatch);
-        const startedAt = trace?.now();
-        try {
+        traceDispatchPhase(ctx.dispatch, "entities.reactions.total", () => {
           runEntityReactions(asEntityRuntimeState(ctx.state), ctx);
-        } finally {
-          recordEntityTracePhase(trace, "entities.reactions.total", startedAt);
-        }
+        });
       },
     },
     snapshot: {

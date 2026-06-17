@@ -1,15 +1,16 @@
+"use client";
+
+import { Suspense } from "react";
+import { useSearchParams, type ReadonlyURLSearchParams } from "next/navigation";
+
 import { RtsGame } from "../components/rts-game";
 import { DEFAULT_GAME_CONFIG, normalizeGameConfig } from "../store/config";
 import type { GameConfig } from "../store";
 
-type SearchParams = Record<string, string | string[] | undefined>;
-
-const firstParamValue = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value);
-
-const readNumberParam = (searchParams: SearchParams, keys: readonly string[]) => {
+const readNumberParam = (params: ReadonlyURLSearchParams, keys: readonly string[]) => {
   for (const key of keys) {
-    const value = firstParamValue(searchParams[key]);
-    if (value === undefined) continue;
+    const value = params.get(key);
+    if (value === null) continue;
 
     const parsed = Number(value);
     if (Number.isFinite(parsed)) return parsed;
@@ -18,34 +19,40 @@ const readNumberParam = (searchParams: SearchParams, keys: readonly string[]) =>
   return undefined;
 };
 
-const readStringParam = (searchParams: SearchParams, keys: readonly string[]) => {
+const readStringParam = (params: ReadonlyURLSearchParams, keys: readonly string[]) => {
   for (const key of keys) {
-    const value = firstParamValue(searchParams[key]);
-    if (value !== undefined) return value;
+    const value = params.get(key);
+    if (value !== null) return value;
   }
 
   return undefined;
 };
 
-const readDebugGameConfig = (searchParams: SearchParams): GameConfig => {
-  const playerUnitHp = readNumberParam(searchParams, ["playerUnitHp", "playerHp", "allyHp", "hp"]);
+const readDebugGameConfig = (params: ReadonlyURLSearchParams): GameConfig => {
+  const playerUnitHp = readNumberParam(params, ["playerUnitHp", "playerHp", "allyHp", "hp"]);
 
   return normalizeGameConfig({
-    enemyCount: readNumberParam(searchParams, ["enemyCount", "enemies"]) ?? DEFAULT_GAME_CONFIG.enemyCount,
+    enemyCount: readNumberParam(params, ["enemyCount", "enemies"]) ?? DEFAULT_GAME_CONFIG.enemyCount,
     allyCount:
-      readNumberParam(searchParams, ["allyCount", "allies", "playerUnitCount", "playerUnits"]) ??
+      readNumberParam(params, ["allyCount", "allies", "playerUnitCount", "playerUnits"]) ??
       DEFAULT_GAME_CONFIG.allyCount,
-    seed: readStringParam(searchParams, ["seed"]) ?? "entities-rts-debug",
+    seed: readStringParam(params, ["seed"]) ?? "entities-rts-debug",
     ...(playerUnitHp === undefined ? {} : { playerUnitHp }),
   });
 };
 
-export default async function EntitiesRtsDebugPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  const initialConfig = readDebugGameConfig(await searchParams);
+function EntitiesRtsDebugGame() {
+  const initialConfig = readDebugGameConfig(useSearchParams());
 
+  return <RtsGame autoStart initialConfig={initialConfig} />;
+}
+
+export default function EntitiesRtsDebugPage() {
   return (
     <main className="min-h-[calc(100svh-6.5rem)] bg-canvas-parchment">
-      <RtsGame autoStart initialConfig={initialConfig} />
+      <Suspense fallback={null}>
+        <EntitiesRtsDebugGame />
+      </Suspense>
     </main>
   );
 }

@@ -44,3 +44,21 @@ export const recordEntityTracePhase = (
   if (!trace || startedAt === undefined) return;
   trace.record(key, startedAt);
 };
+
+export const tracePhase = <T>(
+  trace: EntityTransitionTraceSession | undefined,
+  key: string,
+  fn: () => T,
+): T => {
+  if (!trace) return fn();
+
+  const startedAt = trace.now();
+  try {
+    return fn();
+  } finally {
+    trace.record(key, startedAt);
+  }
+};
+
+export const traceDispatchPhase = <T>(carrier: RuntimeCarrier, key: string, fn: () => T): T =>
+  tracePhase(readEntityTransitionTraceSession(carrier), key, fn);

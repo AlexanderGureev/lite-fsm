@@ -1,5 +1,7 @@
 import { LiteFsmError } from "@lite-fsm/core";
 
+import { hasOwn, isPlainObject } from "./internal";
+
 export const descriptorMarker: unique symbol = Symbol.for("lite-fsm.entities.schema-descriptor") as never;
 export const resourceDescriptorMarker: unique symbol = Symbol.for("lite-fsm.entities.resource-descriptor") as never;
 
@@ -118,8 +120,6 @@ const resourceOnlyReservedFieldNames = new Set([
 
 const isReservedSchemaFieldName = (name: string): boolean => reservedStorageFieldNames.has(name);
 
-const hasOwn = (value: object, key: PropertyKey): boolean => Object.prototype.hasOwnProperty.call(value, key);
-
 const createDescriptor = <Kind extends DescriptorKind>(
   kind: Kind,
   opts?: DescriptorOptions<ValueForKind<Kind>>,
@@ -157,9 +157,6 @@ export function resource<Owner, View>(
 
   return Object.freeze(descriptor) as EntityResourceDescriptor<Owner, View, boolean>;
 }
-
-const isPlainObject = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
 
 const isEntityDescriptor = (value: unknown): value is EntitySpawnDescriptor =>
   isPlainObject(value) && Reflect.get(value, descriptorMarker) === true;

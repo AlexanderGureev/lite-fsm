@@ -7,7 +7,7 @@ import { useManager, useStorageHydrationPreview } from "@lite-fsm/react";
 
 import type { EntityId } from "../plugin";
 import type { EntityActorKey, EntityContextFor, EntityStateFor } from "../runtime/access";
-import type { EntityListOptions, EntityRowSnapshot } from "../runtime/react";
+import type { EntityListOptions, EntityReadMode, EntityRowSnapshot } from "../runtime/react";
 import { getEntityRuntimeState } from "../runtime/state";
 
 export type {
@@ -27,6 +27,17 @@ const ENTITY_STORAGE_KIND = "entity";
 const COMMITTED_ENTITY_READ_MODE = { mode: "commit" } as const;
 
 const subscribeNoop = () => () => {};
+
+const clientReadMode = (hasPreview: boolean, snapshot: unknown): EntityReadMode =>
+  hasPreview ? { mode: "preview", snapshot } : COMMITTED_ENTITY_READ_MODE;
+
+const serverReadMode = (
+  hasServerPreview: boolean,
+  serverSnapshot: unknown,
+  hasPreview: boolean,
+  snapshot: unknown,
+): EntityReadMode =>
+  hasServerPreview ? { mode: "preview", snapshot: serverSnapshot } : clientReadMode(hasPreview, snapshot);
 
 const getEntityReactRuntime = (manager: EntityReactManager) => {
   const accessProvider = manager.entities;
@@ -66,12 +77,7 @@ export function useEntitySnapshot(
     [entityId, manager],
   );
   const getSnapshot = React.useCallback(
-    () =>
-      runtime.readRow(
-        templateKey,
-        entityId,
-        preview.hasPreview ? { mode: "preview", snapshot: preview.preview } : COMMITTED_ENTITY_READ_MODE,
-      ),
+    () => runtime.readRow(templateKey, entityId, clientReadMode(preview.hasPreview, preview.preview)),
     [entityId, preview.hasPreview, preview.preview, runtime, templateKey],
   );
   const getServerSnapshot = React.useCallback(
@@ -79,11 +85,7 @@ export function useEntitySnapshot(
       runtime.readRow(
         templateKey,
         entityId,
-        preview.hasServerPreview
-          ? { mode: "preview", snapshot: preview.serverPreview }
-          : preview.hasPreview
-            ? { mode: "preview", snapshot: preview.preview }
-            : COMMITTED_ENTITY_READ_MODE,
+        serverReadMode(preview.hasServerPreview, preview.serverPreview, preview.hasPreview, preview.preview),
       ),
     [
       entityId,
@@ -112,12 +114,7 @@ export function useEntityCount(templateKey: string, options?: EntityListOptions)
   const preview = useStorageHydrationPreview(ENTITY_STORAGE_KIND);
   const subscribe = React.useMemo(() => createSubscribe(manager), [manager]);
   const getSnapshot = React.useCallback(
-    () =>
-      runtime.readCount(
-        templateKey,
-        options,
-        preview.hasPreview ? { mode: "preview", snapshot: preview.preview } : COMMITTED_ENTITY_READ_MODE,
-      ),
+    () => runtime.readCount(templateKey, options, clientReadMode(preview.hasPreview, preview.preview)),
     [options, preview.hasPreview, preview.preview, runtime, templateKey],
   );
   const getServerSnapshot = React.useCallback(
@@ -125,11 +122,7 @@ export function useEntityCount(templateKey: string, options?: EntityListOptions)
       runtime.readCount(
         templateKey,
         options,
-        preview.hasServerPreview
-          ? { mode: "preview", snapshot: preview.serverPreview }
-          : preview.hasPreview
-            ? { mode: "preview", snapshot: preview.preview }
-            : COMMITTED_ENTITY_READ_MODE,
+        serverReadMode(preview.hasServerPreview, preview.serverPreview, preview.hasPreview, preview.preview),
       ),
     [options, preview.hasPreview, preview.hasServerPreview, preview.preview, preview.serverPreview, runtime, templateKey],
   );
@@ -148,12 +141,7 @@ export function useEntityList(templateKey: string, options?: EntityListOptions):
   const preview = useStorageHydrationPreview(ENTITY_STORAGE_KIND);
   const subscribe = React.useMemo(() => createSubscribe(manager), [manager]);
   const getSnapshot = React.useCallback(
-    () =>
-      runtime.readList(
-        templateKey,
-        options,
-        preview.hasPreview ? { mode: "preview", snapshot: preview.preview } : COMMITTED_ENTITY_READ_MODE,
-      ),
+    () => runtime.readList(templateKey, options, clientReadMode(preview.hasPreview, preview.preview)),
     [options, preview.hasPreview, preview.preview, runtime, templateKey],
   );
   const getServerSnapshot = React.useCallback(
@@ -161,11 +149,7 @@ export function useEntityList(templateKey: string, options?: EntityListOptions):
       runtime.readList(
         templateKey,
         options,
-        preview.hasServerPreview
-          ? { mode: "preview", snapshot: preview.serverPreview }
-          : preview.hasPreview
-            ? { mode: "preview", snapshot: preview.preview }
-            : COMMITTED_ENTITY_READ_MODE,
+        serverReadMode(preview.hasServerPreview, preview.serverPreview, preview.hasPreview, preview.preview),
       ),
     [options, preview.hasPreview, preview.hasServerPreview, preview.preview, preview.serverPreview, runtime, templateKey],
   );

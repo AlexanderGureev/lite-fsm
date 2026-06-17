@@ -95,6 +95,41 @@ export const createTransitionTraceSession = (actionType: string | undefined): Tr
   };
 };
 
+// Оборачивает шаг dispatch-цикла измерением фазы. Без session вызывает шаг напрямую,
+// поэтому на горячем пути без коллектора нет ни now(), ни лишних веток. record() в finally
+// фиксирует фазу даже если шаг бросает — статус trace проставляется на уровне transition().
+export type TraceSpanRunner = <T>(key: string, run: () => T) => T;
+
+export const createTraceSpanRunner = (session: TransitionTraceSession | undefined): TraceSpanRunner => {
+  if (!session) return (_key, run) => run();
+
+  return (key, run) => {
+    const startedAt = session.now();
+    try {
+      return run();
+    } finally {
+      session.record(key, startedAt);
+    }
+  };
+};
+
+// Вариант createTraceSpanRunner для per-bucket фаз: ключ строится как core.bucket.<phase>.<kind>,
+// runtimeKind также пишется в metadata фазы. Без session — прямой вызов без измерения.
+export type BucketTraceRunner = <T>(phase: string, runtimeKind: string, run: () => T) => T;
+
+export const createBucketTraceRunner = (session: TransitionTraceSession | undefined): BucketTraceRunner => {
+  if (!session) return (_phase, _runtimeKind, run) => run();
+
+  return (phase, runtimeKind, run) => {
+    const startedAt = session.now();
+    try {
+      return run();
+    } finally {
+      session.record(`core.bucket.${phase}.${runtimeKind}`, startedAt, { runtimeKind });
+    }
+  };
+};
+
 export const attachTransitionTraceSession = (
   dispatch: StorageDispatchContext,
   session: TransitionTraceSession | undefined,

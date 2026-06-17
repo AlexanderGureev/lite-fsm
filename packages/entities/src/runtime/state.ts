@@ -1,104 +1,65 @@
 import { LiteFsmError } from "@lite-fsm/core";
 import type { MachineStore, StorageManagerContext, StorageTemplate } from "@lite-fsm/core";
 
-import type { EntityDescriptor } from "../schema";
-import { createEntityAccess, rebindEntityStoreView, type EntityAccess } from "./access";
-import {
-  compileEntityRuntimeMetadata,
-  ENTITY_INIT_STATE_CODE,
-  type EntityTemplateMetadata,
-} from "./compile";
-import type { EntityReactRuntime } from "./react";
+import { runtimeError } from "../internal";
 import type { EntityIndex } from "../plugin";
+import {
+  assignActorSelfFields,
+  createActorSelf,
+  createEntityAccess,
+  rebindEntityStoreView,
+  type EntityAccess,
+} from "./access";
+import { compileEntityRuntimeMetadata, ENTITY_INIT_STATE_CODE, type EntityTemplateMetadata } from "./compile";
+import { createEmptyColumn, growColumn, growInt16, growInt32, growUint8, growUint32 } from "./columns";
+import { createScratchByState, refreshActorPublicSlice } from "./runtime-index";
+import type {
+  ColumnarActorStore,
+  EntityActorRowRef,
+  EntityColumn,
+  EntityReducerSelfCache,
+  EntityRuntimeState,
+  EntityStore,
+} from "./store-types";
 
-type EntityPublicStateSlice = {
-  readonly storage: "entity";
-  readonly version: number;
-  readonly count: number;
-  readonly capacity: number;
-};
-
-export type EntityColumn = Float32Array | Int16Array | Int32Array | Uint8Array | string[];
-
-type EntityColumnDescriptor = EntityDescriptor;
-
-export type EntityStore = {
-  count: number;
-  capacity: number;
-  ids: string[];
-  indexById: Record<string, EntityIndex>;
-  alive: Uint8Array;
-  generation: Uint32Array;
-  groupTagByIndex: string[];
-  entitiesByGroupTag: Record<string, EntityIndex[]>;
-  groupTagPosition: Int32Array;
-  freeList: EntityIndex[];
-  version: number;
-};
-
-export type EntityActorRowRef = {
-  readonly store: ColumnarActorStore;
-  readonly entity: EntityIndex;
-  readonly groupTag: string;
-  entityRowsPosition: number;
-  groupRowsPosition: number;
-};
-
-export type ColumnarActorStore = {
-  readonly templateKey: string;
-  readonly metadata: EntityTemplateMetadata;
-  capacity: number;
-  count: number;
-  version: number;
-  presence: Uint8Array;
-  stateCode: Int16Array;
-  prevStateCode: Int16Array;
-  rowVersion: Uint32Array;
-  stateBuckets: EntityIndex[][];
-  statePosition: Int32Array;
-  acceptedScratch: EntityIndex[];
-  pendingPrevStateCodeSync: EntityIndex[];
-  pendingPrevStateCodeSyncMark: Uint32Array;
-  pendingPrevStateCodeSyncToken: number;
-  routingScratchVersion: number;
-  acceptStateBucketsByEventCode: EntityIndex[][][];
-  columns: Record<string, EntityColumn>;
-  resources: Record<string, unknown>;
-  resourceViews: Record<string, unknown>;
-  reducerSelf: EntityReducerSelfCache;
-  publicSlice: EntityPublicStateSlice;
-};
-
-export type EntityReducerSelfCache = Record<string, unknown> & {
-  indices: readonly EntityIndex[];
-  readonly states: EntityTemplateMetadata["stateCodeByName"];
-  presence: Uint8Array;
-  stateCode: Int16Array;
-  prevStateCode: Int16Array;
-  rowVersion: Uint32Array;
-  has(entity: EntityIndex): boolean;
-  entityId(entity: EntityIndex): string;
-};
-
-export type EntityRuntimeState = {
-  readonly entityStore: EntityStore;
-  readonly actorStores: Record<string, ColumnarActorStore>;
-  readonly eventCodeByType: Readonly<Record<string, number>>;
-  readonly eventTypesByCode: readonly string[];
-  readonly templatesByEventCode: readonly (readonly ColumnarActorStore[])[];
-  actorRowsByEntity: EntityActorRowRef[][];
-  actorRowsByGroupTag: Record<string, EntityActorRowRef[]>;
-  routingScratchVersion: number;
-  readonly access: EntityAccess<MachineStore>;
-  react?: EntityReactRuntime;
-};
+// Entrypoint модуля `state`: владелец жизненного цикла EntityRuntimeState (создание,
+// реестр по менеджеру, рост ёмкости, привязка reducer self). Низкоуровневые слои
+// вынесены в отдельные модули и реэкспортируются ниже, чтобы остальной рантайм и тесты
+// импортировали единый `./state`.
+export type {
+  ColumnarActorStore,
+  EntityActorRowRef,
+  EntityColumn,
+  EntityReducerSelfCache,
+  EntityRuntimeState,
+  EntityStore,
+} from "./store-types";
+export { getInitialColumnValue, writeInitialColumnValues } from "./columns";
+export {
+  addActorRowOwnership,
+  addEntityToGroupBucket,
+  clearPendingPrevStateCodeSync,
+  createPublicInitialState,
+  moveActorStateBucket,
+  rebuildActorAcceptStateBuckets,
+  rebuildEntityRuntimeIndexes,
+  refreshActorPublicSlice,
+  removeActorRowsForStore,
+  removeEntityRecords,
+  restorePublicSlices,
+  schedulePresentPrevStateCodeSync,
+  schedulePrevStateCodeSync,
+  syncPendingPrevStateCode,
+} from "./runtime-index";
+export {
+  compileEntityTemplate,
+  ENTITY_INIT_STATE,
+  ENTITY_INIT_STATE_CODE,
+  getEntityStateCode,
+  getEntityStateName,
+} from "./compile";
 
 const runtimeByManager = new WeakMap<object, EntityRuntimeState>();
-
-export { compileEntityTemplate, ENTITY_INIT_STATE, ENTITY_INIT_STATE_CODE, getEntityStateCode, getEntityStateName } from "./compile";
-
-const runtimeError = (reason: string): LiteFsmError =>
-  new LiteFsmError("LITE_FSM_INVALID_STORAGE_RUNTIME", `[lite-fsm/entities] ${reason}.`);
 
 const resourceConfigError = (templateKey: string, resourceKey: string, reason: string): LiteFsmError =>
   new LiteFsmError(
@@ -108,98 +69,9 @@ const resourceConfigError = (templateKey: string, resourceKey: string, reason: s
 
 const isPromise = (value: unknown): value is Promise<unknown> => value instanceof Promise;
 
-const emptyColumnFactories = {
-  f32: () => new Float32Array(0),
-  i16: () => new Int16Array(0),
-  i32: () => new Int32Array(0),
-  u8: () => new Uint8Array(0),
-  string: () => [] as string[],
-} as const satisfies Record<EntityColumnDescriptor["kind"], () => EntityColumn>;
-
-const createEmptyColumn = (descriptor: EntityColumnDescriptor): EntityColumn =>
-  emptyColumnFactories[descriptor.kind]();
-
-const growColumn = (column: EntityColumn, descriptor: EntityColumnDescriptor, capacity: number): EntityColumn => {
-  if (column.length >= capacity) return column;
-
-  if (descriptor.kind === "string") {
-    const next = (column as string[]).slice();
-    next.length = capacity;
-    for (let index = column.length; index < capacity; index += 1) next[index] = "";
-    return next;
-  }
-
-  const next = emptyColumnFactories[descriptor.kind]() as Float32Array | Int16Array | Int32Array | Uint8Array;
-  const grown = new (next.constructor as { new (length: number): typeof next })(capacity);
-  grown.set(column as typeof next);
-  return grown;
-};
-
-const growInt16 = (value: Int16Array, capacity: number, fillValue = 0): Int16Array => {
-  if (value.length >= capacity) return value;
-
-  const next = new Int16Array(capacity);
-  next.fill(fillValue);
-  next.set(value);
-  return next;
-};
-
-const growInt32 = (value: Int32Array, capacity: number, fillValue = 0): Int32Array => {
-  if (value.length >= capacity) return value;
-
-  const next = new Int32Array(capacity);
-  next.fill(fillValue);
-  next.set(value);
-  return next;
-};
-
-const growUint8 = (value: Uint8Array, capacity: number): Uint8Array => {
-  if (value.length >= capacity) return value;
-
-  const next = new Uint8Array(capacity);
-  next.set(value);
-  return next;
-};
-
-const growUint32 = (value: Uint32Array, capacity: number): Uint32Array => {
-  if (value.length >= capacity) return value;
-
-  const next = new Uint32Array(capacity);
-  next.set(value);
-  return next;
-};
-
-const createScratchByState = (states: readonly string[]): EntityIndex[][] => states.map(() => [] as EntityIndex[]);
-
-const createEntityStore = (): EntityStore => ({
-  count: 0,
-  capacity: 0,
-  ids: [],
-  indexById: Object.create(null) as Record<string, EntityIndex>,
-  alive: new Uint8Array(0),
-  generation: new Uint32Array(0),
-  groupTagByIndex: [],
-  entitiesByGroupTag: Object.create(null) as Record<string, EntityIndex[]>,
-  groupTagPosition: new Int32Array(0),
-  freeList: [],
-  version: 0,
-});
-
-const createPublicSlice = (store: Pick<ColumnarActorStore, "capacity" | "count" | "version">): EntityPublicStateSlice => ({
-  storage: "entity",
-  version: store.version,
-  count: store.count,
-  capacity: store.capacity,
-});
-
-const createActorReducerSelf = (entityStore: EntityStore, store: ColumnarActorStore): EntityReducerSelfCache => {
-  const self: EntityReducerSelfCache = {
+const createActorReducerSelf = (entityStore: EntityStore, store: ColumnarActorStore): EntityReducerSelfCache =>
+  createActorSelf(store, {
     indices: [],
-    states: store.metadata.stateCodeByName,
-    presence: store.presence,
-    stateCode: store.stateCode,
-    prevStateCode: store.prevStateCode,
-    rowVersion: store.rowVersion,
     has(entity: EntityIndex) {
       return store.presence[entity] === 1;
     },
@@ -208,31 +80,10 @@ const createActorReducerSelf = (entityStore: EntityStore, store: ColumnarActorSt
       if (id !== undefined) return id;
       throw runtimeError(`unknown entity index ${entity}`);
     },
-  };
-
-  for (const name of Object.keys(store.metadata.initialContext)) {
-    self[name] = store.columns[name];
-  }
-  for (const [name, resource] of Object.entries(store.resources)) {
-    self[name] = resource;
-  }
-
-  return self;
-};
+  }) as EntityReducerSelfCache;
 
 export const rebindActorReducerSelf = (store: ColumnarActorStore): void => {
-  const { reducerSelf } = store;
-  reducerSelf.presence = store.presence;
-  reducerSelf.stateCode = store.stateCode;
-  reducerSelf.prevStateCode = store.prevStateCode;
-  reducerSelf.rowVersion = store.rowVersion;
-
-  for (const name of Object.keys(store.metadata.initialContext)) {
-    reducerSelf[name] = store.columns[name];
-  }
-  for (const [name, resource] of Object.entries(store.resources)) {
-    reducerSelf[name] = resource;
-  }
+  assignActorSelfFields(store.reducerSelf, store);
 };
 
 export const getActorReducerSelf = (
@@ -279,6 +130,20 @@ const createResourceValues = (
   return { resources, resourceViews };
 };
 
+const createEntityStore = (): EntityStore => ({
+  count: 0,
+  capacity: 0,
+  ids: [],
+  indexById: Object.create(null) as Record<string, EntityIndex>,
+  alive: new Uint8Array(0),
+  generation: new Uint32Array(0),
+  groupTagByIndex: [],
+  entitiesByGroupTag: Object.create(null) as Record<string, EntityIndex[]>,
+  groupTagPosition: new Int32Array(0),
+  freeList: [],
+  version: 0,
+});
+
 const createColumnarActorStore = (metadata: EntityTemplateMetadata, entityStore: EntityStore): ColumnarActorStore => {
   const columns = Object.fromEntries(
     Object.entries(metadata.initialContext).map(([name, descriptor]) => [
@@ -316,7 +181,7 @@ const createColumnarActorStore = (metadata: EntityTemplateMetadata, entityStore:
   store.acceptStateBucketsByEventCode = metadata.acceptStateCodesByEventCode.map((stateCodes) =>
     stateCodes.flatMap((stateCode) => (stateCode >= 0 ? [store.stateBuckets[stateCode]] : [])),
   );
-  store.publicSlice = createPublicSlice(store);
+  refreshActorPublicSlice(store);
   return store;
 };
 
@@ -391,319 +256,4 @@ export const ensureActorCapacity = (store: ColumnarActorStore, capacity: number)
   }
   rebindActorReducerSelf(store);
   rebindEntityStoreView(store);
-};
-
-export const getInitialColumnValue = (descriptor: EntityColumnDescriptor): number | string => {
-  if (descriptor.default !== undefined) return descriptor.default;
-  return descriptor.kind === "string" ? "" : 0;
-};
-
-export const writeInitialColumnValues = (store: ColumnarActorStore, entity: EntityIndex): void => {
-  for (const [name, descriptor] of Object.entries(store.metadata.initialContext)) {
-    const column = store.columns[name];
-    (column as Record<number, number | string>)[entity] = getInitialColumnValue(descriptor);
-  }
-};
-
-export const refreshActorPublicSlice = (store: ColumnarActorStore): void => {
-  store.publicSlice = createPublicSlice(store);
-};
-
-export const clearPendingPrevStateCodeSync = (store: ColumnarActorStore): void => {
-  store.pendingPrevStateCodeSync.length = 0;
-  store.pendingPrevStateCodeSyncToken += 1;
-  /* v8 ignore next 4 -- one actor store would need more than four billion dirty-row sync epochs. */
-  if (store.pendingPrevStateCodeSyncToken >= 0xffffffff) {
-    store.pendingPrevStateCodeSyncMark.fill(0);
-    store.pendingPrevStateCodeSyncToken = 1;
-  }
-};
-
-export const schedulePrevStateCodeSync = (
-  store: ColumnarActorStore,
-  indices: readonly EntityIndex[],
-): void => {
-  const pending = store.pendingPrevStateCodeSync;
-  const marks = store.pendingPrevStateCodeSyncMark;
-  const token = store.pendingPrevStateCodeSyncToken;
-
-  for (let index = 0; index < indices.length; index += 1) {
-    const entity = indices[index];
-    if (marks[entity] === token) continue;
-    marks[entity] = token;
-    pending.push(entity);
-  }
-};
-
-export const schedulePresentPrevStateCodeSync = (store: ColumnarActorStore): void => {
-  const pending = store.pendingPrevStateCodeSync;
-  const marks = store.pendingPrevStateCodeSyncMark;
-  const token = store.pendingPrevStateCodeSyncToken;
-  const presence = store.presence;
-
-  for (let entity = 0; entity < presence.length; entity += 1) {
-    if (presence[entity] !== 1 || marks[entity] === token) continue;
-    marks[entity] = token;
-    pending.push(entity as EntityIndex);
-  }
-};
-
-export const syncPendingPrevStateCode = (store: ColumnarActorStore): void => {
-  const pending = store.pendingPrevStateCodeSync;
-  if (pending.length === 0) return;
-
-  const presence = store.presence;
-  const previousStateCodeByEntity = store.prevStateCode;
-  const stateCodeByEntity = store.stateCode;
-  for (let index = 0; index < pending.length; index += 1) {
-    const entity = pending[index];
-    if (presence[entity] === 1) previousStateCodeByEntity[entity] = stateCodeByEntity[entity];
-  }
-  clearPendingPrevStateCodeSync(store);
-};
-
-export const rebuildActorAcceptStateBuckets = (store: ColumnarActorStore): void => {
-  store.acceptStateBucketsByEventCode = store.metadata.acceptStateCodesByEventCode.map((stateCodes) =>
-    stateCodes.flatMap((stateCode) => (stateCode >= 0 ? [store.stateBuckets[stateCode]] : [])),
-  );
-};
-
-export const addEntityToGroupBucket = (store: EntityStore, entity: EntityIndex, groupTag: string): void => {
-  const bucket = store.entitiesByGroupTag[groupTag] ?? [];
-  if (bucket.length === 0) store.entitiesByGroupTag[groupTag] = bucket;
-  store.groupTagPosition[entity] = bucket.length;
-  bucket.push(entity);
-};
-
-export const addActorRowOwnership = (
-  runtime: EntityRuntimeState,
-  store: ColumnarActorStore,
-  entity: EntityIndex,
-  groupTag: string,
-): void => {
-  const entityRows = runtime.actorRowsByEntity[entity] ?? [];
-  if (entityRows.length === 0) runtime.actorRowsByEntity[entity] = entityRows;
-
-  const groupRows = runtime.actorRowsByGroupTag[groupTag] ?? [];
-  if (groupRows.length === 0) runtime.actorRowsByGroupTag[groupTag] = groupRows;
-
-  const row = {
-    store,
-    entity,
-    groupTag,
-    entityRowsPosition: entityRows.length,
-    groupRowsPosition: groupRows.length,
-  };
-  entityRows.push(row);
-  groupRows.push(row);
-};
-
-const swapRemoveActorRowRef = (
-  rows: EntityActorRowRef[] | undefined,
-  row: EntityActorRowRef,
-  position: number,
-  updateMovedPosition: (moved: EntityActorRowRef, position: number) => void,
-): boolean => {
-  /* v8 ignore next -- defensive ownership invariant: live rows are stored in both ownership indexes. */
-  if (!rows || position < 0 || rows[position] !== row) return false;
-
-  const last = rows.pop();
-  if (last !== undefined && last !== row) {
-    rows[position] = last;
-    updateMovedPosition(last, position);
-  }
-
-  return true;
-};
-
-const removeActorRowOwnership = (runtime: EntityRuntimeState, row: EntityActorRowRef): void => {
-  const entityRows = runtime.actorRowsByEntity[row.entity];
-  swapRemoveActorRowRef(entityRows, row, row.entityRowsPosition, (moved, position) => {
-    moved.entityRowsPosition = position;
-  });
-  row.entityRowsPosition = -1;
-
-  const groupRows = runtime.actorRowsByGroupTag[row.groupTag];
-  swapRemoveActorRowRef(groupRows, row, row.groupRowsPosition, (moved, position) => {
-    moved.groupRowsPosition = position;
-  });
-  row.groupRowsPosition = -1;
-  if (groupRows && groupRows.length === 0) delete runtime.actorRowsByGroupTag[row.groupTag];
-};
-
-const removeActorFromStateBucket = (store: ColumnarActorStore, entity: EntityIndex, stateCode: number): void => {
-  if (stateCode < 0) return;
-  const bucket = store.stateBuckets[stateCode];
-  const position = store.statePosition[entity];
-  if (!bucket || position < 0) return;
-
-  const last = bucket.pop();
-  if (last !== undefined && last !== entity) {
-    bucket[position] = last;
-    store.statePosition[last] = position;
-  }
-  store.statePosition[entity] = -1;
-};
-
-const addActorToStateBucket = (store: ColumnarActorStore, entity: EntityIndex, stateCode: number): void => {
-  if (stateCode < 0) return;
-  const bucket = store.stateBuckets[stateCode];
-  if (!bucket) return;
-
-  store.statePosition[entity] = bucket.length;
-  bucket.push(entity);
-};
-
-export const moveActorStateBucket = (
-  store: ColumnarActorStore,
-  entity: EntityIndex,
-  previousCode: number,
-  nextCode: number,
-): void => {
-  if (previousCode === nextCode) return;
-
-  removeActorFromStateBucket(store, entity, previousCode);
-  addActorToStateBucket(store, entity, nextCode);
-};
-
-const removeEntityFromGroupBucket = (store: EntityStore, entity: EntityIndex): void => {
-  const groupTag = store.groupTagByIndex[entity];
-  const bucket = store.entitiesByGroupTag[groupTag];
-  const position = store.groupTagPosition[entity];
-  /* v8 ignore next -- defensive group index invariant for live entity cleanup. */
-  if (!bucket || position < 0) return;
-
-  const last = bucket.pop();
-  if (last !== undefined && last !== entity) {
-    bucket[position] = last;
-    store.groupTagPosition[last] = position;
-  }
-  if (bucket.length === 0) delete store.entitiesByGroupTag[groupTag];
-  store.groupTagPosition[entity] = -1;
-};
-
-export const removeActorRowsForStore = (
-  runtime: EntityRuntimeState,
-  store: ColumnarActorStore,
-  rows: readonly EntityActorRowRef[],
-): number => {
-  let removed = 0;
-
-  for (const row of rows) {
-    const entity = row.entity;
-    if (row.store !== store || store.presence[entity] !== 1) continue;
-
-    removeActorFromStateBucket(store, entity, store.stateCode[entity]);
-    removeActorRowOwnership(runtime, row);
-    store.presence[entity] = 0;
-    store.stateCode[entity] = ENTITY_INIT_STATE_CODE;
-    store.prevStateCode[entity] = ENTITY_INIT_STATE_CODE;
-    store.rowVersion[entity] = 0;
-    removed += 1;
-  }
-
-  if (removed === 0) return 0;
-
-  store.count -= removed;
-  store.version += 1;
-  refreshActorPublicSlice(store);
-  return removed;
-};
-
-export const removeEntityRecords = (runtime: EntityRuntimeState, entities: readonly EntityIndex[]): number => {
-  const store = runtime.entityStore;
-  let removed = 0;
-
-  for (const entity of entities) {
-    if (store.alive[entity] !== 1) continue;
-
-    const id = store.ids[entity];
-    removeEntityFromGroupBucket(store, entity);
-    delete store.indexById[id];
-    store.ids[entity] = "";
-    store.alive[entity] = 0;
-    store.groupTagByIndex[entity] = "";
-    store.freeList.push(entity);
-    runtime.actorRowsByEntity[entity] = [];
-    removed += 1;
-  }
-
-  if (removed === 0) return 0;
-
-  store.count -= removed;
-  store.version += 1;
-  return removed;
-};
-
-export const createPublicInitialState = (
-  runtime: EntityRuntimeState,
-  template: StorageTemplate<EntityTemplateMetadata>,
-): EntityPublicStateSlice => {
-  const store = runtime.actorStores[template.key];
-  /* v8 ignore next 4 -- compile/runtime bucket invariant: public state is requested only for compiled entity templates. */
-  if (!store) {
-    throw new Error(`[lite-fsm/entities] missing actor store for entity template '${template.key}'.`);
-  }
-
-  store.publicSlice = createPublicSlice(store);
-  return store.publicSlice;
-};
-
-export const restorePublicSlices = (
-  runtime: EntityRuntimeState,
-  nextState: Record<string, unknown>,
-): Record<string, unknown> => {
-  let restored = nextState;
-
-  for (const store of Object.values(runtime.actorStores)) {
-    if (restored[store.templateKey] === store.publicSlice) continue;
-    if (restored === nextState) restored = { ...nextState };
-    restored[store.templateKey] = store.publicSlice;
-  }
-
-  return restored;
-};
-
-export const rebuildEntityRuntimeIndexes = (runtime: EntityRuntimeState): void => {
-  const entityStore = runtime.entityStore;
-  entityStore.indexById = Object.create(null) as Record<string, EntityIndex>;
-  entityStore.entitiesByGroupTag = Object.create(null) as Record<string, EntityIndex[]>;
-  entityStore.groupTagPosition = new Int32Array(entityStore.capacity);
-  entityStore.groupTagPosition.fill(-1);
-  entityStore.count = 0;
-
-  runtime.actorRowsByEntity = Array.from({ length: entityStore.capacity }, () => [] as EntityActorRowRef[]);
-  runtime.actorRowsByGroupTag = Object.create(null) as Record<string, EntityActorRowRef[]>;
-  runtime.routingScratchVersion = 0;
-
-  for (const store of Object.values(runtime.actorStores)) {
-    store.count = 0;
-    store.stateBuckets = createScratchByState(store.metadata.publicStates);
-    store.statePosition = new Int32Array(store.capacity);
-    store.statePosition.fill(-1);
-    store.acceptedScratch = [];
-    store.routingScratchVersion = 0;
-    rebuildActorAcceptStateBuckets(store);
-  }
-
-  for (let entity = 0; entity < entityStore.capacity; entity += 1) {
-    if (entityStore.alive[entity] !== 1) continue;
-
-    const index = entity as EntityIndex;
-    entityStore.indexById[entityStore.ids[entity]] = index;
-    addEntityToGroupBucket(entityStore, index, entityStore.groupTagByIndex[entity]);
-    entityStore.count += 1;
-  }
-
-  for (const store of Object.values(runtime.actorStores)) {
-    for (let entity = 0; entity < store.capacity; entity += 1) {
-      if (store.presence[entity] !== 1) continue;
-
-      const index = entity as EntityIndex;
-      addActorToStateBucket(store, index, store.stateCode[entity]);
-      addActorRowOwnership(runtime, store, index, entityStore.groupTagByIndex[entity]);
-      store.count += 1;
-    }
-    refreshActorPublicSlice(store);
-  }
 };

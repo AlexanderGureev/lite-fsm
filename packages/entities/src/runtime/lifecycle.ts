@@ -1,5 +1,7 @@
 import { LiteFsmError } from "@lite-fsm/core";
 
+import { hasOwn } from "../internal";
+
 export type LiteFsmEntityLifecycleEvents =
   | { readonly type: "ENTITY_SPAWNED" }
   | { readonly type: "ENTITY_DESPAWNED" };
@@ -9,7 +11,6 @@ export const ENTITY_DESPAWNED: LiteFsmEntityLifecycleEvents["type"] = "ENTITY_DE
 
 const lifecycleEventTypes = new Set<string>([ENTITY_SPAWNED, ENTITY_DESPAWNED]);
 
-const hasOwn = (value: object, key: PropertyKey): boolean => Object.prototype.hasOwnProperty.call(value, key);
 const isObjectMap = (value: unknown): value is Record<string, unknown> =>
   Object.prototype.toString.call(value) === "[object Object]";
 

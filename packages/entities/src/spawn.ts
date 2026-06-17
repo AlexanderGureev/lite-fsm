@@ -1,6 +1,7 @@
 import { LiteFsmError } from "@lite-fsm/core";
 import type { AnyEvent, MachineStore } from "@lite-fsm/core";
 
+import { hasOwn, isPlainObject } from "./internal";
 import type { EntitySpawnPayload, EntitySpawnSchema } from "./schema";
 import { isEntityLifecycleEventType } from "./runtime/lifecycle";
 
@@ -76,11 +77,6 @@ export type EntitySpawnEvents<Spawn> =
 export type EntitySpawnPluginEvents<Spawn> = SpawnEventsFrom<EntitySpawnEvents<Spawn>>;
 
 export type AnyEntitySpawnDescriptor = EntitySpawnDescriptor<any, any>;
-
-const hasOwn = (value: object, key: PropertyKey): boolean => Object.prototype.hasOwnProperty.call(value, key);
-
-const isPlainObject = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
 
 const spawnConfigError = (reason: string): LiteFsmError =>
   new LiteFsmError("LITE_FSM_INVALID_OPTIONS", `[lite-fsm/entities] invalid entity spawn config: ${reason}.`);
