@@ -17,6 +17,7 @@ import { applyDefaultTransitions, getAcceptedIndices } from "./reduce-transition
 import {
   getActorReducerSelf,
   moveActorStateBucket,
+  moveActorStateBucketBatch,
   refreshActorPublicSlice,
   schedulePrevStateCodeSync,
   type ColumnarActorStore,
@@ -168,6 +169,7 @@ export const reduceAcceptedBatch = (
         batch.store,
         accepted,
         getPostProcessingFlags(batch.store, plan, options),
+        plan,
         previousStateCodeForAccepted,
         knownValidStateCodeForAccepted,
       );
@@ -202,6 +204,21 @@ export const reduceAcceptedBatch = (
 
     const updateStateBucketsStartedAt = trace?.now();
     try {
+      if (postProcessing.bulkStateTransition) {
+        const moved = moveActorStateBucketBatch(
+          batch.store,
+          postProcessing.bulkStateTransition.previousStateCode,
+          postProcessing.bulkStateTransition.stateCode,
+          postProcessing.bulkStateTransition.indices,
+        );
+        if (!moved) {
+          updateActorStateBuckets(
+            batch.store,
+            postProcessing.bulkStateTransition.indices,
+            postProcessing.bulkStateTransition.previousStateCode,
+          );
+        }
+      }
       if (postProcessing.dirtyRows) {
         updateActorStateBuckets(batch.store, postProcessing.dirtyRows, postProcessing.dirtyRowsPreviousStateCode);
         schedulePrevStateCodeSync(batch.store, postProcessing.dirtyRows);

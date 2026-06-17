@@ -41,6 +41,7 @@ export {
   clearPendingPrevStateCodeSync,
   createPublicInitialState,
   moveActorStateBucket,
+  moveActorStateBucketBatch,
   rebuildActorAcceptStateBuckets,
   rebuildEntityRuntimeIndexes,
   refreshActorPublicSlice,
@@ -49,6 +50,7 @@ export {
   restorePublicSlices,
   schedulePresentPrevStateCodeSync,
   schedulePrevStateCodeSync,
+  schedulePrevStateCodeSyncRow,
   syncPendingPrevStateCode,
 } from "./runtime-index";
 export {

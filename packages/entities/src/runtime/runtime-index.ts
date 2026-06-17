@@ -38,16 +38,18 @@ export const schedulePrevStateCodeSync = (
   store: ColumnarActorStore,
   indices: readonly EntityIndex[],
 ): void => {
-  const pending = store.pendingPrevStateCodeSync;
+  for (let index = 0; index < indices.length; index += 1) {
+    schedulePrevStateCodeSyncRow(store, indices[index]);
+  }
+};
+
+export const schedulePrevStateCodeSyncRow = (store: ColumnarActorStore, entity: EntityIndex): void => {
   const marks = store.pendingPrevStateCodeSyncMark;
   const token = store.pendingPrevStateCodeSyncToken;
+  if (marks[entity] === token) return;
 
-  for (let index = 0; index < indices.length; index += 1) {
-    const entity = indices[index];
-    if (marks[entity] === token) continue;
-    marks[entity] = token;
-    pending.push(entity);
-  }
+  marks[entity] = token;
+  store.pendingPrevStateCodeSync.push(entity);
 };
 
 export const schedulePresentPrevStateCodeSync = (store: ColumnarActorStore): void => {
@@ -195,6 +197,26 @@ export const moveActorStateBucket = (
 
   removeActorFromStateBucket(store, entity, previousCode);
   addActorToStateBucket(store, entity, nextCode);
+};
+
+export const moveActorStateBucketBatch = (
+  store: ColumnarActorStore,
+  sourceCode: number,
+  targetCode: number,
+  sourceBucket: readonly EntityIndex[],
+): boolean => {
+  if (sourceCode === targetCode || sourceCode < 0 || targetCode < 0) return false;
+
+  const currentSourceBucket = store.stateBuckets[sourceCode];
+  const currentTargetBucket = store.stateBuckets[targetCode];
+  if (currentSourceBucket !== sourceBucket || !currentTargetBucket || currentTargetBucket.length !== 0) {
+    return false;
+  }
+
+  store.stateBuckets[sourceCode] = currentTargetBucket;
+  store.stateBuckets[targetCode] = currentSourceBucket;
+  rebuildActorAcceptStateBuckets(store);
+  return true;
 };
 
 export const removeActorRowsForStore = (

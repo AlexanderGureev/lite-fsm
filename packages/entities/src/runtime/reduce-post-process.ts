@@ -1,7 +1,7 @@
 import type { EntityIndex } from "../plugin";
 import { ENTITY_INIT_STATE_CODE, hasDespawnOnStates, type EntityReducePlan } from "./compile";
 import { isTerminalStateCode, runtimeError, type ReduceAcceptedBatchOptions } from "./reduce-shared";
-import type { ColumnarActorStore, EntityRuntimeState } from "./state";
+import { schedulePrevStateCodeSyncRow, type ColumnarActorStore, type EntityRuntimeState } from "./state";
 import { scheduleEntityDespawn, type CapturedEntityScopeEntry, type EntityDispatchTransaction } from "./transaction";
 
 type PostProcessingFlags = {
@@ -18,8 +18,15 @@ export type EnteredEffectRows = {
 export type AcceptedRowsPostProcessing = {
   readonly dirtyRows: readonly EntityIndex[] | undefined;
   readonly dirtyRowsPreviousStateCode: number | undefined;
+  readonly bulkStateTransition: BulkStateTransition | undefined;
   readonly enteredByState: ReadonlyMap<number, EnteredEffectRows> | undefined;
   readonly cleanupRemovesAcceptedRows: boolean;
+};
+
+export type BulkStateTransition = {
+  readonly indices: readonly EntityIndex[];
+  readonly previousStateCode: number;
+  readonly stateCode: number;
 };
 
 const assertValidStateCode = (store: ColumnarActorStore, entity: EntityIndex, code: number): void => {
@@ -115,8 +122,105 @@ const postProcessIdentityRowsWithoutLifecycle = (
   return {
     dirtyRows,
     dirtyRowsPreviousStateCode: dirtyRows ? previousStateCode : undefined,
+    bulkStateTransition: undefined,
     enteredByState: undefined,
     cleanupRemovesAcceptedRows,
+  };
+};
+
+const planAcceptsStateCode = (plan: EntityReducePlan, stateCode: number): boolean => {
+  for (const acceptedStateCode of plan.acceptStateCodes) {
+    if (acceptedStateCode === stateCode) return true;
+  }
+  return false;
+};
+
+const getBulkStateTransitionCandidate = (
+  store: ColumnarActorStore,
+  accepted: readonly EntityIndex[],
+  flags: PostProcessingFlags,
+  plan: EntityReducePlan | undefined,
+  previousStateCodeForAccepted: number | undefined,
+  knownValidStateCodeForAccepted: number | undefined,
+): BulkStateTransition | undefined => {
+  if (!plan?.hasNonIdentityDefaultTransition) return undefined;
+  if (previousStateCodeForAccepted === undefined || knownValidStateCodeForAccepted === undefined) return undefined;
+  if (previousStateCodeForAccepted === knownValidStateCodeForAccepted) return undefined;
+  if (previousStateCodeForAccepted < 0 || knownValidStateCodeForAccepted < 0) return undefined;
+  if (!planAcceptsStateCode(plan, previousStateCodeForAccepted)) return undefined;
+  if (store.stateBuckets[previousStateCodeForAccepted] !== accepted) return undefined;
+  if (store.stateBuckets[knownValidStateCodeForAccepted]?.length !== 0) return undefined;
+  if (flags.scheduleDespawnOn && store.metadata.despawnStateMask[knownValidStateCodeForAccepted] === 1) {
+    return undefined;
+  }
+
+  return {
+    indices: accepted,
+    previousStateCode: previousStateCodeForAccepted,
+    stateCode: knownValidStateCodeForAccepted,
+  };
+};
+
+const createEnteredEffectRows = (
+  transaction: EntityDispatchTransaction,
+  accepted: readonly EntityIndex[],
+): EnteredEffectRows => {
+  const entityStore = transaction.runtime.entityStore;
+  const entries: CapturedEntityScopeEntry[] = new Array(accepted.length);
+  for (let index = 0; index < accepted.length; index += 1) {
+    const entity = accepted[index];
+    entries[index] = { entity, generation: entityStore.generation[entity], id: entityStore.ids[entity] as string };
+  }
+  return { indices: accepted as EntityIndex[], entries };
+};
+
+const tryPostProcessBulkStateTransition = (
+  transaction: EntityDispatchTransaction | undefined,
+  store: ColumnarActorStore,
+  accepted: readonly EntityIndex[],
+  flags: PostProcessingFlags,
+  plan: EntityReducePlan | undefined,
+  previousStateCodeForAccepted: number | undefined,
+  knownValidStateCodeForAccepted: number | undefined,
+): AcceptedRowsPostProcessing | undefined => {
+  const bulkStateTransition = getBulkStateTransitionCandidate(
+    store,
+    accepted,
+    flags,
+    plan,
+    previousStateCodeForAccepted,
+    knownValidStateCodeForAccepted,
+  );
+  if (!bulkStateTransition) return undefined;
+
+  const stateCodeByEntity = store.stateCode;
+  for (let index = 0; index < accepted.length; index += 1) {
+    if (stateCodeByEntity[accepted[index]] !== bulkStateTransition.stateCode) return undefined;
+  }
+
+  const rowVersion = store.rowVersion;
+  for (let index = 0; index < accepted.length; index += 1) {
+    const entity = accepted[index];
+    rowVersion[entity] += 1;
+    schedulePrevStateCodeSyncRow(store, entity);
+  }
+
+  let enteredByState: Map<number, EnteredEffectRows> | undefined;
+  if (
+    flags.scheduleEffects &&
+    transaction &&
+    store.metadata.effectsByStateCode[bulkStateTransition.stateCode]
+  ) {
+    enteredByState = new Map<number, EnteredEffectRows>();
+    enteredByState.set(bulkStateTransition.stateCode, createEnteredEffectRows(transaction, accepted));
+  }
+
+  return {
+    dirtyRows: undefined,
+    dirtyRowsPreviousStateCode: undefined,
+    bulkStateTransition,
+    enteredByState,
+    cleanupRemovesAcceptedRows: false,
   };
 };
 
@@ -125,9 +229,21 @@ export const postProcessAcceptedRows = (
   store: ColumnarActorStore,
   accepted: readonly EntityIndex[],
   flags: PostProcessingFlags,
+  plan: EntityReducePlan | undefined,
   previousStateCodeForAccepted: number | undefined,
   knownValidStateCodeForAccepted: number | undefined,
 ): AcceptedRowsPostProcessing => {
+  const bulkStateTransition = tryPostProcessBulkStateTransition(
+    transaction,
+    store,
+    accepted,
+    flags,
+    plan,
+    previousStateCodeForAccepted,
+    knownValidStateCodeForAccepted,
+  );
+  if (bulkStateTransition) return bulkStateTransition;
+
   if (
     previousStateCodeForAccepted !== undefined &&
     !flags.scheduleDespawnOn &&
@@ -197,6 +313,7 @@ export const postProcessAcceptedRows = (
   return {
     dirtyRows,
     dirtyRowsPreviousStateCode: dirtyRows ? previousStateCodeForAccepted : undefined,
+    bulkStateTransition: undefined,
     enteredByState,
     cleanupRemovesAcceptedRows,
   };

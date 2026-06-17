@@ -36,6 +36,8 @@ type TestReducer = (
   meta: { readonly self: TestReducerSelf },
 ) => void;
 
+type TestEffect = (deps: { readonly self: { readonly indices: readonly EntityIndex[] } }) => void;
+
 const spawnEvents = defineSpawnEvents({
   SPAWN: spawnEvent<{ readonly id: string }>(),
 });
@@ -69,7 +71,36 @@ const createManager = (reducer?: TestReducer) => {
   return MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
 };
 
-const spawnEntity = (manager: ReturnType<typeof createManager>, id: string): void => {
+const createTransitionManager = (
+  reducer?: TestReducer,
+  effects?: Record<string, TestEffect>,
+) => {
+  const actor = {
+    storage: "entity",
+    config: {
+      __INIT: { ENTITY_SPAWNED: "READY" },
+      READY: { TICK: "STOPPED" },
+      STOPPED: {},
+    },
+    initialState: "__INIT",
+    initialContext: { value: i32() },
+    spawnSchema: {},
+    ...(reducer ? { reducer } : {}),
+    ...(effects ? { effects } : {}),
+  } as const;
+  const machines = { actor };
+  const spawn = defineEntitySpawn(machines, spawnEvents)({
+    SPAWN: (payload) => ({
+      id: payload.id,
+      groupTag: "units",
+      actors: { actor: {} },
+    }),
+  });
+
+  return MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+};
+
+const spawnEntity = (manager: Pick<ReturnType<typeof createManager>, "transition">, id: string): void => {
   manager.transition({ type: "SPAWN", payload: { id } });
 };
 
@@ -331,5 +362,77 @@ describe("@lite-fsm/entities — reducer post-processing dirty rows", () => {
 
     expect(store.stateBuckets[readyCode]).toEqual(bucketBefore);
     expect(store.statePosition[entity]).toBe(positionBefore);
+  });
+
+  it("bulk transition переносит single-source bucket целиком и сохраняет effect scope", () => {
+    const effectScopes: EntityIndex[][] = [];
+    const manager = createTransitionManager(undefined, {
+      STOPPED({ self }) {
+        effectScopes.push([...self.indices]);
+      },
+    });
+    spawnEntity(manager, "unit/a");
+    spawnEntity(manager, "unit/b");
+    spawnEntity(manager, "unit/c");
+
+    const runtime = getEntityRuntimeState(manager.entities());
+    const store = runtime.actorStores.actor;
+    const readyCode = store.metadata.stateCodeByName.READY;
+    const stoppedCode = store.metadata.stateCodeByName.STOPPED;
+    const readyBucket = store.stateBuckets[readyCode];
+    const stoppedBucket = store.stateBuckets[stoppedCode];
+    const beforeRowVersions = [store.rowVersion[0], store.rowVersion[1], store.rowVersion[2]];
+
+    manager.transition({ type: "TICK" });
+
+    expect(store.stateBuckets[readyCode]).toBe(stoppedBucket);
+    expect(store.stateBuckets[stoppedCode]).toBe(readyBucket);
+    expect(store.stateBuckets[readyCode]).toEqual([]);
+    expect(store.stateBuckets[stoppedCode]).toEqual([0, 1, 2]);
+    expect([store.statePosition[0], store.statePosition[1], store.statePosition[2]]).toEqual([0, 1, 2]);
+    expect([store.prevStateCode[0], store.prevStateCode[1], store.prevStateCode[2]]).toEqual([
+      readyCode,
+      readyCode,
+      readyCode,
+    ]);
+    expect(store.pendingPrevStateCodeSync).toEqual([0, 1, 2]);
+    expect([store.rowVersion[0], store.rowVersion[1], store.rowVersion[2]]).toEqual(
+      beforeRowVersions.map((version) => version + 1),
+    );
+    expect(effectScopes).toEqual([[0, 1, 2]]);
+  });
+
+  it("bulk transition fallback сохраняет reducer override для части rows", () => {
+    const manager = createTransitionManager((_slice, action, { self }) => {
+      if (action.type !== "TICK") return;
+      self.stateCode[1 as EntityIndex] = self.prevStateCode[1 as EntityIndex];
+    });
+    spawnEntity(manager, "unit/a");
+    spawnEntity(manager, "unit/b");
+    spawnEntity(manager, "unit/c");
+
+    const store = getEntityRuntimeState(manager.entities()).actorStores.actor;
+    const readyCode = store.metadata.stateCodeByName.READY;
+    const stoppedCode = store.metadata.stateCodeByName.STOPPED;
+    const readyBucket = store.stateBuckets[readyCode];
+    const stoppedBucket = store.stateBuckets[stoppedCode];
+
+    manager.transition({ type: "TICK" });
+
+    expect(store.stateBuckets[readyCode]).toBe(readyBucket);
+    expect(store.stateBuckets[stoppedCode]).toBe(stoppedBucket);
+    expect(store.stateBuckets[readyCode]).toEqual([1]);
+    expect([...store.stateBuckets[stoppedCode]].sort()).toEqual([0, 2]);
+  });
+
+  it("bulk transition fallback валидирует invalid reducer stateCode", () => {
+    const manager = createTransitionManager((_slice, action, { self }) => {
+      if (action.type !== "TICK") return;
+      self.stateCode[1 as EntityIndex] = 99;
+    });
+    spawnEntity(manager, "unit/a");
+    spawnEntity(manager, "unit/b");
+
+    expect(() => manager.transition({ type: "TICK" })).toThrow("invalid stateCode 99");
   });
 });
