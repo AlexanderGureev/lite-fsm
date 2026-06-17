@@ -423,12 +423,13 @@ importers:
       '@lite-fsm/core':
         specifier: workspace:*
         version: link:../core
-      '@lite-fsm/react':
-        specifier: workspace:*
-        version: link:../react
       react:
         specifier: '>=18.0.0'
         version: 19.2.7
+    devDependencies:
+      '@lite-fsm/react':
+        specifier: workspace:*
+        version: link:../react
 
   packages/graph:
     dependencies:

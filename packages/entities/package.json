@@ -72,6 +72,9 @@
   "dependencies": {
     "@lite-fsm/core": "workspace:*"
   },
+  "devDependencies": {
+    "@lite-fsm/react": "workspace:*"
+  },
   "peerDependencies": {
     "@lite-fsm/react": "workspace:*",
     "react": ">=18.0.0"
