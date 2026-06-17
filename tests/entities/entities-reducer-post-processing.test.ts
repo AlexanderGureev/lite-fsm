@@ -10,11 +10,13 @@ import {
 } from "@lite-fsm/entities";
 import type { EntityIndex } from "@lite-fsm/entities";
 
-import { ENTITY_RESOLVED_STATE_CODE } from "../../packages/entities/src/runtime/compile";
+import { ENTITY_RESOLVED_STATE_CODE, type EntityReducePlan } from "../../packages/entities/src/runtime/compile";
 import { reduceEntityBucket } from "../../packages/entities/src/runtime/reduce";
+import { postProcessAcceptedRows } from "../../packages/entities/src/runtime/reduce-post-process";
 import {
   getEntityRuntimeState,
   moveActorStateBucket,
+  moveActorStateBucketBatch,
   rebindActorReducerSelf,
   schedulePrevStateCodeSync,
   syncPendingPrevStateCode,
@@ -103,6 +105,24 @@ const createTransitionManager = (
 const spawnEntity = (manager: Pick<ReturnType<typeof createManager>, "transition">, id: string): void => {
   manager.transition({ type: "SPAWN", payload: { id } });
 };
+
+const noLifecyclePostProcessingFlags = {
+  scheduleDespawnOn: false,
+  scheduleEffects: false,
+  scheduleTerminal: false,
+} as const;
+
+const createBulkTransitionPlan = (acceptStateCodes: readonly number[]): EntityReducePlan => ({
+  eventCode: 0,
+  acceptStateCodes,
+  allDefaultTransitionsIdentity: false,
+  hasNonIdentityDefaultTransition: true,
+  mayEnterEffectState: false,
+  hasDespawnOnStates: false,
+  hasReaction: false,
+  mayEnterTerminalState: false,
+  requiresReducerCall: false,
+});
 
 const createUnscopedTickContext = (runtime: EntityRuntimeState) => {
   const dispatch = {
@@ -364,6 +384,22 @@ describe("@lite-fsm/entities — reducer post-processing dirty rows", () => {
     expect(store.statePosition[entity]).toBe(positionBefore);
   });
 
+  it("moveActorStateBucketBatch отклоняет identity и несовпадающий source bucket", () => {
+    const manager = createTransitionManager();
+    spawnEntity(manager, "unit/a");
+
+    const store = getEntityRuntimeState(manager.entities()).actorStores.actor;
+    const readyCode = store.metadata.stateCodeByName.READY;
+    const stoppedCode = store.metadata.stateCodeByName.STOPPED;
+    const readyBucket = store.stateBuckets[readyCode];
+    const stoppedBucket = store.stateBuckets[stoppedCode];
+
+    expect(moveActorStateBucketBatch(store, readyCode, readyCode, readyBucket)).toBe(false);
+    expect(moveActorStateBucketBatch(store, readyCode, stoppedCode, [...readyBucket])).toBe(false);
+    expect(store.stateBuckets[readyCode]).toBe(readyBucket);
+    expect(store.stateBuckets[stoppedCode]).toBe(stoppedBucket);
+  });
+
   it("bulk transition переносит single-source bucket целиком и сохраняет effect scope", () => {
     const effectScopes: EntityIndex[][] = [];
     const manager = createTransitionManager(undefined, {
@@ -400,6 +436,132 @@ describe("@lite-fsm/entities — reducer post-processing dirty rows", () => {
       beforeRowVersions.map((version) => version + 1),
     );
     expect(effectScopes).toEqual([[0, 1, 2]]);
+  });
+
+  it("bulk transition fallback обновляет buckets, если batch move отклонен", () => {
+    const manager = createTransitionManager();
+    spawnEntity(manager, "unit/a");
+    spawnEntity(manager, "unit/b");
+    spawnEntity(manager, "unit/c");
+
+    const runtime = getEntityRuntimeState(manager.entities());
+    const store = runtime.actorStores.actor;
+    const readyCode = store.metadata.stateCodeByName.READY;
+    const stoppedCode = store.metadata.stateCodeByName.STOPPED;
+    const stateBuckets = store.stateBuckets;
+    const readyBucket = store.stateBuckets[readyCode];
+    const stoppedBucket = store.stateBuckets[stoppedCode];
+    let readyBucketReads = 0;
+
+    store.stateBuckets = new Proxy(stateBuckets, {
+      get(target, property, receiver) {
+        if (property === String(readyCode)) {
+          readyBucketReads += 1;
+          if (readyBucketReads === 3) return [];
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    }) as EntityIndex[][];
+
+    try {
+      reduceUnscopedTick(runtime, createUnscopedTickContext(runtime));
+    } finally {
+      store.stateBuckets = stateBuckets;
+    }
+
+    expect(readyBucketReads).toBeGreaterThanOrEqual(3);
+    expect(store.stateBuckets[readyCode]).toBe(readyBucket);
+    expect(store.stateBuckets[stoppedCode]).toBe(stoppedBucket);
+    expect(store.stateBuckets[readyCode]).toEqual([]);
+    expect([...store.stateBuckets[stoppedCode]].sort()).toEqual([0, 1, 2]);
+    expect([store.statePosition[0], store.statePosition[1], store.statePosition[2]]).toEqual([2, 1, 0]);
+  });
+
+  it("bulk transition candidate отбрасывает неподходящие инварианты bucket", () => {
+    {
+      const manager = createTransitionManager();
+      spawnEntity(manager, "unit/a");
+
+      const store = getEntityRuntimeState(manager.entities()).actorStores.actor;
+      const readyCode = store.metadata.stateCodeByName.READY;
+      const accepted = store.stateBuckets[readyCode];
+      const result = postProcessAcceptedRows(
+        undefined,
+        store,
+        accepted,
+        noLifecyclePostProcessingFlags,
+        createBulkTransitionPlan([readyCode]),
+        readyCode,
+        readyCode,
+      );
+
+      expect(result.bulkStateTransition).toBeUndefined();
+    }
+
+    {
+      const manager = createTransitionManager();
+      spawnEntity(manager, "unit/a");
+
+      const store = getEntityRuntimeState(manager.entities()).actorStores.actor;
+      const readyCode = store.metadata.stateCodeByName.READY;
+      const stoppedCode = store.metadata.stateCodeByName.STOPPED;
+      const accepted = store.stateBuckets[readyCode];
+      const result = postProcessAcceptedRows(
+        undefined,
+        store,
+        accepted,
+        noLifecyclePostProcessingFlags,
+        createBulkTransitionPlan([stoppedCode]),
+        readyCode,
+        stoppedCode,
+      );
+
+      expect(result.bulkStateTransition).toBeUndefined();
+    }
+
+    {
+      const manager = createTransitionManager();
+      spawnEntity(manager, "unit/a");
+
+      const store = getEntityRuntimeState(manager.entities()).actorStores.actor;
+      const readyCode = store.metadata.stateCodeByName.READY;
+      const stoppedCode = store.metadata.stateCodeByName.STOPPED;
+      const accepted = [...store.stateBuckets[readyCode]];
+      const result = postProcessAcceptedRows(
+        undefined,
+        store,
+        accepted,
+        noLifecyclePostProcessingFlags,
+        createBulkTransitionPlan([readyCode]),
+        readyCode,
+        stoppedCode,
+      );
+
+      expect(result.bulkStateTransition).toBeUndefined();
+    }
+
+    {
+      const manager = createTransitionManager();
+      spawnEntity(manager, "unit/a");
+
+      const store = getEntityRuntimeState(manager.entities()).actorStores.actor;
+      const readyCode = store.metadata.stateCodeByName.READY;
+      const stoppedCode = store.metadata.stateCodeByName.STOPPED;
+      const accepted = store.stateBuckets[readyCode];
+      store.stateBuckets[stoppedCode].push(0 as EntityIndex);
+
+      const result = postProcessAcceptedRows(
+        undefined,
+        store,
+        accepted,
+        noLifecyclePostProcessingFlags,
+        createBulkTransitionPlan([readyCode]),
+        readyCode,
+        stoppedCode,
+      );
+
+      expect(result.bulkStateTransition).toBeUndefined();
+    }
   });
 
   it("bulk transition fallback сохраняет reducer override для части rows", () => {
