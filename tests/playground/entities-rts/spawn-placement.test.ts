@@ -65,6 +65,26 @@ describe("spawn placement для RTS", () => {
     expect(left.every((unit) => unit.identity.kind === UNIT_KIND.ENEMY)).toBe(true);
   });
 
+  it("варьирует скорость enemies и разносит большую орду в широкую полосу от края", () => {
+    const plan = createEnemySpawnBatchPlan({
+      config: { enemyCount: 10_000, allyCount: 1, seed: "enemy-horde-scale" },
+      start: 0,
+      count: DEFAULT_ENEMY_SPAWN_BATCH_SIZE,
+    });
+    const speeds = plan.map((unit) => unit.movement.speed);
+    const uniqueRoundedSpeeds = new Set(speeds.map((speed) => Math.round(speed)));
+    const maxEdgeDepth = Math.max(
+      ...plan.map((unit) =>
+        Math.min(unit.movement.x, unit.movement.y, RTS_MAP.width - unit.movement.x, RTS_MAP.height - unit.movement.y),
+      ),
+    );
+
+    expect(uniqueRoundedSpeeds.size).toBeGreaterThan(12);
+    expect(Math.min(...speeds)).toBeGreaterThanOrEqual(68);
+    expect(Math.max(...speeds)).toBeLessThanOrEqual(104);
+    expect(maxEdgeDepth).toBeGreaterThan(520);
+  });
+
   it("откладывает initial enemy batch пока player batch не закрывает allyCount", () => {
     const plan = createGameStartSpawnPlan({
       enemyCount: 4,

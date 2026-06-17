@@ -8,6 +8,10 @@ import { slotCount } from "../column-slot-count";
 import { isUnitAlive } from "../unit-health";
 
 const INITIAL_PROJECTILE_CAPACITY = 1_024;
+const INITIAL_IMPACT_EVENT_CAPACITY = 256;
+const INITIAL_HIT_EVENT_CAPACITY = 1_024;
+const MAX_IMPACT_EVENTS = 4_096;
+const MAX_HIT_EVENTS = 16_384;
 const PROJECTILE_RANGE_GRACE = 96;
 const PROJECTILE_AOE_TARGET_LIMIT = 96;
 const MIN_PROJECTILE_SPEED = 1;
@@ -29,6 +33,13 @@ type ProjectilePool = {
   damageTargets: Int32Array;
   impactTargetBuffer: Int32Array;
   damageTargetCount: number;
+  impactEventX: Float32Array;
+  impactEventY: Float32Array;
+  impactEventRadius: Float32Array;
+  impactEventCount: number;
+  hitEventX: Float32Array;
+  hitEventY: Float32Array;
+  hitEventCount: number;
 };
 
 export type UnitProjectilePoolView = {
@@ -40,6 +51,16 @@ export type UnitProjectilePoolView = {
   readVy(): Float32Array;
   readRadius(): Float32Array;
   readIncomingDamage(): Int32Array;
+  // Косметические события попаданий накапливаются за кадр и сливаются рендером:
+  // центр и радиус AOE-вспышки плюс позиции всех задетых врагов.
+  readImpactEventCount(): number;
+  readImpactEventX(): Float32Array;
+  readImpactEventY(): Float32Array;
+  readImpactEventRadius(): Float32Array;
+  readHitEventCount(): number;
+  readHitEventX(): Float32Array;
+  readHitEventY(): Float32Array;
+  clearEffectEvents(): void;
 };
 
 type ProjectileSpawn = {
@@ -102,6 +123,13 @@ const createProjectilePool = (capacity = INITIAL_PROJECTILE_CAPACITY): Projectil
   damageTargets: createI32(1),
   impactTargetBuffer: createI32(1),
   damageTargetCount: 0,
+  impactEventX: createF32(INITIAL_IMPACT_EVENT_CAPACITY),
+  impactEventY: createF32(INITIAL_IMPACT_EVENT_CAPACITY),
+  impactEventRadius: createF32(INITIAL_IMPACT_EVENT_CAPACITY),
+  impactEventCount: 0,
+  hitEventX: createF32(INITIAL_HIT_EVENT_CAPACITY),
+  hitEventY: createF32(INITIAL_HIT_EVENT_CAPACITY),
+  hitEventCount: 0,
 });
 
 const exposeProjectilePool = (pool: ProjectilePool): UnitProjectilePoolView => ({
@@ -113,6 +141,17 @@ const exposeProjectilePool = (pool: ProjectilePool): UnitProjectilePoolView => (
   readVy: () => pool.vy,
   readRadius: () => pool.radius,
   readIncomingDamage: () => pool.incomingDamage,
+  readImpactEventCount: () => pool.impactEventCount,
+  readImpactEventX: () => pool.impactEventX,
+  readImpactEventY: () => pool.impactEventY,
+  readImpactEventRadius: () => pool.impactEventRadius,
+  readHitEventCount: () => pool.hitEventCount,
+  readHitEventX: () => pool.hitEventX,
+  readHitEventY: () => pool.hitEventY,
+  clearEffectEvents: () => {
+    pool.impactEventCount = 0;
+    pool.hitEventCount = 0;
+  },
 });
 
 const clearProjectileDamage = (pool: ProjectilePool) => {
@@ -150,8 +189,42 @@ const ensureDamageBufferCapacity = (pool: ProjectilePool, required: number) => {
 
 const resetProjectilePool = (pool: ProjectilePool) => {
   clearProjectileDamage(pool);
+  pool.impactEventCount = 0;
+  pool.hitEventCount = 0;
   pool.count = 0;
   pool.version += 1;
+};
+
+const recordImpactEvent = (pool: ProjectilePool, x: number, y: number, radius: number) => {
+  if (pool.impactEventCount >= MAX_IMPACT_EVENTS) return;
+
+  if (pool.impactEventCount >= pool.impactEventX.length) {
+    const capacity = Math.min(MAX_IMPACT_EVENTS, nextCapacity(pool.impactEventX.length, pool.impactEventCount + 1));
+    pool.impactEventX = growF32(pool.impactEventX, capacity);
+    pool.impactEventY = growF32(pool.impactEventY, capacity);
+    pool.impactEventRadius = growF32(pool.impactEventRadius, capacity);
+  }
+
+  const index = pool.impactEventCount;
+  pool.impactEventX[index] = x;
+  pool.impactEventY[index] = y;
+  pool.impactEventRadius[index] = radius;
+  pool.impactEventCount += 1;
+};
+
+const recordHitEvent = (pool: ProjectilePool, x: number, y: number) => {
+  if (pool.hitEventCount >= MAX_HIT_EVENTS) return;
+
+  if (pool.hitEventCount >= pool.hitEventX.length) {
+    const capacity = Math.min(MAX_HIT_EVENTS, nextCapacity(pool.hitEventX.length, pool.hitEventCount + 1));
+    pool.hitEventX = growF32(pool.hitEventX, capacity);
+    pool.hitEventY = growF32(pool.hitEventY, capacity);
+  }
+
+  const index = pool.hitEventCount;
+  pool.hitEventX[index] = x;
+  pool.hitEventY[index] = y;
+  pool.hitEventCount += 1;
 };
 
 const recordProjectileDamage = (pool: ProjectilePool, target: EntityIndex, damage: number) => {
@@ -183,6 +256,8 @@ const recordProjectileImpactDamage = (
 
   const radius = Math.max(0, impactRadius);
   recordProjectileDamage(pool, primaryTarget, damage);
+  recordImpactEvent(pool, impactX, impactY, radius);
+  recordHitEvent(pool, targetX[primaryTarget], targetY[primaryTarget]);
   if (radius <= 0) {
     return;
   }
@@ -207,6 +282,7 @@ const recordProjectileImpactDamage = (
     if (dx * dx + dy * dy > range * range) continue;
 
     recordProjectileDamage(pool, target, damage);
+    recordHitEvent(pool, targetX[target], targetY[target]);
   }
 };
 

@@ -8,10 +8,13 @@ import { ENEMY_INTENT } from "../enemy-ai";
 
 const TARGET_ARRIVAL_DISTANCE = 6;
 const SEPARATION_FORCE = 1.4;
+const ENEMY_SEPARATION_FORCE = 1.8;
+const UNIT_SEPARATION_GAP = 4;
+const ENEMY_SEPARATION_GAP = 16;
 const SEPARATION_SAMPLE_LIMIT = 12;
 const SEPARATION_COLLECT_LIMIT = 12;
 const NEIGHBOR_BUFFER_SIZE = SEPARATION_COLLECT_LIMIT;
-const ENEMY_SEPARATION_HERO_RADIUS = 960;
+const ENEMY_SEPARATION_HERO_RADIUS = 1_240;
 const ENEMY_SEPARATION_HERO_RADIUS_SQUARED = ENEMY_SEPARATION_HERO_RADIUS * ENEMY_SEPARATION_HERO_RADIUS;
 
 export type Events = AppEvents;
@@ -115,7 +118,8 @@ export const unitMovement = createMachine({
 
             const awayX = entityX - movementX[neighbor];
             const awayY = entityY - movementY[neighbor];
-            const minDistance = identityRadius[entity] + identityRadius[neighbor] + 4;
+            const separationGap = faction === UNIT_FACTION.ENEMY ? ENEMY_SEPARATION_GAP : UNIT_SEPARATION_GAP;
+            const minDistance = identityRadius[entity] + identityRadius[neighbor] + separationGap;
             const currentDistanceSquared = awayX * awayX + awayY * awayY;
 
             if (currentDistanceSquared <= 0 || currentDistanceSquared >= minDistance * minDistance) continue;
@@ -127,8 +131,9 @@ export const unitMovement = createMachine({
             samples += 1;
           }
 
-          let desiredX = separationX * SEPARATION_FORCE;
-          let desiredY = separationY * SEPARATION_FORCE;
+          const separationForce = faction === UNIT_FACTION.ENEMY ? ENEMY_SEPARATION_FORCE : SEPARATION_FORCE;
+          let desiredX = separationX * separationForce;
+          let desiredY = separationY * separationForce;
 
           if (
             faction === UNIT_FACTION.PLAYER &&

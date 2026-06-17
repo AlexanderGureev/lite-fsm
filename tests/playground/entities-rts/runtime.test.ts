@@ -246,6 +246,42 @@ describe("runtime simulation для entities RTS", () => {
     expect(units.health.hp[nearbyEnemy]).toBeLessThan(initialNearbyHp);
   });
 
+  it("projectile impact накапливает события эффектов для AOE-центра и каждого задетого enemy", () => {
+    const manager = makeTestStore();
+
+    startGame(manager, { enemyCount: 2, allyCount: 1, seed: "player-projectile-effects" });
+
+    const units = readUnitViews(manager);
+    const projectiles = readProjectileView(manager);
+    const hero = entity(0);
+    const ally = entity(1);
+    const primaryEnemy = entity(2);
+    const nearbyEnemy = entity(3);
+
+    mutableColumn(units.movement.x)[primaryEnemy] = RTS_MAP.centerX + 90;
+    mutableColumn(units.movement.y)[primaryEnemy] = RTS_MAP.centerY;
+    mutableColumn(units.movement.speed)[primaryEnemy] = 0;
+    mutableColumn(units.movement.x)[nearbyEnemy] = RTS_MAP.centerX + 145;
+    mutableColumn(units.movement.y)[nearbyEnemy] = RTS_MAP.centerY + 12;
+    mutableColumn(units.movement.speed)[nearbyEnemy] = 0;
+    mutableColumn(units.health.hp)[primaryEnemy] = units.health.maxHp[primaryEnemy];
+    mutableColumn(units.health.hp)[nearbyEnemy] = units.health.maxHp[nearbyEnemy];
+    mutableColumn(units.combat.attackTimerMs)[hero] = 0;
+    mutableColumn(units.combat.attackTimerMs)[ally] = 10_000;
+
+    projectiles.clearEffectEvents();
+    runTicks(manager, 16, 16);
+
+    expect(projectiles.readImpactEventCount()).toBeGreaterThan(0);
+    expect(projectiles.readImpactEventRadius()[0]).toBeGreaterThan(0);
+    expect(projectiles.readHitEventCount()).toBeGreaterThanOrEqual(2);
+
+    projectiles.clearEffectEvents();
+
+    expect(projectiles.readImpactEventCount()).toBe(0);
+    expect(projectiles.readHitEventCount()).toBe(0);
+  });
+
   it("attackRange расширяет поиск цели для player projectiles за пределами соседних grid cells", () => {
     const manager = makeTestStore();
 

@@ -20,9 +20,14 @@ export const RTS_MAP = {
   centerY: 4_096,
 } as const;
 
-const ENEMY_GROUP_SIZE = 80;
+const ENEMY_GROUP_SIZE = 64;
 const ENEMY_EDGE_PADDING = 160;
-const ENEMY_GROUP_SPREAD = 220;
+const ENEMY_GROUP_TANGENT_SPREAD = 240;
+const ENEMY_GROUP_DEPTH_SPREAD = 280;
+const ENEMY_HORDE_SPREAD_REFERENCE_COUNT = 10_000;
+const ENEMY_MAX_SPREAD_MULTIPLIER = 1.55;
+const ENEMY_SPEED_MIN = 68;
+const ENEMY_SPEED_MAX = 104;
 const PLAYER_FORMATION_SPACING = 24;
 
 export const DEFAULT_ENEMY_SPAWN_BATCH_SIZE = 512;
@@ -139,17 +144,26 @@ const enemyAnchorForGroup = (group: number, random: () => number) => {
 
   switch (edge) {
     case 0:
-      return { x, y: ENEMY_EDGE_PADDING };
+      return { edge, x, y: ENEMY_EDGE_PADDING };
     case 1:
-      return { x: RTS_MAP.width - ENEMY_EDGE_PADDING, y };
+      return { edge, x: RTS_MAP.width - ENEMY_EDGE_PADDING, y };
     case 2:
-      return { x, y: RTS_MAP.height - ENEMY_EDGE_PADDING };
+      return { edge, x, y: RTS_MAP.height - ENEMY_EDGE_PADDING };
     default:
-      return { x: ENEMY_EDGE_PADDING, y };
+      return { edge, x: ENEMY_EDGE_PADDING, y };
   }
 };
 
 const clampToMap = (value: number, max: number) => Math.min(max, Math.max(0, value));
+
+const enemyHordeSpreadMultiplier = (enemyCount: number) => {
+  const normalizedEnemyCount = Math.max(0, Math.trunc(enemyCount));
+  const hordeScale = Math.sqrt(normalizedEnemyCount / ENEMY_HORDE_SPREAD_REFERENCE_COUNT);
+
+  return 1 + Math.min(1, hordeScale) * (ENEMY_MAX_SPREAD_MULTIPLIER - 1);
+};
+
+const enemySpeedForSpawn = (random: () => number) => randomBetween(random, ENEMY_SPEED_MIN, ENEMY_SPEED_MAX);
 
 const playerFormationPointForIndex = (config: GameConfig, allyIndex: number) => {
   const unitCount = Math.max(0, Math.trunc(config.allyCount));
@@ -171,15 +185,44 @@ const createEnemyAnchors = (config: GameConfig) => {
   const groupCount = Math.max(1, Math.ceil(config.enemyCount / ENEMY_GROUP_SIZE));
   const anchorX = new Float32Array(groupCount);
   const anchorY = new Float32Array(groupCount);
+  const edge = new Uint8Array(groupCount);
   const random = createSeededRandom(config.seed);
 
   for (let group = 0; group < groupCount; group += 1) {
     const anchor = enemyAnchorForGroup(group, random);
     anchorX[group] = anchor.x;
     anchorY[group] = anchor.y;
+    edge[group] = anchor.edge;
   }
 
-  return { anchorX, anchorY, groupCount };
+  return { anchorX, anchorY, edge, groupCount };
+};
+
+const enemyPositionForSpawn = (
+  anchors: ReturnType<typeof createEnemyAnchors>,
+  group: number,
+  random: () => number,
+  spreadMultiplier: number,
+) => {
+  const tangent = randomBetween(
+    random,
+    -ENEMY_GROUP_TANGENT_SPREAD * spreadMultiplier,
+    ENEMY_GROUP_TANGENT_SPREAD * spreadMultiplier,
+  );
+  const depth = randomBetween(random, 0, ENEMY_GROUP_DEPTH_SPREAD * spreadMultiplier);
+  const x = anchors.anchorX[group];
+  const y = anchors.anchorY[group];
+
+  switch (anchors.edge[group]) {
+    case 0:
+      return { x: clampToMap(x + tangent, RTS_MAP.width), y: clampToMap(y + depth, RTS_MAP.height) };
+    case 1:
+      return { x: clampToMap(x - depth, RTS_MAP.width), y: clampToMap(y + tangent, RTS_MAP.height) };
+    case 2:
+      return { x: clampToMap(x + tangent, RTS_MAP.width), y: clampToMap(y - depth, RTS_MAP.height) };
+    default:
+      return { x: clampToMap(x + depth, RTS_MAP.width), y: clampToMap(y + tangent, RTS_MAP.height) };
+  }
 };
 
 const createEnemyUnit = (
@@ -189,21 +232,19 @@ const createEnemyUnit = (
 ): PlannedUnitSpawn => {
   const random = createSeededRandom(`${config.seed}:enemy:${enemyIndex}`);
   const group = randomInt(random, 0, anchors.groupCount);
-  const angle = randomBetween(random, 0, Math.PI * 2);
-  const distance = randomBetween(random, 0, ENEMY_GROUP_SPREAD);
-  const x = clampToMap(anchors.anchorX[group] + Math.cos(angle) * distance, RTS_MAP.width);
-  const y = clampToMap(anchors.anchorY[group] + Math.sin(angle) * distance, RTS_MAP.height);
+  const position = enemyPositionForSpawn(anchors, group, random, enemyHordeSpreadMultiplier(config.enemyCount));
 
   return {
     id: `unit/enemy/${enemyIndex}`,
     groupTag: "enemy",
     ...createUnitComponents({
-      x,
-      y,
+      x: position.x,
+      y: position.y,
       kind: UNIT_KIND.ENEMY,
       faction: UNIT_FACTION.ENEMY,
       unitIndex: enemyIndex,
       ...enemyStats,
+      speed: enemySpeedForSpawn(random),
     }),
   };
 };
