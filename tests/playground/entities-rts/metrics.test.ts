@@ -3,18 +3,18 @@ import { describe, expect, it } from "vitest";
 import { createRollingMetric } from "../../../apps/playground/app/examples/entities-rts/store/metrics";
 
 describe("metrics helper для RTS", () => {
-  it("считает current, rolling average и max в пределах окна", () => {
+  it("считает current, min, rolling average и max в пределах окна", () => {
     const metric = createRollingMetric(3);
 
     metric.record(2);
     metric.record(4);
     metric.record(6);
 
-    expect(metric.read()).toEqual({ current: 6, average: 4, max: 6 });
+    expect(metric.read()).toEqual({ current: 6, min: 2, average: 4, max: 6 });
 
     metric.record(8);
 
-    expect(metric.read()).toEqual({ current: 8, average: 6, max: 8 });
+    expect(metric.read()).toEqual({ current: 8, min: 4, average: 6, max: 8 });
   });
 
   it("пересчитывает max после вытеснения старого значения", () => {
@@ -24,7 +24,17 @@ describe("metrics helper для RTS", () => {
     metric.record(4);
     metric.record(3);
 
-    expect(metric.read()).toEqual({ current: 3, average: 3.5, max: 4 });
+    expect(metric.read()).toEqual({ current: 3, min: 3, average: 3.5, max: 4 });
+  });
+
+  it("пересчитывает min после вытеснения старого значения", () => {
+    const metric = createRollingMetric(2);
+
+    metric.record(3);
+    metric.record(8);
+    metric.record(10);
+
+    expect(metric.read()).toEqual({ current: 10, min: 8, average: 9, max: 10 });
   });
 
   it("нормализует нечисловые и отрицательные значения", () => {
@@ -33,6 +43,6 @@ describe("metrics helper для RTS", () => {
     metric.record(Number.NaN);
     metric.record(-5);
 
-    expect(metric.read()).toEqual({ current: 0, average: 0, max: 0 });
+    expect(metric.read()).toEqual({ current: 0, min: 0, average: 0, max: 0 });
   });
 });

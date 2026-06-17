@@ -4,6 +4,7 @@ export const RTS_METRICS_WINDOW = 120;
 
 export type RtsTimingStats = {
   current: number;
+  min: number;
   average: number;
   max: number;
 };
@@ -44,6 +45,7 @@ export const createRollingMetric = (windowSize = RTS_METRICS_WINDOW): RollingMet
   const values = new Float32Array(size);
   const stats: RtsTimingStats = {
     current: 0,
+    min: 0,
     average: 0,
     max: 0,
   };
@@ -51,20 +53,25 @@ export const createRollingMetric = (windowSize = RTS_METRICS_WINDOW): RollingMet
   let count = 0;
   let sum = 0;
 
-  const recomputeMax = () => {
-    let max = 0;
+  const recomputeBounds = () => {
+    let min = values[0];
+    let max = values[0];
 
-    for (let index = 0; index < count; index += 1) {
-      if (values[index] > max) max = values[index];
+    for (let index = 1; index < count; index += 1) {
+      const value = values[index];
+      if (value < min) min = value;
+      if (value > max) max = value;
     }
 
+    stats.min = min;
     stats.max = max;
   };
 
   return {
     record(value) {
       const next = normalizeMetricValue(value);
-      const previous = count === size ? values[cursor] : 0;
+      const full = count === size;
+      const previous = full ? values[cursor] : 0;
 
       values[cursor] = next;
       cursor = (cursor + 1) % size;
@@ -74,12 +81,16 @@ export const createRollingMetric = (windowSize = RTS_METRICS_WINDOW): RollingMet
       stats.current = next;
       stats.average = sum / count;
 
-      if (count === 1 || next >= stats.max) {
+      if (count === 1) {
+        stats.min = next;
         stats.max = next;
         return;
       }
 
-      if (previous >= stats.max) recomputeMax();
+      if (next > stats.max) stats.max = next;
+      if (next < stats.min) stats.min = next;
+
+      if (full && (previous >= stats.max || previous <= stats.min)) recomputeBounds();
     },
     read() {
       return stats;

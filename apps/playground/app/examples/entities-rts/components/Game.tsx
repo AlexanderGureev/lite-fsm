@@ -1,13 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
-import { FSMContextProvider } from "@lite-fsm/react";
 import {
   ActivityIcon,
+  GaugeIcon,
   Gamepad2Icon,
   HeartPulseIcon,
-  LoaderCircleIcon,
+  PanelRightCloseIcon,
+  PanelRightOpenIcon,
   PauseIcon,
   PlayIcon,
   RotateCcwIcon,
@@ -24,37 +25,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 
-import {
-  createEntitiesRtsScene,
-  RTS_CAMERA_ZOOM_EVENT,
-  RTS_CANVAS,
-  type PhaserApi,
-  type RtsCameraZoomAction,
-} from "./phaser-scene";
-import {
-  DEFAULT_GAME_CONFIG,
-  GAME_PRESETS,
-  makeStore,
-  useSelector,
-  useTransition,
-  type AppStore,
-  type GameConfig,
-} from "../store";
+import { RTS_CAMERA_ZOOM_EVENT, type RtsCameraZoomAction } from "./phaser-scene";
+import { GAME_PRESETS, useSelector, useTransition, type AppStore, type GameConfig } from "../store";
 import type { RtsPresetId } from "../store";
-import {
-  createRtsMetricsAdapter,
-  type MetricsAdapter,
-  type RtsMetricsSnapshot,
-  type RtsTimingStats,
-} from "../store/metrics";
+import type { MetricsAdapter, RtsMetricsSnapshot, RtsTimingStats } from "../store/metrics";
 import { readRtsEntityStats, readUnitViews, type RtsEntityStats } from "../store/selectors";
-
-type GameLike = {
-  destroy: (removeCanvas?: boolean, noReturn?: boolean) => void;
-  scale?: {
-    resize?: (width: number, height: number) => void;
-  };
-};
+import type { RtsApp } from "../app";
 
 const presetEntries = Object.entries(GAME_PRESETS) as Array<[RtsPresetId, (typeof GAME_PRESETS)[RtsPresetId]]>;
 
@@ -70,6 +46,7 @@ const emptyStats: RtsEntityStats = {
 
 const emptyTimingStats: RtsTimingStats = {
   current: 0,
+  min: 0,
   average: 0,
   max: 0,
 };
@@ -83,14 +60,14 @@ const emptyMetrics: RtsMetricsSnapshot = {
   spatialGridBuildMs: 0,
 };
 
-const formatCount = (value: number) => value.toLocaleString("en-US");
+const formatCount = (value: number) => value.toLocaleString("ru-RU");
 
 const formatFps = (value: number) => formatCount(Math.round(value));
 
 const formatMs = (value: number) => {
-  if (value >= 100) return `${value.toFixed(0)} ms`;
-  if (value >= 10) return `${value.toFixed(1)} ms`;
-  return `${value.toFixed(2)} ms`;
+  if (value >= 100) return `${value.toFixed(0)} мс`;
+  if (value >= 10) return `${value.toFixed(1)} мс`;
+  return `${value.toFixed(2)} мс`;
 };
 
 const readCountInput = (value: string) => {
@@ -189,7 +166,7 @@ function CountInput({
 function SeedInput({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   return (
     <label className="grid gap-2">
-      <span className="text-caption-strong text-ink-muted-80">seed</span>
+      <span className="text-caption-strong text-ink-muted-80">Сид</span>
       <input
         type="text"
         value={value}
@@ -239,8 +216,8 @@ function TacticalPreview({ config }: { config: GameConfig }) {
         />
       ))}
       <div className="absolute inset-x-4 bottom-4 flex flex-wrap gap-2">
-        <Badge className="rounded-md bg-[#59d6a3] text-[#09271a]">allies {formatCount(config.allyCount)}</Badge>
-        <Badge className="rounded-md bg-[#ff6f61] text-[#2d0906]">enemies {formatCount(config.enemyCount)}</Badge>
+        <Badge className="rounded-md bg-[#59d6a3] text-[#09271a]">союзники {formatCount(config.allyCount)}</Badge>
+        <Badge className="rounded-md bg-[#ff6f61] text-[#2d0906]">враги {formatCount(config.enemyCount)}</Badge>
       </div>
     </div>
   );
@@ -257,11 +234,11 @@ function StartScreen() {
       <CardHeader className="grid gap-4 border-b border-hairline px-5 py-5 sm:grid-cols-[1fr_auto] sm:items-center sm:px-6">
         <div>
           <CardDescription className="text-caption-strong text-primary">Entities + Phaser</CardDescription>
-          <CardTitle className="mt-1 text-tagline text-ink">RTS stress test</CardTitle>
+          <CardTitle className="mt-1 text-tagline text-ink">Стресс-тест RTS</CardTitle>
         </div>
         <Badge variant="secondary" className="w-fit rounded-md bg-canvas-parchment text-ink-muted-80">
           <Gamepad2Icon data-icon="inline-start" />
-          setup
+          настройка
         </Badge>
       </CardHeader>
 
@@ -284,13 +261,13 @@ function StartScreen() {
 
           <div className="grid gap-4 sm:grid-cols-2">
             <CountInput
-              label="enemy count"
+              label="Враги"
               min={0}
               value={config.enemyCount}
               onChange={(enemyCount) => transition({ type: "GAME_CONFIG_CHANGED", payload: { enemyCount } })}
             />
             <CountInput
-              label="ally count"
+              label="Союзники"
               min={1}
               value={config.allyCount}
               onChange={(allyCount) => transition({ type: "GAME_CONFIG_CHANGED", payload: { allyCount } })}
@@ -304,12 +281,13 @@ function StartScreen() {
           </div>
 
           <p className="text-caption text-ink-muted-48">
-            Recommended: enemies 100-20,000; allies 1-1,000. Larger values are allowed and only warn before launch.
+            Рекомендуется: врагов 100–20 000, союзников 1–1 000. Большие значения допустимы и лишь предупреждают перед
+            запуском.
           </p>
 
           {isHeavyRun ? (
             <div className="rounded-lg border border-[#d9952b]/40 bg-[#fff2d8] px-4 py-3 text-caption text-[#5a3800]">
-              High enemy counts are allowed; frame rate depends on local hardware.
+              Большое число врагов допустимо; частота кадров зависит от вашего железа.
             </div>
           ) : null}
 
@@ -320,10 +298,10 @@ function StartScreen() {
               className="h-11 min-w-36 rounded-pill px-5 text-button-large"
             >
               <PlayIcon data-icon="inline-start" />
-              launch
+              Запустить
             </Button>
             <span className="text-caption text-ink-muted-48">
-              {formatCount(config.enemyCount + config.allyCount + 1)} entities including hero
+              {formatCount(config.enemyCount + config.allyCount + 1)} сущностей вместе с базой героя
             </span>
           </div>
         </section>
@@ -332,13 +310,13 @@ function StartScreen() {
           <TacticalPreview config={config} />
           <div className="mt-5 grid gap-3 text-caption text-ink-muted-48">
             <div className="flex items-center justify-between gap-3">
-              <span>seed</span>
+              <span>сид</span>
               <span className="max-w-44 truncate text-body-strong text-ink">{config.seed}</span>
             </div>
             <Separator />
             <div className="flex items-center justify-between gap-3">
-              <span>preset</span>
-              <span className="text-body-strong text-ink">{activePreset ?? "custom"}</span>
+              <span>пресет</span>
+              <span className="text-body-strong text-ink">{activePreset ?? "свой"}</span>
             </div>
           </div>
         </aside>
@@ -347,78 +325,28 @@ function StartScreen() {
   );
 }
 
-function PhaserCanvas({ manager, metrics }: { manager: AppStore; metrics: MetricsAdapter }) {
+function PhaserCanvas({ app }: { app: RtsApp }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    let disposed = false;
-    let game: GameLike | undefined;
     const container = containerRef.current;
     if (!container) return undefined;
-
-    const preventContextMenu = (event: MouseEvent) => event.preventDefault();
-    const readContainerSize = () => ({
-      width: Math.max(1, Math.floor(container.clientWidth || RTS_CANVAS.width)),
-      height: Math.max(1, Math.floor(container.clientHeight || RTS_CANVAS.height)),
-    });
-    const resizeGame = () => {
-      const size = readContainerSize();
-      game?.scale?.resize?.(size.width, size.height);
-    };
-    const resizeObserver = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(resizeGame);
-
-    container.addEventListener("contextmenu", preventContextMenu);
-    resizeObserver?.observe(container);
-    window.addEventListener("resize", resizeGame);
-
-    const mountGame = async () => {
-      const Phaser = (await import("phaser")) as PhaserApi;
-      if (disposed || !containerRef.current) return;
-      const size = readContainerSize();
-
-      game = new Phaser.Game({
-        type: Phaser.AUTO,
-        parent: containerRef.current,
-        width: size.width,
-        height: size.height,
-        backgroundColor: "#101612",
-        render: {
-          antialias: false,
-          pixelArt: true,
-          roundPixels: false,
-        },
-        scale: {
-          mode: Phaser.Scale.RESIZE,
-        },
-        scene: createEntitiesRtsScene(Phaser, manager, metrics),
-      }) as GameLike;
-      resizeGame();
-    };
-
-    void mountGame();
-
-    return () => {
-      disposed = true;
-      container.removeEventListener("contextmenu", preventContextMenu);
-      resizeObserver?.disconnect();
-      window.removeEventListener("resize", resizeGame);
-      game?.destroy(true);
-    };
-  }, [manager, metrics]);
+    return app.mountScene(container);
+  }, [app]);
 
   return <div ref={containerRef} className="absolute inset-0 [&>canvas]:block" />;
 }
 
 function HudRow({ icon, label, value, detail }: { icon: ReactNode; label: string; value: string; detail?: string }) {
   return (
-    <div className="grid grid-cols-[auto_1fr_auto] items-center gap-3 py-2">
-      <span className="flex size-7 items-center justify-center rounded-md bg-[#253329] text-[#66f0a7] [&_svg]:size-4">
+    <div className="grid grid-cols-[auto_1fr_auto] items-center gap-2.5 py-1">
+      <span className="flex size-6 items-center justify-center rounded-md bg-[#253329] text-[#66f0a7] [&_svg]:size-3.5">
         {icon}
       </span>
       <span className="text-caption text-[#b8c5bd]">{label}</span>
       <span className="text-right text-caption-strong text-[#f4faf5]">
         {value}
-        {detail ? <span className="ml-2 text-caption font-normal text-[#b8c5bd]">{detail}</span> : null}
+        {detail ? <span className="ml-1.5 text-fine-print font-normal text-[#819289]">{detail}</span> : null}
       </span>
     </div>
   );
@@ -434,14 +362,15 @@ function TimingRow({
   format: (value: number) => string;
 }) {
   return (
-    <div className="grid gap-1 py-2">
+    <div className="py-1.5">
       <div className="flex items-center justify-between gap-3">
         <span className="text-caption text-[#b8c5bd]">{label}</span>
         <span className="text-caption-strong text-[#f4faf5]">{format(stats.current)}</span>
       </div>
-      <div className="flex flex-wrap justify-between gap-x-3 gap-y-1 text-caption text-[#819289]">
-        <span>avg {format(stats.average)}</span>
-        <span>max {format(stats.max)}</span>
+      <div className="mt-1 grid grid-cols-3 gap-2 text-fine-print text-[#819289]">
+        <span>мин {format(stats.min)}</span>
+        <span className="text-center">сред {format(stats.average)}</span>
+        <span className="text-right">макс {format(stats.max)}</span>
       </div>
     </div>
   );
@@ -449,18 +378,16 @@ function TimingRow({
 
 function MetricValueRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between gap-3 py-2">
+    <div className="flex items-center justify-between gap-3 py-1">
       <span className="text-caption text-[#b8c5bd]">{label}</span>
       <span className="text-caption-strong text-[#f4faf5]">{value}</span>
     </div>
   );
 }
 
-function OverlaySeparator() {
-  return <div className="h-px bg-[#d7f6e0]/12" />;
-}
-
-function ArmedShell({ manager, metrics }: { manager: AppStore; metrics: MetricsAdapter }) {
+function ArmedShell({ app }: { app: RtsApp }) {
+  const manager = app.store;
+  const metrics = app.metrics;
   const transition = useTransition();
   const state = useSelector((snapshot) => snapshot.gameSession);
   const spawnState = useSelector((snapshot) => snapshot.gameSpawn);
@@ -468,6 +395,7 @@ function ArmedShell({ manager, metrics }: { manager: AppStore; metrics: MetricsA
   const isSpawning = state.state === "SPAWNING";
   const isPaused = state.state === "PAUSED";
   const isGameOver = state.state === "GAME_OVER";
+  const [statsOpen, setStatsOpen] = useState(false);
   const stats = useRtsEntityStats(manager, state.state !== "CONFIGURING");
   const performanceMetrics = useRtsPerformanceMetrics(metrics, state.state !== "CONFIGURING");
   const heroPercent = stats.heroMaxHp > 0 ? Math.max(0, Math.round((stats.heroHp / stats.heroMaxHp) * 100)) : 0;
@@ -476,11 +404,11 @@ function ArmedShell({ manager, metrics }: { manager: AppStore; metrics: MetricsA
   const spawnedEnemies = spawnState.context.spawnedEnemyCount;
   const spawnedUnits = spawnedPlayerUnits + spawnedEnemies;
   const spawnProgress = spawnTarget > 0 ? Math.min(100, Math.round((spawnedUnits / spawnTarget) * 100)) : 100;
-  const statusLabel = isGameOver ? "GAME OVER" : isPaused ? "PAUSED" : isSpawning ? "SPAWNING" : "LIVE";
+  const statusLabel = isGameOver ? "ПОРАЖЕНИЕ" : isPaused ? "ПАУЗА" : isSpawning ? "СПАВН" : "АКТИВНО";
   const enemySpawnDetail =
-    spawnState.state === "IDLE" ? "complete" : `${formatCount(spawnState.context.enemyBatchSize)}/batch`;
+    spawnState.state === "IDLE" ? "готово" : `${formatCount(spawnState.context.enemyBatchSize)}/батч`;
   const playerSpawnDetail =
-    spawnState.state === "IDLE" ? "complete" : `${formatCount(spawnState.context.playerBatchSize)}/batch`;
+    spawnState.state === "IDLE" ? "готово" : `${formatCount(spawnState.context.playerBatchSize)}/батч`;
   const activeSpawnBatchSize =
     spawnedPlayerUnits < spawnState.context.targetPlayerUnitCount
       ? spawnState.context.playerBatchSize
@@ -488,7 +416,7 @@ function ArmedShell({ manager, metrics }: { manager: AppStore; metrics: MetricsA
 
   return (
     <section className="relative min-h-[calc(100svh-6.5rem)] w-full overflow-hidden bg-[#101612]">
-      <PhaserCanvas manager={manager} metrics={metrics} />
+      <PhaserCanvas app={app} />
 
       <div className="pointer-events-none absolute inset-0 z-10 flex flex-col justify-between gap-3 p-3 sm:p-4 lg:p-5">
         <div className="flex items-start justify-between gap-3">
@@ -497,7 +425,7 @@ function ArmedShell({ manager, metrics }: { manager: AppStore; metrics: MetricsA
               <p className="text-fine-print font-semibold tracking-[0.08em] text-[#66f0a7] uppercase">
                 Entities + Phaser
               </p>
-              <p className="truncate text-caption-strong text-[#f4faf5]">RTS stress test</p>
+              <p className="truncate text-caption-strong text-[#f4faf5]">Стресс-тест RTS</p>
             </div>
             <span
               className={cn(
@@ -518,7 +446,7 @@ function ArmedShell({ manager, metrics }: { manager: AppStore; metrics: MetricsA
               className="h-9 rounded-pill bg-[#f4faf5] px-3 text-caption-strong text-[#151916] hover:bg-[#d8f4e4]"
             >
               {isPaused ? <PlayIcon data-icon="inline-start" /> : <PauseIcon data-icon="inline-start" />}
-              {isPaused ? "resume" : "pause"}
+              {isPaused ? "Продолжить" : "Пауза"}
             </Button>
             <Button
               type="button"
@@ -527,14 +455,14 @@ function ArmedShell({ manager, metrics }: { manager: AppStore; metrics: MetricsA
               className="h-9 rounded-pill border border-[#d7f6e0]/20 bg-[#1d241f] px-3 text-caption-strong text-[#f4faf5] hover:bg-[#29332c] hover:text-[#f4faf5]"
             >
               <RotateCcwIcon data-icon="inline-start" />
-              configure
+              Настроить
             </Button>
             <div className="flex items-center gap-1 rounded-pill border border-[#d7f6e0]/16 bg-[#1d241f] p-1">
               <Button
                 type="button"
                 variant="ghost"
-                aria-label="Zoom out"
-                title="Zoom out"
+                aria-label="Отдалить"
+                title="Отдалить"
                 onClick={() => dispatchCameraZoom("out")}
                 className="size-7 rounded-pill text-[#f4faf5] hover:bg-[#29332c] hover:text-[#f4faf5] [&_svg]:size-4"
               >
@@ -543,8 +471,8 @@ function ArmedShell({ manager, metrics }: { manager: AppStore; metrics: MetricsA
               <Button
                 type="button"
                 variant="ghost"
-                aria-label="Reset zoom"
-                title="Reset zoom"
+                aria-label="Сбросить масштаб"
+                title="Сбросить масштаб"
                 onClick={() => dispatchCameraZoom("reset")}
                 className="size-7 rounded-pill text-[#f4faf5] hover:bg-[#29332c] hover:text-[#f4faf5] [&_svg]:size-4"
               >
@@ -553,8 +481,8 @@ function ArmedShell({ manager, metrics }: { manager: AppStore; metrics: MetricsA
               <Button
                 type="button"
                 variant="ghost"
-                aria-label="Zoom in"
-                title="Zoom in"
+                aria-label="Приблизить"
+                title="Приблизить"
                 onClick={() => dispatchCameraZoom("in")}
                 className="size-7 rounded-pill text-[#f4faf5] hover:bg-[#29332c] hover:text-[#f4faf5] [&_svg]:size-4"
               >
@@ -563,15 +491,26 @@ function ArmedShell({ manager, metrics }: { manager: AppStore; metrics: MetricsA
             </div>
           </div>
 
-          <aside className="pointer-events-auto hidden max-h-[calc(100svh-8rem)] w-[21rem] overflow-y-auto rounded-lg border border-[#d7f6e0]/14 bg-[#151916]/92 p-4 text-[#f4faf5] shadow-product md:block">
-            <div>
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <p className="text-caption-strong text-[#f4faf5]">Hero base</p>
-                <span className="rounded-md border border-[#d7f6e0]/18 px-2 py-0.5 text-caption-strong text-[#f4faf5]">
-                  {heroPercent}%
-                </span>
+          {statsOpen ? (
+            <aside className="pointer-events-auto hidden max-h-[calc(100svh-7rem)] w-72 overflow-y-auto rounded-lg border border-[#d7f6e0]/14 bg-[#151916]/92 p-3 text-[#f4faf5] shadow-product md:block">
+              <div className="mb-2.5 flex items-center justify-between gap-3">
+                <p className="text-caption-strong text-[#f4faf5]">Сводка</p>
+                <button
+                  type="button"
+                  onClick={() => setStatsOpen(false)}
+                  aria-label="Свернуть панель"
+                  title="Свернуть панель"
+                  className="flex size-6 items-center justify-center rounded-md border border-[#d7f6e0]/18 text-[#b8c5bd] transition hover:bg-[#1d241f] hover:text-[#f4faf5] [&_svg]:size-3.5"
+                >
+                  <PanelRightCloseIcon />
+                </button>
               </div>
-              <div className="h-2 overflow-hidden rounded-pill bg-[#253329]">
+
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-caption text-[#b8c5bd]">База героя</p>
+                <span className="text-caption-strong text-[#f4faf5]">{heroPercent}%</span>
+              </div>
+              <div className="mt-1.5 h-1.5 overflow-hidden rounded-pill bg-[#253329]">
                 <div
                   className={cn(
                     "h-full rounded-pill transition-all",
@@ -580,81 +519,91 @@ function ArmedShell({ manager, metrics }: { manager: AppStore; metrics: MetricsA
                   style={{ width: `${heroPercent}%` }}
                 />
               </div>
-            </div>
 
-            <div className="mt-4 flex flex-col">
-              <HudRow
-                icon={<HeartPulseIcon />}
-                label="HP"
-                value={`${formatCount(stats.heroHp)}/${formatCount(stats.heroMaxHp)}`}
-                detail={stats.heroAlive ? "alive" : "down"}
-              />
-              <OverlaySeparator />
-              <HudRow icon={<ActivityIcon />} label="entities" value={formatCount(stats.total)} />
-              <OverlaySeparator />
-              <HudRow icon={<SwordsIcon />} label="enemies" value={formatCount(stats.enemies)} />
-              <OverlaySeparator />
-              <HudRow icon={<UsersRoundIcon />} label="allies" value={formatCount(stats.allies)} />
-              <OverlaySeparator />
-              <HudRow icon={<ShieldIcon />} label="selected" value={formatCount(stats.selected)} />
-            </div>
+              <div className="mt-2.5 flex flex-col divide-y divide-[#d7f6e0]/8">
+                <HudRow
+                  icon={<HeartPulseIcon />}
+                  label="HP"
+                  value={`${formatCount(stats.heroHp)}/${formatCount(stats.heroMaxHp)}`}
+                  detail={stats.heroAlive ? "жив" : "пал"}
+                />
+                <HudRow icon={<ActivityIcon />} label="сущности" value={formatCount(stats.total)} />
+                <HudRow icon={<SwordsIcon />} label="враги" value={formatCount(stats.enemies)} />
+                <HudRow icon={<UsersRoundIcon />} label="союзники" value={formatCount(stats.allies)} />
+                <HudRow icon={<ShieldIcon />} label="выбрано" value={formatCount(stats.selected)} />
+              </div>
 
-            <OverlaySeparator />
+              <div className="mt-2.5 border-t border-[#d7f6e0]/12 pt-2.5">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-caption-strong text-[#f4faf5]">Метрики</p>
+                  <span className="text-fine-print text-[#819289]">окно 120 кадров</span>
+                </div>
 
-            <div className="mt-3 grid gap-1">
-              <div className="mb-1 flex items-center justify-between gap-3">
-                <p className="text-caption-strong text-[#f4faf5]">Metrics</p>
-                <span className="rounded-md border border-[#d7f6e0]/18 px-2 py-0.5 text-caption text-[#b8c5bd]">
-                  120 frames
-                </span>
-              </div>
-              <TimingRow label="FPS" stats={performanceMetrics.fps} format={formatFps} />
-              <OverlaySeparator />
-              <TimingRow label="TICK transition" stats={performanceMetrics.tick} format={formatMs} />
-              <OverlaySeparator />
-              <TimingRow label="Phaser sync/render" stats={performanceMetrics.sync} format={formatMs} />
-              <OverlaySeparator />
-              <MetricValueRow label="flow field rebuild" value={formatMs(performanceMetrics.flowFieldRebuildMs)} />
-              <OverlaySeparator />
-              <MetricValueRow label="spatial grid build" value={formatMs(performanceMetrics.spatialGridBuildMs)} />
-            </div>
+                <p className="mt-2 text-fine-print uppercase tracking-[0.08em] text-[#6f8378]">тайминги кадра</p>
+                <div className="flex flex-col divide-y divide-[#d7f6e0]/8">
+                  <TimingRow label="FPS" stats={performanceMetrics.fps} format={formatFps} />
+                  <TimingRow label="Тик-переход" stats={performanceMetrics.tick} format={formatMs} />
+                  <TimingRow label="Phaser синх/рендер" stats={performanceMetrics.sync} format={formatMs} />
+                </div>
 
-            <OverlaySeparator />
+                <p className="mt-2 text-fine-print uppercase tracking-[0.08em] text-[#6f8378]">пересборка структур</p>
+                <div className="flex flex-col divide-y divide-[#d7f6e0]/8">
+                  <MetricValueRow
+                    label="перестройка flow field"
+                    value={formatMs(performanceMetrics.flowFieldRebuildMs)}
+                  />
+                  <MetricValueRow label="сборка spatial grid" value={formatMs(performanceMetrics.spatialGridBuildMs)} />
+                </div>
+              </div>
 
-            <div className="mt-3 grid gap-3 text-caption text-[#b8c5bd]">
-              <div className="flex items-center justify-between gap-3">
-                <span>seed</span>
-                <span className="max-w-44 truncate text-caption-strong text-[#f4faf5]">{config.seed}</span>
+              <div className="mt-2.5 grid gap-1.5 border-t border-[#d7f6e0]/12 pt-2.5 text-caption text-[#b8c5bd]">
+                <div className="flex items-center justify-between gap-3">
+                  <span>сид</span>
+                  <span className="max-w-44 truncate text-caption-strong text-[#f4faf5]">{config.seed}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span>врагов задано</span>
+                  <span className="text-caption-strong text-[#f4faf5]">{formatCount(config.enemyCount)}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span>юниты игрока</span>
+                  <span className="text-caption-strong text-[#f4faf5]">
+                    {formatCount(spawnedPlayerUnits)}/{formatCount(spawnState.context.targetPlayerUnitCount)}
+                    <span className="ml-1.5 text-fine-print font-normal text-[#819289]">{playerSpawnDetail}</span>
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span>враги</span>
+                  <span className="text-caption-strong text-[#f4faf5]">
+                    {formatCount(spawnState.context.spawnedEnemyCount)}/
+                    {formatCount(spawnState.context.targetEnemyCount)}
+                    <span className="ml-1.5 text-fine-print font-normal text-[#819289]">{enemySpawnDetail}</span>
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span>запуски</span>
+                  <span className="text-caption-strong text-[#f4faf5]">{state.context.startedRuns}</span>
+                </div>
               </div>
-              <div className="flex items-center justify-between gap-3">
-                <span>configured enemies</span>
-                <span className="text-caption-strong text-[#f4faf5]">{formatCount(config.enemyCount)}</span>
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <span>spawned player units</span>
-                <span className="text-caption-strong text-[#f4faf5]">
-                  {formatCount(spawnedPlayerUnits)}/{formatCount(spawnState.context.targetPlayerUnitCount)}
-                  <span className="ml-2 font-normal text-[#b8c5bd]">{playerSpawnDetail}</span>
-                </span>
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <span>spawned enemies</span>
-                <span className="text-caption-strong text-[#f4faf5]">
-                  {formatCount(spawnState.context.spawnedEnemyCount)}/{formatCount(spawnState.context.targetEnemyCount)}
-                  <span className="ml-2 font-normal text-[#b8c5bd]">{enemySpawnDetail}</span>
-                </span>
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <span>runs</span>
-                <span className="text-caption-strong text-[#f4faf5]">{state.context.startedRuns}</span>
-              </div>
-            </div>
-          </aside>
+            </aside>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setStatsOpen(true)}
+              aria-label="Показать панель"
+              title="Показать панель"
+              className="pointer-events-auto hidden items-center gap-2 rounded-pill border border-[#d7f6e0]/14 bg-[#151916]/92 px-3 py-2 text-caption-strong text-[#f4faf5] shadow-product transition hover:bg-[#1d241f] md:inline-flex [&_svg]:size-4"
+            >
+              <GaugeIcon className="text-[#66f0a7]" />
+              <span>{formatFps(performanceMetrics.fps.current)} FPS</span>
+              <PanelRightOpenIcon className="text-[#b8c5bd]" />
+            </button>
+          )}
         </div>
 
         <div className="pointer-events-auto grid gap-3 rounded-lg border border-[#d7f6e0]/14 bg-[#151916]/92 p-3 text-[#f4faf5] shadow-product md:hidden">
           <div className="flex items-center justify-between gap-3">
-            <span className="text-caption-strong">Hero base</span>
+            <span className="text-caption-strong">База героя</span>
             <span className="text-caption-strong">{heroPercent}%</span>
           </div>
           <div className="h-2 overflow-hidden rounded-pill bg-[#253329]">
@@ -665,19 +614,19 @@ function ArmedShell({ manager, metrics }: { manager: AppStore; metrics: MetricsA
           </div>
           <div className="grid grid-cols-4 gap-2 text-center">
             <div>
-              <p className="text-fine-print text-[#819289]">units</p>
+              <p className="text-fine-print text-[#819289]">юниты</p>
               <p className="text-caption-strong">{formatCount(stats.total)}</p>
             </div>
             <div>
-              <p className="text-fine-print text-[#819289]">enemies</p>
+              <p className="text-fine-print text-[#819289]">враги</p>
               <p className="text-caption-strong">{formatCount(stats.enemies)}</p>
             </div>
             <div>
-              <p className="text-fine-print text-[#819289]">allies</p>
+              <p className="text-fine-print text-[#819289]">союзники</p>
               <p className="text-caption-strong">{formatCount(stats.allies)}</p>
             </div>
             <div>
-              <p className="text-fine-print text-[#819289]">selected</p>
+              <p className="text-fine-print text-[#819289]">выбрано</p>
               <p className="text-caption-strong">{formatCount(stats.selected)}</p>
             </div>
           </div>
@@ -687,18 +636,13 @@ function ArmedShell({ manager, metrics }: { manager: AppStore; metrics: MetricsA
       {isSpawning ? (
         <div className="absolute inset-0 z-30 grid place-items-center bg-[#101612]/82 px-4 text-center backdrop-blur-[2px]">
           <div className="flex w-full max-w-md flex-col items-center gap-4 rounded-lg border border-[#d7f6e0]/16 bg-[#151916]/96 px-6 py-6 text-[#f4faf5] shadow-product sm:px-8 sm:py-7">
-            <span className="flex size-12 items-center justify-center rounded-md border border-[#8fd4ff]/30 bg-[#8fd4ff]/12 text-[#b7e6ff]">
-              <LoaderCircleIcon className="size-6 animate-spin" />
-            </span>
             <div className="grid gap-1">
-              <span className="text-fine-print font-semibold tracking-[0.08em] text-[#8fd4ff] uppercase">
-                SPAWNING
-              </span>
-              <p className="text-tagline text-[#f4faf5]">Forces loading</p>
+              <span className="text-fine-print font-semibold tracking-[0.08em] text-[#8fd4ff] uppercase">СПАВН</span>
+              <p className="text-tagline text-[#f4faf5]">Загрузка войск</p>
             </div>
             <div className="w-full">
               <div className="mb-2 flex items-center justify-between gap-3 text-caption text-[#b8c5bd]">
-                <span>{formatCount(spawnedUnits)} units</span>
+                <span>{formatCount(spawnedUnits)} юнитов</span>
                 <span>{formatCount(spawnTarget)}</span>
               </div>
               <div className="h-2.5 overflow-hidden rounded-pill bg-[#253329]">
@@ -710,12 +654,14 @@ function ArmedShell({ manager, metrics }: { manager: AppStore; metrics: MetricsA
               <div className="mt-2 flex items-center justify-between gap-3 text-caption text-[#819289]">
                 <span>{spawnProgress}%</span>
                 <span>
-                  {formatCount(spawnedPlayerUnits)}/{formatCount(spawnState.context.targetPlayerUnitCount)} players
+                  {formatCount(spawnedPlayerUnits)}/{formatCount(spawnState.context.targetPlayerUnitCount)} игроков
                 </span>
               </div>
               <div className="mt-1 flex items-center justify-between gap-3 text-caption text-[#819289]">
-                <span>{formatCount(spawnedEnemies)}/{formatCount(spawnState.context.targetEnemyCount)} enemies</span>
-                <span>{formatCount(activeSpawnBatchSize)}/batch</span>
+                <span>
+                  {formatCount(spawnedEnemies)}/{formatCount(spawnState.context.targetEnemyCount)} врагов
+                </span>
+                <span>{formatCount(activeSpawnBatchSize)}/батч</span>
               </div>
             </div>
           </div>
@@ -725,11 +671,11 @@ function ArmedShell({ manager, metrics }: { manager: AppStore; metrics: MetricsA
       {isPaused ? (
         <div className="absolute inset-0 z-20 grid place-items-center bg-[#101612]/72 px-4 text-center">
           <div className="flex max-w-sm flex-col items-center gap-4 rounded-lg border border-[#d7f6e0]/14 bg-[#151916]/94 px-8 py-7 text-[#f4faf5] shadow-product">
-            <span className="rounded-md bg-[#f6e27a]/18 px-2.5 py-1 text-caption-strong text-[#f6e27a]">PAUSED</span>
-            <p className="text-tagline text-[#f4faf5]">Simulation paused</p>
+            <span className="rounded-md bg-[#f6e27a]/18 px-2.5 py-1 text-caption-strong text-[#f6e27a]">ПАУЗА</span>
+            <p className="text-tagline text-[#f4faf5]">Симуляция на паузе</p>
             <Button type="button" onClick={() => transition({ type: "GAME_RESUME" })} className="rounded-pill">
               <PlayIcon data-icon="inline-start" />
-              resume
+              Продолжить
             </Button>
           </div>
         </div>
@@ -738,11 +684,11 @@ function ArmedShell({ manager, metrics }: { manager: AppStore; metrics: MetricsA
       {isGameOver ? (
         <div className="absolute inset-0 z-20 grid place-items-center bg-[#101612]/78 px-4 text-center">
           <div className="flex max-w-sm flex-col items-center gap-4 rounded-lg border border-[#d7f6e0]/14 bg-[#151916]/94 px-8 py-7 text-[#f4faf5] shadow-product">
-            <span className="rounded-md bg-[#ff786b]/18 px-2.5 py-1 text-caption-strong text-[#ff9a90]">GAME OVER</span>
-            <p className="text-tagline text-[#f4faf5]">Hero base destroyed</p>
+            <span className="rounded-md bg-[#ff786b]/18 px-2.5 py-1 text-caption-strong text-[#ff9a90]">ПОРАЖЕНИЕ</span>
+            <p className="text-tagline text-[#f4faf5]">База героя уничтожена</p>
             <Button type="button" onClick={() => transition({ type: "GAME_RESTART" })} className="rounded-pill">
               <RotateCcwIcon data-icon="inline-start" />
-              configure
+              Настроить
             </Button>
           </div>
         </div>
@@ -751,48 +697,8 @@ function ArmedShell({ manager, metrics }: { manager: AppStore; metrics: MetricsA
   );
 }
 
-function GameShell({ manager, metrics }: { manager: AppStore; metrics: MetricsAdapter }) {
+export function GameView({ app }: { app: RtsApp }) {
   const status = useSelector((state) => state.gameSession.state);
   if (status === "CONFIGURING") return <StartScreen />;
-  return <ArmedShell manager={manager} metrics={metrics} />;
-}
-
-type GameProps = {
-  autoStart?: boolean;
-  initialConfig?: GameConfig;
-};
-
-export function Game({ autoStart = false, initialConfig }: GameProps = {}) {
-  const metrics = useMemo(() => createRtsMetricsAdapter(() => performance.now()), []);
-  const initialEnemyCount = initialConfig?.enemyCount;
-  const initialAllyCount = initialConfig?.allyCount;
-  const initialSeed = initialConfig?.seed;
-  const initialPlayerUnitHp = initialConfig?.playerUnitHp;
-  const manager = useMemo<AppStore>(() => {
-    const nextManager = makeStore({
-      metrics,
-      random: Math.random,
-      renderer: { reset: () => undefined },
-    });
-
-    if (autoStart) {
-      nextManager.transition({
-        type: "GAME_START",
-        payload: {
-          enemyCount: initialEnemyCount ?? DEFAULT_GAME_CONFIG.enemyCount,
-          allyCount: initialAllyCount ?? DEFAULT_GAME_CONFIG.allyCount,
-          seed: initialSeed ?? DEFAULT_GAME_CONFIG.seed,
-          ...(initialPlayerUnitHp === undefined ? {} : { playerUnitHp: initialPlayerUnitHp }),
-        },
-      });
-    }
-
-    return nextManager;
-  }, [autoStart, initialAllyCount, initialEnemyCount, initialPlayerUnitHp, initialSeed, metrics]);
-
-  return (
-    <FSMContextProvider machineManager={manager}>
-      <GameShell manager={manager} metrics={metrics} />
-    </FSMContextProvider>
-  );
+  return <ArmedShell app={app} />;
 }

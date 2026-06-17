@@ -8,18 +8,18 @@ type Preset = {
 
 export const GAME_PRESETS = {
   small: {
-    label: "Small",
-    description: "500 enemies, 50 allies",
+    label: "Малый",
+    description: "500 врагов, 50 союзников",
     config: { enemyCount: 500, allyCount: 50, seed: "small-500" },
   },
   medium: {
-    label: "Medium",
-    description: "3,000 enemies, 120 allies",
+    label: "Средний",
+    description: "3 000 врагов, 120 союзников",
     config: { enemyCount: 3_000, allyCount: 120, seed: "medium-3000" },
   },
   stress: {
-    label: "Stress",
-    description: "10,000 enemies, 400 allies",
+    label: "Стресс",
+    description: "10 000 врагов, 400 союзников",
     config: { enemyCount: 10_000, allyCount: 400, seed: "stress-10000" },
   },
 } as const satisfies Record<RtsPresetId, Preset>;

@@ -1,4 +1,4 @@
-import { Game } from "../components/Game";
+import { RtsGame } from "../components/rts-game";
 import { DEFAULT_GAME_CONFIG, normalizeGameConfig } from "../store/config";
 import type { GameConfig } from "../store";
 
@@ -45,7 +45,7 @@ export default async function EntitiesRtsDebugPage({ searchParams }: { searchPar
 
   return (
     <main className="min-h-[calc(100svh-6.5rem)] bg-canvas-parchment">
-      <Game autoStart initialConfig={initialConfig} />
+      <RtsGame autoStart initialConfig={initialConfig} />
     </main>
   );
 }
