@@ -172,6 +172,7 @@ Columns — авторитативные или handoff-значения на к
 - `attackTimerMs`;
 - `incomingDamage`;
 - `projectileTargetEntity`;
+- `projectileImpactRadius`;
 - `projectileDamage`.
 
 Для handoff columns всегда фиксируйте владельца и lifetime:
@@ -183,7 +184,7 @@ Columns — авторитативные или handoff-значения на к
 
 `incomingDamage` допустим как hot-path handoff column для прямого урона: пишет только `unitCombat`, читает `unitHealth`, очищает владелец в начале своего `TICK`. Значение после `TICK` не является долговременным domain fact.
 
-Урон от снарядов должен иметь отдельного владельца. В RTS-примере `unitProjectile` держит SoA-пул снарядов и буфер урона по целям в `resource(...)`, очищает его в начале своего `TICK`, пишет попадания при движении снарядов, а `unitHealth` читает exposed buffer вместе с `unitCombat.incomingDamage`. `unitProjectile` не применяет `hp` и не dispatch-ит death lifecycle.
+Урон от снарядов должен иметь отдельного владельца. В RTS-примере `unitProjectile` держит SoA-пул снарядов, bounded scratch для spatial query и буфер урона по целям в `resource(...)`, очищает буфер в начале своего `TICK`, пишет AoE-попадания при движении снарядов, а `unitHealth` читает exposed buffer вместе с `unitCombat.incomingDamage`. `unitProjectile` не применяет `hp` и не dispatch-ит death lifecycle.
 
 Не используйте columns для runtime buffers или общих структур мира.
 
@@ -266,9 +267,9 @@ unitMovement.x/y + unitHealth.hp + unitIdentity.faction
 -> rtsSpatialIndex.unitGrid resource
 -> query API для combat/movement
 
-unitCombat.projectileTargetEntity + unitMovement.x/y
+unitCombat.projectileTargetEntity + unitCombat.projectileImpactRadius + unitMovement.x/y
 -> unitProjectile.projectiles resource
--> exposed projectile damage buffer для unitHealth
+-> spatial AoE query + exposed projectile damage buffer для unitHealth
 ```
 
 Анти-паттерн:

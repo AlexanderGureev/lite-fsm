@@ -33,6 +33,7 @@ export const unitCombat = createMachine({
     incomingDamage: i32({ default: 0 }),
     projectileSpeed: f32({ default: 0 }),
     projectileRadius: f32({ default: 0 }),
+    projectileImpactRadius: f32({ default: 0 }),
     projectileTargetEntity: i32({ default: -1 }),
     projectileDamage: i32({ default: 0 }),
     targetBuffer: resource(() => new Int32Array(TARGET_BUFFER_SIZE)),
@@ -44,6 +45,7 @@ export const unitCombat = createMachine({
     attackTimerMs: i32(),
     projectileSpeed: f32(),
     projectileRadius: f32(),
+    projectileImpactRadius: f32(),
   },
   reducer: (_state, action, { entities, payloadFor, self }) => {
     switch (action.type) {
@@ -58,6 +60,7 @@ export const unitCombat = createMachine({
           self.incomingDamage[entity] = 0;
           self.projectileSpeed[entity] = payload.projectileSpeed;
           self.projectileRadius[entity] = payload.projectileRadius;
+          self.projectileImpactRadius[entity] = payload.projectileImpactRadius;
           self.projectileTargetEntity[entity] = -1;
           self.projectileDamage[entity] = 0;
         }

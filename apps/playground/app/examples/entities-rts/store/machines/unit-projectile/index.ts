@@ -9,6 +9,7 @@ import { isUnitAlive } from "../unit-health";
 
 const INITIAL_PROJECTILE_CAPACITY = 1_024;
 const PROJECTILE_RANGE_GRACE = 96;
+const PROJECTILE_AOE_TARGET_LIMIT = 96;
 const MIN_PROJECTILE_SPEED = 1;
 
 type ProjectilePool = {
@@ -20,11 +21,13 @@ type ProjectilePool = {
   vy: Float32Array;
   speed: Float32Array;
   radius: Float32Array;
+  impactRadius: Float32Array;
   remainingDistance: Float32Array;
   damage: Int32Array;
   targetEntity: Int32Array;
   incomingDamage: Int32Array;
   damageTargets: Int32Array;
+  impactTargetBuffer: Int32Array;
   damageTargetCount: number;
 };
 
@@ -46,12 +49,17 @@ type ProjectileSpawn = {
   damage: number;
   speed: number;
   radius: number;
+  impactRadius: number;
   remainingDistance: number;
 };
 
 type UnitHealthLiveness = {
   has(entity: EntityIndex): boolean;
   readonly hp: { readonly [entity: number]: number };
+};
+
+type EnemySpatialQuery = {
+  collectEnemyNeighborsAroundAt(x: number, y: number, radius: number, out: Int32Array, limit?: number): number;
 };
 
 export type Events = AppEvents;
@@ -86,11 +94,13 @@ const createProjectilePool = (capacity = INITIAL_PROJECTILE_CAPACITY): Projectil
   vy: createF32(capacity),
   speed: createF32(capacity),
   radius: createF32(capacity),
+  impactRadius: createF32(capacity),
   remainingDistance: createF32(capacity),
   damage: createI32(capacity),
   targetEntity: createI32(capacity),
   incomingDamage: createI32(1),
   damageTargets: createI32(1),
+  impactTargetBuffer: createI32(1),
   damageTargetCount: 0,
 });
 
@@ -123,17 +133,19 @@ const ensureProjectileCapacity = (pool: ProjectilePool, required: number) => {
   pool.vy = growF32(pool.vy, capacity);
   pool.speed = growF32(pool.speed, capacity);
   pool.radius = growF32(pool.radius, capacity);
+  pool.impactRadius = growF32(pool.impactRadius, capacity);
   pool.remainingDistance = growF32(pool.remainingDistance, capacity);
   pool.damage = growI32(pool.damage, capacity);
   pool.targetEntity = growI32(pool.targetEntity, capacity);
 };
 
-const ensureDamageCapacity = (pool: ProjectilePool, required: number) => {
+const ensureDamageBufferCapacity = (pool: ProjectilePool, required: number) => {
   if (required <= pool.incomingDamage.length) return;
 
   const capacity = nextCapacity(pool.incomingDamage.length, required);
   pool.incomingDamage = growI32(pool.incomingDamage, capacity);
   pool.damageTargets = growI32(pool.damageTargets, capacity);
+  pool.impactTargetBuffer = growI32(pool.impactTargetBuffer, capacity);
 };
 
 const resetProjectilePool = (pool: ProjectilePool) => {
@@ -153,6 +165,51 @@ const recordProjectileDamage = (pool: ProjectilePool, target: EntityIndex, damag
   pool.incomingDamage[target] += damage;
 };
 
+const recordProjectileImpactDamage = (
+  pool: ProjectilePool,
+  spatial: EnemySpatialQuery,
+  health: UnitHealthLiveness,
+  identityFaction: { readonly [entity: number]: number },
+  targetRadius: { readonly [entity: number]: number },
+  targetX: { readonly [entity: number]: number },
+  targetY: { readonly [entity: number]: number },
+  primaryTarget: EntityIndex,
+  impactX: number,
+  impactY: number,
+  impactRadius: number,
+  damage: number,
+) => {
+  if (damage <= 0) return;
+
+  const radius = Math.max(0, impactRadius);
+  recordProjectileDamage(pool, primaryTarget, damage);
+  if (radius <= 0) {
+    return;
+  }
+
+  const count = spatial.collectEnemyNeighborsAroundAt(
+    impactX,
+    impactY,
+    radius,
+    pool.impactTargetBuffer,
+    PROJECTILE_AOE_TARGET_LIMIT,
+  );
+
+  for (let index = 0; index < count; index += 1) {
+    const target = pool.impactTargetBuffer[index] as EntityIndex;
+
+    if (target === primaryTarget) continue;
+    if (identityFaction[target] !== UNIT_FACTION.ENEMY || !isUnitAlive(health, target)) continue;
+
+    const range = radius + targetRadius[target];
+    const dx = targetX[target] - impactX;
+    const dy = targetY[target] - impactY;
+    if (dx * dx + dy * dy > range * range) continue;
+
+    recordProjectileDamage(pool, target, damage);
+  }
+};
+
 const removeProjectileAt = (pool: ProjectilePool, index: number) => {
   const last = pool.count - 1;
 
@@ -163,6 +220,7 @@ const removeProjectileAt = (pool: ProjectilePool, index: number) => {
     pool.vy[index] = pool.vy[last];
     pool.speed[index] = pool.speed[last];
     pool.radius[index] = pool.radius[last];
+    pool.impactRadius[index] = pool.impactRadius[last];
     pool.remainingDistance[index] = pool.remainingDistance[last];
     pool.damage[index] = pool.damage[last];
     pool.targetEntity[index] = pool.targetEntity[last];
@@ -182,6 +240,7 @@ const appendProjectile = (pool: ProjectilePool, spawn: ProjectileSpawn) => {
   pool.vy[index] = 0;
   pool.speed[index] = spawn.speed;
   pool.radius[index] = spawn.radius;
+  pool.impactRadius[index] = spawn.impactRadius;
   pool.remainingDistance[index] = spawn.remainingDistance;
   pool.damage[index] = spawn.damage;
   pool.targetEntity[index] = spawn.targetEntity;
@@ -192,7 +251,9 @@ const appendProjectile = (pool: ProjectilePool, spawn: ProjectileSpawn) => {
 const updateProjectiles = (
   pool: ProjectilePool,
   deltaSeconds: number,
+  spatial: EnemySpatialQuery,
   health: UnitHealthLiveness,
+  identityFaction: { readonly [entity: number]: number },
   targetRadius: { readonly [entity: number]: number },
   targetX: { readonly [entity: number]: number },
   targetY: { readonly [entity: number]: number },
@@ -215,7 +276,20 @@ const updateProjectiles = (
     const hitRadius = pool.radius[index] + targetRadius[target];
 
     if (distanceSquared <= hitRadius * hitRadius) {
-      recordProjectileDamage(pool, target, pool.damage[index]);
+      recordProjectileImpactDamage(
+        pool,
+        spatial,
+        health,
+        identityFaction,
+        targetRadius,
+        targetX,
+        targetY,
+        target,
+        targetX[target],
+        targetY[target],
+        pool.impactRadius[index],
+        pool.damage[index],
+      );
       removeProjectileAt(pool, index);
       continue;
     }
@@ -224,7 +298,20 @@ const updateProjectiles = (
     const travelDistance = pool.speed[index] * deltaSeconds;
 
     if (distance <= 0.0001 || travelDistance >= distance) {
-      recordProjectileDamage(pool, target, pool.damage[index]);
+      recordProjectileImpactDamage(
+        pool,
+        spatial,
+        health,
+        identityFaction,
+        targetRadius,
+        targetX,
+        targetY,
+        target,
+        targetX[target],
+        targetY[target],
+        pool.impactRadius[index],
+        pool.damage[index],
+      );
       removeProjectileAt(pool, index);
       continue;
     }
@@ -290,14 +377,25 @@ export const unitProjectile = createMachine({
     const health = access.get("unitHealth");
     const identity = access.get("unitIdentity");
     const movement = access.get("unitMovement");
+    const spatial = access.get("rtsSpatialIndex").index;
     const capacity = slotCount(movement.x);
 
     clearProjectileDamage(self.projectiles);
-    ensureDamageCapacity(self.projectiles, slotCount(health.hp));
+    ensureDamageBufferCapacity(self.projectiles, slotCount(health.hp));
 
-    updateProjectiles(self.projectiles, deltaSeconds, health, identity.radius, movement.x, movement.y);
+    updateProjectiles(
+      self.projectiles,
+      deltaSeconds,
+      spatial,
+      health,
+      identity.faction,
+      identity.radius,
+      movement.x,
+      movement.y,
+    );
 
     const combatProjectileDamage = combat.projectileDamage;
+    const combatProjectileImpactRadius = combat.projectileImpactRadius;
     const combatProjectileRadius = combat.projectileRadius;
     const combatProjectileSpeed = combat.projectileSpeed;
     const combatProjectileTargetEntity = combat.projectileTargetEntity;
@@ -328,6 +426,7 @@ export const unitProjectile = createMachine({
         damage,
         speed,
         radius: combatProjectileRadius[entity],
+        impactRadius: combatProjectileImpactRadius[entity],
         remainingDistance: combatAttackRange[entity] + identityRadius[target] + PROJECTILE_RANGE_GRACE,
       });
     }

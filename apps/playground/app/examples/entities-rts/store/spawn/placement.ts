@@ -37,17 +37,19 @@ const heroStats = {
   attackCooldownMs: 420,
   projectileSpeed: 720,
   projectileRadius: 10,
+  projectileImpactRadius: 96,
 };
 
 const allyStats = {
   radius: 8,
   speed: 145,
   hp: 120,
-  attackRange: 400,
+  attackRange: 900,
   attackDamage: 9,
   attackCooldownMs: 650,
   projectileSpeed: 640,
   projectileRadius: 7,
+  projectileImpactRadius: 72,
 };
 
 const enemyStats = {
@@ -59,6 +61,7 @@ const enemyStats = {
   attackCooldownMs: 900,
   projectileSpeed: 0,
   projectileRadius: 0,
+  projectileImpactRadius: 0,
 };
 
 type UnitSpawnValues = UnitIdentitySpawnPayload &
@@ -66,7 +69,12 @@ type UnitSpawnValues = UnitIdentitySpawnPayload &
   Pick<UnitHealthSpawnPayload, "hp"> &
   Pick<
     UnitCombatSpawnPayload,
-    "attackRange" | "attackDamage" | "attackCooldownMs" | "projectileSpeed" | "projectileRadius"
+    | "attackRange"
+    | "attackDamage"
+    | "attackCooldownMs"
+    | "projectileSpeed"
+    | "projectileRadius"
+    | "projectileImpactRadius"
   > & {
     readonly formationOffsetX?: number;
     readonly formationOffsetY?: number;
@@ -98,6 +106,7 @@ const createUnitComponents = (values: UnitSpawnValues): Omit<PlannedUnitSpawn, "
       attackTimerMs: 0,
       projectileSpeed: values.projectileSpeed,
       projectileRadius: values.projectileRadius,
+      projectileImpactRadius: values.projectileImpactRadius,
     },
   };
 

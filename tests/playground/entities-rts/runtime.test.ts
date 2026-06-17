@@ -211,6 +211,41 @@ describe("runtime simulation для entities RTS", () => {
     expect(units.health.hp[enemy]).toBeLessThan(initialEnemyHp);
   });
 
+  it("player projectiles наносят aoe-урон соседним enemies через spatial index", () => {
+    const manager = makeTestStore();
+
+    startGame(manager, { enemyCount: 2, allyCount: 1, seed: "player-projectile-aoe" });
+
+    const units = readUnitViews(manager);
+    const hero = entity(0);
+    const ally = entity(1);
+    const primaryEnemy = entity(2);
+    const nearbyEnemy = entity(3);
+    const initialPrimaryHp = units.health.hp[primaryEnemy];
+    const initialNearbyHp = units.health.hp[nearbyEnemy];
+
+    mutableColumn(units.movement.x)[primaryEnemy] = RTS_MAP.centerX + 90;
+    mutableColumn(units.movement.y)[primaryEnemy] = RTS_MAP.centerY;
+    mutableColumn(units.movement.speed)[primaryEnemy] = 0;
+    mutableColumn(units.movement.x)[nearbyEnemy] = RTS_MAP.centerX + 145;
+    mutableColumn(units.movement.y)[nearbyEnemy] = RTS_MAP.centerY + 12;
+    mutableColumn(units.movement.speed)[nearbyEnemy] = 0;
+    mutableColumn(units.health.hp)[primaryEnemy] = units.health.maxHp[primaryEnemy];
+    mutableColumn(units.health.hp)[nearbyEnemy] = units.health.maxHp[nearbyEnemy];
+    mutableColumn(units.combat.attackTimerMs)[hero] = 0;
+    mutableColumn(units.combat.attackTimerMs)[ally] = 10_000;
+
+    manager.transition({ type: "TICK", payload: { now: 16, deltaMs: 16 } });
+
+    expect(units.combat.incomingDamage[primaryEnemy]).toBe(0);
+    expect(units.combat.incomingDamage[nearbyEnemy]).toBe(0);
+
+    runTicks(manager, 16, 16);
+
+    expect(units.health.hp[primaryEnemy]).toBeLessThan(initialPrimaryHp);
+    expect(units.health.hp[nearbyEnemy]).toBeLessThan(initialNearbyHp);
+  });
+
   it("attackRange расширяет поиск цели для player projectiles за пределами соседних grid cells", () => {
     const manager = makeTestStore();
 
@@ -275,6 +310,10 @@ describe("runtime simulation для entities RTS", () => {
     const manager = makeTestStore();
 
     startGame(manager, { enemyCount: 300, allyCount: 1, seed: "hero-death" });
+
+    const units = readUnitViews(manager);
+    mutableColumn(units.combat.attackDamage)[entity(0)] = 0;
+    mutableColumn(units.combat.attackDamage)[entity(1)] = 0;
 
     for (let tick = 0; tick < 150 && manager.getState().gameSession.state !== "GAME_OVER"; tick += 1) {
       manager.transition({ type: "TICK", payload: { now: tick * 1_000, deltaMs: 1_000 } });
