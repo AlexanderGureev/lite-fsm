@@ -5,6 +5,7 @@ import { isUnitAlive } from "../store/machines/unit-health";
 import type { MetricsAdapter } from "../store/metrics";
 import { entityIdForUnitIndex, readUnitViews, unitSelected, type UnitViews } from "../store/selectors";
 import { RTS_MAP } from "../store/spawn/placement";
+import { createSeededRandom } from "../store/spawn/random";
 import type { Point } from "../store/types";
 import { UNIT_FACTION, UNIT_KIND, UNIT_SELECTION } from "../store/unit-model";
 
@@ -30,6 +31,9 @@ const TEXTURES = {
   selected: "entities-rts-selected",
   hpBg: "entities-rts-hp-bg",
   hpFill: "entities-rts-hp-fill",
+  ground: "entities-rts-ground",
+  rock: "entities-rts-rock",
+  tuft: "entities-rts-tuft",
 } as const;
 
 const CLICK_DRAG_THRESHOLD = 12;
@@ -42,12 +46,14 @@ const MAP_GRID_MINOR_STEP = 128;
 const MAP_GRID_MAJOR_STEP = 512;
 const MAP_GRID_MINOR_WIDTH = 4;
 const MAP_GRID_MAJOR_WIDTH = 8;
-const HP_BAR_MIN_WIDTH = 76;
-const HP_BAR_WIDTH_SCALE = 1.8;
-const HP_BAR_OFFSET_SCALE = 0.9;
-const HP_BAR_BG_HEIGHT = 24;
-const HP_BAR_FILL_HEIGHT = 16;
-const HP_BAR_HORIZONTAL_PADDING = 14;
+const HP_BAR_MIN_WIDTH = 18;
+const HP_BAR_BG_HEIGHT = 7;
+const HP_BAR_FILL_HEIGHT = 4;
+const HP_BAR_HORIZONTAL_PADDING = 2;
+const HP_BAR_GAP = 5;
+// Рамка выделения уходит под спрайты, чтобы не перекрывать плотные отряды.
+const SELECTION_DEPTH = 2;
+const SELECTION_PADDING = 8;
 const SIMULATION_TICK_RATE = 30;
 const FIXED_SIMULATION_STEP_MS = 1_000 / SIMULATION_TICK_RATE;
 const MAX_SIMULATION_FRAME_DELTA_MS = 100;
@@ -56,6 +62,7 @@ const MAX_SPAWN_STEPS_PER_FRAME = 1;
 const SPAWN_RENDER_CREATE_BUDGET = 768;
 const RENDER_CULL_MARGIN = 256;
 const MAX_VISIBLE_ENEMY_SPRITES = 8_000;
+const MOVING_SPEED_THRESHOLD_SQUARED = 1;
 
 type DragState = {
   start: Point;
@@ -70,6 +77,7 @@ type UnitView = {
   maxHp: number;
   hpRate: number;
   kind: number;
+  frame: number;
 };
 
 type HpBarView = {
@@ -123,11 +131,22 @@ const cameraPanVectorForCode = (code: string) => {
   }
 };
 
-const displaySizeForKind = (kind: number) => {
-  if (kind === UNIT_KIND.HERO) return 96;
-  if (kind === UNIT_KIND.ALLY) return 48;
-  return 38;
+const spriteDisplaySize = (kind: number) => {
+  if (kind === UNIT_KIND.HERO) return { width: 66, height: 104 };
+  if (kind === UNIT_KIND.ALLY) return { width: 34, height: 54 };
+  return { width: 38, height: 42 };
 };
+
+const displaySizeForKind = (kind: number) => spriteDisplaySize(kind).height;
+
+const spriteAnimForKind = (kind: number) => {
+  if (kind === UNIT_KIND.HERO) return { frameCount: 4, frameDurationMs: 120 };
+  if (kind === UNIT_KIND.ALLY) return { frameCount: 4, frameDurationMs: 120 };
+  return { frameCount: 2, frameDurationMs: 320 };
+};
+
+const animationFrameIndex = (timeMs: number, frameDurationMs: number, frameCount: number, phase: number) =>
+  (Math.floor(timeMs / frameDurationMs) + phase) % frameCount;
 
 const textureForKind = (kind: number) => {
   if (kind === UNIT_KIND.HERO) return TEXTURES.hero;
@@ -172,29 +191,237 @@ const addGeneratedTexture = (
   texture.refresh();
 };
 
+// Кадры юнита собираются из неподвижного торса, набора ног (узкая/широкая стойка)
+// и тени. "bob" поднимает тело над зафиксированной тенью — так горизонтальный
+// пиксель-арт получает объем: персонаж пружинит, а тень держит его на земле.
+type WalkStance = "apart" | "together";
+
+type WalkFrame = { stance: WalkStance; bob: number };
+
+type WalkerArt = {
+  width: number;
+  torso: string[];
+  legsApart: string[];
+  legsTogether: string[];
+  shadow: string[];
+  frames: WalkFrame[];
+};
+
+const buildWalkerFrames = (art: WalkerArt): string[][] => {
+  const maxBob = art.frames.reduce((max, frame) => Math.max(max, frame.bob), 0);
+  const blankRow = ".".repeat(art.width);
+  const pad = (row: string) => row.padEnd(art.width, ".");
+
+  return art.frames.map(({ stance, bob }) => {
+    const legs = stance === "apart" ? art.legsApart : art.legsTogether;
+    const body = [...art.torso, ...legs].map(pad);
+
+    return [
+      ...Array.from({ length: maxBob - bob }, () => blankRow),
+      ...body,
+      ...Array.from({ length: bob }, () => blankRow),
+      ...art.shadow.map(pad),
+    ];
+  });
+};
+
+const addGeneratedSpriteSheet = (
+  scene: import("phaser").Scene,
+  key: string,
+  frames: string[][],
+  palette: Record<string, string>,
+  pixelWidth = 4,
+) => {
+  if (scene.textures.exists(key)) return;
+
+  const columns = Math.max(...frames.flatMap((frame) => frame.map((row) => row.length)));
+  const rows = Math.max(...frames.map((frame) => frame.length));
+  const frameWidth = columns * pixelWidth;
+  const frameHeight = rows * pixelWidth;
+  const texture = scene.textures.createCanvas(key, frameWidth * frames.length, frameHeight);
+  if (!texture) return;
+
+  const context = texture.getContext();
+  context.imageSmoothingEnabled = false;
+  context.clearRect(0, 0, frameWidth * frames.length, frameHeight);
+
+  frames.forEach((frame, frameIndex) => {
+    const offsetX = frameIndex * frameWidth;
+
+    for (let row = 0; row < frame.length; row += 1) {
+      for (let column = 0; column < frame[row].length; column += 1) {
+        const color = palette[frame[row][column]];
+        if (!color || color === "rgba(0,0,0,0)") continue;
+
+        context.fillStyle = color;
+        context.fillRect(offsetX + column * pixelWidth, row * pixelWidth, pixelWidth, pixelWidth);
+      }
+    }
+
+    texture.add(frameIndex, 0, offsetX, 0, frameWidth, frameHeight);
+  });
+
+  texture.refresh();
+};
+
+const ZOMBIE_ART: WalkerArt = {
+  width: 8,
+  torso: ["..lgg...", ".lgggg..", ".dgeeg..", "ddgggdd.", ".dgggd..", "..ggg..."],
+  legsApart: ["..d..d.."],
+  legsTogether: ["..d..d.."],
+  shadow: [".ssssss."],
+  frames: [
+    { stance: "apart", bob: 0 },
+    { stance: "apart", bob: 1 },
+  ],
+};
+
+const ALLY_ART: WalkerArt = {
+  width: 8,
+  torso: ["...dd...", "..dkkd..", "..kkkk..", "..hbbh..", ".bbbbbb.", ".kdbbdk.", "..bbbb..", "..dbbd.."],
+  legsApart: ["..b..b..", "..o..o.."],
+  legsTogether: ["...bb...", "...oo..."],
+  shadow: [".ssssss."],
+  frames: [
+    { stance: "apart", bob: 0 },
+    { stance: "together", bob: 1 },
+    { stance: "apart", bob: 2 },
+    { stance: "together", bob: 1 },
+  ],
+};
+
+const HERO_ART: WalkerArt = {
+  width: 10,
+  torso: [
+    "....rr....",
+    "...mrrm...",
+    "..mhmmhm..",
+    "..mkkkkm..",
+    "...kkkk...",
+    "..hbbbbh..",
+    ".hbbbbbbh.",
+    ".kdbbbbdk.",
+    "..bbbbbb..",
+    "..bhbbhb..",
+    "..obbbbo..",
+  ],
+  legsApart: ["...b..b...", "...o..o..."],
+  legsTogether: ["....bb....", "....oo...."],
+  shadow: ["..ssssss.."],
+  frames: [
+    { stance: "apart", bob: 0 },
+    { stance: "together", bob: 1 },
+    { stance: "apart", bob: 2 },
+    { stance: "together", bob: 1 },
+  ],
+};
+
+const ZOMBIE_PALETTE = {
+  ".": "rgba(0,0,0,0)",
+  s: "rgba(0,0,0,0.34)",
+  d: "#3f4a2c",
+  g: "#6b7a45",
+  l: "#97a86a",
+  e: "#6e241c",
+};
+
+const ALLY_PALETTE = {
+  ".": "rgba(0,0,0,0)",
+  s: "rgba(0,0,0,0.30)",
+  o: "#0f3a24",
+  d: "#2f9e5e",
+  b: "#43c46f",
+  h: "#8ff0ad",
+  k: "#f1c79a",
+};
+
+const HERO_PALETTE = {
+  ".": "rgba(0,0,0,0)",
+  s: "rgba(0,0,0,0.32)",
+  o: "#5b3d12",
+  d: "#caa033",
+  b: "#f0c23e",
+  h: "#ffe486",
+  k: "#f1c79a",
+  m: "#cdd6ec",
+  r: "#e24a30",
+};
+
+// Тайл земли: мшистый грунт с низкочастотными пятнами и редкими вкраплениями.
+// Низкочастотная "грубая" карта задает органичные участки, а пожатие на блок
+// добавляет фактуру — так у плоской карты появляется глубина.
+const GROUND_BLOCKS = 96;
+const GROUND_BLOCK_PIXELS = 6;
+const GROUND_COARSE = 10;
+
+const addGroundTexture = (scene: import("phaser").Scene, key: string) => {
+  if (scene.textures.exists(key)) return;
+
+  const size = GROUND_BLOCKS * GROUND_BLOCK_PIXELS;
+  const texture = scene.textures.createCanvas(key, size, size);
+  if (!texture) return;
+
+  const context = texture.getContext();
+  context.imageSmoothingEnabled = false;
+
+  const random = createSeededRandom("rts-ground-v1");
+  const moss = ["#0f1813", "#13201a", "#172620", "#1c2d24", "#22352a"];
+  const dirt = ["#262217", "#2d2a1d"];
+  const coarse = Array.from({ length: GROUND_COARSE * GROUND_COARSE }, () => random());
+
+  for (let by = 0; by < GROUND_BLOCKS; by += 1) {
+    for (let bx = 0; bx < GROUND_BLOCKS; bx += 1) {
+      const cx = Math.floor((bx / GROUND_BLOCKS) * GROUND_COARSE);
+      const cy = Math.floor((by / GROUND_BLOCKS) * GROUND_COARSE);
+      const region = coarse[cy * GROUND_COARSE + cx];
+      const jitter = random();
+      // Земля проступает вероятностно по краям "грязного" участка — это размывает
+      // жесткие квадраты грубой карты и делает грунт органичным.
+      const dirtChance = Math.max(0, region - 0.74) * 2.6;
+
+      let color: string;
+      if (jitter < dirtChance) {
+        color = dirt[jitter < dirtChance * 0.5 ? 0 : 1];
+      } else if (jitter > 0.985) {
+        color = "#2c4434";
+      } else {
+        const level = Math.min(moss.length - 1, Math.floor((region * 0.4 + jitter * 0.6) * moss.length));
+        color = moss[level];
+      }
+
+      context.fillStyle = color;
+      context.fillRect(bx * GROUND_BLOCK_PIXELS, by * GROUND_BLOCK_PIXELS, GROUND_BLOCK_PIXELS, GROUND_BLOCK_PIXELS);
+    }
+  }
+
+  texture.refresh();
+};
+
+const ROCK_ART = [
+  "........",
+  "..lll...",
+  ".lgggl..",
+  ".gggggo.",
+  ".oggggo.",
+  ".soooos.",
+  "..sss...",
+];
+
+const ROCK_PALETTE = { ".": "rgba(0,0,0,0)", s: "rgba(0,0,0,0.32)", o: "#2b302d", g: "#565d59", l: "#828984" };
+
+const TUFT_ART = ["...b....", ".b.bl.b.", ".blblbl.", "bblbbblb", ".bbbbbb.", ".sssss..", "...s...."];
+
+const TUFT_PALETTE = { ".": "rgba(0,0,0,0)", s: "rgba(0,0,0,0.26)", b: "#2f5d3a", l: "#6fae6a" };
+
 const ensureGeneratedTextures = (scene: import("phaser").Scene) => {
   const transparent = "rgba(0,0,0,0)";
 
-  addGeneratedTexture(
-    scene,
-    TEXTURES.hero,
-    ["...YYYY...", "..YFFFFY..", ".YFYYYYFY.", "YFYYFFYYFY", "YFYFFFFYFY", ".YFYYYYFY.", "..YFFFFY..", "...YYYY..."],
-    {
-      ".": transparent,
-      Y: "#f6e27a",
-      F: "#fff7b0",
-    },
-  );
-  addGeneratedTexture(scene, TEXTURES.ally, ["..GG..", ".GLLG.", "GLLLLG", "GLLLLG", ".GLLG.", "..GG.."], {
-    ".": transparent,
-    G: "#1b7a54",
-    L: "#59d6a3",
-  });
-  addGeneratedTexture(scene, TEXTURES.enemy, ["..RR..", ".RDDR.", "RDRRDR", "RDRRDR", ".RDDR.", "..RR.."], {
-    ".": transparent,
-    R: "#ff6f61",
-    D: "#7c211b",
-  });
+  addGroundTexture(scene, TEXTURES.ground);
+  addGeneratedTexture(scene, TEXTURES.rock, ROCK_ART, ROCK_PALETTE, 3);
+  addGeneratedTexture(scene, TEXTURES.tuft, TUFT_ART, TUFT_PALETTE, 3);
+  addGeneratedSpriteSheet(scene, TEXTURES.hero, buildWalkerFrames(HERO_ART), HERO_PALETTE);
+  addGeneratedSpriteSheet(scene, TEXTURES.ally, buildWalkerFrames(ALLY_ART), ALLY_PALETTE);
+  addGeneratedSpriteSheet(scene, TEXTURES.enemy, buildWalkerFrames(ZOMBIE_ART), ZOMBIE_PALETTE);
   addGeneratedTexture(
     scene,
     TEXTURES.selected,
@@ -215,6 +442,7 @@ class UnitSpriteRenderer {
   private readonly hpBars = new Map<number, HpBarView>();
   private readonly liveEntities = new Set<number>();
   private loadingSyncCursor = 0;
+  private animTimeMs = 0;
 
   constructor(
     private readonly scene: import("phaser").Scene,
@@ -239,6 +467,7 @@ class UnitSpriteRenderer {
   sync() {
     const units = readUnitViews(this.manager);
     const plan = this.createRenderPlan(units);
+    this.animTimeMs = this.scene.time.now;
     this.liveEntities.clear();
     this.loadingSyncCursor = units.capacity;
 
@@ -257,6 +486,7 @@ class UnitSpriteRenderer {
   syncLoading(maxCreates: number) {
     const units = readUnitViews(this.manager);
     const plan = this.createRenderPlan(units);
+    this.animTimeMs = this.scene.time.now;
     const capacity = units.capacity;
     let created = 0;
     let index = Math.min(this.loadingSyncCursor, capacity);
@@ -339,7 +569,7 @@ class UnitSpriteRenderer {
     const texture = textureForKind(kind);
     const x = units.movement.x[entity];
     const y = units.movement.y[entity];
-    const view = this.sprites.get(key) ?? this.createUnitView(key, units, entity, kind, texture, size);
+    const view = this.sprites.get(key) ?? this.createUnitView(key, units, entity, kind, texture);
     const hp = units.health.hp[entity];
     const maxHp = units.health.maxHp[entity];
     let hpRate = view.hpRate;
@@ -351,10 +581,12 @@ class UnitSpriteRenderer {
     }
 
     if (view.kind !== kind) {
+      const display = spriteDisplaySize(kind);
       view.kind = kind;
-      view.sprite.setTexture(texture);
+      view.frame = 0;
+      view.sprite.setTexture(texture, 0);
       view.sprite.setDepth(depthForKind(kind));
-      view.sprite.setDisplaySize(size, size);
+      view.sprite.setDisplaySize(display.width, display.height);
     }
 
     if (view.hp !== hp || view.maxHp !== maxHp) {
@@ -376,39 +608,50 @@ class UnitSpriteRenderer {
       }
     }
 
+    this.syncAnimation(view, units, entity, kind);
+
     if (kind === UNIT_KIND.ENEMY && hpRate >= 1) return;
 
     const selected = unitSelected(units, entity);
     this.syncSelection(units, entity, size, kind, selected);
-    this.syncHpBar(units, entity, size, kind, selected, hpRate);
+    this.syncHpBar(units, entity, size, kind, hpRate);
   }
 
-  private createUnitView(
-    key: number,
-    units: UnitViews,
-    entity: EntityIndex,
-    kind: number,
-    texture: string,
-    size: number,
-  ) {
+  private createUnitView(key: number, units: UnitViews, entity: EntityIndex, kind: number, texture: string) {
     const x = units.movement.x[entity];
     const y = units.movement.y[entity];
-    const view = {
+    const display = spriteDisplaySize(kind);
+    const view: UnitView = {
+      frame: 0,
       hp: -1,
       hpRate: -1,
       kind,
       maxHp: -1,
       sprite: this.scene.add
-        .image(x, y, texture)
+        .image(x, y, texture, 0)
         .setOrigin(0.5, 0.5)
         .setDepth(depthForKind(kind))
-        .setDisplaySize(size, size),
+        .setDisplaySize(display.width, display.height),
       x,
       y,
     };
 
     this.sprites.set(key, view);
     return view;
+  }
+
+  private syncAnimation(view: UnitView, units: UnitViews, entity: EntityIndex, kind: number) {
+    const anim = spriteAnimForKind(kind);
+    const vx = units.movement.vx[entity];
+    const vy = units.movement.vy[entity];
+    const moving = vx * vx + vy * vy > MOVING_SPEED_THRESHOLD_SQUARED;
+    const frame = moving
+      ? animationFrameIndex(this.animTimeMs, anim.frameDurationMs, anim.frameCount, Number(entity) % anim.frameCount)
+      : 0;
+
+    if (view.frame === frame) return;
+    view.frame = frame;
+    view.sprite.setFrame(frame);
   }
 
   private syncSelection(units: UnitViews, entity: EntityIndex, size: number, kind: number, selected: number) {
@@ -429,25 +672,17 @@ class UnitSpriteRenderer {
       this.scene.add
         .image(units.movement.x[entity], units.movement.y[entity], TEXTURES.selected)
         .setOrigin(0.5, 0.5)
-        .setDepth(7);
+        .setDepth(SELECTION_DEPTH);
 
     this.selected.set(key, highlight);
     highlight.setPosition(units.movement.x[entity], units.movement.y[entity]);
-    highlight.setDisplaySize(size * 1.5, size * 1.5);
-    highlight.setAlpha(selected === UNIT_SELECTION.SELECTED ? 0.95 : 0.34);
+    highlight.setDisplaySize(spriteDisplaySize(kind).width + SELECTION_PADDING, size + SELECTION_PADDING);
+    highlight.setAlpha(selected === UNIT_SELECTION.SELECTED ? 0.9 : 0.34);
   }
 
-  private syncHpBar(
-    units: UnitViews,
-    entity: EntityIndex,
-    size: number,
-    kind: number,
-    selected: number,
-    hpRate: number,
-  ) {
+  private syncHpBar(units: UnitViews, entity: EntityIndex, size: number, kind: number, hpRate: number) {
     const key = Number(entity);
-    const shouldShow =
-      kind === UNIT_KIND.HERO || selected === UNIT_SELECTION.SELECTED || (kind === UNIT_KIND.ENEMY && hpRate < 1);
+    const shouldShow = kind === UNIT_KIND.HERO || hpRate < 1;
 
     if (!shouldShow) {
       const stale = this.hpBars.get(key);
@@ -459,8 +694,8 @@ class UnitSpriteRenderer {
       return;
     }
 
-    const width = Math.max(HP_BAR_MIN_WIDTH, size * HP_BAR_WIDTH_SCALE);
-    const y = units.movement.y[entity] - size * HP_BAR_OFFSET_SCALE;
+    const width = Math.max(HP_BAR_MIN_WIDTH, spriteDisplaySize(kind).width);
+    const y = units.movement.y[entity] - size / 2 - HP_BAR_GAP;
     const bar =
       this.hpBars.get(key) ??
       ({
@@ -805,7 +1040,9 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
     }
 
     private drawMap() {
-      const grid = this.add.graphics().setDepth(0);
+      this.add.tileSprite(0, 0, RTS_MAP.width, RTS_MAP.height, TEXTURES.ground).setOrigin(0, 0).setDepth(-2);
+
+      const grid = this.add.graphics().setDepth(-1);
       const drawVerticalGridLine = (x: number, width: number) => {
         const left = clampValue(x - width / 2, 0, RTS_MAP.width - width);
         grid.fillRect(left, 0, width, RTS_MAP.height);
@@ -815,16 +1052,15 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
         grid.fillRect(0, top, RTS_MAP.width, width);
       };
 
-      grid.fillStyle(0x101612, 1);
-      grid.fillRect(0, 0, RTS_MAP.width, RTS_MAP.height);
-
-      grid.fillStyle(0x26392f, 0.58);
+      grid.fillStyle(0x2a3d32, 0.38);
       for (let x = 0; x <= RTS_MAP.width; x += MAP_GRID_MINOR_STEP) drawVerticalGridLine(x, MAP_GRID_MINOR_WIDTH);
       for (let y = 0; y <= RTS_MAP.height; y += MAP_GRID_MINOR_STEP) drawHorizontalGridLine(y, MAP_GRID_MINOR_WIDTH);
 
-      grid.fillStyle(0x54705b, 0.68);
+      grid.fillStyle(0x5a7862, 0.5);
       for (let x = 0; x <= RTS_MAP.width; x += MAP_GRID_MAJOR_STEP) drawVerticalGridLine(x, MAP_GRID_MAJOR_WIDTH);
       for (let y = 0; y <= RTS_MAP.height; y += MAP_GRID_MAJOR_STEP) drawHorizontalGridLine(y, MAP_GRID_MAJOR_WIDTH);
+
+      this.scatterProps();
 
       grid.fillStyle(0x314231, 0.7);
       grid.fillRect(RTS_MAP.centerX - 84, RTS_MAP.centerY - 84, 168, 168);
@@ -832,6 +1068,26 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
       grid.strokeRect(RTS_MAP.centerX - 92, RTS_MAP.centerY - 92, 184, 184);
       grid.lineStyle(10, 0xff6f61, 0.24);
       grid.strokeRect(80, 80, RTS_MAP.width - 160, RTS_MAP.height - 160);
+    }
+
+    private scatterProps() {
+      const random = createSeededRandom("rts-props-v1");
+      const margin = 160;
+      const span = RTS_MAP.width - margin * 2;
+
+      for (let index = 0; index < 260; index += 1) {
+        const x = margin + random() * span;
+        const y = margin + random() * span;
+        const nearBase = Math.abs(x - RTS_MAP.centerX) < 220 && Math.abs(y - RTS_MAP.centerY) < 220;
+        if (nearBase) continue;
+
+        const texture = random() > 0.5 ? TEXTURES.tuft : TEXTURES.rock;
+        this.add
+          .image(x, y, texture)
+          .setDepth(1)
+          .setScale(1.6 + random() * 2)
+          .setAlpha(0.9);
+      }
     }
 
     private bindInput() {
