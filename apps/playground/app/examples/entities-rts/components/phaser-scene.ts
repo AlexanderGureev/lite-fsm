@@ -14,8 +14,8 @@ import {
   MAX_SIMULATION_STEPS_PER_FRAME,
   MAX_SPAWN_STEPS_PER_FRAME,
   RTS_CAMERA_ZOOM_EVENT,
-  RTS_RENDER_DEBUG_TOGGLE_KEY,
-  RTS_RENDER_LOD_TOGGLE_KEY,
+  RTS_RENDER_DEBUG_TOGGLE_KEYS,
+  RTS_RENDER_LOD_TOGGLE_KEYS,
   SPAWN_RENDER_CREATE_BUDGET,
   type RtsCameraZoomAction,
 } from "./scene/constants";
@@ -70,7 +70,9 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
     private readonly handleWindowKeyDown = (event: KeyboardEvent) => {
       if (keyboardTargetIsEditable(event.target)) return;
 
-      if (event.key.toLowerCase() === RTS_RENDER_DEBUG_TOGGLE_KEY) {
+      const key = event.key.toLowerCase();
+
+      if (RTS_RENDER_DEBUG_TOGGLE_KEYS.includes(key)) {
         event.preventDefault();
         this.renderDebugEnabled = !this.renderDebugEnabled;
         this.unitRenderer?.setDebugMode(this.renderDebugEnabled);
@@ -78,7 +80,7 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
         return;
       }
 
-      if (event.key.toLowerCase() === RTS_RENDER_LOD_TOGGLE_KEY) {
+      if (RTS_RENDER_LOD_TOGGLE_KEYS.includes(key)) {
         event.preventDefault();
         this.renderLodDisabled = !this.renderLodDisabled;
         this.unitRenderer?.setRenderLodDisabled(this.renderLodDisabled);

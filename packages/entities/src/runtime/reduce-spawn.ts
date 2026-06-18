@@ -16,11 +16,8 @@ import {
   type ColumnarActorStore,
   type EntityRuntimeState,
 } from "./state";
-import {
-  type EntityDispatchTransaction,
-  type EntityReactionBatch,
-  type StagedEntitySpawn,
-} from "./transaction";
+import { type EntityDispatchTransaction, type EntityReactionBatch, type StagedEntitySpawn } from "./transaction";
+import { tracePhase, type EntityTransitionTraceSession } from "./transitionTrace";
 
 type SpawnBatch = {
   readonly store: ColumnarActorStore;
@@ -96,42 +93,57 @@ export const reduceStagedSpawnLifecycle = (
   staged: readonly StagedEntitySpawn[],
   transaction: EntityDispatchTransaction | undefined,
   reactionContext: LifecycleReactionContext,
+  trace?: EntityTransitionTraceSession,
 ): boolean => {
   if (staged.length === 0) return false;
 
-  const spawnBatches = applyStagedSpawns(runtime, staged);
+  const spawnBatches = tracePhase(trace, "entities.reduce.spawnLifecycle.applyStagedSpawns", () =>
+    applyStagedSpawns(runtime, staged),
+  );
   const reactionBatches: EntityReactionBatch[] = [];
 
-  for (const batch of spawnBatches) {
-    reduceAcceptedBatch(
-      runtime,
-      {
-        store: batch.store,
-        indices: batch.indices,
-        action: spawnLifecycleAction,
-        eventCode: runtime.eventCodeByType[ENTITY_SPAWNED],
-        payloadByEntity: batch.payloadByEntity,
-      },
-      transaction,
-      {
-        scheduleReactions: false,
-        onAccepted(accepted) {
-          appendLifecycleReactionBatch(
-            transaction,
-            reactionBatches,
-            batch.store,
-            runtime.eventCodeByType[ENTITY_SPAWNED],
-            accepted,
-          );
+  tracePhase(trace, "entities.reduce.spawnLifecycle.reduceBatches", () => {
+    for (const batch of spawnBatches) {
+      reduceAcceptedBatch(
+        runtime,
+        {
+          store: batch.store,
+          indices: batch.indices,
+          action: spawnLifecycleAction,
+          eventCode: runtime.eventCodeByType[ENTITY_SPAWNED],
+          payloadByEntity: batch.payloadByEntity,
         },
-      },
-    );
-  }
+        transaction,
+        {
+          scheduleReactions: false,
+          trace,
+          traceBatchPrefix: "entities.reduce.spawnLifecycle.batch",
+          onAccepted(accepted) {
+            appendLifecycleReactionBatch(
+              transaction,
+              reactionBatches,
+              batch.store,
+              runtime.eventCodeByType[ENTITY_SPAWNED],
+              accepted,
+            );
+          },
+        },
+      );
+    }
+  });
 
-  runEntityReactionBatches(runtime, reactionBatches, {
-    action: spawnLifecycleAction,
-    manager: reactionContext.manager,
-    dispatch: reactionContext.dispatch,
+  tracePhase(trace, "entities.reduce.spawnLifecycle.reactions", () => {
+    runEntityReactionBatches(
+      runtime,
+      reactionBatches,
+      {
+        action: spawnLifecycleAction,
+        manager: reactionContext.manager,
+        dispatch: reactionContext.dispatch,
+      },
+      trace,
+      "entities.reduce.spawnLifecycle.reactions",
+    );
   });
   return true;
 };

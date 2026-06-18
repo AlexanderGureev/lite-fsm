@@ -6,7 +6,7 @@ import type { EntitySpawnDescriptor } from "../spawn";
 import { hasSpawnRecipe, runSpawnRecipe } from "../spawn";
 import type { EntitySpawnSchema } from "../schema";
 import type { ColumnarActorStore, EntityRuntimeState } from "./state";
-import { readEntityTransitionTraceSession, recordEntityTracePhase } from "./transitionTrace";
+import { readEntityTransitionTraceSession, recordEntityTracePhase, tracePhase } from "./transitionTrace";
 
 type RuntimeCarrier = {
   readonly runtime: Map<string, unknown>;
@@ -115,9 +115,7 @@ const scheduleCapturedEntityDespawn = (
   }
 
   if (isDev()) {
-    throw storageRuntimeError(
-      `stale entity effect scope cannot despawn entity '${entry.id}' at index ${entry.entity}`,
-    );
+    throw storageRuntimeError(`stale entity effect scope cannot despawn entity '${entry.id}' at index ${entry.entity}`);
   }
 };
 
@@ -159,7 +157,10 @@ const resetReactionIndexPool = (scratch: EntityTransactionScratch): void => {
   scratch.reactionIndexPoolCursor = 0;
 };
 
-export const prepareEntityTransaction = (carrier: RuntimeCarrier, runtime: EntityRuntimeState): EntityDispatchTransaction => {
+export const prepareEntityTransaction = (
+  carrier: RuntimeCarrier,
+  runtime: EntityRuntimeState,
+): EntityDispatchTransaction => {
   const scratch = getEntityTransactionScratch(runtime);
   clearDespawnScheduledMarks(scratch);
   resetReactionIndexPool(scratch);
@@ -245,11 +246,7 @@ const normalizeRecipeResult = (value: unknown): readonly unknown[] => {
   throw runtimeError("recipe must return an EntitySpawnSpec or an array of EntitySpawnSpec");
 };
 
-const validateSpawnSpec = (
-  runtime: EntityRuntimeState,
-  value: unknown,
-  seenIds: Set<string>,
-): StagedEntitySpawn => {
+const validateSpawnSpec = (runtime: EntityRuntimeState, value: unknown, seenIds: Set<string>): StagedEntitySpawn => {
   if (!isPlainObject(value)) {
     throw runtimeError("EntitySpawnSpec must be a plain object");
   }
@@ -307,15 +304,19 @@ export const stageSpawnAction = (
       throw runtimeError("entity transaction slot was not prepared before spawn staging");
     }
 
-    const result = runSpawnRecipe(spawn, carrier.action as AnyEvent);
-    const rawSpecs = normalizeRecipeResult(result);
+    const result = tracePhase(trace, "entities.spawn.stage.recipe", () =>
+      runSpawnRecipe(spawn, carrier.action as AnyEvent),
+    );
+    const rawSpecs = tracePhase(trace, "entities.spawn.stage.normalize", () => normalizeRecipeResult(result));
     if (rawSpecs.length === 0) {
       transaction.stagedSpawns = [];
       return;
     }
 
-    const seenIds = new Set<string>();
-    transaction.stagedSpawns = rawSpecs.map((spec) => validateSpawnSpec(transaction.runtime, spec, seenIds));
+    transaction.stagedSpawns = tracePhase(trace, "entities.spawn.stage.validate", () => {
+      const seenIds = new Set<string>();
+      return rawSpecs.map((spec) => validateSpawnSpec(transaction.runtime, spec, seenIds));
+    });
   } finally {
     recordEntityTracePhase(trace, "entities.spawn.stage", startedAt);
   }
@@ -337,10 +338,7 @@ const ensureDespawnScheduleCapacity = (transaction: EntityDispatchTransaction, c
   transaction.despawnScheduled = next;
 };
 
-export const scheduleEntityDespawn = (
-  transaction: EntityDispatchTransaction,
-  entity: EntityIndex,
-): boolean => {
+export const scheduleEntityDespawn = (transaction: EntityDispatchTransaction, entity: EntityIndex): boolean => {
   if (transaction.runtime.entityStore.alive[entity] !== 1) return false;
 
   ensureDespawnScheduleCapacity(transaction, entity + 1);

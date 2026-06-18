@@ -1,13 +1,16 @@
 /* global globalThis */
 
 import {
-  benchmarkName,
-  measuredIterations,
-  scenarioDefinitions,
-  warmupIterations,
+  benchmarkName as compositionBenchmarkName,
+  measuredIterations as compositionMeasuredIterations,
+  scenarioDefinitions as compositionScenarioDefinitions,
+  warmupIterations as compositionWarmupIterations,
 } from "./composition-lite-fsm-entities.fixture.mjs";
 
-export { measuredIterations, warmupIterations };
+export const benchmarkName = compositionBenchmarkName;
+export const measuredIterations = compositionMeasuredIterations;
+export const scenarioDefinitions = compositionScenarioDefinitions;
+export const warmupIterations = compositionWarmupIterations;
 
 const transitionTraceCollectorSymbol = Symbol.for("@lite-fsm/performance-trace");
 const tickActionType = "TICK";
@@ -53,23 +56,32 @@ const coverageDefinitions = [
     ],
   },
   {
+    key: "entities.spawnStage",
+    label: "entities spawn stage coverage",
+    parentKey: "entities.spawn.stage",
+    numeratorKeys: ["entities.spawn.stage.recipe", "entities.spawn.stage.normalize", "entities.spawn.stage.validate"],
+  },
+  {
+    key: "entities.spawnLifecycle",
+    label: "entities spawn lifecycle coverage",
+    parentKey: "entities.reduce.spawnLifecycle",
+    numeratorKeys: [
+      "entities.reduce.spawnLifecycle.applyStagedSpawns",
+      "entities.reduce.spawnLifecycle.reduceBatches",
+      "entities.reduce.spawnLifecycle.reactions",
+    ],
+  },
+  {
     key: "entities.reactions",
     label: "entities reactions coverage",
     parentKey: "entities.reactions.total",
-    numeratorKeys: [
-      "entities.reactions.captureScope",
-      "entities.reactions.createDeps",
-      "entities.reactions.user",
-    ],
+    numeratorKeys: ["entities.reactions.captureScope", "entities.reactions.createDeps", "entities.reactions.user"],
   },
   {
     key: "entities.effects",
     label: "entities effects coverage",
     parentKey: "core.effects.total",
-    numeratorKeys: [
-      "entities.effects.resolve",
-      "entities.effects.invoke",
-    ],
+    numeratorKeys: ["entities.effects.resolve", "entities.effects.invoke"],
   },
 ];
 
@@ -94,8 +106,25 @@ const phaseLabelOverrides = {
   "core.hooks.afterEffects": "after effects hooks",
   "entities.prepare.transaction": "prepare transaction",
   "entities.spawn.stage": "spawn stage",
+  "entities.spawn.stage.recipe": "spawn stage recipe",
+  "entities.spawn.stage.normalize": "spawn stage normalize",
+  "entities.spawn.stage.validate": "spawn stage validate",
   "entities.reduce.total": "reduce total",
   "entities.reduce.spawnLifecycle": "spawn lifecycle",
+  "entities.reduce.spawnLifecycle.applyStagedSpawns": "spawn lifecycle apply staged spawns",
+  "entities.reduce.spawnLifecycle.reduceBatches": "spawn lifecycle reduce batches",
+  "entities.reduce.spawnLifecycle.batch.total": "spawn lifecycle batch total",
+  "entities.reduce.spawnLifecycle.batch.defaultTransitions": "spawn lifecycle batch default transitions",
+  "entities.reduce.spawnLifecycle.batch.userReducer": "spawn lifecycle batch user reducer",
+  "entities.reduce.spawnLifecycle.batch.postProcess": "spawn lifecycle batch post process",
+  "entities.reduce.spawnLifecycle.batch.markTouched": "spawn lifecycle batch mark touched",
+  "entities.reduce.spawnLifecycle.batch.scheduleEffects": "spawn lifecycle batch schedule effects",
+  "entities.reduce.spawnLifecycle.batch.scheduleReactions": "spawn lifecycle batch schedule reactions",
+  "entities.reduce.spawnLifecycle.batch.updateStateBuckets": "spawn lifecycle batch update state buckets",
+  "entities.reduce.spawnLifecycle.reactions": "spawn lifecycle reactions",
+  "entities.reduce.spawnLifecycle.reactions.captureScope": "spawn lifecycle reaction capture scope",
+  "entities.reduce.spawnLifecycle.reactions.createDeps": "spawn lifecycle reaction deps",
+  "entities.reduce.spawnLifecycle.reactions.user": "spawn lifecycle user reaction",
   "entities.reduce.spawnCleanup": "spawn cleanup",
   "entities.reduce.collectPublicBatches": "collect public batches",
   "entities.reduce.publicBatch.total": "public batch total",
@@ -144,6 +173,7 @@ export const parentKeyForTracePhase = (key) => {
 
   if (key === "entities.prepare.transaction") return "core.bucket.prepareAction.entity";
   if (key === "entities.spawn.stage") return "core.hooks.beforeReduce";
+  if (key.startsWith("entities.spawn.stage.")) return "entities.spawn.stage";
   if (key === "entities.reduce.total") return "core.bucket.reduce.entity";
   if (
     [
@@ -156,14 +186,28 @@ export const parentKeyForTracePhase = (key) => {
   ) {
     return "entities.reduce.total";
   }
+  if (
+    [
+      "entities.reduce.spawnLifecycle.applyStagedSpawns",
+      "entities.reduce.spawnLifecycle.reduceBatches",
+      "entities.reduce.spawnLifecycle.reactions",
+    ].includes(key)
+  ) {
+    return "entities.reduce.spawnLifecycle";
+  }
+  if (key === "entities.reduce.spawnLifecycle.batch.total") {
+    return "entities.reduce.spawnLifecycle.reduceBatches";
+  }
+  if (key.startsWith("entities.reduce.spawnLifecycle.batch.")) return "entities.reduce.spawnLifecycle.batch.total";
+  if (key.startsWith("entities.reduce.spawnLifecycle.reactions.")) {
+    return "entities.reduce.spawnLifecycle.reactions";
+  }
   if (key.startsWith("entities.reduce.publicBatch.")) return "entities.reduce.publicBatch.total";
   if (key.startsWith("entities.cleanup.spawn.")) return "entities.reduce.spawnCleanup";
   if (key.startsWith("entities.cleanup.public.")) return "entities.reduce.publicCleanup";
   if (key === "entities.commit.restorePublicSlices") return "core.bucket.commit.entity";
   if (key === "entities.reactions.total") return "core.bucket.reactions.entity";
-  if (
-    ["entities.reactions.captureScope", "entities.reactions.createDeps", "entities.reactions.user"].includes(key)
-  ) {
+  if (["entities.reactions.captureScope", "entities.reactions.createDeps", "entities.reactions.user"].includes(key)) {
     return "entities.reactions.total";
   }
   if (key === "entities.effects.resolve") return "core.bucket.effects.resolve.entity";
@@ -237,9 +281,9 @@ const sumRecordPhases = (record) => {
   return { durations, runtimeKinds };
 };
 
-const collectMeasuredTransitions = (records) =>
+const collectMeasuredTransitions = (records, actionType) =>
   records
-    .filter((record) => record.actionType === tickActionType && record.depth === 0 && record.status === "ok")
+    .filter((record) => record.actionType === actionType && record.depth === 0 && record.status === "ok")
     .map(sumRecordPhases);
 
 const runWithCollector = (runner) => {
@@ -253,8 +297,8 @@ const runWithCollector = (runner) => {
   return collector.records;
 };
 
-const runWarmup = (runner, operationsPerSample) => {
-  for (let sampleIndex = 0; sampleIndex < warmupIterations; sampleIndex += 1) {
+const runWarmup = (runner, operationsPerSample, selectedWarmupIterations) => {
+  for (let sampleIndex = 0; sampleIndex < selectedWarmupIterations; sampleIndex += 1) {
     runner.beforeSample();
     for (let operationIndex = 0; operationIndex < operationsPerSample; operationIndex += 1) {
       runner.beforeOperation?.();
@@ -265,15 +309,19 @@ const runWarmup = (runner, operationsPerSample) => {
   }
 };
 
-const collectTraceSamples = (runner, operationsPerSample) => {
-  runWarmup(runner, operationsPerSample);
+const collectTraceSamples = (
+  runner,
+  operationsPerSample,
+  { actionType, measuredIterations: selectedMeasuredIterations, warmupIterations: selectedWarmupIterations },
+) => {
+  runWarmup(runner, operationsPerSample, selectedWarmupIterations);
 
   const transitions = [];
-  for (let sampleIndex = 0; sampleIndex < measuredIterations; sampleIndex += 1) {
+  for (let sampleIndex = 0; sampleIndex < selectedMeasuredIterations; sampleIndex += 1) {
     runner.beforeSample();
     for (let operationIndex = 0; operationIndex < operationsPerSample; operationIndex += 1) {
       runner.beforeOperation?.();
-      transitions.push(...collectMeasuredTransitions(runWithCollector(runner)));
+      transitions.push(...collectMeasuredTransitions(runWithCollector(runner), actionType));
       runner.afterOperation?.();
     }
     runner.afterSample();
@@ -289,11 +337,9 @@ const summarizeCoverage = (transitions, definition) => {
   for (const transition of transitions) {
     const parentValue = transition.durations.get(definition.parentKey);
     if (parentValue === undefined || parentValue <= 0) continue;
+    if (!definition.numeratorKeys.some((key) => transition.durations.has(key))) continue;
 
-    const attributed = definition.numeratorKeys.reduce(
-      (sum, key) => sum + (transition.durations.get(key) ?? 0),
-      0,
-    );
+    const attributed = definition.numeratorKeys.reduce((sum, key) => sum + (transition.durations.get(key) ?? 0), 0);
     coverageSamples.push(attributed / parentValue);
     unattributedSamples.push(parentValue - attributed);
   }
@@ -363,9 +409,17 @@ const summarizeTransitions = (transitions) => {
   };
 };
 
-const runTraceScenario = (definition, rowCount) => {
+const runTraceScenario = (definition, rowCount, config) => {
   const runner = definition.createEntityRunner(rowCount);
-  const transitions = collectTraceSamples(runner, definition.operationsPerSample);
+  const actionType = definition.actionType ?? tickActionType;
+  const transitions = collectTraceSamples(runner, definition.operationsPerSample, {
+    actionType,
+    measuredIterations: config.measuredIterations,
+    warmupIterations: config.warmupIterations,
+  });
+  if (transitions.length === 0) {
+    throw new Error(`Trace scenario '${definition.key}' produced no measured '${actionType}' transitions.`);
+  }
   const summary = summarizeTransitions(transitions);
 
   runner.read?.();
@@ -375,9 +429,15 @@ const runTraceScenario = (definition, rowCount) => {
     label: definition.label,
     kind: definition.kind,
     rowCount,
+    ...(definition.actorRowsPerEntity
+      ? {
+          actorRowsPerEntity: definition.actorRowsPerEntity,
+          actorRowCount: rowCount * definition.actorRowsPerEntity,
+        }
+      : {}),
     iterations: {
-      warmup: warmupIterations,
-      measured: measuredIterations,
+      warmup: config.warmupIterations,
+      measured: config.measuredIterations,
       operationsPerSample: definition.operationsPerSample,
     },
     ...summary,
@@ -386,23 +446,31 @@ const runTraceScenario = (definition, rowCount) => {
 
 export const runEntitiesTraceBenchmark = ({
   profile,
+  benchmark: selectedBenchmark = benchmarkName,
+  measuredIterations: selectedMeasuredIterations = measuredIterations,
   onScenarioStart,
   onScenarioEnd,
   rowCounts: selectedRowCounts = rowCounts,
+  scenarioDefinitions: selectedScenarioDefinitions = scenarioDefinitions,
+  warmupIterations: selectedWarmupIterations = warmupIterations,
 } = {}) => {
   const scenarios = [];
+  const config = {
+    measuredIterations: selectedMeasuredIterations,
+    warmupIterations: selectedWarmupIterations,
+  };
 
-  for (const definition of scenarioDefinitions) {
+  for (const definition of selectedScenarioDefinitions) {
     for (const rowCount of selectedRowCounts) {
       onScenarioStart?.(definition, rowCount);
-      const scenario = runTraceScenario(definition, rowCount);
+      const scenario = runTraceScenario(definition, rowCount, config);
       scenarios.push(scenario);
       onScenarioEnd?.(scenario);
     }
   }
 
   return {
-    benchmark: benchmarkName,
+    benchmark: selectedBenchmark,
     profile: profile ?? "node",
     runtime: "production dist",
     rowCounts: selectedRowCounts,

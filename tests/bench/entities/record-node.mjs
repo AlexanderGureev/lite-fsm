@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   aggregateGateRuns,
+  aggregateSpawnRuns,
   aggregateTraceRuns,
   collectEnvironmentMetadata,
   formatRecordMarkdown,
@@ -20,7 +21,8 @@ process.env.NODE_ENV = "production";
 const rootDir = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
 const defaultOutDir = ".bench/entities";
 const defaultRuns = 3;
-const allowedIncludes = ["gate", "trace"];
+const defaultIncludes = ["gate", "trace"];
+const allowedIncludes = ["gate", "trace", "spawn", "spawn-trace"];
 
 let benchmarkFixtures;
 
@@ -28,9 +30,10 @@ const loadBenchmarkFixtures = async () => {
   if (benchmarkFixtures) return benchmarkFixtures;
 
   const gate = await import("./composition-lite-fsm-entities.fixture.mjs");
+  const spawn = await import("./spawn.fixture.mjs");
   const trace = await import("./trace.fixture.mjs");
 
-  benchmarkFixtures = { gate, trace };
+  benchmarkFixtures = { gate, spawn, trace };
   return benchmarkFixtures;
 };
 
@@ -41,7 +44,7 @@ Options:
   --label <name>          Human label stored in the report and used for label aliases.
   --runs <count>          Number of benchmark runs to aggregate. Defaults to ${defaultRuns}.
   --out <dir>             Report directory. Defaults to ${defaultOutDir}.
-  --include <items>       Comma-separated subset: gate, trace. Defaults to gate,trace.
+  --include <items>       Comma-separated subset: gate, trace, spawn, spawn-trace. Defaults to gate,trace.
   --row-counts <items>    Internal smoke-test override, for example 1000 or 1000,5000.
 `;
 
@@ -77,7 +80,7 @@ const parseRowCounts = (value) => {
 
 const parseArgs = (argv) => {
   const options = {
-    include: allowedIncludes,
+    include: defaultIncludes,
     out: defaultOutDir,
     runs: defaultRuns,
     rowCounts: undefined,
@@ -162,6 +165,16 @@ const logTraceScenarioEnd = (scenario) => {
   );
 };
 
+const logSpawnScenarioEnd = (scenario) => {
+  console.error(
+    `[entities bench record] spawn ${scenario.label} / ${scenario.rowCount.toLocaleString(
+      "en-US",
+    )} entities: median ${scenario.total.median.toFixed(3)}ms, p95 ${scenario.total.p95.toFixed(
+      3,
+    )}ms, actor rows ${scenario.actorRowCount.toLocaleString("en-US")}`,
+  );
+};
+
 const runGateBenchmarks = ({ runs, rowCounts, fixture }) => {
   const results = [];
   for (let runIndex = 0; runIndex < runs; runIndex += 1) {
@@ -181,16 +194,39 @@ const runGateBenchmarks = ({ runs, rowCounts, fixture }) => {
   return results;
 };
 
-const runTraceBenchmarks = ({ runs, rowCounts, fixture }) => {
+const runSpawnBenchmarks = ({ runs, rowCounts, fixture }) => {
   const results = [];
   for (let runIndex = 0; runIndex < runs; runIndex += 1) {
-    console.error(`[entities bench record] trace run ${runIndex + 1}/${runs}`);
+    console.error(`[entities bench record] spawn run ${runIndex + 1}/${runs}`);
+    results.push(
+      fixture.runEntitiesSpawnBenchmark({
+        profile: "node",
+        rowCounts,
+        onScenarioStart: (scenario, rowCount) => {
+          console.error(
+            `[entities bench record] spawn ${scenario.label} / ${rowCount.toLocaleString("en-US")} entities`,
+          );
+        },
+        onScenarioEnd: logSpawnScenarioEnd,
+      }),
+    );
+  }
+  return results;
+};
+
+const runTraceBenchmarks = ({ runs, rowCounts, fixture, traceOptions = {}, traceName = "trace" }) => {
+  const results = [];
+  for (let runIndex = 0; runIndex < runs; runIndex += 1) {
+    console.error(`[entities bench record] ${traceName} run ${runIndex + 1}/${runs}`);
     results.push(
       fixture.runEntitiesTraceBenchmark({
         profile: "node",
         rowCounts,
+        ...traceOptions,
         onScenarioStart: (scenario, rowCount) => {
-          console.error(`[entities bench record] trace ${scenario.label} / ${rowCount.toLocaleString("en-US")} rows`);
+          console.error(
+            `[entities bench record] ${traceName} ${scenario.label} / ${rowCount.toLocaleString("en-US")} rows`,
+          );
         },
         onScenarioEnd: logTraceScenarioEnd,
       }),
@@ -212,13 +248,55 @@ const createRecord = async (options) => {
     results.gate.config.measuredIterations = fixtures.gate.measuredIterations;
   }
 
-  if (options.include.includes("trace")) {
-    results.trace = aggregateTraceRuns(
-      runTraceBenchmarks({ runs: options.runs, rowCounts: options.rowCounts, fixture: fixtures.trace }),
-      results.gate,
+  if (options.include.includes("spawn")) {
+    results.spawn = aggregateSpawnRuns(
+      runSpawnBenchmarks({ runs: options.runs, rowCounts: options.rowCounts, fixture: fixtures.spawn }),
     );
-    results.trace.config.warmupIterations = fixtures.trace.warmupIterations;
-    results.trace.config.measuredIterations = fixtures.trace.measuredIterations;
+    results.spawn.config.warmupIterations = fixtures.spawn.warmupIterations;
+    results.spawn.config.measuredIterations = fixtures.spawn.measuredIterations;
+  }
+
+  const traceRuns = [];
+  const traceConfigs = [];
+  if (options.include.includes("trace")) {
+    traceRuns.push(
+      ...runTraceBenchmarks({ runs: options.runs, rowCounts: options.rowCounts, fixture: fixtures.trace }),
+    );
+    traceConfigs.push({
+      include: "trace",
+      warmupIterations: fixtures.trace.warmupIterations,
+      measuredIterations: fixtures.trace.measuredIterations,
+    });
+  }
+  if (options.include.includes("spawn-trace")) {
+    traceRuns.push(
+      ...runTraceBenchmarks({
+        runs: options.runs,
+        rowCounts: options.rowCounts,
+        fixture: fixtures.trace,
+        traceName: "spawn-trace",
+        traceOptions: {
+          benchmark: fixtures.spawn.benchmarkName,
+          measuredIterations: fixtures.spawn.measuredIterations,
+          scenarioDefinitions: fixtures.spawn.spawnScenarioDefinitions,
+          warmupIterations: fixtures.spawn.warmupIterations,
+        },
+      }),
+    );
+    traceConfigs.push({
+      include: "spawn-trace",
+      warmupIterations: fixtures.spawn.warmupIterations,
+      measuredIterations: fixtures.spawn.measuredIterations,
+    });
+  }
+
+  if (traceRuns.length > 0) {
+    results.trace = aggregateTraceRuns(traceRuns, results.gate);
+    results.trace.config.fixtures = traceConfigs;
+    if (traceConfigs.length === 1) {
+      results.trace.config.warmupIterations = traceConfigs[0].warmupIterations;
+      results.trace.config.measuredIterations = traceConfigs[0].measuredIterations;
+    }
   }
 
   return {

@@ -22,7 +22,7 @@ export const reduceEntityBucket = (
   return tracePhase(trace, "entities.reduce.total", (): { readonly type: "skip" } | undefined => {
     try {
       const spawned = tracePhase(trace, "entities.reduce.spawnLifecycle", () =>
-        reduceStagedSpawnLifecycle(runtime, staged, transaction, ctx),
+        reduceStagedSpawnLifecycle(runtime, staged, transaction, ctx, trace),
       );
       const spawnCleanup = tracePhase(trace, "entities.reduce.spawnCleanup", () =>
         flushEntityLifecycleCleanup(runtime, transaction, ctx, "spawn", trace),

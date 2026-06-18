@@ -4,8 +4,8 @@ export const RTS_CANVAS = {
 } as const;
 
 export const RTS_CAMERA_ZOOM_EVENT = "entities-rts-camera-zoom";
-export const RTS_RENDER_DEBUG_TOGGLE_KEY = "k";
-export const RTS_RENDER_LOD_TOGGLE_KEY = "l";
+export const RTS_RENDER_DEBUG_TOGGLE_KEYS: readonly string[] = ["k", "л"];
+export const RTS_RENDER_LOD_TOGGLE_KEYS: readonly string[] = ["l", "д"];
 
 export type RtsCameraZoomAction = "in" | "out" | "reset";
 

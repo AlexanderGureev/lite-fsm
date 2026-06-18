@@ -24,6 +24,7 @@ export type ReduceAcceptedBatchOptions = {
   readonly scheduleReactions?: boolean;
   readonly scheduleTerminal?: boolean;
   readonly trace?: EntityTransitionTraceSession;
+  readonly traceBatchPrefix?: string;
   readonly tracePublicBatch?: boolean;
   onAccepted?(accepted: readonly EntityIndex[]): void;
 };

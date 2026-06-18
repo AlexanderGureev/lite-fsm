@@ -2,11 +2,7 @@ import type { AnyEvent, LiteFsmError, ReadonlyManagerAction, StorageManagerConte
 
 import { runtimeError } from "../internal";
 import type { EntityIndex } from "../plugin";
-import {
-  createReactionEntityAccess,
-  createReactionEntitySelf,
-  type EntityReactionScope,
-} from "./access";
+import { createReactionEntityAccess, createReactionEntitySelf, type EntityReactionScope } from "./access";
 import type { ColumnarActorStore, EntityRuntimeState } from "./state";
 import {
   readEntityTransitionTraceSession,
@@ -96,10 +92,7 @@ const captureReactionScope = (
 ): { readonly scratch: ReactionScopeScratch; readonly scope: EntityReactionScope } | undefined => {
   const scratch = getReactionScopeScratch(runtime);
   cleanupReactionScope(scratch);
-  ensureReactionScopeCapacity(
-    scratch,
-    Math.max(runtime.entityStore.generation.length, store.presence.length),
-  );
+  ensureReactionScopeCapacity(scratch, Math.max(runtime.entityStore.generation.length, store.presence.length));
 
   const token = nextReactionScopeToken(scratch);
   let compact: EntityIndex[] | undefined;
@@ -174,18 +167,19 @@ const runReactionBatch = (
   batch: EntityReactionBatch,
   ctx: ReactionRunContext,
   trace?: EntityTransitionTraceSession,
+  phasePrefix = "entities.reactions",
 ): void => {
   const reaction = batch.store.metadata.reactionsByEventCode[batch.eventCode];
   if (!reaction) return;
 
   const captureStartedAt = trace?.now();
   const captured = captureReactionScope(runtime, batch.store, batch.indices, batch.ownership);
-  recordEntityTracePhase(trace, "entities.reactions.captureScope", captureStartedAt);
+  recordEntityTracePhase(trace, `${phasePrefix}.captureScope`, captureStartedAt);
   if (!captured) return;
 
   const depsStartedAt = trace?.now();
   const deps = createReactionDeps(runtime, batch.store, captured.scope, ctx);
-  recordEntityTracePhase(trace, "entities.reactions.createDeps", depsStartedAt);
+  recordEntityTracePhase(trace, `${phasePrefix}.createDeps`, depsStartedAt);
 
   const userStartedAt = trace?.now();
   try {
@@ -196,7 +190,7 @@ const runReactionBatch = (
   } catch (error) {
     ctx.dispatch.reportError(error);
   } finally {
-    recordEntityTracePhase(trace, "entities.reactions.user", userStartedAt);
+    recordEntityTracePhase(trace, `${phasePrefix}.user`, userStartedAt);
     cleanupReactionScope(captured.scratch);
   }
 };
@@ -205,8 +199,10 @@ export const runEntityReactionBatches = (
   runtime: EntityRuntimeState,
   batches: readonly EntityReactionBatch[],
   ctx: ReactionRunContext,
+  trace?: EntityTransitionTraceSession,
+  phasePrefix?: string,
 ): void => {
-  for (const batch of batches) runReactionBatch(runtime, batch, ctx);
+  for (const batch of batches) runReactionBatch(runtime, batch, ctx, trace, phasePrefix);
 };
 
 export const runEntityReactions = (runtime: EntityRuntimeState, ctx: ReactionRunContext): void => {

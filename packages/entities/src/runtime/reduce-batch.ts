@@ -8,11 +8,7 @@ import {
   type AcceptedRowsPostProcessing,
   type EnteredEffectRows,
 } from "./reduce-post-process";
-import {
-  runtimeError,
-  type ReduceAcceptedBatchOptions,
-  type ReducerBatch,
-} from "./reduce-shared";
+import { runtimeError, type ReduceAcceptedBatchOptions, type ReducerBatch } from "./reduce-shared";
 import { applyDefaultTransitions, getAcceptedIndices } from "./reduce-transitions";
 import {
   getActorReducerSelf,
@@ -45,7 +41,12 @@ const updateActorStateBuckets = (
   const stateCodeByEntity = store.stateCode;
   for (let index = indices.length - 1; index >= 0; index -= 1) {
     const entity = indices[index];
-    moveActorStateBucket(store, entity, previousStateCode ?? previousStateCodeByEntity[entity], stateCodeByEntity[entity]);
+    moveActorStateBucket(
+      store,
+      entity,
+      previousStateCode ?? previousStateCodeByEntity[entity],
+      stateCodeByEntity[entity],
+    );
   }
 };
 
@@ -115,7 +116,8 @@ export const reduceAcceptedBatch = (
   transaction: EntityDispatchTransaction | undefined,
   options: ReduceAcceptedBatchOptions = {},
 ): boolean => {
-  const trace = options.tracePublicBatch ? options.trace : undefined;
+  const traceBatchPrefix = options.traceBatchPrefix ?? "entities.reduce.publicBatch";
+  const trace = options.tracePublicBatch || options.traceBatchPrefix ? options.trace : undefined;
   const totalStartedAt = trace?.now();
   try {
     let accepted: readonly EntityIndex[] = [];
@@ -131,7 +133,7 @@ export const reduceAcceptedBatch = (
       previousStateCodeForAccepted = defaultTransitions.previousStateCodeForAccepted;
       knownValidStateCodeForAccepted = defaultTransitions.knownValidStateCodeForAccepted;
     } finally {
-      recordEntityTracePhase(trace, "entities.reduce.publicBatch.defaultTransitions", defaultTransitionsStartedAt);
+      recordEntityTracePhase(trace, `${traceBatchPrefix}.defaultTransitions`, defaultTransitionsStartedAt);
     }
 
     const reducer = batch.store.metadata.reducer;
@@ -139,17 +141,13 @@ export const reduceAcceptedBatch = (
     try {
       if (reducer) {
         const nextState = firstNextState!;
-        const result = reducer(
-          { state: nextState, context: {} },
-          batch.action,
-          {
-            nextState,
-            config: batch.store.metadata.config,
-            self: getActorReducerSelf(batch.store, accepted),
-            entities: () => runtime.access,
-            payloadFor: createPayloadFor(batch.store, batch.payloadByEntity),
-          },
-        );
+        const result = reducer({ state: nextState, context: {} }, batch.action, {
+          nextState,
+          config: batch.store.metadata.config,
+          self: getActorReducerSelf(batch.store, accepted),
+          entities: () => runtime.access,
+          payloadFor: createPayloadFor(batch.store, batch.payloadByEntity),
+        });
         if (result instanceof Promise) {
           throw runtimeError(
             `reducer for actor '${batch.store.templateKey}' and event '${batch.action.type}' returned a Promise; entity reducers are sync-only`,
@@ -157,7 +155,7 @@ export const reduceAcceptedBatch = (
         }
       }
     } finally {
-      recordEntityTracePhase(trace, "entities.reduce.publicBatch.userReducer", userReducerStartedAt);
+      recordEntityTracePhase(trace, `${traceBatchPrefix}.userReducer`, userReducerStartedAt);
     }
 
     const plan = getBatchReducePlan(batch);
@@ -174,21 +172,21 @@ export const reduceAcceptedBatch = (
         knownValidStateCodeForAccepted,
       );
     } finally {
-      recordEntityTracePhase(trace, "entities.reduce.publicBatch.postProcess", postProcessStartedAt);
+      recordEntityTracePhase(trace, `${traceBatchPrefix}.postProcess`, postProcessStartedAt);
     }
 
     const markTouchedStartedAt = trace?.now();
     try {
       markActorRowsTouched(batch.store);
     } finally {
-      recordEntityTracePhase(trace, "entities.reduce.publicBatch.markTouched", markTouchedStartedAt);
+      recordEntityTracePhase(trace, `${traceBatchPrefix}.markTouched`, markTouchedStartedAt);
     }
 
     const scheduleEffectsStartedAt = trace?.now();
     try {
       scheduleEnteredStateEffects(transaction, batch.store, postProcessing.enteredByState);
     } finally {
-      recordEntityTracePhase(trace, "entities.reduce.publicBatch.scheduleEffects", scheduleEffectsStartedAt);
+      recordEntityTracePhase(trace, `${traceBatchPrefix}.scheduleEffects`, scheduleEffectsStartedAt);
     }
 
     const scheduleReactionsStartedAt = trace?.now();
@@ -199,7 +197,7 @@ export const reduceAcceptedBatch = (
         });
       }
     } finally {
-      recordEntityTracePhase(trace, "entities.reduce.publicBatch.scheduleReactions", scheduleReactionsStartedAt);
+      recordEntityTracePhase(trace, `${traceBatchPrefix}.scheduleReactions`, scheduleReactionsStartedAt);
     }
 
     const updateStateBucketsStartedAt = trace?.now();
@@ -224,12 +222,12 @@ export const reduceAcceptedBatch = (
         schedulePrevStateCodeSync(batch.store, postProcessing.dirtyRows);
       }
     } finally {
-      recordEntityTracePhase(trace, "entities.reduce.publicBatch.updateStateBuckets", updateStateBucketsStartedAt);
+      recordEntityTracePhase(trace, `${traceBatchPrefix}.updateStateBuckets`, updateStateBucketsStartedAt);
     }
 
     options.onAccepted?.(accepted);
     return true;
   } finally {
-    recordEntityTracePhase(trace, "entities.reduce.publicBatch.total", totalStartedAt);
+    recordEntityTracePhase(trace, `${traceBatchPrefix}.total`, totalStartedAt);
   }
 };

@@ -21,6 +21,8 @@ Benchmark проверяет репрезентативный composition-сце
 
 Trace benchmark включается через `--include trace` и измеряет тот же production public path `manager.transition(...)`, что и сценарии gate. Collector добавляет overhead, поэтому абсолютные значения trace не смешиваются с gate median. Gate остается основным budget check; trace нужен для attribution и выбора следующего шага оптимизации.
 
+Отдельный spawn workflow включается через `--include spawn,spawn-trace`. Он измеряет один массовый RTS-подобный spawn transition на свежем manager: каждая entity создает пять actor rows (`unitIdentity`, `unitMovement`, `unitHealth`, `unitCombat`, `enemyAi`). В этом workflow `--row-counts` означает количество entities, а отчет также показывает количество actor rows.
+
 Historical diagnostics artifacts с `results.diagnostics` являются legacy synthetic data. Они читаются `compare` для сопоставления старых records, но текущий optimization workflow не создает diagnostics section и не использует `raw entity kernel` как источник production attribution.
 
 ### Быстрый цикл
@@ -61,6 +63,7 @@ pnpm run bench:entities:record -- --out .bench/entities
 pnpm run bench:entities:record -- --include gate
 pnpm run bench:entities:record -- --include trace
 pnpm run bench:entities:record -- --include gate,trace
+pnpm run bench:entities:record -- --runs 1 --label spawn-baseline --include spawn,spawn-trace --row-counts 35000
 ```
 
 По умолчанию `record` запускает `3` прогона и включает `gate,trace`.
@@ -102,6 +105,11 @@ pnpm run bench:entities:legacy-diagnostics
 - share phase относительно transition или parent;
 - total trace scenario и `traceTotal / gateEntityMedian`, если оба отчета содержат gate.
 
+Для spawn benchmark сравниваются:
+
+- `total median`;
+- `total p95`.
+
 Изменения больше `10%` выделяются в таблице. По умолчанию compare не завершает процесс с ошибкой при регрессии.
 
 ### Формат отчетов
@@ -129,6 +137,7 @@ JSON использует `schemaVersion: 1` и содержит:
 - Node, OS, arch, CPU и package manager;
 - argv, cwd, количество runs и include-набор;
 - результаты `gate` и/или `trace`; старые records могут содержать legacy `diagnostics`;
+- результаты `spawn`, если был выбран spawn workflow;
 - raw samples и summary across runs.
 
 ### Стабильность измерений

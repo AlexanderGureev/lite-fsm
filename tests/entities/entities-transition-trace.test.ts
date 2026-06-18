@@ -1,14 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { MachineManager } from "@lite-fsm/core";
-import {
-  defineEntitySpawn,
-  defineSpawnEvents,
-  entitiesPlugin,
-  f32,
-  i32,
-  spawnEvent,
-} from "@lite-fsm/entities";
+import { defineEntitySpawn, defineSpawnEvents, entitiesPlugin, f32, i32, spawnEvent } from "@lite-fsm/entities";
 import type { EntityIndex } from "@lite-fsm/entities";
 
 import {
@@ -58,7 +51,10 @@ const phaseKeysFor = (collector: TraceCollector, actionType: string): readonly s
 
 const spawnEntity = (
   manager: {
-    transition(action: { readonly type: "SPAWN_ENTITY"; readonly payload: { readonly id: string; readonly x: number } }): unknown;
+    transition(action: {
+      readonly type: "SPAWN_ENTITY";
+      readonly payload: { readonly id: string; readonly x: number };
+    }): unknown;
   },
   id: string,
   x: number,
@@ -130,6 +126,61 @@ describe("@lite-fsm/entities — transition trace helper", () => {
 });
 
 describe("@lite-fsm/entities — transition trace разметка runtime phases", () => {
+  it("spawn transition пишет spawn lifecycle phases", () => {
+    const movementActor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: {} },
+      initialState: "__INIT",
+      initialContext: { x: f32() },
+      spawnSchema: { x: f32() },
+      reducer(
+        _slice: unknown,
+        action: { readonly type: string },
+        { self, payloadFor }: { readonly self: any; payloadFor(entity: EntityIndex): { readonly x: number } },
+      ) {
+        if (action.type !== "ENTITY_SPAWNED") return;
+        for (const entity of self.indices) self.x[entity] = payloadFor(entity).x;
+      },
+    } as const;
+    const machines = { movementActor };
+    const spawn = defineEntitySpawn(
+      machines,
+      spawnEvents,
+    )({
+      SPAWN_ENTITY: (payload) => ({
+        id: payload.id,
+        groupTag: "units",
+        actors: { movementActor: { x: payload.x } },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+
+    const collector = installCollector();
+    spawnEntity(manager, "unit/a", 1);
+
+    expect(phaseKeysFor(collector, "SPAWN_ENTITY")).toEqual(
+      expect.arrayContaining([
+        "entities.spawn.stage",
+        "entities.spawn.stage.recipe",
+        "entities.spawn.stage.normalize",
+        "entities.spawn.stage.validate",
+        "entities.reduce.spawnLifecycle",
+        "entities.reduce.spawnLifecycle.applyStagedSpawns",
+        "entities.reduce.spawnLifecycle.reduceBatches",
+        "entities.reduce.spawnLifecycle.batch.total",
+        "entities.reduce.spawnLifecycle.batch.defaultTransitions",
+        "entities.reduce.spawnLifecycle.batch.userReducer",
+        "entities.reduce.spawnLifecycle.batch.postProcess",
+        "entities.reduce.spawnLifecycle.batch.markTouched",
+        "entities.reduce.spawnLifecycle.batch.scheduleEffects",
+        "entities.reduce.spawnLifecycle.batch.scheduleReactions",
+        "entities.reduce.spawnLifecycle.batch.updateStateBuckets",
+        "entities.reduce.spawnLifecycle.reactions",
+      ]),
+    );
+    expect(manager.entities().get("movementActor").x[0 as EntityIndex]).toBe(1);
+  });
+
   it("movement update пишет reduce phases", () => {
     const movementActor = {
       storage: "entity",
@@ -149,7 +200,10 @@ describe("@lite-fsm/entities — transition trace разметка runtime phase
       },
     } as const;
     const machines = { movementActor };
-    const spawn = defineEntitySpawn(machines, spawnEvents)({
+    const spawn = defineEntitySpawn(
+      machines,
+      spawnEvents,
+    )({
       SPAWN_ENTITY: (payload) => ({
         id: payload.id,
         groupTag: "units",
@@ -202,12 +256,17 @@ describe("@lite-fsm/entities — transition trace разметка runtime phase
       },
       reactions: {
         TICK: ({ self }: { readonly self: any }) => {
-          frames.push(self.indices.map((entity: EntityIndex) => `${self.entityId(entity)}:${self.frame[entity]}`).join("|"));
+          frames.push(
+            self.indices.map((entity: EntityIndex) => `${self.entityId(entity)}:${self.frame[entity]}`).join("|"),
+          );
         },
       },
     } as const;
     const machines = { spriteActor };
-    const spawn = defineEntitySpawn(machines, spawnEvents)({
+    const spawn = defineEntitySpawn(
+      machines,
+      spawnEvents,
+    )({
       SPAWN_ENTITY: (payload) => ({
         id: payload.id,
         groupTag: "sprites",
@@ -253,7 +312,10 @@ describe("@lite-fsm/entities — transition trace разметка runtime phase
       },
     } as const;
     const machines = { actor };
-    const spawn = defineEntitySpawn(machines, spawnEvents)({
+    const spawn = defineEntitySpawn(
+      machines,
+      spawnEvents,
+    )({
       SPAWN_ENTITY: (payload) => ({
         id: payload.id,
         groupTag: "units",

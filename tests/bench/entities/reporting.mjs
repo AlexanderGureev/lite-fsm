@@ -171,16 +171,14 @@ export const aggregateGateRuns = (runs) => {
     for (const scenario of run.scenarios) {
       assertScenarioResult(scenario, "gate");
       const key = gateScenarioKey(scenario);
-      const existing =
-        scenariosByKey.get(key) ??
-        {
-          key: scenario.key,
-          label: scenario.label,
-          rowCount: scenario.rowCount,
-          kind: scenario.kind,
-          budget: scenario.budget,
-          runs: [],
-        };
+      const existing = scenariosByKey.get(key) ?? {
+        key: scenario.key,
+        label: scenario.label,
+        rowCount: scenario.rowCount,
+        kind: scenario.kind,
+        budget: scenario.budget,
+        runs: [],
+      };
 
       existing.runs.push({
         runIndex: runIndex + 1,
@@ -235,8 +233,61 @@ export const aggregateGateRuns = (runs) => {
       runs: allocationGuardRuns,
       status: allocationGuardRuns.every((run) => run.skipped || run.passed) ? "pass" : "fail",
     },
-    passed: scenarios.every((scenario) => scenario.status === "pass") &&
+    passed:
+      scenarios.every((scenario) => scenario.status === "pass") &&
       allocationGuardRuns.every((run) => run.skipped || run.passed),
+  };
+};
+
+export const aggregateSpawnRuns = (runs) => {
+  if (runs.length === 0) throw new Error("Cannot aggregate spawn benchmark without runs.");
+
+  const scenariosByKey = new Map();
+  for (const [runIndex, run] of runs.entries()) {
+    if (!Array.isArray(run.scenarios)) throw new Error("Invalid spawn benchmark result: scenarios must be an array.");
+
+    for (const scenario of run.scenarios) {
+      assertScenarioResult(scenario, "spawn");
+      const key = gateScenarioKey(scenario);
+      const existing = scenariosByKey.get(key) ?? {
+        key: scenario.key,
+        label: scenario.label,
+        rowCount: scenario.rowCount,
+        kind: scenario.kind,
+        actorRowsPerEntity: scenario.actorRowsPerEntity,
+        actorRowCount: scenario.actorRowCount,
+        iterations: scenario.iterations,
+        runs: [],
+      };
+
+      existing.runs.push({
+        runIndex: runIndex + 1,
+        iterations: scenario.iterations,
+        total: cloneMeasurement(scenario.total),
+      });
+      scenariosByKey.set(key, existing);
+    }
+  }
+
+  const scenarios = Array.from(scenariosByKey.values()).map((scenario) => {
+    const totalSummary = summarizeMeasurements(scenario.runs.map((run) => run.total));
+
+    return {
+      ...scenario,
+      total: metricFromMeasurementSummary(totalSummary),
+      summary: totalSummary,
+    };
+  });
+
+  return {
+    benchmark: runs[0].benchmark,
+    profile: runs[0].profile,
+    runtime: runs[0].runtime,
+    config: {
+      rowCounts: runs[0].rowCounts,
+      runs: runs.length,
+    },
+    scenarios,
   };
 };
 
@@ -253,26 +304,22 @@ export const aggregateDiagnosticsRuns = (runs) => {
       assertScenarioResult(scenario, "diagnostics");
       if (!Array.isArray(scenario.layers)) throw new Error("Invalid diagnostics scenario: layers must be an array.");
       const key = gateScenarioKey(scenario);
-      const existing =
-        scenariosByKey.get(key) ??
-        {
-          key: scenario.key,
-          label: scenario.label,
-          rowCount: scenario.rowCount,
-          runs: [],
-          layerRunsByKey: new Map(),
-        };
+      const existing = scenariosByKey.get(key) ?? {
+        key: scenario.key,
+        label: scenario.label,
+        rowCount: scenario.rowCount,
+        runs: [],
+        layerRunsByKey: new Map(),
+      };
       const layers = [];
 
       for (const layer of scenario.layers) {
-        const layerRuns =
-          existing.layerRunsByKey.get(layer.key) ??
-          {
-            key: layer.key,
-            label: layer.label,
-            operationsPerSample: layer.operationsPerSample,
-            runs: [],
-          };
+        const layerRuns = existing.layerRunsByKey.get(layer.key) ?? {
+          key: layer.key,
+          label: layer.label,
+          operationsPerSample: layer.operationsPerSample,
+          runs: [],
+        };
         const runLayer = {
           runIndex: runIndex + 1,
           key: layer.key,
@@ -364,43 +411,37 @@ export const aggregateTraceRuns = (runs, gateResult) => {
       if (!Array.isArray(scenario.phases)) throw new Error("Invalid trace scenario: phases must be an array.");
 
       const key = gateScenarioKey(scenario);
-      const existing =
-        scenariosByKey.get(key) ??
-        {
-          key: scenario.key,
-          label: scenario.label,
-          rowCount: scenario.rowCount,
-          kind: scenario.kind,
-          iterations: scenario.iterations,
-          runs: [],
-          phaseRunsByKey: new Map(),
-          coverageRunsByKey: new Map(),
-        };
+      const existing = scenariosByKey.get(key) ?? {
+        key: scenario.key,
+        label: scenario.label,
+        rowCount: scenario.rowCount,
+        kind: scenario.kind,
+        iterations: scenario.iterations,
+        runs: [],
+        phaseRunsByKey: new Map(),
+        coverageRunsByKey: new Map(),
+      };
 
       for (const phase of scenario.phases) {
-        const phaseRuns =
-          existing.phaseRunsByKey.get(phase.key) ??
-          {
-            key: phase.key,
-            label: phase.label,
-            parentKey: phase.parentKey,
-            runtimeKind: phase.runtimeKind,
-            runs: [],
-          };
+        const phaseRuns = existing.phaseRunsByKey.get(phase.key) ?? {
+          key: phase.key,
+          label: phase.label,
+          parentKey: phase.parentKey,
+          runtimeKind: phase.runtimeKind,
+          runs: [],
+        };
         phaseRuns.runs.push({ runIndex: runIndex + 1, ...cloneTraceMetric(phase), ...phase });
         existing.phaseRunsByKey.set(phase.key, phaseRuns);
       }
 
       for (const coverage of scenario.coverage ?? []) {
-        const coverageRuns =
-          existing.coverageRunsByKey.get(coverage.key) ??
-          {
-            key: coverage.key,
-            label: coverage.label,
-            parentKey: coverage.parentKey,
-            numeratorKeys: coverage.numeratorKeys,
-            runs: [],
-          };
+        const coverageRuns = existing.coverageRunsByKey.get(coverage.key) ?? {
+          key: coverage.key,
+          label: coverage.label,
+          parentKey: coverage.parentKey,
+          numeratorKeys: coverage.numeratorKeys,
+          runs: [],
+        };
         coverageRuns.runs.push({ runIndex: runIndex + 1, ...cloneTraceMetric(coverage), ...coverage });
         existing.coverageRunsByKey.set(coverage.key, coverageRuns);
       }
@@ -506,16 +547,35 @@ const entitiesReducePhaseKeys = new Set([
   "entities.reduce.publicCleanup",
 ]);
 
+const entitiesSpawnPhaseKeys = new Set([
+  "entities.prepare.transaction",
+  "entities.spawn.stage",
+  "entities.spawn.stage.recipe",
+  "entities.spawn.stage.normalize",
+  "entities.spawn.stage.validate",
+  "entities.reduce.spawnLifecycle.applyStagedSpawns",
+  "entities.reduce.spawnLifecycle.reduceBatches",
+  "entities.reduce.spawnLifecycle.batch.total",
+  "entities.reduce.spawnLifecycle.batch.defaultTransitions",
+  "entities.reduce.spawnLifecycle.batch.userReducer",
+  "entities.reduce.spawnLifecycle.batch.postProcess",
+  "entities.reduce.spawnLifecycle.batch.markTouched",
+  "entities.reduce.spawnLifecycle.batch.scheduleEffects",
+  "entities.reduce.spawnLifecycle.batch.scheduleReactions",
+  "entities.reduce.spawnLifecycle.batch.updateStateBuckets",
+  "entities.reduce.spawnLifecycle.reactions",
+  "entities.reduce.spawnLifecycle.reactions.captureScope",
+  "entities.reduce.spawnLifecycle.reactions.createDeps",
+  "entities.reduce.spawnLifecycle.reactions.user",
+]);
+
 const entitiesReactionPhaseKeys = new Set([
   "entities.reactions.captureScope",
   "entities.reactions.createDeps",
   "entities.reactions.user",
 ]);
 
-const entitiesEffectPhaseKeys = new Set([
-  "entities.effects.resolve",
-  "entities.effects.invoke",
-]);
+const entitiesEffectPhaseKeys = new Set(["entities.effects.resolve", "entities.effects.invoke"]);
 
 const addTable = (lines, headers, rows) => {
   lines.push(`| ${headers.join(" | ")} |`);
@@ -540,18 +600,20 @@ const traceShareLabel = (phase, shareLabel) => {
 
 const tracePhaseRows = (trace, phaseFilter, shareLabel) =>
   trace.scenarios.flatMap((scenario) =>
-    scenario.phases.filter(phaseFilter).map((phase) => [
-      scenario.label,
-      scenario.rowCount.toLocaleString("en-US"),
-      phase.key,
-      phase.parentKey ?? "",
-      phase.runtimeKind ?? "",
-      formatMs(phase.median),
-      formatMs(phase.p95),
-      traceShareLabel(phase, shareLabel),
-      formatPercent(phase.relativeStdDev),
-      String(phase.samples.length),
-    ]),
+    scenario.phases
+      .filter(phaseFilter)
+      .map((phase) => [
+        scenario.label,
+        scenario.rowCount.toLocaleString("en-US"),
+        phase.key,
+        phase.parentKey ?? "",
+        phase.runtimeKind ?? "",
+        formatMs(phase.median),
+        formatMs(phase.p95),
+        traceShareLabel(phase, shareLabel),
+        formatPercent(phase.relativeStdDev),
+        String(phase.samples.length),
+      ]),
   );
 
 const collectStabilityWarnings = (record) => {
@@ -598,6 +660,19 @@ const collectStabilityWarnings = (record) => {
     }
   }
 
+  const spawn = record.results.spawn;
+  if (spawn) {
+    for (const scenario of spawn.scenarios) {
+      if (scenario.summary.relativeStdDev > highVarianceThreshold) {
+        warnings.push(
+          `Spawn ${scenario.label} / ${scenario.rowCount} rows has high total median variance (${formatPercent(
+            scenario.summary.relativeStdDev,
+          )}).`,
+        );
+      }
+    }
+  }
+
   const trace = record.results.trace;
   if (trace) {
     for (const scenario of trace.scenarios) {
@@ -626,19 +701,23 @@ export const formatRecordMarkdown = (record) => {
   const title = record.label ? `# Entities benchmark record: ${record.label}` : "# Entities benchmark record";
   lines.push(title);
   lines.push("");
-  addTable(lines, ["Field", "Value"], [
-    ["Created at", record.createdAt],
-    ["Git SHA", shortSha(record.environment.gitSha)],
-    ["Git branch", record.environment.gitBranch ?? "unknown"],
-    ["Git status", record.environment.gitDirty ? "dirty" : "clean"],
-    ["Node", record.environment.node],
-    ["OS", `${record.environment.platform}/${record.environment.arch}`],
-    ["CPU", `${record.environment.cpuModel ?? "unknown"} (${record.environment.cpuCount ?? "unknown"} cores)`],
-    ["Package manager", record.environment.packageManager ?? "unknown"],
-    ["Runs", String(record.command.runs)],
-    ["Include", record.command.include.join(", ")],
-    ["Command argv", record.command.argv.length > 0 ? record.command.argv.join(" ") : "(none)"],
-  ]);
+  addTable(
+    lines,
+    ["Field", "Value"],
+    [
+      ["Created at", record.createdAt],
+      ["Git SHA", shortSha(record.environment.gitSha)],
+      ["Git branch", record.environment.gitBranch ?? "unknown"],
+      ["Git status", record.environment.gitDirty ? "dirty" : "clean"],
+      ["Node", record.environment.node],
+      ["OS", `${record.environment.platform}/${record.environment.arch}`],
+      ["CPU", `${record.environment.cpuModel ?? "unknown"} (${record.environment.cpuCount ?? "unknown"} cores)`],
+      ["Package manager", record.environment.packageManager ?? "unknown"],
+      ["Runs", String(record.command.runs)],
+      ["Include", record.command.include.join(", ")],
+      ["Command argv", record.command.argv.length > 0 ? record.command.argv.join(" ") : "(none)"],
+    ],
+  );
 
   lines.push("");
   lines.push("## Gate benchmark");
@@ -672,6 +751,29 @@ export const formatRecordMarkdown = (record) => {
         formatRatio(scenario.ratio.median),
         formatRatio(scenario.budget),
         scenario.status,
+        formatPercent(scenario.summary.relativeStdDev),
+      ]),
+    );
+  }
+
+  lines.push("");
+  lines.push("## Spawn benchmark");
+  lines.push("");
+  if (!record.results.spawn) {
+    lines.push("Spawn benchmark was not included.");
+  } else {
+    addTable(
+      lines,
+      ["Scenario", "Entities", "Actor rows", "Total", "Total p95", "Min", "Max", "Ops/sample", "RSD"],
+      record.results.spawn.scenarios.map((scenario) => [
+        scenario.label,
+        scenario.rowCount.toLocaleString("en-US"),
+        scenario.actorRowCount === undefined ? "n/a" : scenario.actorRowCount.toLocaleString("en-US"),
+        formatMs(scenario.total.median),
+        formatMs(scenario.total.p95),
+        formatMs(scenario.total.min),
+        formatMs(scenario.total.max),
+        String(scenario.iterations.operationsPerSample),
         formatPercent(scenario.summary.relativeStdDev),
       ]),
     );
@@ -755,6 +857,15 @@ export const formatRecordMarkdown = (record) => {
       lines,
       ["Scenario", "Rows", "Phase", "Parent", "Runtime", "Median", "p95", "Share", "RSD", "Samples"],
       tracePhaseRows(record.results.trace, (phase) => entitiesReducePhaseKeys.has(phase.key), "parent"),
+    );
+
+    lines.push("");
+    lines.push("### Entities spawn phases");
+    lines.push("");
+    addTable(
+      lines,
+      ["Scenario", "Rows", "Phase", "Parent", "Runtime", "Median", "p95", "Share", "RSD", "Samples"],
+      tracePhaseRows(record.results.trace, (phase) => entitiesSpawnPhaseKeys.has(phase.key), "parent"),
     );
 
     lines.push("");
@@ -936,6 +1047,44 @@ export const formatCompareMarkdown = (before, after) => {
     lines.push("");
   }
 
+  if (before.results.spawn && after.results.spawn) {
+    const beforeMap = mapScenarios(before.results.spawn);
+    const afterMap = mapScenarios(after.results.spawn);
+    const rows = [];
+
+    for (const [key, beforeScenario] of beforeMap) {
+      const afterScenario = afterMap.get(key);
+      if (!afterScenario) continue;
+
+      rows.push(
+        compareMetricRow({
+          scenario: beforeScenario.label,
+          rowCount: beforeScenario.rowCount,
+          metric: "total median",
+          beforeValue: beforeScenario.total.median,
+          afterValue: afterScenario.total.median,
+          unit: "ms",
+        }),
+      );
+      rows.push(
+        compareMetricRow({
+          scenario: beforeScenario.label,
+          rowCount: beforeScenario.rowCount,
+          metric: "total p95",
+          beforeValue: beforeScenario.total.p95,
+          afterValue: afterScenario.total.p95,
+          unit: "ms",
+        }),
+      );
+    }
+
+    lines.push("## Spawn benchmark");
+    lines.push("");
+    addTable(lines, ["Scenario", "Rows", "Metric", "Before", "After", "Delta", "Change", "Direction"], rows);
+    addMissingScenarioNotes(lines, "Spawn benchmark", beforeMap, afterMap);
+    lines.push("");
+  }
+
   if (before.results.diagnostics && after.results.diagnostics) {
     const beforeRows = new Map();
     const afterRows = new Map();
@@ -1033,6 +1182,13 @@ export const formatCompareMarkdown = (before, after) => {
     lines.push("## Gate benchmark");
     lines.push("");
     lines.push("Gate benchmark was not present in both records.");
+    lines.push("");
+  }
+
+  if (!before.results.spawn || !after.results.spawn) {
+    lines.push("## Spawn benchmark");
+    lines.push("");
+    lines.push("Spawn benchmark was not present in both records.");
     lines.push("");
   }
 
