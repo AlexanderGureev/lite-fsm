@@ -36,7 +36,8 @@ description: "Для создания и доработки пользовате
    - technical bridge, coordinator, sub-process handshake, selector projection → `references/system-patterns.md`;
    - async, deps, `createEffect`, `condition`, middleware → `references/effects.md`;
    - persistence → `references/persistence.md`;
-   - SSR/Next, hydration → `references/ssr-hydration.md`.
+   - SSR/Next, hydration → `references/ssr-hydration.md`;
+   - игры, симуляции, ECS-нагрузка, большие наборы сущностей на `@lite-fsm/entities` → `entities/README.md` (далее по навигации внутри подскилла).
 7. **Тесты и проверки.** `references/testing.md`.
 
 ## Обязательные правила
@@ -71,6 +72,8 @@ description: "Для создания и доработки пользовате
 - `@lite-fsm/middleware/devTools` — `devToolsMiddleware`.
 - `@lite-fsm/persist` — `persistManager`, `createJsonStorage`, `PersistStorage`.
 - `@lite-fsm/persist/react` — persist status hooks.
+- `@lite-fsm/entities` — entity templates (`storage: "entity"`), `entitiesPlugin`, `defineEntitySpawn`, `defineSpawnEvents`, `spawnEvent`, дескрипторы колонок `f32`/`i16`/`i32`/`u8`/`string`/`optional`/`resource`, типы `EntitiesPlugin`/`EntityAccess`/`EntityIndex`. Глубокое погружение и best practices — в `entities/`.
+- `@lite-fsm/entities/react` — `useEntitySnapshot`, `useEntityCount`, `useEntityList`.
 
 ## Если API неясен
 

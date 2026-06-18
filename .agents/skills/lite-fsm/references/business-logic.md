@@ -78,9 +78,9 @@ Reducer получает только свой `slice`, `action` и helpers. О�
 
 - Immer-style reducer является baseline; manager должен использовать `immerMiddleware`.
 - В начале стандартного reducer ставь `state.state = nextState`.
-- Используй `switch (action.type)`.
+- Reducer всегда ветвится через `switch (action.type)`, даже если обрабатывается один тип события. Не используй `if (action.type !== "...") return` и цепочки `if` по типу: единая структура `switch` читается лучше и не разъезжается при добавлении новых событий. Guard-стиль `if (action.type !== ...)` уместен в effects, но не в reducer.
 - Не добавляй `default` по умолчанию.
-- Каждый `case` завершай `return`.
+- Каждый `case` завершай `return`. Ветку с локальными объявлениями (`const ...`) оборачивай в блок `case "X": { ... }`.
 - Reducer меняет только `state.context` и `state.state` своего machine.
 
 Guard-through-reducer допустим, когда target state зависит от payload или current context и это нельзя выразить статическим `config`.
