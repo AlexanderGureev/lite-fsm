@@ -21,6 +21,8 @@ import {
   SELECTION_DEPTH,
   SELECTION_PADDING,
   TEXTURES,
+  UNIT_SPRITE_FADE_IN_MS,
+  UNIT_SPRITE_FADE_OUT_MS,
 } from "./constants";
 import type { PhaserGraphics, PhaserImage, PhaserScene } from "./phaser-types";
 import {
@@ -41,6 +43,9 @@ import {
   type RenderBounds,
   type RenderMode,
 } from "./viewport";
+import { UnitRenderDebugOverlay, type RenderDebugPoint, type RenderSyncStats } from "./unit-render-debug";
+
+type UnitVisibilityPhase = "entering" | "visible" | "exiting";
 
 type UnitView = {
   sprite: PhaserImage;
@@ -53,6 +58,11 @@ type UnitView = {
   hp: number;
   maxHp: number;
   hpRate: number;
+  baseAlpha: number;
+  visibilityAlpha: number;
+  visibilityPhase: UnitVisibilityPhase;
+  fadeStartedAtMs: number;
+  fadeStartAlpha: number;
   kind: number;
   frame: number;
 };
@@ -66,6 +76,7 @@ type RenderPlan = {
   bounds: RenderBounds;
   mode: RenderMode;
   enemyStride: number;
+  visibleEnemies: number;
 };
 
 export class UnitSpriteRenderer {
@@ -75,11 +86,15 @@ export class UnitSpriteRenderer {
   private readonly hpBars = new Map<number, HpBarView>();
   private readonly liveEntities = new Set<number>();
   private readonly projectableEntities = new Set<number>();
+  private readonly fadingEntities = new Set<number>();
   private readonly allyDots: PhaserGraphics;
   private readonly enemyDots: PhaserGraphics;
+  private readonly debug: UnitRenderDebugOverlay;
   private loadingSyncCursor = 0;
   private dotLoadingCapacity = -1;
   private dotLoadingZoom = -1;
+  private dotRenderPlan: RenderPlan | null = null;
+  private dotProjectionSeconds = -1;
   private animTimeMs = 0;
   private enemyStride = 1;
   private allyDotWorldSize = 0;
@@ -91,6 +106,7 @@ export class UnitSpriteRenderer {
   ) {
     this.enemyDots = scene.add.graphics().setDepth(3).setVisible(false);
     this.allyDots = scene.add.graphics().setDepth(4).setVisible(false);
+    this.debug = new UnitRenderDebugOverlay(scene);
   }
 
   reset() {
@@ -110,10 +126,18 @@ export class UnitSpriteRenderer {
     this.hpBars.clear();
     this.liveEntities.clear();
     this.projectableEntities.clear();
+    this.fadingEntities.clear();
     this.loadingSyncCursor = 0;
     this.dotLoadingCapacity = -1;
     this.dotLoadingZoom = -1;
+    this.dotRenderPlan = null;
+    this.dotProjectionSeconds = -1;
+    this.debug.reset();
     this.enemyStride = 1;
+  }
+
+  setDebugMode(enabled: boolean) {
+    this.debug.setEnabled(enabled, this.animTimeMs, this.enemyStride);
   }
 
   sync() {
@@ -129,6 +153,15 @@ export class UnitSpriteRenderer {
 
   private syncVisibleUnits(units: UnitViews, plan: RenderPlan) {
     this.prepareDotLayer(plan);
+    this.dotRenderPlan = plan.mode === "dot" ? plan : null;
+    this.dotProjectionSeconds = -1;
+    const stats: RenderSyncStats = {
+      debugPoints: [],
+      dotUnits: 0,
+      entered: 0,
+      exited: 0,
+      spriteUnits: 0,
+    };
 
     for (let index = 0; index < units.capacity; index += 1) {
       const entity = index as EntityIndex;
@@ -139,15 +172,24 @@ export class UnitSpriteRenderer {
       if (!this.unitShouldRender(units, entity, plan)) continue;
 
       if (plan.mode === "dot" && kind !== UNIT_KIND.HERO) {
-        this.syncUnitDot(units, entity, kind);
+        this.syncUnitDot(units, entity, kind, 0);
+        stats.dotUnits += 1;
         continue;
+      }
+
+      const existing = this.sprites.get(index);
+      if (!existing || existing.visibilityPhase === "exiting") {
+        stats.entered += 1;
+        this.debug.pushPoint(stats.debugPoints, units.movement.x[entity], units.movement.y[entity], "enter");
       }
 
       this.liveEntities.add(index);
       this.syncUnit(units, entity);
+      stats.spriteUnits += 1;
     }
 
-    this.cleanupMissing();
+    stats.exited = this.cleanupMissing(stats.debugPoints);
+    this.debug.recordSync(plan, stats, this.animTimeMs);
   }
 
   syncLoading(maxCreates: number) {
@@ -189,6 +231,20 @@ export class UnitSpriteRenderer {
         !this.sprites.has(index);
 
       if (shouldCreate) {
+        const existing = this.sprites.get(index);
+        if (!existing || existing.visibilityPhase === "exiting") {
+          this.debug.recordSync(
+            plan,
+            {
+              debugPoints: [{ kind: "enter", x: units.movement.x[entity], y: units.movement.y[entity] }],
+              dotUnits: 0,
+              entered: 1,
+              exited: 0,
+              spriteUnits: 1,
+            },
+            this.animTimeMs,
+          );
+        }
         this.syncUnit(units, entity);
         created += 1;
       }
@@ -202,6 +258,9 @@ export class UnitSpriteRenderer {
   project(extrapolationMs: number) {
     const dt = visualStepSeconds(extrapolationMs);
     this.animTimeMs = this.scene.time.now;
+    this.projectDotLayer(dt);
+    this.updateFadingSprites();
+    this.debug.update(this.animTimeMs, this.enemyStride);
 
     for (const key of this.projectableEntities) {
       const view = this.sprites.get(key);
@@ -242,6 +301,7 @@ export class UnitSpriteRenderer {
       bounds,
       mode,
       enemyStride: this.enemyStride,
+      visibleEnemies,
     };
   }
 
@@ -262,17 +322,41 @@ export class UnitSpriteRenderer {
   }
 
   private clearDotLayer() {
+    this.dotRenderPlan = null;
+    this.dotProjectionSeconds = -1;
     this.allyDots.clear().setVisible(false);
     this.enemyDots.clear().setVisible(false);
   }
 
-  private syncUnitDot(units: UnitViews, entity: EntityIndex, kind: number) {
+  private projectDotLayer(dt: number) {
+    const plan = this.dotRenderPlan;
+    if (!plan || this.dotProjectionSeconds === dt) return;
+
+    const units = readUnitViews(this.manager);
+    this.prepareDotLayer(plan);
+
+    for (let index = 0; index < units.capacity; index += 1) {
+      const entity = index as EntityIndex;
+      if (!isUnitAlive(units.health, entity)) continue;
+
+      const kind = units.identity.kind[entity];
+      if (kind === UNIT_KIND.HERO) continue;
+      if (!this.unitIntersectsBoundsAt(units, entity, plan.bounds, dt)) continue;
+      if (!this.unitShouldRender(units, entity, plan)) continue;
+
+      this.syncUnitDot(units, entity, kind, dt);
+    }
+
+    this.dotProjectionSeconds = dt;
+  }
+
+  private syncUnitDot(units: UnitViews, entity: EntityIndex, kind: number, dt: number) {
     const faction = units.identity.faction[entity];
     const graphics = faction === UNIT_FACTION.PLAYER ? this.allyDots : this.enemyDots;
     const size = faction === UNIT_FACTION.PLAYER ? this.allyDotWorldSize : this.enemyDotWorldSize;
     const half = size / 2;
-    const x = units.movement.x[entity];
-    const y = units.movement.y[entity];
+    const x = units.movement.x[entity] + units.movement.vx[entity] * dt;
+    const y = units.movement.y[entity] + units.movement.vy[entity] * dt;
 
     if (faction === UNIT_FACTION.PLAYER && unitSelected(units, entity) === UNIT_SELECTION.SELECTED) {
       graphics.fillStyle(0xe8f8ff, 0.92);
@@ -294,11 +378,20 @@ export class UnitSpriteRenderer {
   }
 
   private unitIntersectsBounds(units: UnitViews, entity: EntityIndex, bounds: RenderBounds) {
+    return this.unitIntersectsBoundsAt(units, entity, bounds, 0);
+  }
+
+  private unitIntersectsBoundsAt(units: UnitViews, entity: EntityIndex, bounds: RenderBounds, dt: number) {
     const x = units.movement.x[entity];
     const y = units.movement.y[entity];
     const radius = displaySizeForKind(units.identity.kind[entity]) * 0.5;
 
-    return pointIntersectsBounds(x, y, radius, bounds);
+    return pointIntersectsBounds(
+      x + units.movement.vx[entity] * dt,
+      y + units.movement.vy[entity] * dt,
+      radius,
+      bounds,
+    );
   }
 
   private syncUnit(units: UnitViews, entity: EntityIndex) {
@@ -314,6 +407,8 @@ export class UnitSpriteRenderer {
     const hp = units.health.hp[entity];
     const maxHp = units.health.maxHp[entity];
     let hpRate = view.hpRate;
+
+    this.ensureVisibleSprite(key, view);
 
     if (view.x !== x || view.y !== y || view.vx !== vx || view.vy !== vy) {
       view.x = x;
@@ -339,7 +434,8 @@ export class UnitSpriteRenderer {
 
     if (view.hpRate !== hpRate) {
       view.hpRate = hpRate;
-      view.sprite.setAlpha(0.74 + hpRate * 0.26);
+      view.baseAlpha = 0.74 + hpRate * 0.26;
+      this.syncSpriteAlpha(view);
 
       if (kind === UNIT_KIND.ENEMY && hpRate < 0.5) {
         view.sprite.setTint(0xffc05b);
@@ -369,6 +465,9 @@ export class UnitSpriteRenderer {
     const display = spriteDisplaySize(kind);
     const sprite = this.acquireSprite(texture, kind, x, y);
     const view: UnitView = {
+      baseAlpha: 1,
+      fadeStartAlpha: 0,
+      fadeStartedAtMs: this.animTimeMs,
       frame: 0,
       hp: -1,
       hpRate: -1,
@@ -379,11 +478,15 @@ export class UnitSpriteRenderer {
       sprite: sprite.setDisplaySize(display.width, display.height),
       vx: units.movement.vx[entity],
       vy: units.movement.vy[entity],
+      visibilityAlpha: 0,
+      visibilityPhase: "entering",
       x,
       y,
     };
 
     this.sprites.set(key, view);
+    this.fadingEntities.add(key);
+    this.syncSpriteAlpha(view);
     return view;
   }
 
@@ -409,6 +512,73 @@ export class UnitSpriteRenderer {
     const pool = this.spritePools.get(texture);
     if (pool) pool.push(view.sprite);
     else this.spritePools.set(texture, [view.sprite]);
+  }
+
+  private ensureVisibleSprite(key: number, view: UnitView) {
+    if (view.visibilityPhase === "visible") return;
+    if (view.visibilityPhase === "entering") return;
+
+    view.visibilityPhase = "entering";
+    view.fadeStartedAtMs = this.animTimeMs;
+    view.fadeStartAlpha = view.visibilityAlpha;
+    this.fadingEntities.add(key);
+    this.syncSpriteAlpha(view);
+  }
+
+  private beginSpriteExit(key: number, view: UnitView) {
+    if (view.visibilityPhase === "exiting") return;
+
+    view.visibilityPhase = "exiting";
+    view.fadeStartedAtMs = this.animTimeMs;
+    view.fadeStartAlpha = view.visibilityAlpha;
+    this.fadingEntities.add(key);
+    this.syncSpriteAlpha(view);
+  }
+
+  private updateFadingSprites() {
+    for (const key of this.fadingEntities) {
+      const view = this.sprites.get(key);
+      if (!view) {
+        this.fadingEntities.delete(key);
+        continue;
+      }
+
+      if (view.visibilityPhase === "visible") {
+        this.fadingEntities.delete(key);
+        continue;
+      }
+
+      const duration = view.visibilityPhase === "exiting" ? UNIT_SPRITE_FADE_OUT_MS : UNIT_SPRITE_FADE_IN_MS;
+      const progress = duration <= 0 ? 1 : clampValue((this.animTimeMs - view.fadeStartedAtMs) / duration, 0, 1);
+      const easedProgress = progress * (2 - progress);
+      const targetAlpha = view.visibilityPhase === "exiting" ? 0 : 1;
+
+      view.visibilityAlpha = view.fadeStartAlpha + (targetAlpha - view.fadeStartAlpha) * easedProgress;
+      this.syncSpriteAlpha(view);
+
+      if (progress < 1) continue;
+
+      if (view.visibilityPhase === "exiting") {
+        this.releaseSpriteView(key, view);
+        continue;
+      }
+
+      view.visibilityAlpha = 1;
+      view.visibilityPhase = "visible";
+      this.fadingEntities.delete(key);
+      this.syncSpriteAlpha(view);
+    }
+  }
+
+  private syncSpriteAlpha(view: UnitView) {
+    view.sprite.setAlpha(view.baseAlpha * view.visibilityAlpha);
+  }
+
+  private releaseSpriteView(key: number, view: UnitView) {
+    this.releaseSprite(view);
+    this.sprites.delete(key);
+    this.projectableEntities.delete(key);
+    this.fadingEntities.delete(key);
   }
 
   private syncAnimation(view: UnitView, key: number) {
@@ -438,10 +608,7 @@ export class UnitSpriteRenderer {
 
     const highlight =
       this.selected.get(key) ??
-      this.scene.add
-        .image(view.renderX, view.renderY, TEXTURES.selected)
-        .setOrigin(0.5, 0.5)
-        .setDepth(SELECTION_DEPTH);
+      this.scene.add.image(view.renderX, view.renderY, TEXTURES.selected).setOrigin(0.5, 0.5).setDepth(SELECTION_DEPTH);
 
     this.selected.set(key, highlight);
     highlight.setPosition(view.renderX, view.renderY);
@@ -513,12 +680,15 @@ export class UnitSpriteRenderer {
     view.sprite.setPosition(view.x, view.y);
   }
 
-  private cleanupMissing() {
+  private cleanupMissing(debugPoints: RenderDebugPoint[] = []) {
+    let exited = 0;
     for (const [key, view] of this.sprites) {
       if (this.liveEntities.has(key)) continue;
-      this.releaseSprite(view);
-      this.sprites.delete(key);
-      this.projectableEntities.delete(key);
+      if (view.visibilityPhase !== "exiting") {
+        exited += 1;
+        this.debug.pushPoint(debugPoints, view.renderX, view.renderY, "exit");
+      }
+      this.beginSpriteExit(key, view);
     }
 
     for (const [key, view] of this.selected) {
@@ -533,5 +703,7 @@ export class UnitSpriteRenderer {
       view.fill.destroy();
       this.hpBars.delete(key);
     }
+
+    return exited;
   }
 }

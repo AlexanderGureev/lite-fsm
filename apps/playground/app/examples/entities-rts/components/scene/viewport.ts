@@ -7,6 +7,7 @@ import {
   LOD_STRIDE_EXIT_RATIO,
   MAX_LOD_STRIDE,
   RENDER_CULL_MARGIN,
+  RENDER_CULL_VIEW_MARGIN_RATIO,
   UNIT_DOT_LOD_MAX_ZOOM,
 } from "./constants";
 import type { PhaserCamera, PhaserScene } from "./phaser-types";
@@ -76,12 +77,14 @@ export const setCameraScrollForScreenWorldPoint = (camera: PhaserCamera, x: numb
 
 export const renderBoundsForScene = (scene: PhaserScene): RenderBounds => {
   const worldView = cameraWorldViewFor(scene.cameras.main);
+  const horizontalMargin = Math.max(RENDER_CULL_MARGIN, worldView.width * RENDER_CULL_VIEW_MARGIN_RATIO);
+  const verticalMargin = Math.max(RENDER_CULL_MARGIN, worldView.height * RENDER_CULL_VIEW_MARGIN_RATIO);
 
   return {
-    left: worldView.left - RENDER_CULL_MARGIN,
-    right: worldView.right + RENDER_CULL_MARGIN,
-    top: worldView.top - RENDER_CULL_MARGIN,
-    bottom: worldView.bottom + RENDER_CULL_MARGIN,
+    left: worldView.left - horizontalMargin,
+    right: worldView.right + horizontalMargin,
+    top: worldView.top - verticalMargin,
+    bottom: worldView.bottom + verticalMargin,
   };
 };
 

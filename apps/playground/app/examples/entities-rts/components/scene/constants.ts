@@ -4,6 +4,7 @@ export const RTS_CANVAS = {
 } as const;
 
 export const RTS_CAMERA_ZOOM_EVENT = "entities-rts-camera-zoom";
+export const RTS_RENDER_DEBUG_TOGGLE_KEY = "k";
 
 export type RtsCameraZoomAction = "in" | "out" | "reset";
 
@@ -56,12 +57,19 @@ export const SPAWN_RENDER_CREATE_BUDGET = 768;
 
 // Куллинг и уровень детализации (LOD).
 export const RENDER_CULL_MARGIN = 256;
+export const RENDER_CULL_VIEW_MARGIN_RATIO = 0.18;
 export const MAX_VISIBLE_ENEMY_SPRITES = 3_500;
 export const MAX_VISIBLE_ENEMY_DOTS = 8_000;
 export const UNIT_DOT_LOD_MAX_ZOOM = 0.42;
 export const LOD_STRIDE_ENTER_RATIO = 1.12;
 export const LOD_STRIDE_EXIT_RATIO = 0.72;
 export const MAX_LOD_STRIDE = 16;
+export const UNIT_SPRITE_FADE_IN_MS = 140;
+export const UNIT_SPRITE_FADE_OUT_MS = 180;
+export const RENDER_DEBUG_FLASH_MS = 620;
+export const RENDER_DEBUG_SAMPLE_LIMIT = 96;
+export const RENDER_DEBUG_UNIT_CHANGE_THRESHOLD = 32;
+export const RENDER_DEBUG_VISIBLE_ENEMY_DELTA_THRESHOLD = 256;
 export const ALLY_DOT_SCREEN_SIZE = 2.4;
 export const ENEMY_DOT_SCREEN_SIZE = 2.1;
 export const DOT_MIN_WORLD_SIZE = 7;

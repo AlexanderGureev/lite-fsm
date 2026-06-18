@@ -14,6 +14,7 @@ import {
   MAX_SIMULATION_STEPS_PER_FRAME,
   MAX_SPAWN_STEPS_PER_FRAME,
   RTS_CAMERA_ZOOM_EVENT,
+  RTS_RENDER_DEBUG_TOGGLE_KEY,
   SPAWN_RENDER_CREATE_BUDGET,
   type RtsCameraZoomAction,
 } from "./scene/constants";
@@ -50,6 +51,7 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
     private lastSyncedSessionState: string | null = null;
     private simulationAccumulatorMs = 0;
     private simulationNowMs = 0;
+    private renderDebugEnabled = false;
     private readonly pressedCameraKeys = new Set<string>();
 
     private readonly handleCameraZoomCommand = (event: Event) => {
@@ -65,6 +67,14 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
 
     private readonly handleWindowKeyDown = (event: KeyboardEvent) => {
       if (keyboardTargetIsEditable(event.target)) return;
+
+      if (event.key.toLowerCase() === RTS_RENDER_DEBUG_TOGGLE_KEY) {
+        event.preventDefault();
+        this.renderDebugEnabled = !this.renderDebugEnabled;
+        this.unitRenderer?.setDebugMode(this.renderDebugEnabled);
+        this.renderDirty = true;
+        return;
+      }
 
       if (manager.getState().gameSession.state === "SPAWNING") return;
 
@@ -137,6 +147,7 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
         window.removeEventListener("keyup", this.handleWindowKeyUp);
         window.removeEventListener("blur", this.handleWindowBlur);
         this.pressedCameraKeys.clear();
+        this.renderDebugEnabled = false;
         this.unitRenderer?.reset();
         this.projectileRenderer?.reset();
         this.impactEffects?.reset();
