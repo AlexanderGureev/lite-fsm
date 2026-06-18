@@ -74,6 +74,7 @@ type HpBarView = {
 
 type RenderPlan = {
   bounds: RenderBounds;
+  lodDisabled: boolean;
   mode: RenderMode;
   enemyStride: number;
   visibleEnemies: number;
@@ -97,6 +98,7 @@ export class UnitSpriteRenderer {
   private dotProjectionSeconds = -1;
   private animTimeMs = 0;
   private enemyStride = 1;
+  private renderLodDisabled = false;
   private allyDotWorldSize = 0;
   private enemyDotWorldSize = 0;
 
@@ -138,6 +140,16 @@ export class UnitSpriteRenderer {
 
   setDebugMode(enabled: boolean) {
     this.debug.setEnabled(enabled, this.animTimeMs, this.enemyStride);
+  }
+
+  setRenderLodDisabled(disabled: boolean) {
+    this.renderLodDisabled = disabled;
+    if (!disabled) return;
+
+    this.enemyStride = 1;
+    this.dotLoadingCapacity = -1;
+    this.dotLoadingZoom = -1;
+    this.clearDotLayer();
   }
 
   sync() {
@@ -282,7 +294,7 @@ export class UnitSpriteRenderer {
 
   private createRenderPlan(units: UnitViews): RenderPlan {
     const bounds = renderBoundsForScene(this.scene);
-    const mode = renderModeFor(this.scene);
+    const mode = this.renderLodDisabled ? "sprite" : renderModeFor(this.scene);
     const maxVisibleEnemies = mode === "dot" ? MAX_VISIBLE_ENEMY_DOTS : MAX_VISIBLE_ENEMY_SPRITES;
     let visibleEnemies = 0;
 
@@ -295,11 +307,14 @@ export class UnitSpriteRenderer {
       visibleEnemies += 1;
     }
 
-    this.enemyStride = nextStableStride(visibleEnemies, maxVisibleEnemies, this.enemyStride);
+    this.enemyStride = this.renderLodDisabled
+      ? 1
+      : nextStableStride(visibleEnemies, maxVisibleEnemies, this.enemyStride);
 
     return {
       bounds,
       mode,
+      lodDisabled: this.renderLodDisabled,
       enemyStride: this.enemyStride,
       visibleEnemies,
     };

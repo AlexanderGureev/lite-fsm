@@ -25,12 +25,14 @@ export type RenderSyncStats = {
 
 export type RenderDebugPlanInput = {
   bounds: RenderBounds;
+  lodDisabled: boolean;
   mode: RenderMode;
   enemyStride: number;
   visibleEnemies: number;
 };
 
 type RenderDebugPlan = {
+  lodDisabled: boolean;
   mode: RenderMode;
   enemyStride: number;
   visibleEnemies: number;
@@ -38,6 +40,8 @@ type RenderDebugPlan = {
 
 type RenderDebugPulse = RenderSyncStats & {
   bounds: RenderBounds;
+  lodDisabled: boolean;
+  previousLodDisabled: boolean | null;
   mode: RenderMode;
   previousMode: RenderMode | null;
   enemyStride: number;
@@ -119,12 +123,14 @@ export class UnitRenderDebugOverlay {
     const previous = this.lastPlan;
     this.lastPlan = {
       enemyStride: plan.enemyStride,
+      lodDisabled: plan.lodDisabled,
       mode: plan.mode,
       visibleEnemies: plan.visibleEnemies,
     };
 
     if (!this.enabled) return;
 
+    const lodChanged = previous !== null && previous.lodDisabled !== plan.lodDisabled;
     const strideChanged = previous !== null && previous.enemyStride !== plan.enemyStride;
     const modeChanged = previous !== null && previous.mode !== plan.mode;
     const visibleEnemyDelta =
@@ -132,6 +138,7 @@ export class UnitRenderDebugOverlay {
     const changedUnits = stats.entered + stats.exited;
     const shouldPulse =
       previous === null ||
+      lodChanged ||
       modeChanged ||
       strideChanged ||
       changedUnits >= RENDER_DEBUG_UNIT_CHANGE_THRESHOLD ||
@@ -143,8 +150,10 @@ export class UnitRenderDebugOverlay {
       ...stats,
       bounds: plan.bounds,
       enemyStride: plan.enemyStride,
+      lodDisabled: plan.lodDisabled,
       mode: plan.mode,
       previousEnemyStride: previous?.enemyStride ?? null,
+      previousLodDisabled: previous?.lodDisabled ?? null,
       previousMode: previous?.mode ?? null,
       previousVisibleEnemies: previous?.visibleEnemies ?? null,
       startedAtMs: nowMs,
@@ -168,14 +177,20 @@ export class UnitRenderDebugOverlay {
     }
 
     const previousMode = pulse?.previousMode ?? this.lastPlan?.mode ?? null;
+    const previousLodDisabled = pulse?.previousLodDisabled ?? this.lastPlan?.lodDisabled ?? null;
     const previousStride = pulse?.previousEnemyStride ?? this.lastPlan?.enemyStride ?? null;
     const previousVisible = pulse?.previousVisibleEnemies ?? this.lastPlan?.visibleEnemies ?? null;
     const mode = pulse?.mode ?? this.lastPlan?.mode ?? "sprite";
+    const lodDisabled = pulse?.lodDisabled ?? this.lastPlan?.lodDisabled ?? false;
     const stride = pulse?.enemyStride ?? this.lastPlan?.enemyStride ?? enemyStride;
     const visibleEnemies = pulse?.visibleEnemies ?? this.lastPlan?.visibleEnemies ?? 0;
+    const lodMode = lodDisabled ? "disabled" : "auto";
+    const previousLodMode =
+      previousLodDisabled === null ? null : previousLodDisabled ? "disabled" : "auto";
 
     this.hud.textContent = [
       "render debug",
+      `lod ${previousLodMode && previousLodMode !== lodMode ? `${previousLodMode}->` : ""}${lodMode}`,
       `mode ${previousMode && previousMode !== mode ? `${previousMode}->` : ""}${mode}`,
       `enemy stride ${previousStride !== null && previousStride !== stride ? `${previousStride}->` : ""}${stride}`,
       `visible enemies ${previousVisible !== null && previousVisible !== visibleEnemies ? `${previousVisible}->` : ""}${visibleEnemies}`,

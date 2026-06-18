@@ -15,6 +15,7 @@ import {
   MAX_SPAWN_STEPS_PER_FRAME,
   RTS_CAMERA_ZOOM_EVENT,
   RTS_RENDER_DEBUG_TOGGLE_KEY,
+  RTS_RENDER_LOD_TOGGLE_KEY,
   SPAWN_RENDER_CREATE_BUDGET,
   type RtsCameraZoomAction,
 } from "./scene/constants";
@@ -52,6 +53,7 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
     private simulationAccumulatorMs = 0;
     private simulationNowMs = 0;
     private renderDebugEnabled = false;
+    private renderLodDisabled = false;
     private readonly pressedCameraKeys = new Set<string>();
 
     private readonly handleCameraZoomCommand = (event: Event) => {
@@ -72,6 +74,14 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
         event.preventDefault();
         this.renderDebugEnabled = !this.renderDebugEnabled;
         this.unitRenderer?.setDebugMode(this.renderDebugEnabled);
+        this.renderDirty = true;
+        return;
+      }
+
+      if (event.key.toLowerCase() === RTS_RENDER_LOD_TOGGLE_KEY) {
+        event.preventDefault();
+        this.renderLodDisabled = !this.renderLodDisabled;
+        this.unitRenderer?.setRenderLodDisabled(this.renderLodDisabled);
         this.renderDirty = true;
         return;
       }
@@ -139,6 +149,7 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
       drawRtsMap(this);
       this.selectionGraphics = this.add.graphics().setDepth(20);
       this.unitRenderer = new UnitSpriteRenderer(this, manager);
+      this.unitRenderer.setRenderLodDisabled(this.renderLodDisabled);
       this.projectileRenderer = new ProjectileSpriteRenderer(this, manager);
       this.impactEffects = new ImpactEffectRenderer(this);
       this.events.once("shutdown", () => {
@@ -148,6 +159,7 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
         window.removeEventListener("blur", this.handleWindowBlur);
         this.pressedCameraKeys.clear();
         this.renderDebugEnabled = false;
+        this.renderLodDisabled = false;
         this.unitRenderer?.reset();
         this.projectileRenderer?.reset();
         this.impactEffects?.reset();
