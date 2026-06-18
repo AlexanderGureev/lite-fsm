@@ -15,8 +15,6 @@ export const unitSelection = createMachine({
     },
     ACTIVE: {
       UNIT_SELECTION_UPDATED: null,
-      SELECT_ENTITY: null,
-      CLEAR_SELECTION: null,
       UNIT_DEAD: "DISABLED",
     },
     DISABLED: {},
@@ -40,17 +38,6 @@ export const unitSelection = createMachine({
           if (action.payload.touched[entity] !== 1) continue;
           self.selected[entity] = action.payload.selected[entity];
         }
-        return;
-
-      case "SELECT_ENTITY":
-        for (const entity of self.indices) {
-          self.selected[entity] =
-            self.entityId(entity) === action.payload.entityId ? UNIT_SELECTION.SELECTED : UNIT_SELECTION.UNSELECTED;
-        }
-        return;
-
-      case "CLEAR_SELECTION":
-        for (const entity of self.indices) self.selected[entity] = UNIT_SELECTION.UNSELECTED;
         return;
 
       case "UNIT_DEAD": {

@@ -185,14 +185,7 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
       }
       metrics.recordFrame(frameDeltaMs);
 
-      let simulationSteps = 0;
-      if (initialSessionState === "READY") {
-        simulationSteps = this.runFixedSimulation(simulationDeltaMs, "TICK");
-      } else if (initialSessionState === "SPAWNING") {
-        simulationSteps = this.runFixedSimulation(simulationDeltaMs, "SPAWN_TICK");
-      } else {
-        this.simulationAccumulatorMs = 0;
-      }
+      const simulationSteps = this.runFixedSimulation(simulationDeltaMs);
 
       if (simulationSteps > 0) this.renderDirty = true;
 
@@ -220,17 +213,26 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
       metrics.publish();
     }
 
-    private runFixedSimulation(frameDeltaMs: number, actionType: "TICK" | "SPAWN_TICK") {
+    private runFixedSimulation(frameDeltaMs: number) {
+      const initialSessionState = manager.getState().gameSession.state;
+      if (initialSessionState !== "READY" && initialSessionState !== "SPAWNING") {
+        this.simulationAccumulatorMs = 0;
+        return 0;
+      }
+
       this.simulationAccumulatorMs += frameDeltaMs;
 
-      const maxSteps = actionType === "SPAWN_TICK" ? MAX_SPAWN_STEPS_PER_FRAME : MAX_SIMULATION_STEPS_PER_FRAME;
+      const maxSteps =
+        initialSessionState === "SPAWNING" ? MAX_SPAWN_STEPS_PER_FRAME : MAX_SIMULATION_STEPS_PER_FRAME;
       let steps = 0;
       while (this.simulationAccumulatorMs >= FIXED_SIMULATION_STEP_MS && steps < maxSteps) {
-        if (!this.canRunSimulationAction(actionType)) break;
+        const sessionState = manager.getState().gameSession.state;
+        if (sessionState !== "READY" && sessionState !== "SPAWNING") break;
 
         this.simulationAccumulatorMs -= FIXED_SIMULATION_STEP_MS;
         this.simulationNowMs += FIXED_SIMULATION_STEP_MS;
 
+        const actionType = sessionState === "READY" ? "TICK" : "SPAWN_TICK";
         const tickStartedAt = metrics.now();
         manager.transition({
           type: actionType,
@@ -247,11 +249,6 @@ export const createEntitiesRtsScene = (Phaser: PhaserApi, manager: AppStore, met
 
       if (steps === maxSteps) this.simulationAccumulatorMs = 0;
       return steps;
-    }
-
-    private canRunSimulationAction(actionType: "TICK" | "SPAWN_TICK") {
-      const sessionState = manager.getState().gameSession.state;
-      return actionType === "TICK" ? sessionState === "READY" : sessionState === "SPAWNING";
     }
 
     private bindInput() {

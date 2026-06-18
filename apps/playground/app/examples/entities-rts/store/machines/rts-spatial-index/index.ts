@@ -47,8 +47,6 @@ type RtsSpatialIndexResource = {
 
 export type Events = AppEvents;
 
-const now = () => globalThis.performance?.now() ?? Date.now();
-
 const createGrid = (cellSize: number, maxEntities = 1) =>
   createSpatialGrid({
     width: RTS_MAP.width,
@@ -160,7 +158,6 @@ export const rtsSpatialIndex = createMachine({
     self.index.unitGrid = ensureGridCapacity(self.index.unitGrid, UNIT_GRID_CELL_SIZE, capacity);
     self.index.enemyGrid = ensureGridCapacity(self.index.enemyGrid, ENEMY_LOOKUP_CELL_SIZE, capacity);
 
-    const spatialStartedAt = now();
     resetSpatialGridHeads(self.index.unitGrid);
     resetSpatialGridHeads(self.index.enemyGrid);
 
@@ -183,8 +180,6 @@ export const rtsSpatialIndex = createMachine({
       }
     }
 
-    self.index.metrics.spatialGridBuildMs = now() - spatialStartedAt;
-
     if (self.index.hero === null) {
       self.index.flowField = null;
       return;
@@ -198,7 +193,6 @@ export const rtsSpatialIndex = createMachine({
       if (nextTargetCell === self.index.flowField.targetCell) return;
     }
 
-    const flowStartedAt = now();
     self.index.flowField = createFlowField(
       {
         width: RTS_MAP.width,
@@ -207,6 +201,5 @@ export const rtsSpatialIndex = createMachine({
       },
       { x: self.index.heroX, y: self.index.heroY },
     );
-    self.index.metrics.flowFieldRebuildMs = now() - flowStartedAt;
   },
 });

@@ -19,14 +19,19 @@ export const isUnitAlive = (health: UnitHealthLiveness, entity: EntityIndex) =>
 
 export const unitHealth = createMachine({
   storage: "entity",
+  despawnOn: "REMOVED",
   config: {
     __INIT: {
       ENTITY_SPAWNED: "ALIVE",
     },
     ALIVE: {
       TICK: null,
+      GAME_RESTART: "REMOVED",
     },
-    DEAD: {},
+    DEAD: {
+      GAME_RESTART: "REMOVED",
+    },
+    REMOVED: {},
   },
   initialState: "__INIT",
   initialContext: {
@@ -72,17 +77,20 @@ export const unitHealth = createMachine({
     DEAD: ({ entities, self, transition }) => {
       const identity = entities().get("unitIdentity");
       const deadIds: string[] = [];
+      const nonHeroDeadIds: string[] = [];
       let killedEnemyCount = 0;
       let heroDied = false;
 
       for (const entity of self.indices) {
-        deadIds.push(self.entityId(entity));
+        const entityId = self.entityId(entity);
+        deadIds.push(entityId);
 
         if (identity.kind[entity] === UNIT_KIND.HERO) {
           heroDied = true;
           continue;
         }
 
+        nonHeroDeadIds.push(entityId);
         if (identity.faction[entity] === UNIT_FACTION.ENEMY) killedEnemyCount += 1;
       }
 
@@ -96,6 +104,10 @@ export const unitHealth = createMachine({
 
       if (killedEnemyCount > 0) {
         transition.unscoped({ type: "ENEMIES_KILLED", payload: { count: killedEnemyCount } });
+      }
+
+      if (nonHeroDeadIds.length > 0) {
+        transition.despawn(nonHeroDeadIds);
       }
     },
   },

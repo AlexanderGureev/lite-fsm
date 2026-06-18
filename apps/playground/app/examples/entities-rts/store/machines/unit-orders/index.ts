@@ -3,7 +3,7 @@ import type { EntityIndex } from "@lite-fsm/entities";
 import { createMachine } from "../../create-machine";
 import { RTS_MAP } from "../../spawn/placement";
 import type { AppEvents, Point, SelectionRect } from "../../types";
-import { UNIT_COMMAND, UNIT_SELECTION } from "../../unit-model";
+import { UNIT_COMMAND, UNIT_KIND, UNIT_SELECTION } from "../../unit-model";
 import { slotCount } from "../column-slot-count";
 import { isUnitAlive } from "../unit-health";
 import { createUnitCommandAssignmentBatch, createUnitSelectionBatch } from "./batches";
@@ -16,6 +16,14 @@ type Context = {};
 export type Events = AppEvents;
 
 const initialContext: Context = {};
+
+const gameAcceptsPlayerCommands = (state: { gameSession: { state: string } }) => state.gameSession.state === "READY";
+
+const entityIdForSelectableUnit = (kind: number, unitIndex: number) => {
+  if (kind === UNIT_KIND.HERO) return "unit/hero";
+  if (kind === UNIT_KIND.ALLY && unitIndex >= 0) return `unit/ally/${unitIndex}`;
+  return null;
+};
 
 const clampToMap = (value: number, max: number) => Math.min(max, Math.max(0, value));
 
@@ -35,6 +43,8 @@ export const unitOrders = createMachine({
   config: {
     READY: {
       SELECT_RECT: "SELECTING_BY_RECT",
+      SELECT_ENTITY: "SELECTING_BY_RECT",
+      CLEAR_SELECTION: "SELECTING_BY_RECT",
       ISSUE_MOVE: "ISSUING_COMMAND",
       ISSUE_ATTACK_MOVE: "ISSUING_COMMAND",
       GAME_RESTART: null,
@@ -54,39 +64,56 @@ export const unitOrders = createMachine({
     state.state = nextState;
   },
   effects: {
-    SELECTING_BY_RECT: ({ action, entities, transition }) => {
-      if (action.type !== "SELECT_RECT") {
+    SELECTING_BY_RECT: ({ action, entities, getState, transition }) => {
+      if (action.type !== "SELECT_RECT" && action.type !== "SELECT_ENTITY" && action.type !== "CLEAR_SELECTION") {
         transition({ type: "UNIT_SELECTION_RESOLVED" });
         return;
       }
 
-      const rect = normalizedRect(action.payload);
+      if (!gameAcceptsPlayerCommands(getState())) {
+        transition({ type: "UNIT_SELECTION_RESOLVED" });
+        return;
+      }
+
       const access = entities();
+      const identity = access.get("unitIdentity");
       const movement = access.get("unitMovement");
       const health = access.get("unitHealth");
       const selection = access.get("unitSelection");
-      const capacity = slotCount(movement.x);
+      const capacity = slotCount(selection.selected);
       const batch = createUnitSelectionBatch(capacity);
+      const rect = action.type === "SELECT_RECT" ? normalizedRect(action.payload) : null;
 
       for (let index = 0; index < capacity; index += 1) {
         const entity = index as EntityIndex;
         if (!selection.has(entity) || !isUnitAlive(health, entity)) continue;
 
-        const isInside =
-          movement.x[entity] >= rect.minX &&
-          movement.x[entity] <= rect.maxX &&
-          movement.y[entity] >= rect.minY &&
-          movement.y[entity] <= rect.maxY;
+        let selected = false;
+        if (action.type === "SELECT_ENTITY") {
+          selected =
+            entityIdForSelectableUnit(identity.kind[entity], identity.unitIndex[entity]) === action.payload.entityId;
+        } else if (rect !== null) {
+          selected =
+            movement.x[entity] >= rect.minX &&
+            movement.x[entity] <= rect.maxX &&
+            movement.y[entity] >= rect.minY &&
+            movement.y[entity] <= rect.maxY;
+        }
 
         batch.touched[entity] = 1;
-        batch.selected[entity] = isInside ? UNIT_SELECTION.SELECTED : UNIT_SELECTION.UNSELECTED;
+        batch.selected[entity] = selected ? UNIT_SELECTION.SELECTED : UNIT_SELECTION.UNSELECTED;
       }
 
       transition({ type: "UNIT_SELECTION_UPDATED", payload: batch });
       transition({ type: "UNIT_SELECTION_RESOLVED" });
     },
-    ISSUING_COMMAND: ({ action, entities, transition }) => {
+    ISSUING_COMMAND: ({ action, entities, getState, transition }) => {
       if (action.type !== "ISSUE_MOVE" && action.type !== "ISSUE_ATTACK_MOVE") {
+        transition({ type: "UNIT_COMMAND_RESOLVED" });
+        return;
+      }
+
+      if (!gameAcceptsPlayerCommands(getState())) {
         transition({ type: "UNIT_COMMAND_RESOLVED" });
         return;
       }

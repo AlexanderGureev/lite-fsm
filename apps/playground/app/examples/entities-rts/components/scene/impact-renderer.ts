@@ -45,6 +45,8 @@ type SpriteEffectSpawn = {
 export class ImpactEffectRenderer {
   private readonly active: SpriteEffect[] = [];
   private readonly pools = new Map<string, PhaserImage[]>();
+  private impactEventCursor = 0;
+  private hitEventCursor = 0;
 
   constructor(private readonly scene: PhaserScene) {}
 
@@ -53,13 +55,14 @@ export class ImpactEffectRenderer {
     for (const pool of this.pools.values()) for (const sprite of pool) sprite.destroy();
     this.active.length = 0;
     this.pools.clear();
+    this.impactEventCursor = 0;
+    this.hitEventCursor = 0;
   }
 
   consume(projectiles: ProjectileView) {
     const bounds = renderBoundsForScene(this.scene);
     this.spawnImpacts(projectiles, bounds);
     this.spawnHits(projectiles, bounds);
-    projectiles.clearEffectEvents();
   }
 
   update(deltaMs: number) {
@@ -91,13 +94,17 @@ export class ImpactEffectRenderer {
   }
 
   private spawnImpacts(projectiles: ProjectileView, bounds: RenderBounds) {
-    const count = Math.min(projectiles.readImpactEventCount(), MAX_IMPACT_EVENTS_PER_FRAME);
+    const cursor = projectiles.readImpactEventCursor();
+    const start = projectiles.readImpactEventStart(this.impactEventCursor);
     const x = projectiles.readImpactEventX();
     const y = projectiles.readImpactEventY();
     const radius = projectiles.readImpactEventRadius();
+    let count = 0;
 
-    for (let index = 0; index < count; index += 1) {
+    for (let event = start; event < cursor && count < MAX_IMPACT_EVENTS_PER_FRAME; event += 1) {
+      const index = projectiles.readImpactEventSlot(event);
       const worldRadius = Math.max(IMPACT_MIN_RADIUS, radius[index]);
+      count += 1;
       if (!pointIntersectsBounds(x[index], y[index], worldRadius, bounds)) continue;
 
       this.spawn({
@@ -123,14 +130,20 @@ export class ImpactEffectRenderer {
         depth: IMPACT_RING_DEPTH,
       });
     }
+
+    this.impactEventCursor = cursor;
   }
 
   private spawnHits(projectiles: ProjectileView, bounds: RenderBounds) {
-    const count = Math.min(projectiles.readHitEventCount(), MAX_HIT_EVENTS_PER_FRAME);
+    const cursor = projectiles.readHitEventCursor();
+    const start = projectiles.readHitEventStart(this.hitEventCursor);
     const x = projectiles.readHitEventX();
     const y = projectiles.readHitEventY();
+    let count = 0;
 
-    for (let index = 0; index < count; index += 1) {
+    for (let event = start; event < cursor && count < MAX_HIT_EVENTS_PER_FRAME; event += 1) {
+      const index = projectiles.readHitEventSlot(event);
+      count += 1;
       if (!pointIntersectsBounds(x[index], y[index], HIT_SPARK_MAX_DIAMETER, bounds)) continue;
 
       const jitter = 0.8 + Math.random() * 0.5;
@@ -146,6 +159,8 @@ export class ImpactEffectRenderer {
         depth: HIT_SPARK_DEPTH,
       });
     }
+
+    this.hitEventCursor = cursor;
   }
 
   private spawn(config: SpriteEffectSpawn) {

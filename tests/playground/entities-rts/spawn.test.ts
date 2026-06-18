@@ -118,11 +118,26 @@ describe("spawn через @lite-fsm/entities", () => {
 
     manager.transition({ type: "GAME_START", payload: { enemyCount: 2, allyCount: 1, seed: "first-run" } });
     expect(manager.entities().get("unitIdentity").count).toBe(4);
+    expect(manager.entities().get("unitHealth").count).toBe(4);
+    expect(manager.entities().get("unitCommand").count).toBe(2);
+    expect(manager.entities().get("enemyAi").count).toBe(2);
+    expect(manager.entities().get("rtsSpatialIndex").count).toBe(1);
+    expect(manager.entities().get("unitProjectile").count).toBe(1);
 
     manager.transition({ type: "GAME_RESTART" });
     expect(manager.entities().get("unitIdentity").count).toBe(0);
+    expect(manager.entities().get("unitMovement").count).toBe(0);
+    expect(manager.entities().get("unitHealth").count).toBe(0);
+    expect(manager.entities().get("unitCombat").count).toBe(0);
+    expect(manager.entities().get("unitCommand").count).toBe(0);
+    expect(manager.entities().get("unitSelection").count).toBe(0);
+    expect(manager.entities().get("enemyAi").count).toBe(0);
+    expect(manager.entities().get("rtsSpatialIndex").count).toBe(0);
+    expect(manager.entities().get("unitProjectile").count).toBe(0);
 
     manager.transition({ type: "GAME_START", payload: { enemyCount: 1, allyCount: 1, seed: "second-run" } });
     expect(manager.entities().get("unitIdentity").count).toBe(3);
+    expect(manager.entities().get("unitHealth").count).toBe(3);
+    expect(manager.entities().get("enemyAi").count).toBe(1);
   });
 });

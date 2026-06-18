@@ -94,6 +94,43 @@ const collectDeathAudit = (manager: ReturnType<typeof makeTestStore>) => {
 };
 
 describe("runtime simulation для entities RTS", () => {
+  it("simulation hot path принимает явный TICK без FRAME coordinator", () => {
+    const manager = makeTestStore();
+
+    startGame(manager, { enemyCount: 0, allyCount: 1, seed: "explicit-tick" });
+
+    const ticksBeforeTick = manager.getState().gameSession.context.tickCount;
+    const tickEvents: string[] = [];
+    const unsubscribeTickAudit = manager.onTransition((_prev, _next, action) => {
+      tickEvents.push(action.type);
+    });
+
+    manager.transition({ type: "TICK", payload: { now: 16, deltaMs: 16 } });
+    unsubscribeTickAudit();
+
+    expect(tickEvents).toEqual(["TICK"]);
+    expect(manager.getState().gameSession.context.tickCount).toBe(ticksBeforeTick + 1);
+  });
+
+  it("player commands игнорируются store при PAUSED gameSession", () => {
+    const manager = makeTestStore();
+
+    startGame(manager, { enemyCount: 0, allyCount: 1, seed: "command-gate" });
+
+    const units = readUnitViews(manager);
+    const hero = entity(0);
+
+    manager.transition({ type: "SELECT_ENTITY", payload: { entityId: "unit/hero" } });
+    expect(unitSelected(units, hero)).toBe(1);
+
+    manager.transition({ type: "GAME_PAUSE" });
+    manager.transition({ type: "CLEAR_SELECTION" });
+    manager.transition({ type: "ISSUE_MOVE", payload: { x: RTS_MAP.centerX + 320, y: RTS_MAP.centerY } });
+
+    expect(unitSelected(units, hero)).toBe(1);
+    expect(units.command.command[hero]).toBe(UNIT_COMMAND.IDLE);
+  });
+
   it("выбирает только player units и очищает выбор при клике по enemy", () => {
     const manager = makeTestStore();
 
@@ -314,17 +351,21 @@ describe("runtime simulation для entities RTS", () => {
     mutableColumn(units.combat.attackTimerMs)[hero] = 0;
     mutableColumn(units.combat.attackTimerMs)[ally] = 10_000;
 
-    projectiles.clearEffectEvents();
+    const impactCursor = projectiles.readImpactEventCursor();
+    const hitCursor = projectiles.readHitEventCursor();
+
     runTicks(manager, 16, 16);
 
-    expect(projectiles.readImpactEventCount()).toBeGreaterThan(0);
-    expect(projectiles.readImpactEventRadius()[0]).toBeGreaterThan(0);
-    expect(projectiles.readHitEventCount()).toBeGreaterThanOrEqual(2);
+    const nextImpactCursor = projectiles.readImpactEventCursor();
+    const nextHitCursor = projectiles.readHitEventCursor();
+    const firstImpact = projectiles.readImpactEventSlot(projectiles.readImpactEventStart(impactCursor));
 
-    projectiles.clearEffectEvents();
-
-    expect(projectiles.readImpactEventCount()).toBe(0);
-    expect(projectiles.readHitEventCount()).toBe(0);
+    expect(nextImpactCursor).toBeGreaterThan(impactCursor);
+    expect(projectiles.readImpactEventRadius()[firstImpact]).toBeGreaterThan(0);
+    expect(nextHitCursor - projectiles.readHitEventStart(hitCursor)).toBeGreaterThanOrEqual(2);
+    expect("clearEffectEvents" in projectiles).toBe(false);
+    expect(projectiles.readImpactEventStart(nextImpactCursor)).toBe(nextImpactCursor);
+    expect(projectiles.readHitEventStart(nextHitCursor)).toBe(nextHitCursor);
   });
 
   it("attackRange расширяет поиск цели для player projectiles за пределами соседних grid cells", () => {
@@ -481,8 +522,13 @@ describe("runtime simulation для entities RTS", () => {
     expect(units.identity.has(firstEnemy)).toBe(false);
     expect(units.identity.has(secondEnemy)).toBe(false);
     expect(units.movement.has(firstEnemy)).toBe(false);
+    expect(units.movement.has(secondEnemy)).toBe(false);
+    expect(units.health.has(firstEnemy)).toBe(false);
+    expect(units.health.has(secondEnemy)).toBe(false);
     expect(units.combat.has(firstEnemy)).toBe(false);
+    expect(units.combat.has(secondEnemy)).toBe(false);
     expect(manager.entities().get("enemyAi").has(firstEnemy)).toBe(false);
+    expect(manager.entities().get("enemyAi").has(secondEnemy)).toBe(false);
 
     manager.transition({ type: "TICK", payload: { now: 2_016, deltaMs: 1_000 } });
 

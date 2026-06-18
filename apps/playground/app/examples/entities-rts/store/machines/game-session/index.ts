@@ -32,14 +32,13 @@ export const gameSession = createMachine({
     CONFIGURING: {
       GAME_CONFIG_CHANGED: null,
       GAME_START: "SPAWNING",
+      GAME_RESTART: null,
     },
     SPAWNING: {
       GAME_SPAWN_COMPLETED: "READY",
-      GAME_RESTART: "CONFIGURING",
     },
     READY: {
       GAME_PAUSE: "PAUSED",
-      GAME_RESTART: "CONFIGURING",
       TICK: null,
       ENEMY_KILLED: null,
       ENEMIES_KILLED: null,
@@ -52,13 +51,12 @@ export const gameSession = createMachine({
     },
     PAUSED: {
       GAME_RESUME: "READY",
-      GAME_RESTART: "CONFIGURING",
     },
     BENCHMARK_COMPLETE: {
       BENCHMARK_REPORT_CAPTURED: null,
-      GAME_RESTART: "CONFIGURING",
     },
-    GAME_OVER: {
+    GAME_OVER: {},
+    "*": {
       GAME_RESTART: "CONFIGURING",
     },
   },
@@ -129,8 +127,8 @@ export const gameSession = createMachine({
     }
   },
   effects: {
-    SPAWNING: ({ action, metrics }) => {
-      if (action.type === "GAME_START") metrics.reset();
+    SPAWNING: ({ metrics }) => {
+      metrics.reset();
     },
     READY: ({ action, metrics }) => {
       if (action.type === "GAME_SPAWN_COMPLETED") metrics.reset();
