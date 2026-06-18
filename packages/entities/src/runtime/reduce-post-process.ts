@@ -147,6 +147,70 @@ const postProcessIdentityRowsWithoutLifecycle = (
   };
 };
 
+const postProcessSingleSourceRowsWithDespawnOn = (
+  transaction: EntityDispatchTransaction | undefined,
+  store: ColumnarActorStore,
+  accepted: readonly EntityIndex[],
+  flags: PostProcessingFlags,
+  previousStateCode: number,
+  knownValidStateCode: number | undefined,
+): AcceptedRowsPostProcessing => {
+  const stateCodeByEntity = store.stateCode;
+  const rowVersion = store.rowVersion;
+  const despawnStateMask = store.metadata.despawnStateMask;
+  let dirtyRows: EntityIndex[] | undefined;
+  let cleanupRemovesAcceptedRows = false;
+  let despawnOnRemovesAcceptedRows = false;
+  let acceptedRowsHaveFinalRemoval = false;
+
+  for (let index = 0; index < accepted.length; index += 1) {
+    const entity = accepted[index];
+    const stateCode = stateCodeByEntity[entity];
+    if (stateCode === previousStateCode) {
+      rowVersion[entity] += 1;
+      continue;
+    }
+
+    if (stateCode !== knownValidStateCode) assertValidStateCode(store, entity, stateCode);
+    rowVersion[entity] += 1;
+
+    if (stateCode >= 0 && despawnStateMask[stateCode] === 1) {
+      cleanupRemovesAcceptedRows = true;
+      despawnOnRemovesAcceptedRows = true;
+      /* v8 ignore next -- defensive invariant: reduceBucket receives a transaction from prepareAction. */
+      if (transaction) scheduleEntityDespawn(transaction, entity);
+
+      if (!rowNeedsDespawnLifecycle(store, stateCode)) {
+        acceptedRowsHaveFinalRemoval = true;
+        /* v8 ignore next -- defensive invariant: reduceBucket receives a transaction from prepareAction. */
+        if (transaction) scheduleDespawnRowHint(transaction, store, entity, previousStateCode);
+        continue;
+      }
+    }
+
+    if (!dirtyRows) dirtyRows = [];
+    dirtyRows.push(entity);
+
+    if (flags.scheduleTerminal && isTerminalStateCode(stateCode)) {
+      cleanupRemovesAcceptedRows = true;
+      /* v8 ignore next -- defensive invariant: reduceBucket receives a transaction from prepareAction. */
+      if (transaction) transaction.terminalRows.push({ store, entity });
+    }
+  }
+
+  return {
+    dirtyRows,
+    dirtyRowsPreviousStateCode: dirtyRows ? previousStateCode : undefined,
+    dirtyRowsPreviousStateCodes: undefined,
+    bulkStateTransition: undefined,
+    enteredByState: undefined,
+    cleanupRemovesAcceptedRows,
+    despawnOnRemovesAcceptedRows,
+    acceptedRowsHaveFinalRemoval,
+    reactionSurvivorRows: undefined,
+  };
+};
+
 const planAcceptsStateCode = (plan: EntityReducePlan, stateCode: number): boolean => {
   for (const acceptedStateCode of plan.acceptStateCodes) {
     if (acceptedStateCode === stateCode) return true;
@@ -299,6 +363,23 @@ export const postProcessAcceptedRows = (
       accepted,
       flags,
       previousStateCodeForAccepted,
+    );
+  }
+
+  if (
+    previousStateCodeForAccepted !== undefined &&
+    flags.scheduleDespawnOn &&
+    !flags.scheduleEffects &&
+    !flags.collectReactionSurvivors &&
+    (previousStateCodeForAccepted < 0 || store.metadata.despawnStateMask[previousStateCodeForAccepted] !== 1)
+  ) {
+    return postProcessSingleSourceRowsWithDespawnOn(
+      transaction,
+      store,
+      accepted,
+      flags,
+      previousStateCodeForAccepted,
+      knownValidStateCodeForAccepted,
     );
   }
 

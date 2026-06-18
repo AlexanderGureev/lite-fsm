@@ -332,16 +332,19 @@ const validateActorPayload = (
     throw runtimeError(`actor '${templateKey}' payload must be a plain object`);
   }
 
-  for (const key of Object.keys(value)) {
+  for (const key in value) {
+    if (!hasOwn(value, key)) continue;
     if (hasOwn(schema, key)) continue;
     throw runtimeError(`actor '${templateKey}' payload has unknown key '${key}'`);
   }
 
-  for (const [key, descriptor] of Object.entries(schema)) {
+  for (const key in schema) {
+    if (!hasOwn(schema, key)) continue;
     if (!hasOwn(value, key)) {
       throw runtimeError(`actor '${templateKey}' payload is missing required key '${key}'`);
     }
-    assertPayloadField(`actor '${templateKey}' payload.${key}`, descriptor as Record<string, unknown>, value[key]);
+    const descriptor = schema[key] as Record<string, unknown>;
+    assertPayloadField(`actor '${templateKey}' payload.${key}`, descriptor, value[key]);
   }
 
   return value;
@@ -375,7 +378,9 @@ const validateSpawnSpec = (runtime: EntityRuntimeState, value: unknown, seenIds:
   }
 
   const actors: StagedActorSpawn[] = [];
-  for (const [templateKey, payload] of Object.entries(value.actors)) {
+  for (const templateKey in value.actors) {
+    if (!hasOwn(value.actors, templateKey)) continue;
+    const payload = value.actors[templateKey];
     const actorStore = runtime.actorStores[templateKey];
     if (!actorStore) {
       throw runtimeError(`unknown entity actor template '${templateKey}'`);
