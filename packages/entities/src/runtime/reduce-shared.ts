@@ -14,7 +14,14 @@ export type ReducerBatch = {
   readonly action: ManagerAction<AnyEvent>;
   readonly eventCode: number | undefined;
   readonly accepted?: true;
-  readonly payloadByEntity?: ReadonlyMap<EntityIndex, Record<string, unknown>>;
+  readonly payloadScope?: SpawnPayloadScope;
+};
+
+export type SpawnPayloadScope = {
+  readonly indices: readonly EntityIndex[];
+  readonly payloads: readonly Record<string, unknown>[];
+  readonly firstEntity: EntityIndex;
+  readonly positionsByEntity?: Readonly<Record<number, number | undefined>>;
 };
 
 export type ReduceAcceptedBatchOptions = {

@@ -34,7 +34,7 @@ export type {
   EntityRuntimeState,
   EntityStore,
 } from "./store-types";
-export { getInitialColumnValue, writeInitialColumnValues } from "./columns";
+export { getInitialColumnValue } from "./columns";
 export {
   addActorRowOwnership,
   addEntityToGroupBucket,

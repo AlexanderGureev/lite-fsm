@@ -456,27 +456,25 @@ Trace coverage для нового сценария закрывает attributi
 2. `despawnOn cleanup` имеет median ratio ниже бюджета (`1.51x` против `2.00x`), но record status остался `fail` из-за per-run gate.
 3. Бюджет `unit frame composition` пока не является приемочным production budget: он фиксирует новый более реалистичный baseline для будущих оптимизаций effects path.
 
-### 4. Уменьшить allocations и проверку payload в spawn/lifecycle path
+### 4. Уменьшить validation overhead в spawn path
 
-Ожидаемый выигрыш: средний для текущего измеряемого `TICK`, высокий для реальных workloads со spawn/despawn. В gate cleanup replacement spawn выполняется вне timed участка, но в приложении это часть кадра.
+Ожидаемый выигрыш: средний для текущего измеряемого `TICK`, высокий для реальных workloads со spawn/despawn. Bulk commit, пакетный reserve и payload scope уже вынесены в `spawn-commit.ts`; оставшийся кандидат — validation/staging до physical commit.
 
 Затронутые места:
 
 - `packages/entities/src/runtime/transaction.ts`: `validateSpawnSpec`, `validateActorPayload`, `stageSpawnAction`.
-- `packages/entities/src/runtime/reduce.ts`: `applyStagedSpawns`, `stageActorRow`, `payloadByEntity: Map`.
-- `packages/entities/src/runtime/state.ts`: `ensureEntityCapacity`, `ensureActorCapacity`, `writeInitialColumnValues`.
+- `packages/entities/src/runtime/spawn-commit.ts`: planning, reserve, physical commit и payload scope.
 
 Что исправлять:
 
 1. Предкомпилировать spawn schema validators по template, чтобы не делать `Object.entries(schema)` и повторные проверки формы на каждую строку.
-2. Заменить `payloadByEntity: Map<EntityIndex, payload>` на batch arrays, если индексы создаются последовательно или могут быть представлены параллельными массивами `indices` и `payloads`.
-3. Для batch spawn обновлять `store.version`, `store.count`, ownership indexes и public slice пакетно.
-4. Добавить capacity reservation для spawn batch: перед циклом знать максимальный `entity + count` и расширить columns один раз.
+2. Сохранить текущие duplicate id и payload diagnostics без переноса validation в commit phase.
+3. Не менять public spawn recipe API и schema descriptors.
 
 Критерий приемки:
 
 - Добавить отдельный gate/trace scenario для timed spawn batch.
-- Не ухудшить `movement update` и `projectile lifetime update` на `50k`.
+- Не ухудшить `movement update`, `projectile lifetime update` и bulk spawn benchmark на `50k`.
 
 ### 5. Снизить постоянный overhead `manager.transition` для bucket storage
 

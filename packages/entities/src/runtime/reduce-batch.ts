@@ -8,7 +8,7 @@ import {
   type AcceptedRowsPostProcessing,
   type EnteredEffectRows,
 } from "./reduce-post-process";
-import { runtimeError, type ReduceAcceptedBatchOptions, type ReducerBatch } from "./reduce-shared";
+import { runtimeError, type ReduceAcceptedBatchOptions, type ReducerBatch, type SpawnPayloadScope } from "./reduce-shared";
 import { applyDefaultTransitions, getAcceptedIndices } from "./reduce-transitions";
 import {
   getActorReducerSelf,
@@ -86,21 +86,28 @@ const chooseReactionBatchOwnership = (
 
 const createPayloadFor = (
   store: ColumnarActorStore,
-  payloadByEntity: ReadonlyMap<EntityIndex, Record<string, unknown>> | undefined,
+  payloadScope: SpawnPayloadScope | undefined,
 ) => {
-  if (!payloadByEntity) {
+  if (!payloadScope) {
     return (): Record<string, unknown> => {
       throw runtimeError(`payloadFor(entity) is only available while reducing ${ENTITY_SPAWNED}`);
     };
   }
 
   return (entity: EntityIndex): Record<string, unknown> => {
-    if (!payloadByEntity.has(entity)) {
-      throw runtimeError(
-        `payloadFor(entity) for actor '${store.templateKey}' only accepts EntityIndex values from current spawn scope`,
-      );
+    const offset = entity - payloadScope.firstEntity;
+    if (offset >= 0 && offset < payloadScope.indices.length && payloadScope.indices[offset] === entity) {
+      return payloadScope.payloads[offset]!;
     }
-    return payloadByEntity.get(entity)!;
+
+    const position = payloadScope.positionsByEntity?.[entity];
+    if (position !== undefined && payloadScope.indices[position] === entity) {
+      return payloadScope.payloads[position]!;
+    }
+
+    throw runtimeError(
+      `payloadFor(entity) for actor '${store.templateKey}' only accepts EntityIndex values from current spawn scope`,
+    );
   };
 };
 
@@ -146,7 +153,7 @@ export const reduceAcceptedBatch = (
           config: batch.store.metadata.config,
           self: getActorReducerSelf(batch.store, accepted),
           entities: () => runtime.access,
-          payloadFor: createPayloadFor(batch.store, batch.payloadByEntity),
+          payloadFor: createPayloadFor(batch.store, batch.payloadScope),
         });
         if (result instanceof Promise) {
           throw runtimeError(

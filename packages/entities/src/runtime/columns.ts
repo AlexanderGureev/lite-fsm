@@ -1,6 +1,5 @@
-import type { EntityIndex } from "../plugin";
 import type { EntityDescriptor } from "../schema";
-import type { ColumnarActorStore, EntityColumn } from "./store-types";
+import type { EntityColumn } from "./store-types";
 
 type EntityColumnDescriptor = EntityDescriptor;
 
@@ -68,11 +67,4 @@ export const growUint32 = (value: Uint32Array, capacity: number): Uint32Array =>
 export const getInitialColumnValue = (descriptor: EntityColumnDescriptor): number | string => {
   if (descriptor.default !== undefined) return descriptor.default;
   return descriptor.kind === "string" ? "" : 0;
-};
-
-export const writeInitialColumnValues = (store: ColumnarActorStore, entity: EntityIndex): void => {
-  for (const [name, descriptor] of Object.entries(store.metadata.initialContext)) {
-    const column = store.columns[name];
-    (column as Record<number, number | string>)[entity] = getInitialColumnValue(descriptor);
-  }
 };
