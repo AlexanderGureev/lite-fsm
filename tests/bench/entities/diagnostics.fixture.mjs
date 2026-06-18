@@ -1756,3 +1756,435 @@ export const formatDiagnosticsReport = (result) => {
 
   return lines.join("\n");
 };
+
+export const massDespawnDiagnosticsBenchmarkName = "mass-despawn-lite-fsm-entities-diagnostics";
+
+const massDespawnDiagnosticsWarmupIterations = 2;
+const massDespawnDiagnosticsMeasuredIterations = 10;
+const massDespawnDiagnosticsRowCounts = [30_000, 35_000];
+const massDespawnDiagnosticsBatchSizes = [1_024, 5_000];
+const massActorRowsPerEntity = 5;
+const massActorKeys = ["identity", "movement", "health", "combat", "enemyAi"];
+
+const measureMassDiagnostics = (runner, operationsPerSample) => {
+  for (let sample = 0; sample < massDespawnDiagnosticsWarmupIterations; sample += 1) {
+    for (let operation = 0; operation < operationsPerSample; operation += 1) {
+      runner.beforeOperation?.();
+      runner.run();
+    }
+  }
+
+  const samples = [];
+  for (let sample = 0; sample < massDespawnDiagnosticsMeasuredIterations; sample += 1) {
+    let elapsed = 0;
+    for (let operation = 0; operation < operationsPerSample; operation += 1) {
+      runner.beforeOperation?.();
+      const startedAt = now();
+      runner.run();
+      elapsed += now() - startedAt;
+    }
+    samples.push(elapsed / operationsPerSample);
+  }
+
+  runner.read?.();
+  return summarize(samples);
+};
+
+const createMassDiagnosticsState = (rowCount) => {
+  const actorRowsByEntity = Array.from({ length: rowCount }, () => []);
+  const actorRowsByGroupTag = { unit: [] };
+  const entityGroupBucket = Array.from({ length: rowCount }, (_, entity) => entity);
+  const groupTagPosition = new Int32Array(rowCount);
+  const ids = new Array(rowCount);
+  const indexById = Object.create(null);
+  const freeList = [];
+  const stores = massActorKeys.map((key) => ({
+    key,
+    count: rowCount,
+    version: 0,
+    presence: new Uint8Array(rowCount),
+    stateCode: new Int16Array(rowCount),
+    statePosition: new Int32Array(rowCount),
+    stateBucket: Array.from({ length: rowCount }, (_, entity) => entity),
+    publicSlice: { storage: "entity", version: 0, count: rowCount, capacity: rowCount },
+  }));
+
+  for (let entity = 0; entity < rowCount; entity += 1) {
+    groupTagPosition[entity] = entity;
+    ids[entity] = `unit/${entity}`;
+    indexById[ids[entity]] = entity;
+  }
+
+  for (const store of stores) {
+    store.presence.fill(1);
+    for (let entity = 0; entity < rowCount; entity += 1) {
+      store.statePosition[entity] = entity;
+      const row = {
+        store,
+        entity,
+        groupTag: "unit",
+        entityRowsPosition: actorRowsByEntity[entity].length,
+        groupRowsPosition: actorRowsByGroupTag.unit.length,
+      };
+      actorRowsByEntity[entity].push(row);
+      actorRowsByGroupTag.unit.push(row);
+    }
+  }
+
+  return {
+    rowCount,
+    stores,
+    actorRowsByEntity,
+    actorRowsByGroupTag,
+    entityStore: {
+      count: rowCount,
+      version: 0,
+      ids,
+      indexById,
+      freeList,
+      entitiesByGroupTag: { unit: entityGroupBucket },
+      groupTagPosition,
+    },
+    checksum: 0,
+  };
+};
+
+const swapRemove = (rows, item, position, updateMovedPosition) => {
+  if (position < 0 || rows[position] !== item) return false;
+  const last = rows.pop();
+  if (last !== undefined && last !== item) {
+    rows[position] = last;
+    updateMovedPosition(last, position);
+  }
+  return true;
+};
+
+const createMassRemovalBatches = (state, batchSize) => {
+  const batches = state.stores.map((store) => ({ store, rows: [] }));
+  for (let entity = 0; entity < batchSize; entity += 1) {
+    const rows = state.actorRowsByEntity[entity];
+    for (let index = 0; index < rows.length; index += 1) {
+      batches[index].rows.push(rows[index]);
+    }
+  }
+  return batches;
+};
+
+const runActorRowsByEntityPlanScan = (state, batchSize) => {
+  let rows = 0;
+  for (let entity = 0; entity < batchSize; entity += 1) {
+    rows += state.actorRowsByEntity[entity].length;
+  }
+  state.checksum += rows;
+};
+
+const runGroupOwnershipRemove = (state, batchSize) => {
+  const removalBatches = createMassRemovalBatches(state, batchSize);
+  for (const batch of removalBatches) {
+    for (const row of batch.rows) {
+      const groupRows = state.actorRowsByGroupTag[row.groupTag];
+      swapRemove(groupRows, row, row.groupRowsPosition, (moved, position) => {
+        moved.groupRowsPosition = position;
+      });
+      row.groupRowsPosition = -1;
+    }
+  }
+};
+
+const runEntityOwnershipRemove = (state, batchSize) => {
+  const removalBatches = createMassRemovalBatches(state, batchSize);
+  for (const batch of removalBatches) {
+    for (const row of batch.rows) {
+      const entityRows = state.actorRowsByEntity[row.entity];
+      swapRemove(entityRows, row, row.entityRowsPosition, (moved, position) => {
+        moved.entityRowsPosition = position;
+      });
+      row.entityRowsPosition = -1;
+    }
+  }
+};
+
+const runStateBucketRemove = (state, batchSize) => {
+  for (const store of state.stores) {
+    const bucket = store.stateBucket;
+    for (let entity = 0; entity < batchSize; entity += 1) {
+      const position = store.statePosition[entity];
+      if (position < 0) continue;
+      const last = bucket.pop();
+      if (last !== undefined && last !== entity) {
+        bucket[position] = last;
+        store.statePosition[last] = position;
+      }
+      store.statePosition[entity] = -1;
+    }
+  }
+};
+
+const runEntityGroupBucketRemove = (state, batchSize) => {
+  const bucket = state.entityStore.entitiesByGroupTag.unit;
+  const positions = state.entityStore.groupTagPosition;
+  for (let entity = 0; entity < batchSize; entity += 1) {
+    const position = positions[entity];
+    if (position < 0) continue;
+    const last = bucket.pop();
+    if (last !== undefined && last !== entity) {
+      bucket[position] = last;
+      positions[last] = position;
+    }
+    positions[entity] = -1;
+  }
+};
+
+const runIndexByIdDelete = (state, batchSize) => {
+  const { ids, indexById } = state.entityStore;
+  for (let entity = 0; entity < batchSize; entity += 1) delete indexById[ids[entity]];
+};
+
+const runFreeListPush = (state, batchSize) => {
+  const { freeList } = state.entityStore;
+  for (let entity = 0; entity < batchSize; entity += 1) freeList.push(entity);
+};
+
+const runPublicSliceRefresh = (state, batchSize) => {
+  for (const store of state.stores) {
+    store.count -= batchSize;
+    store.version += 1;
+    store.publicSlice = {
+      storage: "entity",
+      version: store.version,
+      count: store.count,
+      capacity: state.rowCount,
+    };
+  }
+};
+
+const runCombinedRemoveActorRows = (state, batchSize) => {
+  const removalBatches = createMassRemovalBatches(state, batchSize);
+  for (const batch of removalBatches) {
+    for (const row of batch.rows) {
+      const { store, entity } = row;
+      const bucket = store.stateBucket;
+      const statePosition = store.statePosition[entity];
+      const lastStateEntity = bucket.pop();
+      if (lastStateEntity !== undefined && lastStateEntity !== entity) {
+        bucket[statePosition] = lastStateEntity;
+        store.statePosition[lastStateEntity] = statePosition;
+      }
+      store.statePosition[entity] = -1;
+
+      const entityRows = state.actorRowsByEntity[entity];
+      swapRemove(entityRows, row, row.entityRowsPosition, (moved, position) => {
+        moved.entityRowsPosition = position;
+      });
+
+      const groupRows = state.actorRowsByGroupTag[row.groupTag];
+      swapRemove(groupRows, row, row.groupRowsPosition, (moved, position) => {
+        moved.groupRowsPosition = position;
+      });
+
+      store.presence[entity] = 0;
+      store.stateCode[entity] = entityInitStateCode;
+    }
+    batch.store.count -= batch.rows.length;
+    batch.store.version += 1;
+  }
+};
+
+const runCombinedRemoveEntityRecords = (state, batchSize) => {
+  const store = state.entityStore;
+  for (let entity = 0; entity < batchSize; entity += 1) {
+    const position = store.groupTagPosition[entity];
+    const bucket = store.entitiesByGroupTag.unit;
+    const last = bucket.pop();
+    if (last !== undefined && last !== entity) {
+      bucket[position] = last;
+      store.groupTagPosition[last] = position;
+    }
+    store.groupTagPosition[entity] = -1;
+    delete store.indexById[store.ids[entity]];
+    store.ids[entity] = "";
+    store.freeList.push(entity);
+    state.actorRowsByEntity[entity] = [];
+  }
+  store.count -= batchSize;
+  store.version += 1;
+};
+
+const createMassDiagnosticsRunner = (rowCount, batchSize, runLayer) => {
+  let state;
+  return {
+    beforeOperation() {
+      state = createMassDiagnosticsState(rowCount);
+    },
+    run() {
+      runLayer(state, batchSize);
+    },
+    read() {
+      return state?.checksum ?? 0;
+    },
+  };
+};
+
+const massDiagnosticsLayerDefinitions = [
+  {
+    key: "actorRowsByEntity-plan-scan",
+    label: "actorRowsByEntity plan scan",
+    run: runActorRowsByEntityPlanScan,
+    operationsPerSample: 20,
+    mapsTo: "collectPlan",
+  },
+  {
+    key: "actorRowsByEntity-ownership-remove",
+    label: "actorRowsByEntity ownership remove",
+    run: runEntityOwnershipRemove,
+    operationsPerSample: 20,
+    mapsTo: "removeActorRows",
+  },
+  {
+    key: "actorRowsByGroupTag-ownership-remove",
+    label: "actorRowsByGroupTag ownership remove",
+    run: runGroupOwnershipRemove,
+    operationsPerSample: 20,
+    mapsTo: "removeActorRows",
+  },
+  {
+    key: "state-bucket-remove",
+    label: "state bucket remove",
+    run: runStateBucketRemove,
+    operationsPerSample: 20,
+    mapsTo: "removeActorRows",
+  },
+  {
+    key: "entity-group-bucket-remove",
+    label: "entity group bucket remove",
+    run: runEntityGroupBucketRemove,
+    operationsPerSample: 20,
+    mapsTo: "removeEntityRecords",
+  },
+  {
+    key: "indexById-delete",
+    label: "indexById delete",
+    run: runIndexByIdDelete,
+    operationsPerSample: 20,
+    mapsTo: "removeEntityRecords",
+  },
+  {
+    key: "freeList-push",
+    label: "freeList push",
+    run: runFreeListPush,
+    operationsPerSample: 20,
+    mapsTo: "removeEntityRecords",
+  },
+  {
+    key: "public-slice-refresh",
+    label: "public slice refresh",
+    run: runPublicSliceRefresh,
+    operationsPerSample: 20,
+    mapsTo: "removeActorRows",
+  },
+  {
+    key: "combined-removeActorRows",
+    label: "combined removeActorRows",
+    run: runCombinedRemoveActorRows,
+    operationsPerSample: 10,
+    mapsTo: "removeActorRows",
+  },
+  {
+    key: "combined-removeEntityRecords",
+    label: "combined removeEntityRecords",
+    run: runCombinedRemoveEntityRecords,
+    operationsPerSample: 10,
+    mapsTo: "removeEntityRecords",
+  },
+];
+
+const runMassDiagnosticsLayer = (layer, rowCount, batchSize) => {
+  const runner = createMassDiagnosticsRunner(rowCount, batchSize, layer.run);
+  const summary = measureMassDiagnostics(runner, layer.operationsPerSample);
+  return {
+    key: layer.key,
+    label: layer.label,
+    mapsTo: layer.mapsTo,
+    operationsPerSample: layer.operationsPerSample,
+    ...summary,
+  };
+};
+
+const runMassDiagnosticsScenario = (rowCount, batchSize) => ({
+  key: `mass-despawn-diagnostics-b${batchSize}`,
+  label: `mass despawn diagnostics / batch ${batchSize.toLocaleString("en-US")}`,
+  rowCount,
+  batchSize,
+  actorRowsPerEntity: massActorRowsPerEntity,
+  actorRowCount: rowCount * massActorRowsPerEntity,
+  removedActorRows: batchSize * massActorRowsPerEntity,
+  layers: massDiagnosticsLayerDefinitions.map((layer) => runMassDiagnosticsLayer(layer, rowCount, batchSize)),
+});
+
+export const runEntitiesMassDespawnDiagnosticsBenchmark = ({
+  profile,
+  onScenarioStart,
+  onScenarioEnd,
+  rowCounts: selectedRowCounts = massDespawnDiagnosticsRowCounts,
+  batchSizes: selectedBatchSizes = massDespawnDiagnosticsBatchSizes,
+} = {}) => {
+  const scenarios = [];
+
+  for (const rowCount of selectedRowCounts) {
+    for (const batchSize of selectedBatchSizes) {
+      if (batchSize > rowCount) continue;
+      const definition = { key: `mass-despawn-diagnostics-b${batchSize}`, label: `batch ${batchSize}` };
+      onScenarioStart?.(definition, rowCount);
+      const scenario = runMassDiagnosticsScenario(rowCount, batchSize);
+      scenarios.push(scenario);
+      onScenarioEnd?.(scenario);
+    }
+  }
+
+  return {
+    benchmark: massDespawnDiagnosticsBenchmarkName,
+    profile: profile ?? "node",
+    runtime: "synthetic kernel",
+    rowCounts: selectedRowCounts,
+    batchSizes: selectedBatchSizes,
+    scenarios,
+  };
+};
+
+export const formatMassDespawnDiagnosticsReport = (result) => {
+  const lines = [
+    `${result.benchmark} (${result.profile}, ${result.runtime})`,
+    "synthetic attribution for mass despawn cleanup internals; public API benchmark remains separate",
+    `iterations: warmup=${massDespawnDiagnosticsWarmupIterations}, measured=${massDespawnDiagnosticsMeasuredIterations}`,
+    "",
+  ];
+
+  for (const scenario of result.scenarios) {
+    lines.push(
+      `## ${scenario.label} / ${scenario.rowCount.toLocaleString("en-US")} rows / ${scenario.batchSize.toLocaleString(
+        "en-US",
+      )} despawns`,
+    );
+    lines.push("");
+    lines.push("| Layer | Maps to public phase | Median | p95 | Min | Max | Ops/sample |");
+    lines.push("| --- | --- | ---: | ---: | ---: | ---: | ---: |");
+
+    for (const layer of scenario.layers) {
+      lines.push(
+        [
+          layer.label,
+          layer.mapsTo,
+          formatMs(layer.median),
+          formatMs(layer.p95),
+          formatMs(layer.min),
+          formatMs(layer.max),
+          String(layer.operationsPerSample),
+        ].join(" | ").replace(/^/, "| ").replace(/$/, " |"),
+      );
+    }
+
+    lines.push("");
+  }
+
+  return lines.join("\n");
+};

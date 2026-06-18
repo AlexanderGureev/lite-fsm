@@ -6,7 +6,13 @@ import type { EntitySpawnDescriptor } from "../spawn";
 import { hasSpawnRecipe, runSpawnRecipe } from "../spawn";
 import type { EntitySpawnSchema } from "../schema";
 import type { ColumnarActorStore, EntityRuntimeState } from "./state";
-import { readEntityTransitionTraceSession, recordEntityTracePhase, tracePhase } from "./transitionTrace";
+import {
+  readEntityTransitionTraceSession,
+  recordEntityTraceCounter,
+  recordEntityTracePhase,
+  tracePhase,
+  type EntityTransitionTraceSession,
+} from "./transitionTrace";
 
 type RuntimeCarrier = {
   readonly runtime: Map<string, unknown>;
@@ -97,38 +103,52 @@ export const createEntityDespawnOptions = (request: ExplicitDespawnRequest): obj
   [ENTITY_DESPAWN_OPTIONS_KEY]: request,
 });
 
-const scheduleEntityDespawnById = (transaction: EntityDispatchTransaction, id: string): void => {
+const scheduleEntityDespawnById = (transaction: EntityDispatchTransaction, id: string): boolean => {
   const entity = transaction.runtime.entityStore.indexById[id];
-  if (entity === undefined) return;
-  scheduleEntityDespawn(transaction, entity);
+  if (entity === undefined) return false;
+  return scheduleEntityDespawn(transaction, entity);
 };
 
 const scheduleCapturedEntityDespawn = (
   transaction: EntityDispatchTransaction,
   entry: CapturedEntityScopeEntry,
-): void => {
+): boolean => {
   const store = transaction.runtime.entityStore;
   const stale = store.alive[entry.entity] !== 1 || store.generation[entry.entity] !== entry.generation;
   if (!stale) {
-    scheduleEntityDespawn(transaction, entry.entity);
-    return;
+    return scheduleEntityDespawn(transaction, entry.entity);
   }
 
   if (isDev()) {
     throw storageRuntimeError(`stale entity effect scope cannot despawn entity '${entry.id}' at index ${entry.entity}`);
   }
+
+  return false;
 };
 
-const stageExplicitDespawns = (transaction: EntityDispatchTransaction, options: unknown): void => {
+const stageExplicitDespawns = (
+  transaction: EntityDispatchTransaction,
+  options: unknown,
+  trace: EntityTransitionTraceSession | undefined,
+): void => {
   const request = getExplicitDespawnRequest(options);
   if (!request) return;
 
+  let scheduled = 0;
   if (request.mode === "ids") {
-    for (const id of request.ids) scheduleEntityDespawnById(transaction, id);
+    recordEntityTraceCounter(trace, "entities.prepare.explicitDespawn.ids", request.ids.length);
+    for (const id of request.ids) {
+      if (scheduleEntityDespawnById(transaction, id)) scheduled += 1;
+    }
+    recordEntityTraceCounter(trace, "entities.prepare.explicitDespawn.scheduled", scheduled);
     return;
   }
 
-  for (const entry of request.entries) scheduleCapturedEntityDespawn(transaction, entry);
+  recordEntityTraceCounter(trace, "entities.prepare.explicitDespawn.scopeEntries", request.entries.length);
+  for (const entry of request.entries) {
+    if (scheduleCapturedEntityDespawn(transaction, entry)) scheduled += 1;
+  }
+  recordEntityTraceCounter(trace, "entities.prepare.explicitDespawn.scheduled", scheduled);
 };
 
 const getEntityTransactionScratch = (runtime: EntityRuntimeState): EntityTransactionScratch => {
@@ -175,7 +195,10 @@ export const prepareEntityTransaction = (
     reactionBatches: [],
   };
   carrier.runtime.set(ENTITY_TRANSACTION_KEY, transaction);
-  stageExplicitDespawns(transaction, (carrier as { readonly options?: unknown }).options);
+  const trace = readEntityTransitionTraceSession(carrier);
+  tracePhase(trace, "entities.prepare.explicitDespawn", () =>
+    stageExplicitDespawns(transaction, (carrier as { readonly options?: unknown }).options, trace),
+  );
   return transaction;
 };
 

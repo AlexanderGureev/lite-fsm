@@ -13,6 +13,7 @@ const traceOverheadWarningThreshold = 2;
 const gateScenarioKey = (scenario) => `${scenario.key}::${scenario.rowCount}`;
 const layerKey = (scenario, layer) => `${gateScenarioKey(scenario)}::${layer.key}`;
 const phaseRowKey = (scenario, phase) => `${gateScenarioKey(scenario)}::${phase.key}`;
+const massTraceSectionKey = (scenario, section) => `${gateScenarioKey(scenario)}::${section.key}`;
 
 const sortNumbers = (values) => [...values].sort((left, right) => left - right);
 
@@ -285,6 +286,244 @@ export const aggregateSpawnRuns = (runs) => {
     runtime: runs[0].runtime,
     config: {
       rowCounts: runs[0].rowCounts,
+      runs: runs.length,
+    },
+    scenarios,
+  };
+};
+
+const deriveMassDespawnThroughput = (batchSize, actorRowsPerEntity, metric) => {
+  const actorRows = batchSize * actorRowsPerEntity;
+  return {
+    entitiesPerMs: batchSize / metric.median,
+    actorRowsPerMs: actorRows / metric.median,
+    msPerEntity: metric.median / batchSize,
+    msPerActorRow: metric.median / actorRows,
+  };
+};
+
+export const aggregateMassDespawnRuns = (runs) => {
+  if (runs.length === 0) throw new Error("Cannot aggregate mass despawn benchmark without runs.");
+
+  const scenariosByKey = new Map();
+  for (const [runIndex, run] of runs.entries()) {
+    if (!Array.isArray(run.scenarios)) {
+      throw new Error("Invalid mass despawn benchmark result: scenarios must be an array.");
+    }
+
+    for (const scenario of run.scenarios) {
+      assertScenarioResult(scenario, "mass despawn");
+      const key = gateScenarioKey(scenario);
+      const existing = scenariosByKey.get(key) ?? {
+        key: scenario.key,
+        label: scenario.label,
+        rowCount: scenario.rowCount,
+        kind: scenario.kind,
+        actorRowsPerEntity: scenario.actorRowsPerEntity,
+        actorRowCount: scenario.actorRowCount,
+        batchSize: scenario.batchSize,
+        mode: scenario.mode,
+        path: scenario.path,
+        lifecycle: scenario.lifecycle,
+        operationOrder: scenario.operationOrder,
+        iterations: scenario.iterations,
+        expected: scenario.expected,
+        runs: [],
+      };
+
+      existing.runs.push({
+        runIndex: runIndex + 1,
+        iterations: scenario.iterations,
+        expected: scenario.expected,
+        observed: scenario.observed,
+        setup: cloneMeasurement(scenario.setup),
+        despawn: cloneMeasurement(scenario.despawn),
+        ...(scenario.replacementSpawn ? { replacementSpawn: cloneMeasurement(scenario.replacementSpawn) } : {}),
+      });
+      scenariosByKey.set(key, existing);
+    }
+  }
+
+  const scenarios = Array.from(scenariosByKey.values()).map((scenario) => {
+    const setupSummary = summarizeMeasurements(scenario.runs.map((run) => run.setup));
+    const despawnSummary = summarizeMeasurements(scenario.runs.map((run) => run.despawn));
+    const replacementSpawnRuns = scenario.runs
+      .map((run) => run.replacementSpawn)
+      .filter((measurement) => measurement !== undefined);
+    const setup = metricFromMeasurementSummary(setupSummary);
+    const despawn = metricFromMeasurementSummary(despawnSummary);
+    const replacementSpawn =
+      replacementSpawnRuns.length > 0
+        ? metricFromMeasurementSummary(summarizeMeasurements(replacementSpawnRuns))
+        : undefined;
+
+    return {
+      ...scenario,
+      setup,
+      despawn,
+      ...(replacementSpawn ? { replacementSpawn } : {}),
+      throughput: deriveMassDespawnThroughput(scenario.batchSize, scenario.actorRowsPerEntity, despawn),
+      summary: despawnSummary,
+    };
+  });
+
+  return {
+    benchmark: runs[0].benchmark,
+    profile: runs[0].profile,
+    runtime: runs[0].runtime,
+    config: {
+      rowCounts: runs[0].rowCounts,
+      batchSizes: runs[0].batchSizes,
+      runs: runs.length,
+    },
+    scenarios,
+  };
+};
+
+export const aggregateMassDespawnTraceRuns = (runs) => {
+  if (runs.length === 0) throw new Error("Cannot aggregate mass despawn trace benchmark without runs.");
+
+  const scenariosByKey = new Map();
+  for (const [runIndex, run] of runs.entries()) {
+    if (!Array.isArray(run.scenarios)) {
+      throw new Error("Invalid mass despawn trace benchmark result: scenarios must be an array.");
+    }
+
+    for (const scenario of run.scenarios) {
+      assertScenarioResult(scenario, "mass despawn trace");
+      if (!Array.isArray(scenario.sections)) {
+        throw new Error("Invalid mass despawn trace scenario: sections must be an array.");
+      }
+      const key = gateScenarioKey(scenario);
+      const existing = scenariosByKey.get(key) ?? {
+        key: scenario.key,
+        label: scenario.label,
+        rowCount: scenario.rowCount,
+        kind: scenario.kind,
+        actorRowsPerEntity: scenario.actorRowsPerEntity,
+        actorRowCount: scenario.actorRowCount,
+        batchSize: scenario.batchSize,
+        mode: scenario.mode,
+        path: scenario.path,
+        lifecycle: scenario.lifecycle,
+        operationOrder: scenario.operationOrder,
+        iterations: scenario.iterations,
+        expected: scenario.expected,
+        runs: [],
+        sectionRunsByKey: new Map(),
+      };
+
+      const runSections = [];
+      for (const section of scenario.sections) {
+        const sectionRuns = existing.sectionRunsByKey.get(section.key) ?? {
+          key: section.key,
+          label: section.label,
+          role: section.role,
+          actionType: section.actionType,
+          depth: section.depth,
+          runs: [],
+          phaseRunsByKey: new Map(),
+          counterRunsByKey: new Map(),
+        };
+        const runSection = {
+          runIndex: runIndex + 1,
+          transitionCount: section.transitionCount,
+          ...(section.total ? { total: cloneTraceMetric(section.total) } : {}),
+        };
+        sectionRuns.runs.push(runSection);
+
+        for (const phase of section.phases) {
+          const phaseRuns = sectionRuns.phaseRunsByKey.get(phase.key) ?? {
+            key: phase.key,
+            label: phase.label,
+            parentKey: phase.parentKey,
+            runs: [],
+          };
+          phaseRuns.runs.push({ runIndex: runIndex + 1, ...cloneTraceMetric(phase), ...phase });
+          sectionRuns.phaseRunsByKey.set(phase.key, phaseRuns);
+        }
+
+        for (const counter of section.counters) {
+          const counterRuns = sectionRuns.counterRunsByKey.get(counter.key) ?? {
+            key: counter.key,
+            label: counter.label,
+            runs: [],
+          };
+          counterRuns.runs.push({ runIndex: runIndex + 1, ...cloneTraceMetric(counter), ...counter });
+          sectionRuns.counterRunsByKey.set(counter.key, counterRuns);
+        }
+
+        existing.sectionRunsByKey.set(section.key, sectionRuns);
+        runSections.push(runSection);
+      }
+
+      existing.runs.push({
+        runIndex: runIndex + 1,
+        sections: runSections,
+        observed: scenario.observed,
+      });
+      scenariosByKey.set(key, existing);
+    }
+  }
+
+  const scenarios = Array.from(scenariosByKey.values()).map((scenario) => {
+    const sections = Array.from(scenario.sectionRunsByKey.values()).map((section) => {
+      const phases = Array.from(section.phaseRunsByKey.values()).map((phase) => ({
+        key: phase.key,
+        label: phase.label,
+        ...(phase.parentKey ? { parentKey: phase.parentKey } : {}),
+        ...traceMetricFromRuns(phase.runs),
+      }));
+      const counters = Array.from(section.counterRunsByKey.values()).map((counter) => ({
+        key: counter.key,
+        label: counter.label,
+        ...traceMetricFromRuns(counter.runs),
+      }));
+      const totalRuns = section.runs.map((run) => run.total).filter((metric) => metric !== undefined);
+      const total = totalRuns.length > 0 ? traceMetricFromRuns(totalRuns) : undefined;
+
+      return {
+        key: section.key,
+        label: section.label,
+        role: section.role,
+        actionType: section.actionType,
+        depth: section.depth,
+        runs: section.runs,
+        transitionCount: section.runs.reduce((sum, run) => sum + run.transitionCount, 0),
+        ...(total ? { total } : {}),
+        phases,
+        counters,
+      };
+    });
+    const despawnSection = sections.find((section) => section.key === "despawn-transition");
+
+    return {
+      key: scenario.key,
+      label: scenario.label,
+      rowCount: scenario.rowCount,
+      kind: scenario.kind,
+      actorRowsPerEntity: scenario.actorRowsPerEntity,
+      actorRowCount: scenario.actorRowCount,
+      batchSize: scenario.batchSize,
+      mode: scenario.mode,
+      path: scenario.path,
+      lifecycle: scenario.lifecycle,
+      operationOrder: scenario.operationOrder,
+      iterations: scenario.iterations,
+      expected: scenario.expected,
+      runs: scenario.runs,
+      sections,
+      ...(despawnSection?.total ? { total: despawnSection.total } : {}),
+    };
+  });
+
+  return {
+    benchmark: runs[0].benchmark,
+    profile: runs[0].profile,
+    runtime: runs[0].runtime,
+    config: {
+      rowCounts: runs[0].rowCounts,
+      batchSizes: runs[0].batchSizes,
       runs: runs.length,
     },
     scenarios,
@@ -577,6 +816,18 @@ const entitiesReactionPhaseKeys = new Set([
 
 const entitiesEffectPhaseKeys = new Set(["entities.effects.resolve", "entities.effects.invoke"]);
 
+const massCleanupCounterKeys = [
+  "scheduledDespawns",
+  "despawnedEntities",
+  "removedActorRows",
+  "removedEntityRecords",
+  "touchedTemplates",
+  "lifecycleBatches",
+  "lifecycleRows",
+  "removalBatches",
+  "terminalRows",
+];
+
 const addTable = (lines, headers, rows) => {
   lines.push(`| ${headers.join(" | ")} |`);
   lines.push(`| ${headers.map(() => "---").join(" | ")} |`);
@@ -615,6 +866,116 @@ const tracePhaseRows = (trace, phaseFilter, shareLabel) =>
         String(phase.samples.length),
       ]),
   );
+
+const findMassTraceCounter = (section, suffix) =>
+  section.counters.find((counter) => counter.key.endsWith(`.${suffix}`));
+
+const findMassTracePhase = (section, key) => section.phases.find((phase) => phase.key === key);
+
+const massCleanupPhaseShare = (section, phase) => {
+  const parent = phase.parentKey ? findMassTracePhase(section, phase.parentKey) : undefined;
+  if (!parent || parent.median <= 0) return "n/a";
+  return formatPercent(phase.median / parent.median);
+};
+
+const massTraceCleanupSections = (massTrace) =>
+  massTrace.scenarios.flatMap((scenario) =>
+    scenario.sections
+      .filter((section) => section.role === "despawn" || section.role === "explicit-despawn")
+      .map((section) => ({ scenario, section })),
+  );
+
+const massCleanupPhaseRows = (massTrace) =>
+  massTraceCleanupSections(massTrace).flatMap(({ scenario, section }) =>
+    section.phases
+      .filter(
+        (phase) =>
+          phase.key.startsWith("entities.cleanup.public.") ||
+          phase.key.startsWith("entities.cleanup.spawn.") ||
+          phase.key === "entities.reduce.publicCleanup" ||
+          phase.key === "entities.reduce.spawnCleanup" ||
+          phase.key === "entities.prepare.explicitDespawn",
+      )
+      .map((phase) => [
+        scenario.label,
+        section.label,
+        scenario.rowCount.toLocaleString("en-US"),
+        scenario.batchSize.toLocaleString("en-US"),
+        scenario.mode,
+        scenario.path,
+        scenario.lifecycle,
+        phase.key,
+        phase.parentKey ?? "",
+        formatMs(phase.median),
+        formatMs(phase.p95),
+        massCleanupPhaseShare(section, phase),
+        String(phase.samples.length),
+      ]),
+  );
+
+const massCounterRows = (massTrace) =>
+  massTraceCleanupSections(massTrace).map(({ scenario, section }) => [
+    scenario.label,
+    section.label,
+    scenario.rowCount.toLocaleString("en-US"),
+    scenario.batchSize.toLocaleString("en-US"),
+    scenario.mode,
+    scenario.path,
+    scenario.lifecycle,
+    ...massCleanupCounterKeys.map((key) => {
+      const counter = findMassTraceCounter(section, key);
+      return counter ? counter.median.toLocaleString("en-US", { maximumFractionDigits: 2 }) : "0";
+    }),
+  ]);
+
+const massPathComparisonRows = (massDespawn) => {
+  const groups = new Map();
+  for (const scenario of massDespawn.scenarios) {
+    const key = [scenario.rowCount, scenario.batchSize, scenario.mode, scenario.lifecycle].join("::");
+    const group = groups.get(key) ?? {
+      rowCount: scenario.rowCount,
+      batchSize: scenario.batchSize,
+      mode: scenario.mode,
+      lifecycle: scenario.lifecycle,
+      scenarios: new Map(),
+    };
+    group.scenarios.set(scenario.path, scenario);
+    groups.set(key, group);
+  }
+
+  return [...groups.values()]
+    .filter((group) => ["despawnOn", "explicit-ids", "explicit-indices"].every((path) => group.scenarios.has(path)))
+    .map((group) => {
+      const despawnOn = group.scenarios.get("despawnOn").despawn.median;
+      const explicitIds = group.scenarios.get("explicit-ids").despawn.median;
+      const explicitIndices = group.scenarios.get("explicit-indices").despawn.median;
+      return [
+        group.rowCount.toLocaleString("en-US"),
+        group.batchSize.toLocaleString("en-US"),
+        group.mode,
+        group.lifecycle,
+        formatMs(despawnOn),
+        formatMs(explicitIds),
+        formatMs(explicitIndices),
+        formatRatio(explicitIds / despawnOn),
+        formatRatio(explicitIndices / explicitIds),
+      ];
+    });
+};
+
+const massChurnRows = (massDespawn) =>
+  massDespawn.scenarios
+    .filter((scenario) => scenario.mode === "churn" && scenario.replacementSpawn)
+    .map((scenario) => [
+      scenario.label,
+      scenario.rowCount.toLocaleString("en-US"),
+      scenario.batchSize.toLocaleString("en-US"),
+      scenario.path,
+      scenario.lifecycle,
+      formatMs(scenario.despawn.median),
+      formatMs(scenario.replacementSpawn.median),
+      formatRatio(scenario.replacementSpawn.median / scenario.despawn.median),
+    ]);
 
 const collectStabilityWarnings = (record) => {
   const warnings = [];
@@ -667,6 +1028,32 @@ const collectStabilityWarnings = (record) => {
         warnings.push(
           `Spawn ${scenario.label} / ${scenario.rowCount} rows has high total median variance (${formatPercent(
             scenario.summary.relativeStdDev,
+          )}).`,
+        );
+      }
+    }
+  }
+
+  const massDespawn = record.results.massDespawn;
+  if (massDespawn) {
+    for (const scenario of massDespawn.scenarios) {
+      if (scenario.summary.relativeStdDev > highVarianceThreshold) {
+        warnings.push(
+          `Mass despawn ${scenario.label} / ${scenario.rowCount} rows has high despawn median variance (${formatPercent(
+            scenario.summary.relativeStdDev,
+          )}).`,
+        );
+      }
+    }
+  }
+
+  const massTrace = record.results.massDespawnTrace;
+  if (massTrace) {
+    for (const scenario of massTrace.scenarios) {
+      if (scenario.total?.relativeStdDev > highVarianceThreshold) {
+        warnings.push(
+          `Mass despawn trace ${scenario.label} / ${scenario.rowCount} rows total median has high variance (${formatPercent(
+            scenario.total.relativeStdDev,
           )}).`,
         );
       }
@@ -777,6 +1164,138 @@ export const formatRecordMarkdown = (record) => {
         formatPercent(scenario.summary.relativeStdDev),
       ]),
     );
+  }
+
+  lines.push("");
+  lines.push("## Mass despawn benchmark");
+  lines.push("");
+  if (!record.results.massDespawn) {
+    lines.push("Mass despawn benchmark was not included.");
+  } else {
+    addTable(
+      lines,
+      [
+        "Scenario",
+        "Rows",
+        "Batch",
+        "Mode",
+        "Path",
+        "Lifecycle",
+        "Despawn total",
+        "Despawn p95",
+        "Setup",
+        "Replacement spawn",
+        "Ops/sample",
+        "RSD",
+      ],
+      record.results.massDespawn.scenarios.map((scenario) => [
+        scenario.label,
+        scenario.rowCount.toLocaleString("en-US"),
+        scenario.batchSize.toLocaleString("en-US"),
+        scenario.mode,
+        scenario.path,
+        scenario.lifecycle,
+        formatMs(scenario.despawn.median),
+        formatMs(scenario.despawn.p95),
+        formatMs(scenario.setup.median),
+        scenario.replacementSpawn ? formatMs(scenario.replacementSpawn.median) : "n/a",
+        String(scenario.iterations.operationsPerSample),
+        formatPercent(scenario.summary.relativeStdDev),
+      ]),
+    );
+
+    lines.push("");
+    lines.push("### Mass despawn throughput");
+    lines.push("");
+    addTable(
+      lines,
+      ["Scenario", "Rows", "Batch", "Mode", "Path", "Lifecycle", "Entities/ms", "Actor rows/ms", "ms/entity", "ms/actor row"],
+      record.results.massDespawn.scenarios.map((scenario) => [
+        scenario.label,
+        scenario.rowCount.toLocaleString("en-US"),
+        scenario.batchSize.toLocaleString("en-US"),
+        scenario.mode,
+        scenario.path,
+        scenario.lifecycle,
+        scenario.throughput.entitiesPerMs.toFixed(2),
+        scenario.throughput.actorRowsPerMs.toFixed(2),
+        scenario.throughput.msPerEntity.toFixed(6),
+        scenario.throughput.msPerActorRow.toFixed(6),
+      ]),
+    );
+
+    lines.push("");
+    lines.push("### Mass despawn path comparison");
+    lines.push("");
+    addTable(
+      lines,
+      [
+        "Rows",
+        "Batch",
+        "Mode",
+        "Lifecycle",
+        "despawnOn",
+        "explicit ids",
+        "explicit indices",
+        "ids/despawnOn",
+        "indices/ids",
+      ],
+      massPathComparisonRows(record.results.massDespawn),
+    );
+
+    lines.push("");
+    lines.push("### Mass despawn churn comparison");
+    lines.push("");
+    addTable(
+      lines,
+      ["Scenario", "Rows", "Batch", "Path", "Lifecycle", "Despawn", "Replacement spawn", "Spawn/despawn"],
+      massChurnRows(record.results.massDespawn),
+    );
+
+    lines.push("");
+    lines.push("### Mass despawn trace cleanup phases");
+    lines.push("");
+    if (!record.results.massDespawnTrace) {
+      lines.push("Mass despawn trace benchmark was not included.");
+    } else {
+      addTable(
+        lines,
+        [
+          "Scenario",
+          "Section",
+          "Rows",
+          "Batch",
+          "Mode",
+          "Path",
+          "Lifecycle",
+          "Phase",
+          "Parent",
+          "Median",
+          "p95",
+          "Share",
+          "Samples",
+        ],
+        massCleanupPhaseRows(record.results.massDespawnTrace),
+      );
+
+      lines.push("");
+      lines.push("### Mass despawn trace counters");
+      lines.push("");
+      addTable(
+        lines,
+        [
+          "Scenario",
+          "Section",
+          "Rows",
+          "Batch",
+          "Mode",
+          "Path",
+          "Lifecycle",
+          ...massCleanupCounterKeys,
+        ],
+        massCounterRows(record.results.massDespawnTrace),
+      );
+    }
   }
 
   lines.push("");
@@ -963,6 +1482,10 @@ const compareMetricRow = ({ scenario, rowCount, metric, beforeValue, afterValue,
     formatter = formatPercent;
     delta = `${comparison.delta >= 0 ? "+" : ""}${(comparison.delta * 100).toFixed(1)}pp`;
   }
+  if (unit === "perMs") {
+    formatter = (value) => value.toFixed(2);
+    delta = `${comparison.delta >= 0 ? "+" : ""}${comparison.delta.toFixed(2)}`;
+  }
   return [
     scenario,
     rowCount.toLocaleString("en-US"),
@@ -989,6 +1512,34 @@ const addMissingScenarioNotes = (lines, label, beforeMap, afterMap) => {
 
 const phaseShare = (phase) => phase.percentOfTransition ?? phase.percentOfParent;
 const phaseShareMetric = (phase) => (phase.percentOfTransition === undefined ? "parent share" : "transition share");
+
+const mapMassTraceSections = (result) => {
+  const map = new Map();
+  for (const scenario of result?.scenarios ?? []) {
+    for (const section of scenario.sections ?? []) map.set(massTraceSectionKey(scenario, section), { scenario, section });
+  }
+  return map;
+};
+
+const collectMassCounterMismatchWarnings = (beforeRows, afterRows) => {
+  const warnings = [];
+  for (const [sectionKey, beforeEntry] of beforeRows) {
+    const afterEntry = afterRows.get(sectionKey);
+    if (!afterEntry) continue;
+
+    const afterCounters = new Map(afterEntry.section.counters.map((counter) => [counter.key, counter]));
+    for (const beforeCounter of beforeEntry.section.counters) {
+      const afterCounter = afterCounters.get(beforeCounter.key);
+      if (!afterCounter) continue;
+      if (beforeCounter.median === afterCounter.median) continue;
+
+      warnings.push(
+        `${beforeEntry.scenario.label} / ${beforeEntry.section.label} counter ${beforeCounter.key} differs: before ${beforeCounter.median}, after ${afterCounter.median}.`,
+      );
+    }
+  }
+  return warnings;
+};
 
 export const formatCompareMarkdown = (before, after) => {
   const lines = [
@@ -1082,6 +1633,121 @@ export const formatCompareMarkdown = (before, after) => {
     lines.push("");
     addTable(lines, ["Scenario", "Rows", "Metric", "Before", "After", "Delta", "Change", "Direction"], rows);
     addMissingScenarioNotes(lines, "Spawn benchmark", beforeMap, afterMap);
+    lines.push("");
+  }
+
+  if (before.results.massDespawn && after.results.massDespawn) {
+    const beforeMap = mapScenarios(before.results.massDespawn);
+    const afterMap = mapScenarios(after.results.massDespawn);
+    const rows = [];
+
+    for (const [key, beforeScenario] of beforeMap) {
+      const afterScenario = afterMap.get(key);
+      if (!afterScenario) continue;
+
+      rows.push(
+        compareMetricRow({
+          scenario: beforeScenario.label,
+          rowCount: beforeScenario.rowCount,
+          metric: "despawn total median",
+          beforeValue: beforeScenario.despawn.median,
+          afterValue: afterScenario.despawn.median,
+          unit: "ms",
+        }),
+      );
+      rows.push(
+        compareMetricRow({
+          scenario: beforeScenario.label,
+          rowCount: beforeScenario.rowCount,
+          metric: "despawn total p95",
+          beforeValue: beforeScenario.despawn.p95,
+          afterValue: afterScenario.despawn.p95,
+          unit: "ms",
+        }),
+      );
+      rows.push(
+        compareMetricRow({
+          scenario: beforeScenario.label,
+          rowCount: beforeScenario.rowCount,
+          metric: "entities/ms",
+          beforeValue: beforeScenario.throughput.entitiesPerMs,
+          afterValue: afterScenario.throughput.entitiesPerMs,
+          unit: "perMs",
+        }),
+      );
+      rows.push(
+        compareMetricRow({
+          scenario: beforeScenario.label,
+          rowCount: beforeScenario.rowCount,
+          metric: "actorRows/ms",
+          beforeValue: beforeScenario.throughput.actorRowsPerMs,
+          afterValue: afterScenario.throughput.actorRowsPerMs,
+          unit: "perMs",
+        }),
+      );
+    }
+
+    lines.push("## Mass despawn benchmark");
+    lines.push("");
+    addTable(lines, ["Scenario", "Rows", "Metric", "Before", "After", "Delta", "Change", "Direction"], rows);
+    addMissingScenarioNotes(lines, "Mass despawn benchmark", beforeMap, afterMap);
+    lines.push("");
+  }
+
+  if (before.results.massDespawnTrace && after.results.massDespawnTrace) {
+    const beforeSections = mapMassTraceSections(before.results.massDespawnTrace);
+    const afterSections = mapMassTraceSections(after.results.massDespawnTrace);
+    const phaseBeforeRows = new Map();
+    const phaseAfterRows = new Map();
+    const rows = [];
+
+    for (const [sectionKey, beforeEntry] of beforeSections) {
+      const afterEntry = afterSections.get(sectionKey);
+      if (!afterEntry) continue;
+
+      for (const phase of beforeEntry.section.phases) {
+        phaseBeforeRows.set(`${sectionKey}::${phase.key}`, { ...beforeEntry, phase });
+      }
+      for (const phase of afterEntry.section.phases) {
+        phaseAfterRows.set(`${sectionKey}::${phase.key}`, { ...afterEntry, phase });
+      }
+    }
+
+    for (const [key, beforeEntry] of phaseBeforeRows) {
+      const afterEntry = phaseAfterRows.get(key);
+      if (!afterEntry) continue;
+      if (
+        !beforeEntry.phase.key.startsWith("entities.cleanup.") &&
+        beforeEntry.phase.key !== "entities.reduce.publicCleanup" &&
+        beforeEntry.phase.key !== "entities.reduce.spawnCleanup" &&
+        beforeEntry.phase.key !== "entities.prepare.explicitDespawn"
+      ) {
+        continue;
+      }
+
+      rows.push(
+        compareMetricRow({
+          scenario: `${beforeEntry.scenario.label} / ${beforeEntry.section.label} / ${beforeEntry.phase.key}`,
+          rowCount: beforeEntry.scenario.rowCount,
+          metric: "median",
+          beforeValue: beforeEntry.phase.median,
+          afterValue: afterEntry.phase.median,
+          unit: "ms",
+        }),
+      );
+    }
+
+    lines.push("## Mass despawn trace benchmark");
+    lines.push("");
+    addTable(lines, ["Scenario / section / phase", "Rows", "Metric", "Before", "After", "Delta", "Change", "Direction"], rows);
+    const counterWarnings = collectMassCounterMismatchWarnings(beforeSections, afterSections);
+    if (counterWarnings.length > 0) {
+      lines.push("");
+      lines.push("### Mass despawn counter mismatch warnings");
+      lines.push("");
+      for (const warning of counterWarnings) lines.push(`- ${warning}`);
+    }
+    addMissingScenarioNotes(lines, "Mass despawn trace benchmark", beforeSections, afterSections);
     lines.push("");
   }
 
@@ -1189,6 +1855,20 @@ export const formatCompareMarkdown = (before, after) => {
     lines.push("## Spawn benchmark");
     lines.push("");
     lines.push("Spawn benchmark was not present in both records.");
+    lines.push("");
+  }
+
+  if (!before.results.massDespawn || !after.results.massDespawn) {
+    lines.push("## Mass despawn benchmark");
+    lines.push("");
+    lines.push("Mass despawn benchmark was not present in both records.");
+    lines.push("");
+  }
+
+  if (!before.results.massDespawnTrace || !after.results.massDespawnTrace) {
+    lines.push("## Mass despawn trace benchmark");
+    lines.push("");
+    lines.push("Mass despawn trace benchmark was not present in both records.");
     lines.push("");
   }
 

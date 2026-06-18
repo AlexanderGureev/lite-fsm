@@ -6,6 +6,7 @@ import type { EntityIndex } from "@lite-fsm/entities";
 
 import {
   readEntityTransitionTraceSession,
+  recordEntityTraceCounter,
   recordEntityTracePhase,
   type EntityTransitionTraceSession,
 } from "../../packages/entities/src/runtime/transitionTrace";
@@ -48,6 +49,18 @@ const phaseKeysFor = (collector: TraceCollector, actionType: string): readonly s
   expect(record.status).toBe("ok");
   return record.phases.map((phase) => phase.key);
 };
+
+const traceRecordFor = (collector: TraceCollector, actionType: string, depth: number): TraceRecord => {
+  const record = collector.records.find((item) => item.actionType === actionType && item.depth === depth);
+  if (!record) throw new Error(`Expected trace record for ${actionType} at depth ${depth}`);
+  expect(record.status).toBe("ok");
+  return record;
+};
+
+const counterValue = (record: TraceRecord, key: string): number =>
+  record.counters
+    .filter((counter) => counter.key === key)
+    .reduce((sum, counter) => sum + counter.value, 0);
 
 const spawnEntity = (
   manager: {
@@ -102,6 +115,7 @@ describe("@lite-fsm/entities — transition trace helper", () => {
     const startedAt = trace?.now();
 
     recordEntityTracePhase(trace, "entities.test.disabled", startedAt);
+    recordEntityTraceCounter(trace, "entities.test.counter", 1);
 
     expect(trace).toBeUndefined();
     expect(now).not.toHaveBeenCalled();
@@ -116,12 +130,31 @@ describe("@lite-fsm/entities — transition trace helper", () => {
       finish: vi.fn(),
     };
 
-    recordEntityTracePhase(session, "entities.test.skipped", undefined);
-    recordEntityTracePhase(undefined, "entities.test.skipped", 10);
+    recordEntityTracePhase(session, "entities.test.ignored", undefined);
+    recordEntityTracePhase(undefined, "entities.test.ignored", 10);
     recordEntityTracePhase(session, "entities.test.recorded", 10);
 
     expect(session.record).toHaveBeenCalledTimes(1);
     expect(session.record).toHaveBeenCalledWith("entities.test.recorded", 10);
+  });
+
+  it("записывает counter только при session", () => {
+    const session: EntityTransitionTraceSession = {
+      depth: 0,
+      now: vi.fn(() => 10),
+      record: vi.fn(),
+      count: vi.fn(),
+      finish: vi.fn(),
+    };
+
+    recordEntityTraceCounter(undefined, "entities.test.ignored", 2);
+    recordEntityTraceCounter(session, "entities.test.default");
+    recordEntityTraceCounter(session, "entities.test.value", 3);
+
+    expect(session.now).not.toHaveBeenCalled();
+    expect(session.count).toHaveBeenCalledTimes(2);
+    expect(session.count).toHaveBeenCalledWith("entities.test.default", undefined);
+    expect(session.count).toHaveBeenCalledWith("entities.test.value", 3);
   });
 });
 
@@ -343,6 +376,124 @@ describe("@lite-fsm/entities — transition trace разметка runtime phase
     expect(keys).not.toContain("entities.reactions.createDeps");
     expect(keys).not.toContain("entities.reactions.user");
     expect(lifecycleFrames).toEqual(["unit/a,unit/b"]);
+    expect(manager.entities().get("actor").count).toBe(0);
+  });
+
+  it("transition.despawn пишет explicit despawn phase и staging counters", () => {
+    const actor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "READY" },
+        READY: { DESPAWN_SCOPE: "SCOPE_DESPAWN", DESPAWN_ID: "ID_DESPAWN" },
+        SCOPE_DESPAWN: {},
+        ID_DESPAWN: {},
+      },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: { x: f32() },
+      effects: {
+        SCOPE_DESPAWN: ({
+          self,
+          transition,
+        }: {
+          readonly self: { readonly indices: readonly EntityIndex[] };
+          readonly transition: { despawn(entity: readonly EntityIndex[]): void };
+        }) => {
+          transition.despawn(self.indices);
+        },
+        ID_DESPAWN: ({
+          self,
+          transition,
+        }: {
+          readonly self: { readonly indices: readonly EntityIndex[]; entityId(entity: EntityIndex): string };
+          readonly transition: { despawn(entity: string): void };
+        }) => {
+          for (const entity of self.indices) transition.despawn(self.entityId(entity));
+        },
+      },
+    } as const;
+    const machines = { actor };
+    const spawn = defineEntitySpawn(
+      machines,
+      spawnEvents,
+    )({
+      SPAWN_ENTITY: (payload) => ({
+        id: payload.id,
+        groupTag: "units",
+        actors: { actor: { x: payload.x } },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+    spawnEntity(manager, "unit/a", 1);
+    spawnEntity(manager, "unit/b", 2);
+
+    const collector = installCollector();
+    manager.transition({ type: "DESPAWN_SCOPE", meta: { entityId: "unit/a" } } as never);
+    const scopeRecord = traceRecordFor(collector, "LITE_FSM_ENTITY_DESPAWN", 1);
+
+    expect(scopeRecord.phases.map((phase) => phase.key)).toEqual(
+      expect.arrayContaining(["entities.prepare.explicitDespawn"]),
+    );
+    expect(counterValue(scopeRecord, "entities.prepare.explicitDespawn.scopeEntries")).toBe(1);
+    expect(counterValue(scopeRecord, "entities.prepare.explicitDespawn.scheduled")).toBe(1);
+
+    collector.records.length = 0;
+    manager.transition({ type: "DESPAWN_ID", meta: { entityId: "unit/b" } } as never);
+    const idsRecord = traceRecordFor(collector, "LITE_FSM_ENTITY_DESPAWN", 1);
+
+    expect(idsRecord.phases.map((phase) => phase.key)).toEqual(
+      expect.arrayContaining(["entities.prepare.explicitDespawn"]),
+    );
+    expect(counterValue(idsRecord, "entities.prepare.explicitDespawn.ids")).toBe(1);
+    expect(counterValue(idsRecord, "entities.prepare.explicitDespawn.scheduled")).toBe(1);
+    expect(manager.entities().get("actor").count).toBe(0);
+  });
+
+  it("despawnOn cleanup пишет public cleanup counters", () => {
+    const actor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "ACTIVE" },
+        ACTIVE: { EXPIRE: "EXPIRED" },
+        EXPIRED: { ENTITY_DESPAWNED: "CLEANED" },
+        CLEANED: {},
+      },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: { x: f32() },
+      despawnOn: "EXPIRED",
+      reducer() {
+        return undefined;
+      },
+    } as const;
+    const machines = { actor };
+    const spawn = defineEntitySpawn(
+      machines,
+      spawnEvents,
+    )({
+      SPAWN_ENTITY: (payload) => ({
+        id: payload.id,
+        groupTag: "units",
+        actors: { actor: { x: payload.x } },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+    spawnEntity(manager, "unit/a", 1);
+    spawnEntity(manager, "unit/b", 2);
+
+    const collector = installCollector();
+    manager.transition({ type: "EXPIRE" });
+    const record = traceRecordFor(collector, "EXPIRE", 0);
+
+    expect(counterValue(record, "entities.cleanup.public.scheduledDespawns")).toBe(2);
+    expect(counterValue(record, "entities.cleanup.public.despawnedEntities")).toBe(2);
+    expect(counterValue(record, "entities.cleanup.public.removedActorRows")).toBe(2);
+    expect(counterValue(record, "entities.cleanup.public.removedEntityRecords")).toBe(2);
+    expect(counterValue(record, "entities.cleanup.public.touchedTemplates")).toBe(1);
+    expect(counterValue(record, "entities.cleanup.public.lifecycleBatches")).toBe(1);
+    expect(counterValue(record, "entities.cleanup.public.lifecycleRows")).toBe(2);
+    expect(counterValue(record, "entities.cleanup.public.removalBatches")).toBe(1);
+    expect(counterValue(record, "entities.cleanup.public.terminalRows")).toBe(0);
     expect(manager.entities().get("actor").count).toBe(0);
   });
 });

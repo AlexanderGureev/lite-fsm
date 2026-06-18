@@ -45,6 +45,15 @@ export const recordEntityTracePhase = (
   trace.record(key, startedAt);
 };
 
+export const recordEntityTraceCounter = (
+  trace: EntityTransitionTraceSession | undefined,
+  key: string,
+  value?: number,
+): void => {
+  if (!trace) return;
+  trace.count(key, value);
+};
+
 export const tracePhase = <T>(
   trace: EntityTransitionTraceSession | undefined,
   key: string,

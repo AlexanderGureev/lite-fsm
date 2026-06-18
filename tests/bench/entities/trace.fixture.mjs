@@ -105,6 +105,7 @@ const phaseLabelOverrides = {
   "core.effects.total": "effects total",
   "core.hooks.afterEffects": "after effects hooks",
   "entities.prepare.transaction": "prepare transaction",
+  "entities.prepare.explicitDespawn": "prepare explicit despawn",
   "entities.spawn.stage": "spawn stage",
   "entities.spawn.stage.recipe": "spawn stage recipe",
   "entities.spawn.stage.normalize": "spawn stage normalize",
@@ -172,6 +173,7 @@ export const parentKeyForTracePhase = (key) => {
   }
 
   if (key === "entities.prepare.transaction") return "core.bucket.prepareAction.entity";
+  if (key === "entities.prepare.explicitDespawn") return "entities.prepare.transaction";
   if (key === "entities.spawn.stage") return "core.hooks.beforeReduce";
   if (key.startsWith("entities.spawn.stage.")) return "entities.spawn.stage";
   if (key === "entities.reduce.total") return "core.bucket.reduce.entity";

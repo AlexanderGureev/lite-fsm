@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 
 import {
   aggregateGateRuns,
+  aggregateMassDespawnRuns,
+  aggregateMassDespawnTraceRuns,
   aggregateSpawnRuns,
   aggregateTraceRuns,
   collectEnvironmentMetadata,
@@ -22,7 +24,7 @@ const rootDir = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
 const defaultOutDir = ".bench/entities";
 const defaultRuns = 3;
 const defaultIncludes = ["gate", "trace"];
-const allowedIncludes = ["gate", "trace", "spawn", "spawn-trace"];
+const allowedIncludes = ["gate", "trace", "spawn", "spawn-trace", "mass-despawn", "mass-despawn-trace"];
 
 let benchmarkFixtures;
 
@@ -30,10 +32,11 @@ const loadBenchmarkFixtures = async () => {
   if (benchmarkFixtures) return benchmarkFixtures;
 
   const gate = await import("./composition-lite-fsm-entities.fixture.mjs");
+  const massDespawn = await import("./mass-despawn.fixture.mjs");
   const spawn = await import("./spawn.fixture.mjs");
   const trace = await import("./trace.fixture.mjs");
 
-  benchmarkFixtures = { gate, spawn, trace };
+  benchmarkFixtures = { gate, massDespawn, spawn, trace };
   return benchmarkFixtures;
 };
 
@@ -44,7 +47,7 @@ Options:
   --label <name>          Human label stored in the report and used for label aliases.
   --runs <count>          Number of benchmark runs to aggregate. Defaults to ${defaultRuns}.
   --out <dir>             Report directory. Defaults to ${defaultOutDir}.
-  --include <items>       Comma-separated subset: gate, trace, spawn, spawn-trace. Defaults to gate,trace.
+  --include <items>       Comma-separated subset: gate, trace, spawn, spawn-trace, mass-despawn, mass-despawn-trace. Defaults to gate,trace.
   --row-counts <items>    Internal smoke-test override, for example 1000 or 1000,5000.
 `;
 
@@ -175,6 +178,25 @@ const logSpawnScenarioEnd = (scenario) => {
   );
 };
 
+const logMassDespawnScenarioEnd = (scenario) => {
+  console.error(
+    `[entities bench record] mass-despawn ${scenario.label} / ${scenario.rowCount.toLocaleString(
+      "en-US",
+    )} rows: despawn median ${scenario.despawn.median.toFixed(3)}ms, p95 ${scenario.despawn.p95.toFixed(
+      3,
+    )}ms, removed actor rows ${scenario.expected.removedActorRows.toLocaleString("en-US")}`,
+  );
+};
+
+const logMassDespawnTraceScenarioEnd = (scenario) => {
+  const total = scenario.sections.find((section) => section.key === "despawn-transition")?.total;
+  console.error(
+    `[entities bench record] mass-despawn-trace ${scenario.label} / ${scenario.rowCount.toLocaleString(
+      "en-US",
+    )} rows: despawn total ${total ? total.median.toFixed(3) : "n/a"}ms, sections ${scenario.sections.length}`,
+  );
+};
+
 const runGateBenchmarks = ({ runs, rowCounts, fixture }) => {
   const results = [];
   for (let runIndex = 0; runIndex < runs; runIndex += 1) {
@@ -208,6 +230,48 @@ const runSpawnBenchmarks = ({ runs, rowCounts, fixture }) => {
           );
         },
         onScenarioEnd: logSpawnScenarioEnd,
+      }),
+    );
+  }
+  return results;
+};
+
+const runMassDespawnBenchmarks = ({ runs, rowCounts, fixture }) => {
+  const results = [];
+  for (let runIndex = 0; runIndex < runs; runIndex += 1) {
+    console.error(`[entities bench record] mass-despawn run ${runIndex + 1}/${runs}`);
+    results.push(
+      fixture.runEntitiesMassDespawnBenchmark({
+        profile: "node",
+        rowCounts,
+        onScenarioStart: (scenario, rowCount) => {
+          console.error(
+            `[entities bench record] mass-despawn ${scenario.label} / ${rowCount.toLocaleString("en-US")} rows`,
+          );
+        },
+        onScenarioEnd: logMassDespawnScenarioEnd,
+      }),
+    );
+  }
+  return results;
+};
+
+const runMassDespawnTraceBenchmarks = ({ runs, rowCounts, fixture }) => {
+  const results = [];
+  for (let runIndex = 0; runIndex < runs; runIndex += 1) {
+    console.error(`[entities bench record] mass-despawn-trace run ${runIndex + 1}/${runs}`);
+    results.push(
+      fixture.runEntitiesMassDespawnTraceBenchmark({
+        profile: "node",
+        rowCounts,
+        onScenarioStart: (scenario, rowCount) => {
+          console.error(
+            `[entities bench record] mass-despawn-trace ${scenario.label} / ${rowCount.toLocaleString(
+              "en-US",
+            )} rows`,
+          );
+        },
+        onScenarioEnd: logMassDespawnTraceScenarioEnd,
       }),
     );
   }
@@ -254,6 +318,26 @@ const createRecord = async (options) => {
     );
     results.spawn.config.warmupIterations = fixtures.spawn.warmupIterations;
     results.spawn.config.measuredIterations = fixtures.spawn.measuredIterations;
+  }
+
+  if (options.include.includes("mass-despawn")) {
+    results.massDespawn = aggregateMassDespawnRuns(
+      runMassDespawnBenchmarks({ runs: options.runs, rowCounts: options.rowCounts, fixture: fixtures.massDespawn }),
+    );
+    results.massDespawn.config.warmupIterations = fixtures.massDespawn.warmupIterations;
+    results.massDespawn.config.measuredIterations = fixtures.massDespawn.measuredIterations;
+  }
+
+  if (options.include.includes("mass-despawn-trace")) {
+    results.massDespawnTrace = aggregateMassDespawnTraceRuns(
+      runMassDespawnTraceBenchmarks({
+        runs: options.runs,
+        rowCounts: options.rowCounts,
+        fixture: fixtures.massDespawn,
+      }),
+    );
+    results.massDespawnTrace.config.warmupIterations = fixtures.massDespawn.warmupIterations;
+    results.massDespawnTrace.config.measuredIterations = fixtures.massDespawn.measuredIterations;
   }
 
   const traceRuns = [];
