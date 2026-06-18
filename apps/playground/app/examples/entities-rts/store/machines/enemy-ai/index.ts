@@ -2,6 +2,7 @@ import { u8 } from "@lite-fsm/entities";
 
 import { createMachine } from "../../create-machine";
 import type { AppEvents } from "../../types";
+import { UNIT_KIND } from "../../unit-model";
 import { isUnitAlive } from "../unit-health";
 
 export const ENEMY_INTENT = {
@@ -14,19 +15,17 @@ export type Events = AppEvents;
 
 export const enemyAi = createMachine({
   storage: "entity",
+  despawnOn: "REMOVED",
   config: {
     __INIT: {
       ENTITY_SPAWNED: "ACTIVE",
     },
     ACTIVE: {
       TICK: null,
-      UNITS_DIED: null,
-      UNIT_DIED: "DISABLED",
-      ENTITY_DESPAWNED: "__RESOLVED",
+      UNIT_DEAD: "DISABLED",
     },
-    DISABLED: {
-      ENTITY_DESPAWNED: "__RESOLVED",
-    },
+    DISABLED: {},
+    REMOVED: {},
   },
   initialState: "__INIT",
   initialContext: {
@@ -34,17 +33,17 @@ export const enemyAi = createMachine({
   },
   spawnSchema: {},
   reducer: (_state, action, { entities, self }) => {
-    if (action.type === "ENTITY_SPAWNED" || action.type === "UNIT_DIED") {
+    if (action.type === "ENTITY_SPAWNED") {
       for (const entity of self.indices) self.intent[entity] = ENEMY_INTENT.IDLE;
       return;
     }
 
-    if (action.type === "UNITS_DIED") {
-      for (const entity of action.payload.entities) {
-        if (!self.has(entity)) continue;
+    if (action.type === "UNIT_DEAD") {
+      const identity = entities().get("unitIdentity");
 
+      for (const entity of self.indices) {
         self.intent[entity] = ENEMY_INTENT.IDLE;
-        self.stateCode[entity] = self.states.DISABLED;
+        if (identity.kind[entity] !== UNIT_KIND.HERO) self.stateCode[entity] = self.states.REMOVED;
       }
       return;
     }

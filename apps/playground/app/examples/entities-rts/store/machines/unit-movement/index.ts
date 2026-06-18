@@ -3,7 +3,7 @@ import { f32, resource, type EntityIndex } from "@lite-fsm/entities";
 import { createMachine } from "../../create-machine";
 import { RTS_MAP } from "../../spawn/placement";
 import type { AppEvents } from "../../types";
-import { UNIT_COMMAND, UNIT_FACTION } from "../../unit-model";
+import { UNIT_COMMAND, UNIT_FACTION, UNIT_KIND } from "../../unit-model";
 import { ENEMY_INTENT } from "../enemy-ai";
 
 const TARGET_ARRIVAL_DISTANCE = 6;
@@ -21,19 +21,17 @@ export type Events = AppEvents;
 
 export const unitMovement = createMachine({
   storage: "entity",
+  despawnOn: "REMOVED",
   config: {
     __INIT: {
       ENTITY_SPAWNED: "ACTIVE",
     },
     ACTIVE: {
       TICK: null,
-      UNITS_DIED: null,
-      UNIT_DIED: "STOPPED",
-      ENTITY_DESPAWNED: "__RESOLVED",
+      UNIT_DEAD: "STOPPED",
     },
-    STOPPED: {
-      ENTITY_DESPAWNED: "__RESOLVED",
-    },
+    STOPPED: {},
+    REMOVED: {},
   },
   initialState: "__INIT",
   initialContext: {
@@ -179,22 +177,16 @@ export const unitMovement = createMachine({
         return;
       }
 
-      case "UNIT_DIED":
+      case "UNIT_DEAD": {
+        const identity = entities().get("unitIdentity");
+
         for (const entity of self.indices) {
           self.vx[entity] = 0;
           self.vy[entity] = 0;
+          if (identity.kind[entity] !== UNIT_KIND.HERO) self.stateCode[entity] = self.states.REMOVED;
         }
         return;
-
-      case "UNITS_DIED":
-        for (const entity of action.payload.entities) {
-          if (!self.has(entity)) continue;
-
-          self.vx[entity] = 0;
-          self.vy[entity] = 0;
-          self.stateCode[entity] = self.states.STOPPED;
-        }
-        return;
+      }
     }
   },
 });

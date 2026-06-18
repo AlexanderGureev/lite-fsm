@@ -4,6 +4,7 @@ import { createMachine } from "../../create-machine";
 import { RTS_MAP } from "../../spawn/placement";
 import type { AppEvents, Point, SelectionRect } from "../../types";
 import { UNIT_COMMAND, UNIT_SELECTION } from "../../unit-model";
+import { slotCount } from "../column-slot-count";
 import { isUnitAlive } from "../unit-health";
 import { createUnitCommandAssignmentBatch, createUnitSelectionBatch } from "./batches";
 import { createFormationTargets } from "./formation";
@@ -53,7 +54,7 @@ export const unitOrders = createMachine({
     state.state = nextState;
   },
   effects: {
-    SELECTING_BY_RECT: ({ action, entities, getState, transition }) => {
+    SELECTING_BY_RECT: ({ action, entities, transition }) => {
       if (action.type !== "SELECT_RECT") {
         transition({ type: "UNIT_SELECTION_RESOLVED" });
         return;
@@ -64,7 +65,7 @@ export const unitOrders = createMachine({
       const movement = access.get("unitMovement");
       const health = access.get("unitHealth");
       const selection = access.get("unitSelection");
-      const capacity = getState().unitMovement.capacity;
+      const capacity = slotCount(movement.x);
       const batch = createUnitSelectionBatch(capacity);
 
       for (let index = 0; index < capacity; index += 1) {
@@ -84,7 +85,7 @@ export const unitOrders = createMachine({
       transition({ type: "UNIT_SELECTION_UPDATED", payload: batch });
       transition({ type: "UNIT_SELECTION_RESOLVED" });
     },
-    ISSUING_COMMAND: ({ action, entities, getState, transition }) => {
+    ISSUING_COMMAND: ({ action, entities, transition }) => {
       if (action.type !== "ISSUE_MOVE" && action.type !== "ISSUE_ATTACK_MOVE") {
         transition({ type: "UNIT_COMMAND_RESOLVED" });
         return;
@@ -94,7 +95,7 @@ export const unitOrders = createMachine({
       const health = access.get("unitHealth");
       const selection = access.get("unitSelection");
       const command = access.get("unitCommand");
-      const capacity = getState().unitMovement.capacity;
+      const capacity = slotCount(command.command);
       const selected: EntityIndex[] = [];
 
       for (let index = 0; index < capacity; index += 1) {

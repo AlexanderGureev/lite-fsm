@@ -2,7 +2,7 @@ import { f32, i32, resource, type EntityIndex } from "@lite-fsm/entities";
 
 import { createMachine } from "../../create-machine";
 import type { AppEvents } from "../../types";
-import { UNIT_FACTION } from "../../unit-model";
+import { UNIT_FACTION, UNIT_KIND } from "../../unit-model";
 import { isUnitAlive } from "../unit-health";
 
 const TARGET_BUFFER_SIZE = 64;
@@ -11,19 +11,17 @@ export type Events = AppEvents;
 
 export const unitCombat = createMachine({
   storage: "entity",
+  despawnOn: "REMOVED",
   config: {
     __INIT: {
       ENTITY_SPAWNED: "ACTIVE",
     },
     ACTIVE: {
       TICK: null,
-      UNITS_DIED: null,
-      UNIT_DIED: "DISABLED",
-      ENTITY_DESPAWNED: "__RESOLVED",
+      UNIT_DEAD: "DISABLED",
     },
-    DISABLED: {
-      ENTITY_DESPAWNED: "__RESOLVED",
-    },
+    DISABLED: {},
+    REMOVED: {},
   },
   initialState: "__INIT",
   initialContext: {
@@ -145,26 +143,18 @@ export const unitCombat = createMachine({
         return;
       }
 
-      case "UNIT_DIED":
+      case "UNIT_DEAD": {
+        const identity = entities().get("unitIdentity");
+
         for (const entity of self.indices) {
           self.attackTimerMs[entity] = 0;
           self.incomingDamage[entity] = 0;
           self.projectileTargetEntity[entity] = -1;
           self.projectileDamage[entity] = 0;
+          if (identity.kind[entity] !== UNIT_KIND.HERO) self.stateCode[entity] = self.states.REMOVED;
         }
         return;
-
-      case "UNITS_DIED":
-        for (const entity of action.payload.entities) {
-          if (!self.has(entity)) continue;
-
-          self.attackTimerMs[entity] = 0;
-          self.incomingDamage[entity] = 0;
-          self.projectileTargetEntity[entity] = -1;
-          self.projectileDamage[entity] = 0;
-          self.stateCode[entity] = self.states.DISABLED;
-        }
-        return;
+      }
     }
   },
 });

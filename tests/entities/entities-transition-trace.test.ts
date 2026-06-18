@@ -250,6 +250,7 @@ describe("@lite-fsm/entities — transition trace разметка runtime phase
     const collector = installCollector();
     manager.transition({ type: "TICK" });
 
+    // covered by 5.6 observability: trace keeps public batch phase attribution stable.
     expect(phaseKeysFor(collector, "TICK")).toEqual(
       expect.arrayContaining([
         "entities.prepare.transaction",
@@ -363,6 +364,7 @@ describe("@lite-fsm/entities — transition trace разметка runtime phase
     manager.transition({ type: "EXPIRE" });
     const keys = phaseKeysFor(collector, "EXPIRE");
 
+    // covered by 5.5/5.6: cleanup trace records lifecycle and physical cleanup phases.
     expect(keys).toEqual(
       expect.arrayContaining([
         "entities.reduce.publicCleanup",
@@ -431,6 +433,7 @@ describe("@lite-fsm/entities — transition trace разметка runtime phase
     manager.transition({ type: "DESPAWN_SCOPE", meta: { entityId: "unit/a" } } as never);
     const scopeRecord = traceRecordFor(collector, "LITE_FSM_ENTITY_DESPAWN", 1);
 
+    // covered by 5.1/5.6: explicit self.indices despawn records prepare phase and scope counters.
     expect(scopeRecord.phases.map((phase) => phase.key)).toEqual(
       expect.arrayContaining(["entities.prepare.explicitDespawn"]),
     );
@@ -441,6 +444,7 @@ describe("@lite-fsm/entities — transition trace разметка runtime phase
     manager.transition({ type: "DESPAWN_ID", meta: { entityId: "unit/b" } } as never);
     const idsRecord = traceRecordFor(collector, "LITE_FSM_ENTITY_DESPAWN", 1);
 
+    // covered by 5.1/5.6: explicit ids despawn records prepare phase and ids counters.
     expect(idsRecord.phases.map((phase) => phase.key)).toEqual(
       expect.arrayContaining(["entities.prepare.explicitDespawn"]),
     );
@@ -485,6 +489,7 @@ describe("@lite-fsm/entities — transition trace разметка runtime phase
     manager.transition({ type: "EXPIRE" });
     const record = traceRecordFor(collector, "EXPIRE", 0);
 
+    // covered by 5.6: public cleanup counters define the baseline attribution surface.
     expect(counterValue(record, "entities.cleanup.public.scheduledDespawns")).toBe(2);
     expect(counterValue(record, "entities.cleanup.public.despawnedEntities")).toBe(2);
     expect(counterValue(record, "entities.cleanup.public.removedActorRows")).toBe(2);

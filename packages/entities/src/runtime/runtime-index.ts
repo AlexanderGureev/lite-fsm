@@ -10,6 +10,8 @@ import type {
   EntityStore,
 } from "./store-types";
 
+type ActorRowRemovalMode = "row" | "fullEntity";
+
 export const createScratchByState = (states: readonly string[]): EntityIndex[][] =>
   states.map(() => [] as EntityIndex[]);
 
@@ -149,19 +151,26 @@ const swapRemoveActorRowRef = (
   return true;
 };
 
-const removeActorRowOwnership = (runtime: EntityRuntimeState, row: EntityActorRowRef): void => {
+const removeActorRowEntityOwnership = (runtime: EntityRuntimeState, row: EntityActorRowRef): void => {
   const entityRows = runtime.actorRowsByEntity[row.entity];
   swapRemoveActorRowRef(entityRows, row, row.entityRowsPosition, (moved, position) => {
     moved.entityRowsPosition = position;
   });
   row.entityRowsPosition = -1;
+};
 
+const removeActorRowGroupOwnership = (runtime: EntityRuntimeState, row: EntityActorRowRef): void => {
   const groupRows = runtime.actorRowsByGroupTag[row.groupTag];
   swapRemoveActorRowRef(groupRows, row, row.groupRowsPosition, (moved, position) => {
     moved.groupRowsPosition = position;
   });
   row.groupRowsPosition = -1;
   if (groupRows && groupRows.length === 0) delete runtime.actorRowsByGroupTag[row.groupTag];
+};
+
+const removeActorRowOwnership = (runtime: EntityRuntimeState, row: EntityActorRowRef): void => {
+  removeActorRowEntityOwnership(runtime, row);
+  removeActorRowGroupOwnership(runtime, row);
 };
 
 const removeActorFromStateBucket = (store: ColumnarActorStore, entity: EntityIndex, stateCode: number): void => {
@@ -223,15 +232,23 @@ export const removeActorRowsForStore = (
   runtime: EntityRuntimeState,
   store: ColumnarActorStore,
   rows: readonly EntityActorRowRef[],
+  bucketStateCodes?: readonly (number | undefined)[],
+  mode: ActorRowRemovalMode = "row",
 ): number => {
   let removed = 0;
 
-  for (const row of rows) {
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index];
     const entity = row.entity;
     if (row.store !== store || store.presence[entity] !== 1) continue;
 
-    removeActorFromStateBucket(store, entity, store.stateCode[entity]);
-    removeActorRowOwnership(runtime, row);
+    removeActorFromStateBucket(store, entity, bucketStateCodes?.[index] ?? store.stateCode[entity]);
+    if (mode === "fullEntity") {
+      row.entityRowsPosition = -1;
+      removeActorRowGroupOwnership(runtime, row);
+    } else {
+      removeActorRowOwnership(runtime, row);
+    }
     store.presence[entity] = 0;
     store.stateCode[entity] = ENTITY_INIT_STATE_CODE;
     store.prevStateCode[entity] = ENTITY_INIT_STATE_CODE;

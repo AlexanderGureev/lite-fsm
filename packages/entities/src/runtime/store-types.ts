@@ -37,6 +37,7 @@ export type EntityActorRowRef = {
 };
 
 export type ColumnarActorStore = {
+  readonly storeId: number;
   readonly templateKey: string;
   readonly metadata: EntityTemplateMetadata;
   capacity: number;
@@ -49,6 +50,7 @@ export type ColumnarActorStore = {
   stateBuckets: EntityIndex[][];
   statePosition: Int32Array;
   acceptedScratch: EntityIndex[];
+  defaultTransitionSourceStateScratch: number[];
   pendingPrevStateCodeSync: EntityIndex[];
   pendingPrevStateCodeSyncMark: Uint32Array;
   pendingPrevStateCodeSyncToken: number;
@@ -75,6 +77,7 @@ export type EntityReducerSelfCache = Record<string, unknown> & {
 export type EntityRuntimeState = {
   readonly entityStore: EntityStore;
   readonly actorStores: Record<string, ColumnarActorStore>;
+  readonly actorStoresById: ColumnarActorStore[];
   readonly eventCodeByType: Readonly<Record<string, number>>;
   readonly eventTypesByCode: readonly string[];
   readonly templatesByEventCode: readonly (readonly ColumnarActorStore[])[];

@@ -21,6 +21,7 @@ import {
   unitSelected,
 } from "../../../apps/playground/app/examples/entities-rts/store/selectors";
 import { RTS_MAP } from "../../../apps/playground/app/examples/entities-rts/store/spawn/placement";
+import { UNIT_SELECTION } from "../../../apps/playground/app/examples/entities-rts/store/unit-model";
 
 const entity = (index: number) => index as EntityIndex;
 
@@ -51,6 +52,45 @@ const completeSpawn = (manager: ReturnType<typeof makeTestStore>) => {
 const startGame = (manager: ReturnType<typeof makeTestStore>, config: GameConfig) => {
   manager.transition({ type: "GAME_START", payload: config });
   completeSpawn(manager);
+};
+
+type DeathAuditAction = {
+  readonly type: string;
+  readonly payload?: { readonly count?: number };
+  readonly meta?: { readonly entityId?: string | readonly string[] };
+};
+
+const toEntityRoutes = (entityId: string | readonly string[] | undefined) => {
+  if (entityId === undefined) return [];
+  return typeof entityId === "string" ? [entityId] : [...entityId];
+};
+
+const collectDeathAudit = (manager: ReturnType<typeof makeTestStore>) => {
+  const audit = {
+    unitDeadRoutes: [] as string[][],
+    heroDeadCount: 0,
+    enemiesKilledCounts: [] as number[],
+  };
+
+  manager.onTransition((_prev, _next, action) => {
+    const event = action as DeathAuditAction;
+
+    if (event.type === "UNIT_DEAD") {
+      audit.unitDeadRoutes.push(toEntityRoutes(event.meta?.entityId));
+      return;
+    }
+
+    if (event.type === "HERO_DEAD") {
+      audit.heroDeadCount += 1;
+      return;
+    }
+
+    if (event.type === "ENEMIES_KILLED") {
+      audit.enemiesKilledCounts.push(event.payload?.count ?? 0);
+    }
+  });
+
+  return audit;
 };
 
 describe("runtime simulation для entities RTS", () => {
@@ -402,19 +442,175 @@ describe("runtime simulation для entities RTS", () => {
     expect(manager.getState().gameSession.context.killedEnemyCount).toBe(3);
   });
 
+  it("смерть нескольких enemies отправляет один batched UNIT_DEAD и despawn-ит non-hero actors", () => {
+    const manager = makeTestStore();
+
+    startGame(manager, { enemyCount: 2, allyCount: 1, seed: "unit-dead-batch" });
+
+    const units = readUnitViews(manager);
+    const audit = collectDeathAudit(manager);
+    const hero = entity(0);
+    const ally = entity(1);
+    const firstEnemy = entity(2);
+    const secondEnemy = entity(3);
+
+    mutableColumn(units.movement.x)[firstEnemy] = RTS_MAP.centerX + 80;
+    mutableColumn(units.movement.y)[firstEnemy] = RTS_MAP.centerY;
+    mutableColumn(units.movement.x)[secondEnemy] = RTS_MAP.centerX + 96;
+    mutableColumn(units.movement.y)[secondEnemy] = RTS_MAP.centerY + 8;
+    mutableColumn(units.movement.speed)[firstEnemy] = 0;
+    mutableColumn(units.movement.speed)[secondEnemy] = 0;
+    mutableColumn(units.health.hp)[firstEnemy] = 1;
+    mutableColumn(units.health.hp)[secondEnemy] = 1;
+    mutableColumn(units.combat.attackDamage)[hero] = 10_000;
+    mutableColumn(units.combat.attackRange)[hero] = 1_000;
+    mutableColumn(units.combat.attackTimerMs)[hero] = 0;
+    mutableColumn(units.combat.projectileSpeed)[hero] = 10_000;
+    mutableColumn(units.combat.projectileImpactRadius)[hero] = 256;
+    mutableColumn(units.combat.attackDamage)[ally] = 0;
+    mutableColumn(units.combat.attackTimerMs)[ally] = 10_000;
+
+    manager.transition({ type: "TICK", payload: { now: 16, deltaMs: 16 } });
+    manager.transition({ type: "TICK", payload: { now: 1_016, deltaMs: 1_000 } });
+
+    expect(audit.unitDeadRoutes).toHaveLength(1);
+    expect([...audit.unitDeadRoutes[0]].sort()).toEqual(["unit/enemy/0", "unit/enemy/1"]);
+    expect(audit.enemiesKilledCounts).toEqual([2]);
+    expect(audit.heroDeadCount).toBe(0);
+    expect(manager.getState().gameSession.context.killedEnemyCount).toBe(2);
+    expect(units.identity.has(firstEnemy)).toBe(false);
+    expect(units.identity.has(secondEnemy)).toBe(false);
+    expect(units.movement.has(firstEnemy)).toBe(false);
+    expect(units.combat.has(firstEnemy)).toBe(false);
+    expect(manager.entities().get("enemyAi").has(firstEnemy)).toBe(false);
+
+    manager.transition({ type: "TICK", payload: { now: 2_016, deltaMs: 1_000 } });
+
+    expect(audit.unitDeadRoutes).toHaveLength(1);
+    expect([...audit.unitDeadRoutes[0]].sort()).toEqual(["unit/enemy/0", "unit/enemy/1"]);
+    expect(audit.enemiesKilledCounts).toEqual([2]);
+    expect(audit.heroDeadCount).toBe(0);
+  });
+
+  it("UNIT_DEAD очищает hot columns и переводит routed non-hero rows в despawn", () => {
+    const manager = makeTestStore();
+
+    startGame(manager, { enemyCount: 1, allyCount: 1, seed: "unit-dead-cleanup" });
+
+    const units = readUnitViews(manager);
+    const enemyAi = manager.entities().get("enemyAi");
+    const ally = entity(1);
+    const enemy = entity(2);
+
+    mutableColumn(units.movement.vx)[ally] = 10;
+    mutableColumn(units.movement.vy)[ally] = 11;
+    mutableColumn(units.movement.vx)[enemy] = 12;
+    mutableColumn(units.movement.vy)[enemy] = 13;
+    mutableColumn(units.combat.attackTimerMs)[ally] = 100;
+    mutableColumn(units.combat.incomingDamage)[ally] = 200;
+    mutableColumn(units.combat.projectileTargetEntity)[ally] = enemy;
+    mutableColumn(units.combat.projectileDamage)[ally] = 300;
+    mutableColumn(units.command.command)[ally] = UNIT_COMMAND.ATTACK_MOVE;
+    mutableColumn(units.command.targetX)[ally] = 123;
+    mutableColumn(units.command.targetY)[ally] = 456;
+    mutableColumn(units.command.formationOffsetX)[ally] = 7;
+    mutableColumn(units.command.formationOffsetY)[ally] = 8;
+    mutableColumn(units.selection.selected)[ally] = UNIT_SELECTION.SELECTED;
+    mutableColumn(enemyAi.intent)[enemy] = ENEMY_INTENT.CHASE_HERO;
+
+    manager.transition({
+      type: "UNIT_DEAD",
+      meta: { entityId: ["unit/ally/0", "unit/enemy/0"] },
+    } as never);
+
+    expect(units.movement.vx[ally]).toBe(0);
+    expect(units.movement.vy[ally]).toBe(0);
+    expect(units.movement.vx[enemy]).toBe(0);
+    expect(units.movement.vy[enemy]).toBe(0);
+    expect(units.combat.attackTimerMs[ally]).toBe(0);
+    expect(units.combat.incomingDamage[ally]).toBe(0);
+    expect(units.combat.projectileTargetEntity[ally]).toBe(-1);
+    expect(units.combat.projectileDamage[ally]).toBe(0);
+    expect(units.command.command[ally]).toBe(UNIT_COMMAND.IDLE);
+    expect(units.command.targetX[ally]).toBe(0);
+    expect(units.command.targetY[ally]).toBe(0);
+    expect(units.command.formationOffsetX[ally]).toBe(0);
+    expect(units.command.formationOffsetY[ally]).toBe(0);
+    expect(units.selection.selected[ally]).toBe(UNIT_SELECTION.UNSELECTED);
+    expect(enemyAi.intent[enemy]).toBe(ENEMY_INTENT.IDLE);
+    expect(units.identity.has(ally)).toBe(false);
+    expect(units.command.has(ally)).toBe(false);
+    expect(units.selection.has(ally)).toBe(false);
+    expect(units.identity.has(enemy)).toBe(false);
+    expect(enemyAi.has(enemy)).toBe(false);
+  });
+
   it("смерть hero переводит gameSession в GAME_OVER", () => {
     const manager = makeTestStore();
 
-    startGame(manager, { enemyCount: 300, allyCount: 1, seed: "hero-death" });
+    startGame(manager, { enemyCount: 1, allyCount: 1, seed: "hero-death" });
 
     const units = readUnitViews(manager);
-    mutableColumn(units.combat.attackDamage)[entity(0)] = 0;
-    mutableColumn(units.combat.attackDamage)[entity(1)] = 0;
+    const audit = collectDeathAudit(manager);
+    const hero = entity(0);
+    const ally = entity(1);
+    const enemy = entity(2);
 
-    for (let tick = 0; tick < 150 && manager.getState().gameSession.state !== "GAME_OVER"; tick += 1) {
-      manager.transition({ type: "TICK", payload: { now: tick * 1_000, deltaMs: 1_000 } });
-    }
+    mutableColumn(units.health.hp)[hero] = 1;
+    mutableColumn(units.movement.x)[enemy] = RTS_MAP.centerX + 40;
+    mutableColumn(units.movement.y)[enemy] = RTS_MAP.centerY;
+    mutableColumn(units.movement.speed)[enemy] = 0;
+    mutableColumn(units.combat.attackDamage)[hero] = 0;
+    mutableColumn(units.combat.attackDamage)[ally] = 0;
+    mutableColumn(units.combat.attackDamage)[enemy] = 10_000;
+    mutableColumn(units.combat.attackTimerMs)[enemy] = 0;
+    mutableColumn(units.movement.vx)[hero] = 10;
+    mutableColumn(units.movement.vy)[hero] = 11;
+    mutableColumn(units.combat.attackTimerMs)[hero] = 100;
+    mutableColumn(units.combat.incomingDamage)[hero] = 200;
+    mutableColumn(units.combat.projectileTargetEntity)[hero] = enemy;
+    mutableColumn(units.combat.projectileDamage)[hero] = 300;
+    mutableColumn(units.command.command)[hero] = UNIT_COMMAND.MOVE;
+    mutableColumn(units.command.targetX)[hero] = 123;
+    mutableColumn(units.command.targetY)[hero] = 456;
+    mutableColumn(units.command.formationOffsetX)[hero] = 7;
+    mutableColumn(units.command.formationOffsetY)[hero] = 8;
+    mutableColumn(units.selection.selected)[hero] = UNIT_SELECTION.SELECTED;
+
+    manager.transition({ type: "TICK", payload: { now: 16, deltaMs: 1_000 } });
 
     expect(manager.getState().gameSession.state).toBe("GAME_OVER");
+    expect(audit.unitDeadRoutes).toEqual([["unit/hero"]]);
+    expect(audit.heroDeadCount).toBe(1);
+    expect(audit.enemiesKilledCounts).toEqual([]);
+    expect(units.identity.has(hero)).toBe(true);
+    expect(units.health.has(hero)).toBe(true);
+    expect(units.movement.has(hero)).toBe(true);
+    expect(units.combat.has(hero)).toBe(true);
+    expect(units.command.has(hero)).toBe(true);
+    expect(units.selection.has(hero)).toBe(true);
+    expect(units.health.state(hero)).toBe("DEAD");
+    expect(units.movement.state(hero)).toBe("STOPPED");
+    expect(units.combat.state(hero)).toBe("DISABLED");
+    expect(units.command.state(hero)).toBe("DISABLED");
+    expect(units.selection.state(hero)).toBe("DISABLED");
+    expect(units.movement.vx[hero]).toBe(0);
+    expect(units.movement.vy[hero]).toBe(0);
+    expect(units.combat.attackTimerMs[hero]).toBe(0);
+    expect(units.combat.incomingDamage[hero]).toBe(0);
+    expect(units.combat.projectileTargetEntity[hero]).toBe(-1);
+    expect(units.combat.projectileDamage[hero]).toBe(0);
+    expect(units.command.command[hero]).toBe(UNIT_COMMAND.IDLE);
+    expect(units.command.targetX[hero]).toBe(0);
+    expect(units.command.targetY[hero]).toBe(0);
+    expect(units.command.formationOffsetX[hero]).toBe(0);
+    expect(units.command.formationOffsetY[hero]).toBe(0);
+    expect(units.selection.selected[hero]).toBe(UNIT_SELECTION.UNSELECTED);
+
+    manager.transition({ type: "TICK", payload: { now: 1_016, deltaMs: 1_000 } });
+
+    expect(audit.unitDeadRoutes).toEqual([["unit/hero"]]);
+    expect(audit.heroDeadCount).toBe(1);
+    expect(audit.enemiesKilledCounts).toEqual([]);
   });
 });

@@ -14,11 +14,8 @@ export const unitIdentity = createMachine({
     },
     PRESENT: {
       GAME_RESTART: "REMOVED",
-      ENTITY_DESPAWNED: "__RESOLVED",
     },
-    REMOVED: {
-      ENTITY_DESPAWNED: "__RESOLVED",
-    },
+    REMOVED: {},
   },
   initialState: "__INIT",
   initialContext: {

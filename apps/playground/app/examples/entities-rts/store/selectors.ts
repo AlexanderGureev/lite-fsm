@@ -1,6 +1,7 @@
 import type { EntityIndex } from "@lite-fsm/entities";
 
 import type { AppStore } from ".";
+import { slotCount } from "./machines/column-slot-count";
 import { isUnitAlive } from "./machines/unit-health";
 import { UNIT_FACTION, UNIT_KIND, UNIT_SELECTION } from "./unit-model";
 
@@ -15,15 +16,16 @@ export type RtsEntityStats = {
 };
 
 // Колонки индексируются по EntityIndex, поэтому read-side обходит слоты [0, capacity)
-// и фильтрует живые строки. capacity берется из типизированного snapshot, а не из
-// приведения колонки к ArrayLike.
+// и фильтрует живые строки. Read-view не раскрывает backing store, поэтому capacity
+// берется из длины типизированной колонки.
 export const readUnitViews = (manager: AppStore) => {
   const entities = manager.entities();
+  const movement = entities.get("unitMovement");
 
   return {
-    capacity: manager.getState().unitMovement.capacity,
+    capacity: slotCount(movement.x),
     identity: entities.get("unitIdentity"),
-    movement: entities.get("unitMovement"),
+    movement,
     health: entities.get("unitHealth"),
     combat: entities.get("unitCombat"),
     selection: entities.get("unitSelection"),

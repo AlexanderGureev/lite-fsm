@@ -146,7 +146,11 @@ const createEntityStore = (): EntityStore => ({
   version: 0,
 });
 
-const createColumnarActorStore = (metadata: EntityTemplateMetadata, entityStore: EntityStore): ColumnarActorStore => {
+const createColumnarActorStore = (
+  metadata: EntityTemplateMetadata,
+  entityStore: EntityStore,
+  storeId: number,
+): ColumnarActorStore => {
   const columns = Object.fromEntries(
     Object.entries(metadata.initialContext).map(([name, descriptor]) => [
       name,
@@ -155,6 +159,7 @@ const createColumnarActorStore = (metadata: EntityTemplateMetadata, entityStore:
   ) as Record<string, EntityColumn>;
   const resourceValues = createResourceValues(metadata);
   const store: ColumnarActorStore = {
+    storeId,
     templateKey: metadata.templateKey,
     metadata,
     capacity: 0,
@@ -167,6 +172,7 @@ const createColumnarActorStore = (metadata: EntityTemplateMetadata, entityStore:
     stateBuckets: createScratchByState(metadata.publicStates),
     statePosition: new Int32Array(0),
     acceptedScratch: [],
+    defaultTransitionSourceStateScratch: [],
     pendingPrevStateCodeSync: [],
     pendingPrevStateCodeSyncMark: new Uint32Array(0),
     pendingPrevStateCodeSyncToken: 1,
@@ -195,6 +201,7 @@ export const createEntityRuntimeState = (
   const runtime = {
     entityStore: createEntityStore(),
     actorStores: Object.create(null) as Record<string, ColumnarActorStore>,
+    actorStoresById: [] as ColumnarActorStore[],
     eventCodeByType: compiled.eventCodeByType,
     eventTypesByCode: compiled.eventTypesByCode,
     templatesByEventCode: compiled.eventTypesByCode.map(() => [] as ColumnarActorStore[]),
@@ -204,10 +211,12 @@ export const createEntityRuntimeState = (
     access: undefined as unknown as EntityAccess<MachineStore>,
   };
 
-  for (const template of templates) {
+  for (let index = 0; index < templates.length; index += 1) {
+    const template = templates[index];
     const metadata = compiled.metadataByKey[template.key];
-    const store = createColumnarActorStore(metadata, runtime.entityStore);
+    const store = createColumnarActorStore(metadata, runtime.entityStore, index);
     runtime.actorStores[template.key] = store;
+    runtime.actorStoresById[index] = store;
     for (let eventCode = 0; eventCode < metadata.eventAcceptMask.length; eventCode += 1) {
       if (metadata.eventAcceptMask[eventCode] === 1) {
         (runtime.templatesByEventCode[eventCode] as ColumnarActorStore[]).push(store);

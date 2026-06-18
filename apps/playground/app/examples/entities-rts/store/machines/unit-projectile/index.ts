@@ -33,11 +33,8 @@ export const unitProjectile = createMachine({
     ACTIVE: {
       TICK: null,
       GAME_RESTART: "REMOVED",
-      ENTITY_DESPAWNED: "__RESOLVED",
     },
-    REMOVED: {
-      ENTITY_DESPAWNED: "__RESOLVED",
-    },
+    REMOVED: {},
   },
   initialState: "__INIT",
   initialContext: {

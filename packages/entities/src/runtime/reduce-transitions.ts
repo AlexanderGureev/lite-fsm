@@ -10,6 +10,7 @@ import { syncPendingPrevStateCode, type ColumnarActorStore } from "./state";
 type DefaultTransitionResult = {
   readonly firstNextState: string | undefined;
   readonly previousStateCodeForAccepted: number | undefined;
+  readonly sourceStateCodesByAccepted?: readonly number[];
   readonly knownValidStateCodeForAccepted?: number;
 };
 
@@ -18,8 +19,8 @@ const resolveTransitionTarget = (
   entity: EntityIndex,
   eventCode: number | undefined,
   eventType: string,
-): { readonly accepted: boolean; readonly nextState: string | undefined } => {
-  if (eventCode === undefined) return { accepted: false, nextState: undefined };
+): { readonly accepted: boolean; readonly nextState: string | undefined; readonly sourceStateCode: number } => {
+  if (eventCode === undefined) return { accepted: false, nextState: undefined, sourceStateCode: ENTITY_NO_TRANSITION };
 
   const previousCode = store.stateCode[entity];
   const stateSlot = previousCode + 1;
@@ -30,7 +31,9 @@ const resolveTransitionTarget = (
 
   const cell = eventCode * store.metadata.stateSlotCount + stateSlot;
   const nextCode = store.metadata.transitionTable[cell];
-  if (nextCode === ENTITY_NO_TRANSITION) return { accepted: false, nextState: undefined };
+  if (nextCode === ENTITY_NO_TRANSITION) {
+    return { accepted: false, nextState: undefined, sourceStateCode: previousCode };
+  }
   if (nextCode === ENTITY_INVALID_TRANSITION_TARGET) {
     throw runtimeError(
       `actor '${store.templateKey}' transition '${eventType}' targets unknown state '${store.metadata.transitionTargetByCell[cell]}'`,
@@ -39,7 +42,7 @@ const resolveTransitionTarget = (
 
   store.prevStateCode[entity] = previousCode;
   store.stateCode[entity] = nextCode;
-  return { accepted: true, nextState: getEntityStateName(store.metadata, nextCode) };
+  return { accepted: true, nextState: getEntityStateName(store.metadata, nextCode), sourceStateCode: previousCode };
 };
 
 export const getAcceptedIndices = (batch: ReducerBatch): readonly EntityIndex[] => {
@@ -132,18 +135,25 @@ export const applyDefaultTransitions = (
 
   if (!batch.accepted) {
     const stateCodeByEntity = batch.store.stateCode;
+    const previousStateCodeByEntity = batch.store.prevStateCode;
+    const sourceStateCodes = batch.store.defaultTransitionSourceStateScratch;
+    sourceStateCodes.length = accepted.length;
     for (let index = 0; index < accepted.length; index += 1) {
       const entity = accepted[index];
+      sourceStateCodes[index] = previousStateCodeByEntity[entity];
       firstNextState ??= getEntityStateName(batch.store.metadata, stateCodeByEntity[entity]);
     }
-    return { firstNextState, previousStateCodeForAccepted: undefined };
+    return { firstNextState, previousStateCodeForAccepted: undefined, sourceStateCodesByAccepted: sourceStateCodes };
   }
 
+  const sourceStateCodes = batch.store.defaultTransitionSourceStateScratch;
+  sourceStateCodes.length = accepted.length;
   for (let index = 0; index < accepted.length; index += 1) {
     const entity = accepted[index];
     const result = resolveTransitionTarget(batch.store, entity, batch.eventCode, batch.action.type);
+    sourceStateCodes[index] = result.sourceStateCode;
     firstNextState ??= result.nextState;
   }
 
-  return { firstNextState, previousStateCodeForAccepted: undefined };
+  return { firstNextState, previousStateCodeForAccepted: undefined, sourceStateCodesByAccepted: sourceStateCodes };
 };

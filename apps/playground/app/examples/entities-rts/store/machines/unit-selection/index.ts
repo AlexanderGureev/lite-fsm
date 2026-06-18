@@ -2,12 +2,13 @@ import { u8 } from "@lite-fsm/entities";
 
 import { createMachine } from "../../create-machine";
 import type { AppEvents } from "../../types";
-import { UNIT_SELECTION } from "../../unit-model";
+import { UNIT_KIND, UNIT_SELECTION } from "../../unit-model";
 
 export type Events = AppEvents;
 
 export const unitSelection = createMachine({
   storage: "entity",
+  despawnOn: "REMOVED",
   config: {
     __INIT: {
       ENTITY_SPAWNED: "ACTIVE",
@@ -16,13 +17,10 @@ export const unitSelection = createMachine({
       UNIT_SELECTION_UPDATED: null,
       SELECT_ENTITY: null,
       CLEAR_SELECTION: null,
-      UNITS_DIED: null,
-      UNIT_DIED: "DISABLED",
-      ENTITY_DESPAWNED: "__RESOLVED",
+      UNIT_DEAD: "DISABLED",
     },
-    DISABLED: {
-      ENTITY_DESPAWNED: "__RESOLVED",
-    },
+    DISABLED: {},
+    REMOVED: {},
   },
   initialState: "__INIT",
   initialContext: {
@@ -31,7 +29,7 @@ export const unitSelection = createMachine({
   spawnSchema: {
     selected: u8(),
   },
-  reducer: (_state, action, { payloadFor, self }) => {
+  reducer: (_state, action, { entities, payloadFor, self }) => {
     switch (action.type) {
       case "ENTITY_SPAWNED":
         for (const entity of self.indices) self.selected[entity] = payloadFor(entity).selected;
@@ -52,18 +50,18 @@ export const unitSelection = createMachine({
         return;
 
       case "CLEAR_SELECTION":
-      case "UNIT_DIED":
         for (const entity of self.indices) self.selected[entity] = UNIT_SELECTION.UNSELECTED;
         return;
 
-      case "UNITS_DIED":
-        for (const entity of action.payload.entities) {
-          if (!self.has(entity)) continue;
+      case "UNIT_DEAD": {
+        const identity = entities().get("unitIdentity");
 
+        for (const entity of self.indices) {
           self.selected[entity] = UNIT_SELECTION.UNSELECTED;
-          self.stateCode[entity] = self.states.DISABLED;
+          if (identity.kind[entity] !== UNIT_KIND.HERO) self.stateCode[entity] = self.states.REMOVED;
         }
         return;
+      }
     }
   },
 });

@@ -36,17 +36,21 @@ const updateActorStateBuckets = (
   store: ColumnarActorStore,
   indices: readonly EntityIndex[],
   previousStateCode: number | undefined,
+  previousStateCodes?: readonly number[],
 ): void => {
   const previousStateCodeByEntity = store.prevStateCode;
   const stateCodeByEntity = store.stateCode;
   for (let index = indices.length - 1; index >= 0; index -= 1) {
     const entity = indices[index];
-    moveActorStateBucket(
-      store,
-      entity,
-      previousStateCode ?? previousStateCodeByEntity[entity],
-      stateCodeByEntity[entity],
-    );
+    let sourceStateCode = previousStateCode;
+    if (sourceStateCode === undefined && previousStateCodes !== undefined) {
+      sourceStateCode = previousStateCodes[index];
+    }
+    /* v8 ignore next 3 -- reducer batches provide a shared or per-row source state before bucket updates. */
+    if (sourceStateCode === undefined) {
+      sourceStateCode = previousStateCodeByEntity[entity];
+    }
+    moveActorStateBucket(store, entity, sourceStateCode, stateCodeByEntity[entity]);
   }
 };
 
@@ -82,6 +86,14 @@ const chooseReactionBatchOwnership = (
   if (postProcessing.dirtyRows && postProcessing.dirtyRows.length > 0) return "owned";
   if (postProcessing.cleanupRemovesAcceptedRows) return "owned";
   return "borrowed";
+};
+
+const getOriginalReactionRows = (
+  accepted: readonly EntityIndex[],
+  postProcessing: AcceptedRowsPostProcessing,
+): readonly EntityIndex[] => {
+  if (!postProcessing.despawnOnRemovesAcceptedRows) return accepted;
+  return postProcessing.reactionSurvivorRows ?? [];
 };
 
 const createPayloadFor = (
@@ -130,6 +142,7 @@ export const reduceAcceptedBatch = (
     let accepted: readonly EntityIndex[] = [];
     let firstNextState: string | undefined;
     let previousStateCodeForAccepted: number | undefined;
+    let sourceStateCodesByAccepted: readonly number[] | undefined;
     let knownValidStateCodeForAccepted: number | undefined;
     const defaultTransitionsStartedAt = trace?.now();
     try {
@@ -138,6 +151,7 @@ export const reduceAcceptedBatch = (
       const defaultTransitions = applyDefaultTransitions(batch, accepted);
       firstNextState = defaultTransitions.firstNextState;
       previousStateCodeForAccepted = defaultTransitions.previousStateCodeForAccepted;
+      sourceStateCodesByAccepted = defaultTransitions.sourceStateCodesByAccepted;
       knownValidStateCodeForAccepted = defaultTransitions.knownValidStateCodeForAccepted;
     } finally {
       recordEntityTracePhase(trace, `${traceBatchPrefix}.defaultTransitions`, defaultTransitionsStartedAt);
@@ -177,6 +191,7 @@ export const reduceAcceptedBatch = (
         plan,
         previousStateCodeForAccepted,
         knownValidStateCodeForAccepted,
+        sourceStateCodesByAccepted,
       );
     } finally {
       recordEntityTracePhase(trace, `${traceBatchPrefix}.postProcess`, postProcessStartedAt);
@@ -199,9 +214,12 @@ export const reduceAcceptedBatch = (
     const scheduleReactionsStartedAt = trace?.now();
     try {
       if (options.scheduleReactions && batch.eventCode !== undefined) {
-        scheduleEntityReactionBatch(transaction, batch.store, batch.eventCode, accepted, {
-          ownership: chooseReactionBatchOwnership(plan, postProcessing, options),
-        });
+        const reactionRows = getOriginalReactionRows(accepted, postProcessing);
+        if (reactionRows.length > 0) {
+          scheduleEntityReactionBatch(transaction, batch.store, batch.eventCode, reactionRows, {
+            ownership: chooseReactionBatchOwnership(plan, postProcessing, options),
+          });
+        }
       }
     } finally {
       recordEntityTracePhase(trace, `${traceBatchPrefix}.scheduleReactions`, scheduleReactionsStartedAt);
@@ -225,7 +243,12 @@ export const reduceAcceptedBatch = (
         }
       }
       if (postProcessing.dirtyRows) {
-        updateActorStateBuckets(batch.store, postProcessing.dirtyRows, postProcessing.dirtyRowsPreviousStateCode);
+        updateActorStateBuckets(
+          batch.store,
+          postProcessing.dirtyRows,
+          postProcessing.dirtyRowsPreviousStateCode,
+          postProcessing.dirtyRowsPreviousStateCodes,
+        );
         schedulePrevStateCodeSync(batch.store, postProcessing.dirtyRows);
       }
     } finally {

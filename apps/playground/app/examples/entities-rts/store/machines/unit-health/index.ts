@@ -25,11 +25,8 @@ export const unitHealth = createMachine({
     },
     ALIVE: {
       TICK: null,
-      ENTITY_DESPAWNED: "__RESOLVED",
     },
-    DEAD: {
-      ENTITY_DESPAWNED: "__RESOLVED",
-    },
+    DEAD: {},
   },
   initialState: "__INIT",
   initialContext: {
@@ -74,39 +71,31 @@ export const unitHealth = createMachine({
   effects: {
     DEAD: ({ entities, self, transition }) => {
       const identity = entities().get("unitIdentity");
-      const nonHeroDeadEntities: EntityIndex[] = [];
+      const deadIds: string[] = [];
       let killedEnemyCount = 0;
       let heroDied = false;
 
       for (const entity of self.indices) {
+        deadIds.push(self.entityId(entity));
+
         if (identity.kind[entity] === UNIT_KIND.HERO) {
           heroDied = true;
           continue;
         }
 
-        nonHeroDeadEntities.push(entity);
         if (identity.faction[entity] === UNIT_FACTION.ENEMY) killedEnemyCount += 1;
       }
 
+      if (deadIds.length > 0) {
+        transition.entity(deadIds, { type: "UNIT_DEAD" });
+      }
+
       if (heroDied) {
-        for (const entity of self.indices) {
-          if (identity.kind[entity] !== UNIT_KIND.HERO) continue;
-
-          const entityId = self.entityId(entity);
-          transition.entity(entityId, { type: "UNIT_DIED", payload: { entityId } });
-        }
-
         transition.unscoped({ type: "HERO_DEAD" });
       }
 
       if (killedEnemyCount > 0) {
         transition.unscoped({ type: "ENEMIES_KILLED", payload: { count: killedEnemyCount } });
-      }
-
-      if (nonHeroDeadEntities.length > 0) {
-        // Массовый despawn тысяч строк дает длинный frame spike; мертвые строки
-        // остаются до GAME_RESTART, а владельцы поведения выключаются пакетным событием.
-        transition.unscoped({ type: "UNITS_DIED", payload: { entities: nonHeroDeadEntities } });
       }
     },
   },

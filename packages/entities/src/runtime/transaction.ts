@@ -5,7 +5,7 @@ import type { EntityIndex } from "../plugin";
 import type { EntitySpawnDescriptor } from "../spawn";
 import { hasSpawnRecipe, runSpawnRecipe } from "../spawn";
 import type { EntitySpawnSchema } from "../schema";
-import type { ColumnarActorStore, EntityRuntimeState } from "./state";
+import type { ColumnarActorStore, EntityActorRowRef, EntityRuntimeState } from "./state";
 import {
   readEntityTransitionTraceSession,
   recordEntityTraceCounter,
@@ -21,6 +21,11 @@ type RuntimeCarrier = {
 type EntityTransactionScratch = {
   despawnScheduled: Uint8Array;
   readonly despawnScheduledMarks: EntityIndex[];
+  readonly despawnRowHintMarksByStoreId: Uint8Array[];
+  readonly despawnRowHintBucketStateCodeByStoreId: Int16Array[];
+  readonly despawnRowHintMarks: EntityDespawnRowHint[];
+  readonly cleanupScratchPool: EntityCleanupScratch[];
+  cleanupScratchPoolCursor: number;
   readonly reactionIndexPool: EntityIndex[][];
   reactionIndexPoolCursor: number;
 };
@@ -42,14 +47,41 @@ export type EntityDispatchTransaction = {
   stagedSpawns: readonly StagedEntitySpawn[];
   scheduledDespawns: EntityIndex[];
   despawnScheduled: Uint8Array;
+  despawnRowHints: EntityDespawnRowHint[];
   terminalRows: EntityActorTerminalRow[];
   effectBatches: EntityEffectBatch[];
   reactionBatches: EntityReactionBatch[];
 };
 
+export type EntityDespawnRowHint = {
+  readonly storeId: number;
+  readonly entity: EntityIndex;
+  readonly bucketStateCode: number;
+};
+
 export type EntityActorTerminalRow = {
   readonly store: ColumnarActorStore;
   readonly entity: EntityIndex;
+};
+
+export type EntityCleanupRemovalBatch = {
+  readonly store: ColumnarActorStore;
+  readonly rows: EntityActorRowRef[];
+  readonly bucketStateCodes: Array<number | undefined>;
+  bucketStateCodesActive: boolean;
+};
+
+export type EntityCleanupLifecycleBatch = {
+  readonly store: ColumnarActorStore;
+  readonly indices: EntityIndex[];
+};
+
+export type EntityCleanupScratch = {
+  readonly entities: EntityIndex[];
+  readonly removalBatchesByStoreId: Array<EntityCleanupRemovalBatch | undefined>;
+  readonly removalTouchedStoreIds: number[];
+  readonly lifecycleBatchesByStoreId: Array<EntityCleanupLifecycleBatch | undefined>;
+  readonly lifecycleTouchedStoreIds: number[];
 };
 
 export type EntityEffectBatch = {
@@ -91,6 +123,8 @@ export const ENTITY_DESPAWN_ACTION_TYPE = "LITE_FSM_ENTITY_DESPAWN";
 
 const emptyDespawnScheduled = new Uint8Array();
 const transactionScratchByRuntime = new WeakMap<EntityRuntimeState, EntityTransactionScratch>();
+const MIN_DESPAWN_SCHEDULE_CAPACITY = 16;
+const MIN_DESPAWN_ROW_HINT_CAPACITY = 16;
 
 const runtimeError = (reason: string) => storageRuntimeError(`invalid entity spawn: ${reason}`);
 
@@ -158,6 +192,11 @@ const getEntityTransactionScratch = (runtime: EntityRuntimeState): EntityTransac
   const next = {
     despawnScheduled: emptyDespawnScheduled,
     despawnScheduledMarks: [],
+    despawnRowHintMarksByStoreId: [],
+    despawnRowHintBucketStateCodeByStoreId: [],
+    despawnRowHintMarks: [],
+    cleanupScratchPool: [],
+    cleanupScratchPoolCursor: 0,
     reactionIndexPool: [],
     reactionIndexPoolCursor: 0,
   };
@@ -170,11 +209,53 @@ const clearDespawnScheduledMarks = (scratch: EntityTransactionScratch): void => 
   scratch.despawnScheduledMarks.length = 0;
 };
 
+const clearDespawnRowHintMarks = (scratch: EntityTransactionScratch): void => {
+  for (const hint of scratch.despawnRowHintMarks) {
+    scratch.despawnRowHintMarksByStoreId[hint.storeId][hint.entity] = 0;
+  }
+  scratch.despawnRowHintMarks.length = 0;
+};
+
 const resetReactionIndexPool = (scratch: EntityTransactionScratch): void => {
   for (let index = 0; index < scratch.reactionIndexPoolCursor; index += 1) {
     scratch.reactionIndexPool[index].length = 0;
   }
   scratch.reactionIndexPoolCursor = 0;
+};
+
+const createCleanupScratch = (): EntityCleanupScratch => ({
+  entities: [],
+  removalBatchesByStoreId: [],
+  removalTouchedStoreIds: [],
+  lifecycleBatchesByStoreId: [],
+  lifecycleTouchedStoreIds: [],
+});
+
+const clearCleanupScratch = (cleanup: EntityCleanupScratch): void => {
+  for (const storeId of cleanup.removalTouchedStoreIds) {
+    const batch = cleanup.removalBatchesByStoreId[storeId];
+    /* v8 ignore next -- touched store ids are recorded only after creating a removal batch. */
+    if (!batch) continue;
+    batch.rows.length = 0;
+    batch.bucketStateCodes.length = 0;
+    batch.bucketStateCodesActive = false;
+  }
+  cleanup.removalTouchedStoreIds.length = 0;
+
+  for (const storeId of cleanup.lifecycleTouchedStoreIds) {
+    const batch = cleanup.lifecycleBatchesByStoreId[storeId];
+    /* v8 ignore next -- touched store ids are recorded only after creating a lifecycle batch. */
+    if (!batch) continue;
+    batch.indices.length = 0;
+  }
+  cleanup.lifecycleTouchedStoreIds.length = 0;
+  cleanup.entities.length = 0;
+};
+
+const resetInactiveCleanupScratchPool = (scratch: EntityTransactionScratch): void => {
+  /* v8 ignore next -- lifecycle cleanup closes scratch frames in finally blocks before the next prepare. */
+  if (scratch.cleanupScratchPoolCursor !== 0) return;
+  for (const cleanup of scratch.cleanupScratchPool) clearCleanupScratch(cleanup);
 };
 
 export const prepareEntityTransaction = (
@@ -183,6 +264,8 @@ export const prepareEntityTransaction = (
 ): EntityDispatchTransaction => {
   const scratch = getEntityTransactionScratch(runtime);
   clearDespawnScheduledMarks(scratch);
+  clearDespawnRowHintMarks(scratch);
+  resetInactiveCleanupScratchPool(scratch);
   resetReactionIndexPool(scratch);
 
   const transaction: EntityDispatchTransaction = {
@@ -190,6 +273,7 @@ export const prepareEntityTransaction = (
     stagedSpawns: [],
     scheduledDespawns: [],
     despawnScheduled: scratch.despawnScheduled,
+    despawnRowHints: [],
     terminalRows: [],
     effectBatches: [],
     reactionBatches: [],
@@ -352,10 +436,19 @@ export const getStagedSpawns = (carrier: RuntimeCarrier): readonly StagedEntityS
   return transaction.stagedSpawns;
 };
 
-const ensureDespawnScheduleCapacity = (transaction: EntityDispatchTransaction, capacity: number): void => {
-  if (transaction.despawnScheduled.length >= capacity) return;
+const ensureDespawnScheduleCapacity = (transaction: EntityDispatchTransaction, requestedCapacity: number): void => {
+  const currentCapacity = transaction.despawnScheduled.length;
+  if (currentCapacity >= requestedCapacity) return;
 
-  const next = new Uint8Array(capacity);
+  const targetCapacity = Math.max(
+    requestedCapacity,
+    transaction.runtime.entityStore.capacity,
+    MIN_DESPAWN_SCHEDULE_CAPACITY,
+  );
+  let nextCapacity = Math.max(currentCapacity, MIN_DESPAWN_SCHEDULE_CAPACITY);
+  while (nextCapacity < targetCapacity) nextCapacity *= 2;
+
+  const next = new Uint8Array(nextCapacity);
   next.set(transaction.despawnScheduled);
   getEntityTransactionScratch(transaction.runtime).despawnScheduled = next;
   transaction.despawnScheduled = next;
@@ -373,12 +466,141 @@ export const scheduleEntityDespawn = (transaction: EntityDispatchTransaction, en
   return true;
 };
 
+const ensureDespawnRowHintCapacity = (
+  scratch: EntityTransactionScratch,
+  storeId: number,
+  requestedCapacity: number,
+  storeCapacity: number,
+): void => {
+  const marks = scratch.despawnRowHintMarksByStoreId[storeId];
+  const bucketStateCodes = scratch.despawnRowHintBucketStateCodeByStoreId[storeId];
+  if (
+    marks &&
+    bucketStateCodes &&
+    marks.length >= requestedCapacity &&
+    bucketStateCodes.length >= requestedCapacity
+  ) {
+    return;
+  }
+
+  const currentCapacity = Math.min(marks?.length ?? 0, bucketStateCodes?.length ?? 0);
+  const targetCapacity = Math.max(requestedCapacity, storeCapacity, MIN_DESPAWN_ROW_HINT_CAPACITY);
+  let nextCapacity = Math.max(currentCapacity, MIN_DESPAWN_ROW_HINT_CAPACITY);
+  while (nextCapacity < targetCapacity) nextCapacity *= 2;
+
+  const nextMarks = new Uint8Array(nextCapacity);
+  if (marks) nextMarks.set(marks);
+  scratch.despawnRowHintMarksByStoreId[storeId] = nextMarks;
+
+  const nextBucketStateCodes = new Int16Array(nextCapacity);
+  if (bucketStateCodes) nextBucketStateCodes.set(bucketStateCodes);
+  scratch.despawnRowHintBucketStateCodeByStoreId[storeId] = nextBucketStateCodes;
+};
+
+export const scheduleDespawnRowHint = (
+  transaction: EntityDispatchTransaction,
+  store: ColumnarActorStore,
+  entity: EntityIndex,
+  bucketStateCode: number,
+): boolean => {
+  const scratch = getEntityTransactionScratch(transaction.runtime);
+  ensureDespawnRowHintCapacity(scratch, store.storeId, entity + 1, store.capacity);
+
+  const marks = scratch.despawnRowHintMarksByStoreId[store.storeId];
+  if (marks[entity] === 1) return false;
+
+  marks[entity] = 1;
+  scratch.despawnRowHintBucketStateCodeByStoreId[store.storeId][entity] = bucketStateCode;
+  const hint = { storeId: store.storeId, entity, bucketStateCode };
+  transaction.despawnRowHints.push(hint);
+  scratch.despawnRowHintMarks.push(hint);
+  return true;
+};
+
+export const getDespawnRowHintBucketStateCode = (
+  transaction: EntityDispatchTransaction,
+  storeId: number,
+  entity: EntityIndex,
+): number | undefined => {
+  const scratch = getEntityTransactionScratch(transaction.runtime);
+  const marks = scratch.despawnRowHintMarksByStoreId[storeId];
+  if (!marks || marks[entity] !== 1) return undefined;
+  return scratch.despawnRowHintBucketStateCodeByStoreId[storeId][entity];
+};
+
+export const clearDespawnRowHints = (transaction: EntityDispatchTransaction): void => {
+  clearDespawnRowHintMarks(getEntityTransactionScratch(transaction.runtime));
+  transaction.despawnRowHints = [];
+};
+
 export const consumeScheduledDespawns = (transaction: EntityDispatchTransaction): readonly EntityIndex[] => {
   const scheduled = transaction.scheduledDespawns;
   transaction.scheduledDespawns = [];
   for (const entity of scheduled) transaction.despawnScheduled[entity] = 0;
   getEntityTransactionScratch(transaction.runtime).despawnScheduledMarks.length = 0;
   return scheduled;
+};
+
+export const beginEntityCleanupScratch = (transaction: EntityDispatchTransaction): EntityCleanupScratch => {
+  const scratch = getEntityTransactionScratch(transaction.runtime);
+  const poolIndex = scratch.cleanupScratchPoolCursor;
+  const cleanup = scratch.cleanupScratchPool[poolIndex] ?? createCleanupScratch();
+  scratch.cleanupScratchPool[poolIndex] = cleanup;
+  scratch.cleanupScratchPoolCursor += 1;
+  clearCleanupScratch(cleanup);
+  return cleanup;
+};
+
+export const finishEntityCleanupScratch = (
+  transaction: EntityDispatchTransaction,
+  cleanup: EntityCleanupScratch,
+): void => {
+  clearCleanupScratch(cleanup);
+
+  const scratch = getEntityTransactionScratch(transaction.runtime);
+  const lastPoolIndex = scratch.cleanupScratchPoolCursor - 1;
+  if (lastPoolIndex >= 0 && scratch.cleanupScratchPool[lastPoolIndex] === cleanup) {
+    scratch.cleanupScratchPoolCursor = lastPoolIndex;
+  }
+};
+
+export const appendCleanupRemovalRow = (
+  cleanup: EntityCleanupScratch,
+  store: ColumnarActorStore,
+  row: EntityActorRowRef,
+  bucketStateCode: number | undefined,
+): void => {
+  let batch = cleanup.removalBatchesByStoreId[store.storeId];
+  if (!batch) {
+    batch = { store, rows: [], bucketStateCodes: [], bucketStateCodesActive: false };
+    cleanup.removalBatchesByStoreId[store.storeId] = batch;
+  }
+
+  if (batch.rows.length === 0) cleanup.removalTouchedStoreIds.push(store.storeId);
+
+  if (bucketStateCode !== undefined || batch.bucketStateCodesActive) {
+    if (!batch.bucketStateCodesActive) {
+      batch.bucketStateCodes.length = batch.rows.length;
+      batch.bucketStateCodesActive = true;
+    }
+    batch.bucketStateCodes.push(bucketStateCode);
+  }
+  batch.rows.push(row);
+};
+
+export const appendCleanupLifecycleIndex = (
+  cleanup: EntityCleanupScratch,
+  store: ColumnarActorStore,
+  entity: EntityIndex,
+): void => {
+  let batch = cleanup.lifecycleBatchesByStoreId[store.storeId];
+  if (!batch) {
+    batch = { store, indices: [] };
+    cleanup.lifecycleBatchesByStoreId[store.storeId] = batch;
+  }
+
+  if (batch.indices.length === 0) cleanup.lifecycleTouchedStoreIds.push(store.storeId);
+  batch.indices.push(entity);
 };
 
 export const scheduleEntityEffectBatch = (

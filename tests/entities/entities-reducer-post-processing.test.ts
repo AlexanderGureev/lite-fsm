@@ -23,7 +23,11 @@ import {
   type ColumnarActorStore,
   type EntityRuntimeState,
 } from "../../packages/entities/src/runtime/state";
-import { prepareEntityTransaction } from "../../packages/entities/src/runtime/transaction";
+import {
+  prepareEntityTransaction,
+  scheduleDespawnRowHint,
+  scheduleEntityDespawn,
+} from "../../packages/entities/src/runtime/transaction";
 
 type TestReducerSelf = {
   readonly indices: readonly EntityIndex[];
@@ -102,6 +106,33 @@ const createTransitionManager = (
   return MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
 };
 
+const createDespawnOnManager = (withLifecycle = false) => {
+  const actor = {
+    storage: "entity",
+    config: {
+      __INIT: { ENTITY_SPAWNED: "READY" },
+      READY: { TICK: "EXPIRED" },
+      EXPIRED: withLifecycle ? { ENTITY_DESPAWNED: "CLEANED" } : {},
+      CLEANED: {},
+    },
+    initialState: "__INIT",
+    initialContext: { value: i32() },
+    spawnSchema: {},
+    despawnOn: "EXPIRED",
+    ...(withLifecycle ? { reducer: () => undefined } : {}),
+  } as const;
+  const machines = { actor };
+  const spawn = defineEntitySpawn(machines, spawnEvents)({
+    SPAWN: (payload) => ({
+      id: payload.id,
+      groupTag: "units",
+      actors: { actor: {} },
+    }),
+  });
+
+  return MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+};
+
 const spawnEntity = (manager: Pick<ReturnType<typeof createManager>, "transition">, id: string): void => {
   manager.transition({ type: "SPAWN", payload: { id } });
 };
@@ -109,7 +140,15 @@ const spawnEntity = (manager: Pick<ReturnType<typeof createManager>, "transition
 const noLifecyclePostProcessingFlags = {
   scheduleDespawnOn: false,
   scheduleEffects: false,
+  collectReactionSurvivors: false,
   scheduleTerminal: false,
+} as const;
+
+const despawnOnPostProcessingFlags = {
+  scheduleDespawnOn: true,
+  scheduleEffects: true,
+  collectReactionSurvivors: false,
+  scheduleTerminal: true,
 } as const;
 
 const createBulkTransitionPlan = (acceptStateCodes: readonly number[]): EntityReducePlan => ({
@@ -232,6 +271,42 @@ const installAllocationCounters = () => {
   };
 };
 
+const installTypedArrayAllocationCounters = () => {
+  const OriginalUint8Array = globalThis.Uint8Array;
+  const OriginalInt16Array = globalThis.Int16Array;
+  let uint8Allocations = 0;
+  let int16Allocations = 0;
+
+  const CountingUint8Array = new Proxy(OriginalUint8Array, {
+    construct(target, args, newTarget) {
+      uint8Allocations += 1;
+      return Reflect.construct(target, args, newTarget);
+    },
+  }) as typeof Uint8Array;
+  const CountingInt16Array = new Proxy(OriginalInt16Array, {
+    construct(target, args, newTarget) {
+      int16Allocations += 1;
+      return Reflect.construct(target, args, newTarget);
+    },
+  }) as typeof Int16Array;
+
+  Object.defineProperty(globalThis, "Uint8Array", { configurable: true, writable: true, value: CountingUint8Array });
+  Object.defineProperty(globalThis, "Int16Array", { configurable: true, writable: true, value: CountingInt16Array });
+
+  return {
+    get uint8Allocations() {
+      return uint8Allocations;
+    },
+    get int16Allocations() {
+      return int16Allocations;
+    },
+    restore() {
+      Object.defineProperty(globalThis, "Uint8Array", { configurable: true, writable: true, value: OriginalUint8Array });
+      Object.defineProperty(globalThis, "Int16Array", { configurable: true, writable: true, value: OriginalInt16Array });
+    },
+  };
+};
+
 describe("@lite-fsm/entities — reducer post-processing dirty rows", () => {
   it("hot identity TICK не создает Set, Map, column enumeration и bucket update scan", () => {
     const manager = createManager();
@@ -266,12 +341,199 @@ describe("@lite-fsm/entities — reducer post-processing dirty rows", () => {
       reads.restore();
     }
 
+    // covered by 5.6: identity post-processing path avoids Map/Set allocation and extra scans.
     expect(mapAllocations).toBe(0);
     expect(setAllocations).toBe(0);
     expect(columnEnumerations).toBe(0);
     expect(reads.stateReads).toBe(rowCount);
     expect(reads.prevReads).toBe(0);
     expect(reads.prevWrites).toBe(0);
+  });
+
+  it("runtime назначает internal storeId по порядку templates", () => {
+    const manager = createManager();
+    const runtime = getEntityRuntimeState(manager.entities());
+    const store = runtime.actorStores.actor;
+
+    expect(store.storeId).toBe(0);
+    expect(runtime.actorStoresById).toEqual([store]);
+  });
+
+  it("despawnOn final-removal rows планируют hints без Map и не попадают в dirty bucket move", () => {
+    const manager = createDespawnOnManager();
+    spawnEntity(manager, "unit/a");
+    spawnEntity(manager, "unit/b");
+
+    const runtime = getEntityRuntimeState(manager.entities());
+    const store = runtime.actorStores.actor;
+    const readyCode = store.metadata.stateCodeByName.READY;
+    const expiredCode = store.metadata.stateCodeByName.EXPIRED;
+    const accepted = store.stateBuckets[readyCode];
+    for (const entity of accepted) {
+      store.prevStateCode[entity] = readyCode;
+      store.stateCode[entity] = expiredCode;
+    }
+    const transaction = prepareEntityTransaction({ runtime: new Map<string, unknown>() }, runtime);
+    const beforeRowVersions = [store.rowVersion[0], store.rowVersion[1]];
+    const allocations = installAllocationCounters();
+    let mapAllocations = 0;
+    let setAllocations = 0;
+    let result: ReturnType<typeof postProcessAcceptedRows>;
+
+    try {
+      result = postProcessAcceptedRows(
+        transaction,
+        store,
+        accepted,
+        despawnOnPostProcessingFlags,
+        undefined,
+        readyCode,
+        expiredCode,
+      );
+      mapAllocations = allocations.mapAllocations;
+      setAllocations = allocations.setAllocations;
+    } finally {
+      allocations.restore();
+    }
+
+    // covered by 5.1/5.2/5.6: all-despawn final-removal path schedules cleanup hints without hot Map/Set allocation.
+    expect(mapAllocations).toBe(0);
+    expect(setAllocations).toBe(0);
+    expect(result!.dirtyRows).toBeUndefined();
+    expect(result!.despawnOnRemovesAcceptedRows).toBe(true);
+    expect(result!.acceptedRowsHaveFinalRemoval).toBe(true);
+    expect(result!.reactionSurvivorRows).toBeUndefined();
+    expect(transaction.scheduledDespawns).toEqual([0, 1]);
+    expect(transaction.despawnRowHints).toEqual([
+      { storeId: store.storeId, entity: 0, bucketStateCode: readyCode },
+      { storeId: store.storeId, entity: 1, bucketStateCode: readyCode },
+    ]);
+    expect(store.stateBuckets[readyCode]).toEqual([0, 1]);
+    expect(store.stateBuckets[expiredCode]).toEqual([]);
+    expect([store.rowVersion[0], store.rowVersion[1]]).toEqual(
+      beforeRowVersions.map((version) => version + 1),
+    );
+  });
+
+  it("mass despawn scheduling растит mark arrays амортизированно", () => {
+    const manager = createDespawnOnManager();
+    const rowCount = 128;
+    for (let index = 0; index < rowCount; index += 1) {
+      spawnEntity(manager, `unit/${index}`);
+    }
+
+    const runtime = getEntityRuntimeState(manager.entities());
+    const store = runtime.actorStores.actor;
+    const readyCode = store.metadata.stateCodeByName.READY;
+    const transaction = prepareEntityTransaction({ runtime: new Map<string, unknown>() }, runtime);
+    const allocations = installTypedArrayAllocationCounters();
+    let uint8Allocations = 0;
+    let int16Allocations = 0;
+
+    try {
+      for (let entity = 0; entity < rowCount; entity += 1) {
+        expect(scheduleEntityDespawn(transaction, entity as EntityIndex)).toBe(true);
+        expect(scheduleDespawnRowHint(transaction, store, entity as EntityIndex, readyCode)).toBe(true);
+      }
+      uint8Allocations = allocations.uint8Allocations;
+      int16Allocations = allocations.int16Allocations;
+    } finally {
+      allocations.restore();
+    }
+
+    // covered by 5.6: mass final-removal scheduling does not allocate/copy per row.
+    expect(uint8Allocations).toBe(2);
+    expect(int16Allocations).toBe(1);
+    expect(transaction.scheduledDespawns).toHaveLength(rowCount);
+    expect(transaction.despawnRowHints).toHaveLength(rowCount);
+  });
+
+  it("despawn row hints расширяют переиспользуемые mark arrays после роста store", () => {
+    const manager = createDespawnOnManager();
+    spawnEntity(manager, "unit/0");
+
+    const runtime = getEntityRuntimeState(manager.entities());
+    const store = runtime.actorStores.actor;
+    const readyCode = store.metadata.stateCodeByName.READY;
+    const firstTransaction = prepareEntityTransaction({ runtime: new Map<string, unknown>() }, runtime);
+    expect(scheduleDespawnRowHint(firstTransaction, store, 0 as EntityIndex, readyCode)).toBe(true);
+
+    for (let index = 1; index < 33; index += 1) {
+      spawnEntity(manager, `unit/${index}`);
+    }
+
+    const nextTransaction = prepareEntityTransaction({ runtime: new Map<string, unknown>() }, runtime);
+    expect(scheduleDespawnRowHint(nextTransaction, store, 32 as EntityIndex, readyCode)).toBe(true);
+    expect(scheduleDespawnRowHint(nextTransaction, store, 32 as EntityIndex, readyCode)).toBe(false);
+    expect(nextTransaction.despawnRowHints).toEqual([{ storeId: store.storeId, entity: 32, bucketStateCode: readyCode }]);
+  });
+
+  it("mixed despawnOn строит reaction survivors только для живых rows", () => {
+    const manager = createDespawnOnManager();
+    spawnEntity(manager, "unit/a");
+    spawnEntity(manager, "unit/b");
+    spawnEntity(manager, "unit/c");
+
+    const runtime = getEntityRuntimeState(manager.entities());
+    const store = runtime.actorStores.actor;
+    const readyCode = store.metadata.stateCodeByName.READY;
+    const expiredCode = store.metadata.stateCodeByName.EXPIRED;
+    const accepted = store.stateBuckets[readyCode];
+    for (const entity of accepted) {
+      store.prevStateCode[entity] = readyCode;
+      store.stateCode[entity] = entity === 1 ? expiredCode : readyCode;
+    }
+    const transaction = prepareEntityTransaction({ runtime: new Map<string, unknown>() }, runtime);
+
+    const result = postProcessAcceptedRows(
+      transaction,
+      store,
+      accepted,
+      { ...despawnOnPostProcessingFlags, collectReactionSurvivors: true },
+      undefined,
+      readyCode,
+      expiredCode,
+    );
+
+    // covered by 5.2/5.5: mixed despawnOn reaction planning keeps only survivor rows.
+    expect(result.dirtyRows).toBeUndefined();
+    expect(result.reactionSurvivorRows).toEqual([0, 2]);
+    expect(transaction.scheduledDespawns).toEqual([1]);
+    expect(transaction.despawnRowHints).toEqual([{ storeId: store.storeId, entity: 1, bucketStateCode: readyCode }]);
+  });
+
+  it("despawnOn lifecycle rows остаются dirty path и не создают final-removal hints", () => {
+    const manager = createDespawnOnManager(true);
+    spawnEntity(manager, "unit/a");
+    spawnEntity(manager, "unit/b");
+
+    const runtime = getEntityRuntimeState(manager.entities());
+    const store = runtime.actorStores.actor;
+    const readyCode = store.metadata.stateCodeByName.READY;
+    const expiredCode = store.metadata.stateCodeByName.EXPIRED;
+    const accepted = store.stateBuckets[readyCode];
+    for (const entity of accepted) {
+      store.prevStateCode[entity] = readyCode;
+      store.stateCode[entity] = expiredCode;
+    }
+    const transaction = prepareEntityTransaction({ runtime: new Map<string, unknown>() }, runtime);
+
+    const result = postProcessAcceptedRows(
+      transaction,
+      store,
+      accepted,
+      despawnOnPostProcessingFlags,
+      undefined,
+      readyCode,
+      expiredCode,
+    );
+
+    // covered by 5.3/5.6: lifecycle despawn rows use the regular dirty-row bucket update path.
+    expect(result.dirtyRows).toEqual([0, 1]);
+    expect(result.dirtyRowsPreviousStateCode).toBe(readyCode);
+    expect(result.acceptedRowsHaveFinalRemoval).toBe(false);
+    expect(transaction.scheduledDespawns).toEqual([0, 1]);
+    expect(transaction.despawnRowHints).toEqual([]);
   });
 
   it("identity TICK синхронизирует pending prevStateCode один раз после spawn", () => {
@@ -327,10 +589,56 @@ describe("@lite-fsm/entities — reducer post-processing dirty rows", () => {
       reads.restore();
     }
 
+    // covered by 5.2/5.4: reducer override keeps dirty-row bucket updates narrow and coherent.
     expect(store.stateBuckets[readyCode]).toEqual([0, 2]);
     expect(store.stateBuckets[stoppedCode]).toEqual([1]);
     expect(reads.stateReads).toBe(rowCount + 1);
     expect(reads.prevReads).toBe(0);
+  });
+
+  it("multi-source default transition обновляет buckets из per-row source state", () => {
+    const actor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "READY" },
+        READY: { SAFE: "SAFE", TICK: "STOPPED" },
+        SAFE: { TICK: "STOPPED" },
+        STOPPED: {},
+      },
+      initialState: "__INIT",
+      initialContext: { value: i32() },
+      spawnSchema: {},
+    } as const;
+    const machines = { actor };
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN: (payload) => ({
+        id: payload.id,
+        groupTag: "units",
+        actors: { actor: {} },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+    spawnEntity(manager, "unit/a");
+    spawnEntity(manager, "unit/b");
+    spawnEntity(manager, "unit/c");
+    manager.transition({ type: "SAFE", meta: { entityId: "unit/b" } } as never);
+
+    const store = getEntityRuntimeState(manager.entities()).actorStores.actor;
+    const readyCode = store.metadata.stateCodeByName.READY;
+    const safeCode = store.metadata.stateCodeByName.SAFE;
+    const stoppedCode = store.metadata.stateCodeByName.STOPPED;
+
+    manager.transition({ type: "TICK" });
+
+    // covered by 5.2/5.4: mixed source buckets use per-row source state codes during bucket updates.
+    expect(store.stateBuckets[readyCode]).toEqual([]);
+    expect(store.stateBuckets[safeCode]).toEqual([]);
+    expect([...store.stateBuckets[stoppedCode]].sort()).toEqual([0, 1, 2]);
+    expect([store.stateCode[0], store.stateCode[1], store.stateCode[2]]).toEqual([
+      stoppedCode,
+      stoppedCode,
+      stoppedCode,
+    ]);
   });
 
   it("identity fast path планирует terminal cleanup после reducer write", () => {
@@ -346,6 +654,7 @@ describe("@lite-fsm/entities — reducer post-processing dirty rows", () => {
 
     reduceUnscopedTick(runtime, ctx);
 
+    // covered by 5.3: terminal row cleanup is separate from full-entity despawn.
     expect(store.presence[0 as EntityIndex]).toBe(0);
     expect(store.count).toBe(0);
     expect(runtime.entityStore.alive[0 as EntityIndex]).toBe(0);
@@ -364,6 +673,7 @@ describe("@lite-fsm/entities — reducer post-processing dirty rows", () => {
     schedulePrevStateCodeSync(store, [entity]);
     syncPendingPrevStateCode(store);
 
+    // covered by 5.4: prevStateCode sync skips rows that cleanup already removed.
     expect(store.prevStateCode[entity]).toBe(-1);
     expect(store.pendingPrevStateCodeSync).toEqual([]);
   });
@@ -421,6 +731,7 @@ describe("@lite-fsm/entities — reducer post-processing dirty rows", () => {
 
     manager.transition({ type: "TICK" });
 
+    // covered by 5.2/5.4: single-source bucket batch move preserves positions and effect scope.
     expect(store.stateBuckets[readyCode]).toBe(stoppedBucket);
     expect(store.stateBuckets[stoppedCode]).toBe(readyBucket);
     expect(store.stateBuckets[readyCode]).toEqual([]);
@@ -581,6 +892,7 @@ describe("@lite-fsm/entities — reducer post-processing dirty rows", () => {
 
     manager.transition({ type: "TICK" });
 
+    // covered by 5.2: reducer override from default target back to live state keeps survivor rows.
     expect(store.stateBuckets[readyCode]).toBe(readyBucket);
     expect(store.stateBuckets[stoppedCode]).toBe(stoppedBucket);
     expect(store.stateBuckets[readyCode]).toEqual([1]);

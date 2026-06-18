@@ -2,11 +2,17 @@ import type { EntityIndex } from "../plugin";
 import { ENTITY_INIT_STATE_CODE, hasDespawnOnStates, type EntityReducePlan } from "./compile";
 import { isTerminalStateCode, runtimeError, type ReduceAcceptedBatchOptions } from "./reduce-shared";
 import { schedulePrevStateCodeSyncRow, type ColumnarActorStore, type EntityRuntimeState } from "./state";
-import { scheduleEntityDespawn, type CapturedEntityScopeEntry, type EntityDispatchTransaction } from "./transaction";
+import {
+  scheduleDespawnRowHint,
+  scheduleEntityDespawn,
+  type CapturedEntityScopeEntry,
+  type EntityDispatchTransaction,
+} from "./transaction";
 
 type PostProcessingFlags = {
   readonly scheduleDespawnOn: boolean;
   readonly scheduleEffects: boolean;
+  readonly collectReactionSurvivors: boolean;
   readonly scheduleTerminal: boolean;
 };
 
@@ -18,9 +24,13 @@ export type EnteredEffectRows = {
 export type AcceptedRowsPostProcessing = {
   readonly dirtyRows: readonly EntityIndex[] | undefined;
   readonly dirtyRowsPreviousStateCode: number | undefined;
+  readonly dirtyRowsPreviousStateCodes: readonly number[] | undefined;
   readonly bulkStateTransition: BulkStateTransition | undefined;
   readonly enteredByState: ReadonlyMap<number, EnteredEffectRows> | undefined;
   readonly cleanupRemovesAcceptedRows: boolean;
+  readonly despawnOnRemovesAcceptedRows: boolean;
+  readonly acceptedRowsHaveFinalRemoval: boolean;
+  readonly reactionSurvivorRows: readonly EntityIndex[] | undefined;
 };
 
 export type BulkStateTransition = {
@@ -54,6 +64,11 @@ export const getPostProcessingFlags = (
     scheduleEffects:
       (options.scheduleEffects ?? true) &&
       (plan?.mayEnterEffectState === true || (reducerMayOverrideState && hasStateEffects(store))),
+    collectReactionSurvivors:
+      options.scheduleReactions === true &&
+      plan?.hasReaction === true &&
+      (options.scheduleDespawnOn ?? true) &&
+      hasDespawnOnStates(store.metadata.despawnStateMask),
     scheduleTerminal:
       (options.scheduleTerminal ?? true) &&
       (plan?.mayEnterTerminalState === true || reducerMayOverrideState),
@@ -122,9 +137,13 @@ const postProcessIdentityRowsWithoutLifecycle = (
   return {
     dirtyRows,
     dirtyRowsPreviousStateCode: dirtyRows ? previousStateCode : undefined,
+    dirtyRowsPreviousStateCodes: undefined,
     bulkStateTransition: undefined,
     enteredByState: undefined,
     cleanupRemovesAcceptedRows,
+    despawnOnRemovesAcceptedRows: false,
+    acceptedRowsHaveFinalRemoval: false,
+    reactionSurvivorRows: undefined,
   };
 };
 
@@ -174,6 +193,26 @@ const createEnteredEffectRows = (
   return { indices: accepted as EntityIndex[], entries };
 };
 
+const rowNeedsDespawnLifecycle = (store: ColumnarActorStore, stateCode: number): boolean => {
+  const stateSlot = stateCode + 1;
+  return stateSlot >= 0 && store.metadata.despawnLifecycleStateMask[stateSlot] === 1;
+};
+
+const getSourceBucketStateCode = (
+  entity: EntityIndex,
+  index: number,
+  previousStateCodeForAccepted: number | undefined,
+  sourceStateCodesByAccepted: readonly number[] | undefined,
+  previousStateCodeByEntity: Int16Array,
+): number => {
+  if (previousStateCodeForAccepted !== undefined) return previousStateCodeForAccepted;
+  /* v8 ignore next 3 -- reduceAcceptedBatch provides per-row source states when there is no shared source state. */
+  if (sourceStateCodesByAccepted === undefined) {
+    return previousStateCodeByEntity[entity];
+  }
+  return sourceStateCodesByAccepted[index];
+};
+
 const tryPostProcessBulkStateTransition = (
   transaction: EntityDispatchTransaction | undefined,
   store: ColumnarActorStore,
@@ -218,9 +257,13 @@ const tryPostProcessBulkStateTransition = (
   return {
     dirtyRows: undefined,
     dirtyRowsPreviousStateCode: undefined,
+    dirtyRowsPreviousStateCodes: undefined,
     bulkStateTransition,
     enteredByState,
     cleanupRemovesAcceptedRows: false,
+    despawnOnRemovesAcceptedRows: false,
+    acceptedRowsHaveFinalRemoval: false,
+    reactionSurvivorRows: undefined,
   };
 };
 
@@ -232,6 +275,7 @@ export const postProcessAcceptedRows = (
   plan: EntityReducePlan | undefined,
   previousStateCodeForAccepted: number | undefined,
   knownValidStateCodeForAccepted: number | undefined,
+  sourceStateCodesByAccepted?: readonly number[],
 ): AcceptedRowsPostProcessing => {
   const bulkStateTransition = tryPostProcessBulkStateTransition(
     transaction,
@@ -259,8 +303,12 @@ export const postProcessAcceptedRows = (
   }
 
   let dirtyRows: EntityIndex[] | undefined;
+  let dirtyRowsPreviousStateCodes: number[] | undefined;
   let enteredByState: Map<number, EnteredEffectRows> | undefined;
   let cleanupRemovesAcceptedRows = false;
+  let despawnOnRemovesAcceptedRows = false;
+  let acceptedRowsHaveFinalRemoval = false;
+  let reactionSurvivorRows: EntityIndex[] | undefined;
   const canSkipCleanStateValidation = previousStateCodeForAccepted !== undefined;
   const stateCodeByEntity = store.stateCode;
   const previousStateCodeByEntity = store.prevStateCode;
@@ -271,7 +319,13 @@ export const postProcessAcceptedRows = (
   for (let index = 0; index < accepted.length; index += 1) {
     const entity = accepted[index];
     const stateCode = stateCodeByEntity[entity];
-    const previousStateCode = previousStateCodeForAccepted ?? previousStateCodeByEntity[entity];
+    const previousStateCode = getSourceBucketStateCode(
+      entity,
+      index,
+      previousStateCodeForAccepted,
+      sourceStateCodesByAccepted,
+      previousStateCodeByEntity,
+    );
     const dirty = stateCode !== previousStateCode;
     const knownValid =
       previousStateCodeForAccepted !== undefined &&
@@ -282,15 +336,35 @@ export const postProcessAcceptedRows = (
     let despawned = false;
     if (flags.scheduleDespawnOn && stateCode >= 0 && despawnStateMask[stateCode] === 1) {
       cleanupRemovesAcceptedRows = true;
+      despawnOnRemovesAcceptedRows = true;
       despawned = true;
+      if (flags.collectReactionSurvivors && !reactionSurvivorRows) {
+        reactionSurvivorRows = [];
+        for (let copyIndex = 0; copyIndex < index; copyIndex += 1) {
+          reactionSurvivorRows.push(accepted[copyIndex]);
+        }
+      }
       /* v8 ignore next -- defensive invariant: reduceBucket receives a transaction from prepareAction. */
       if (transaction) scheduleEntityDespawn(transaction, entity);
+
+      if (!rowNeedsDespawnLifecycle(store, stateCode)) {
+        acceptedRowsHaveFinalRemoval = true;
+        /* v8 ignore next -- defensive invariant: reduceBucket receives a transaction from prepareAction. */
+        if (transaction) scheduleDespawnRowHint(transaction, store, entity, previousStateCode);
+        continue;
+      }
+    } else {
+      reactionSurvivorRows?.push(entity);
     }
 
     if (!dirty) continue;
 
-    if (!dirtyRows) dirtyRows = [];
+    if (!dirtyRows) {
+      dirtyRows = [];
+      if (previousStateCodeForAccepted === undefined) dirtyRowsPreviousStateCodes = [];
+    }
     dirtyRows.push(entity);
+    dirtyRowsPreviousStateCodes?.push(previousStateCode);
 
     if (flags.scheduleTerminal && isTerminalStateCode(stateCode)) {
       cleanupRemovesAcceptedRows = true;
@@ -313,8 +387,12 @@ export const postProcessAcceptedRows = (
   return {
     dirtyRows,
     dirtyRowsPreviousStateCode: dirtyRows ? previousStateCodeForAccepted : undefined,
+    dirtyRowsPreviousStateCodes,
     bulkStateTransition: undefined,
     enteredByState,
     cleanupRemovesAcceptedRows,
+    despawnOnRemovesAcceptedRows,
+    acceptedRowsHaveFinalRemoval,
+    reactionSurvivorRows,
   };
 };

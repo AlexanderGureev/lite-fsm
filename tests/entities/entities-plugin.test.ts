@@ -4,7 +4,14 @@ import { describe, expect, it } from "vitest";
 
 import { definePlugin, defineStorageRuntime, HYDRATE_ACTION_TYPE, LiteFsmError, MachineManager } from "@lite-fsm/core";
 import { getNormalizedPlugin } from "@lite-fsm/core/internal/plugin";
-import type { FSMEvent, MachineConfig, MachineStore, Middleware } from "@lite-fsm/core";
+import type {
+  FSMEvent,
+  MachineConfig,
+  MachineStore,
+  Middleware,
+  StorageManagerContext,
+} from "@lite-fsm/core";
+import type { StorageDispatchContext } from "../../packages/core/src/runtime/kernel/storage";
 import {
   defineEntitySpawn,
   defineSpawnEvents,
@@ -26,6 +33,7 @@ import {
   createEntityRuntimeState,
   ensureActorCapacity,
   ensureEntityCapacity,
+  ENTITY_INIT_STATE_CODE,
   getEntityStateCode,
   getEntityStateName,
   getEntityRuntimeState,
@@ -39,11 +47,17 @@ import {
 } from "../../packages/entities/src/runtime/compile";
 import { invokeEntityEffect, resolveEntityEffectInvocations } from "../../packages/entities/src/runtime/effects";
 import { reduceEntityBucket } from "../../packages/entities/src/runtime/reduce";
+import { flushEntityLifecycleCleanup } from "../../packages/entities/src/runtime/reduce-despawn";
 import { collectEntityPublicReducerBatches } from "../../packages/entities/src/runtime/routing";
 import {
+  appendCleanupLifecycleIndex,
+  appendCleanupRemovalRow,
+  beginEntityCleanupScratch,
   consumeScheduledDespawns,
   createEntityDespawnOptions,
+  finishEntityCleanupScratch,
   prepareEntityTransaction,
+  scheduleDespawnRowHint,
   scheduleEntityDespawn,
   scheduleEntityEffectBatch,
   scheduleEntityReactionBatch,
@@ -199,6 +213,117 @@ const expectLiteFsmError = (run: () => unknown, code: LiteFsmError["code"]): Lit
   expect(caught).toBeInstanceOf(LiteFsmError);
   expect((caught as LiteFsmError).code).toBe(code);
   return caught as LiteFsmError;
+};
+
+type TestEntityRuntimeState = ReturnType<typeof getEntityRuntimeState>;
+
+const sortEntityIndices = (values: readonly EntityIndex[]): EntityIndex[] =>
+  [...values].sort((left, right) => left - right) as EntityIndex[];
+
+const createTestLifecycleContext = (dispatch: { readonly runtime: Map<string, unknown>; reportError(error: unknown): void }) => ({
+  manager: {
+    getDependencies: () => ({}),
+  } as StorageManagerContext<any>,
+  dispatch: dispatch as StorageDispatchContext,
+});
+
+const expectEntityRuntimeIndexesCoherent = (runtime: TestEntityRuntimeState): void => {
+  const entityStore = runtime.entityStore;
+  const expectedFreeList: EntityIndex[] = [];
+  const expectedIds: string[] = [];
+  const expectedEntitiesByGroup = new Map<string, EntityIndex[]>();
+
+  for (let entity = 0; entity < entityStore.capacity; entity += 1) {
+    const index = entity as EntityIndex;
+    const rows = runtime.actorRowsByEntity[index] ?? [];
+
+    if (entityStore.alive[index] !== 1) {
+      expectedFreeList.push(index);
+      expect(entityStore.ids[index]).toBe("");
+      expect(entityStore.groupTagByIndex[index]).toBe("");
+      expect(entityStore.groupTagPosition[index]).toBe(-1);
+      expect(rows).toEqual([]);
+      continue;
+    }
+
+    const id = entityStore.ids[index];
+    const groupTag = entityStore.groupTagByIndex[index];
+    const groupBucket = entityStore.entitiesByGroupTag[groupTag];
+    const groupPosition = entityStore.groupTagPosition[index];
+    expectedIds.push(id);
+    const expectedGroup = expectedEntitiesByGroup.get(groupTag) ?? [];
+    if (expectedGroup.length === 0) expectedEntitiesByGroup.set(groupTag, expectedGroup);
+    expectedGroup.push(index);
+
+    expect(id).not.toBe("");
+    expect(entityStore.indexById[id]).toBe(index);
+    expect(groupBucket?.[groupPosition]).toBe(index);
+    expect(rows.length).toBeGreaterThan(0);
+
+    for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+      const row = rows[rowIndex];
+      expect(row.entity).toBe(index);
+      expect(row.groupTag).toBe(groupTag);
+      expect(row.entityRowsPosition).toBe(rowIndex);
+      expect(row.store.presence[index]).toBe(1);
+      expect(runtime.actorRowsByGroupTag[groupTag]?.[row.groupRowsPosition]).toBe(row);
+    }
+  }
+
+  expect(entityStore.count).toBe(expectedIds.length);
+  expect(Object.keys(entityStore.indexById).sort()).toEqual([...expectedIds].sort());
+  expect(sortEntityIndices(entityStore.freeList)).toEqual(expectedFreeList);
+
+  for (const [groupTag, bucket] of Object.entries(entityStore.entitiesByGroupTag)) {
+    const expected = expectedEntitiesByGroup.get(groupTag) ?? [];
+    expect(sortEntityIndices(bucket)).toEqual(expected);
+    for (let position = 0; position < bucket.length; position += 1) {
+      expect(entityStore.groupTagPosition[bucket[position]]).toBe(position);
+    }
+  }
+
+  for (const store of Object.values(runtime.actorStores)) {
+    let presentRows = 0;
+
+    for (let entity = 0; entity < store.capacity; entity += 1) {
+      const index = entity as EntityIndex;
+      const rows = runtime.actorRowsByEntity[index] ?? [];
+
+      if (store.presence[index] !== 1) {
+        expect(store.statePosition[index]).toBe(-1);
+        expect(store.stateCode[index]).toBe(ENTITY_INIT_STATE_CODE);
+        expect(store.prevStateCode[index]).toBe(ENTITY_INIT_STATE_CODE);
+        expect(store.rowVersion[index]).toBe(0);
+        expect(rows.some((row) => row.store === store)).toBe(false);
+        continue;
+      }
+
+      presentRows += 1;
+      const stateCode = store.stateCode[index];
+      const statePosition = store.statePosition[index];
+      const row = rows.find((candidate) => candidate.store === store);
+      expect(entityStore.alive[index]).toBe(1);
+      expect(store.stateBuckets[stateCode]?.[statePosition]).toBe(index);
+      expect(row).toBeDefined();
+      expect(row?.entityRowsPosition).toBe(rows.indexOf(row!));
+      expect(runtime.actorRowsByGroupTag[row!.groupTag]?.[row!.groupRowsPosition]).toBe(row);
+    }
+
+    for (let stateCode = 0; stateCode < store.stateBuckets.length; stateCode += 1) {
+      const bucket = store.stateBuckets[stateCode];
+      for (let position = 0; position < bucket.length; position += 1) {
+        const entity = bucket[position];
+        expect(store.presence[entity]).toBe(1);
+        expect(store.stateCode[entity]).toBe(stateCode);
+        expect(store.statePosition[entity]).toBe(position);
+      }
+    }
+
+    expect(store.count).toBe(presentRows);
+    expect(store.publicSlice.count).toBe(store.count);
+    expect(store.publicSlice.capacity).toBe(store.capacity);
+    expect(store.publicSlice.version).toBe(store.version);
+  }
 };
 
 const emptyEntitySlice = {
@@ -2580,6 +2705,7 @@ describe("@lite-fsm/entities — этап 6 reduce pipeline и routing", () => {
       meta: { entityId: ["unit/dead", "other/a", "unit/stopped"] },
     } as never);
 
+    // covered by 5.2/5.5: routed single-entity delivery keeps missing/dead rows as no-op.
     expect(routedCalls).toEqual([]);
     expect(entityAccess<typeof machines>(manager).get("routedActor").hits[0 as EntityIndex]).toBe(0);
   });
@@ -2619,6 +2745,7 @@ describe("@lite-fsm/entities — этап 6 reduce pipeline и routing", () => {
 
     spawnStage6Entity(manager, "unit/a");
     manager.transition({ type: "STOP" });
+    // covered by 5.5: reducer observes default transition before post-processing.
     expect(observations).toEqual(["0->1:1"]);
     expect(store.state(entity)).toBe("READY");
 
@@ -2664,6 +2791,7 @@ describe("@lite-fsm/entities — этап 6 reduce pipeline и routing", () => {
     manager.transition({ type: "TICK" });
 
     const store = entityAccess<typeof machines>(manager).get("actor");
+    // covered by 5.2: unscoped multi-bucket source merges accepted rows in one scratch batch.
     expect(frames).toEqual([["unit/a", "unit/b", "unit/c"]]);
     expect(store.hits[0 as EntityIndex]).toBe(1);
     expect(store.hits[1 as EntityIndex]).toBe(1);
@@ -2702,6 +2830,7 @@ describe("@lite-fsm/entities — этап 6 reduce pipeline и routing", () => {
       targetSet: [],
     });
 
+    // covered by 5.2/5.6: single state bucket source reuses the bucket array.
     expect(batches).toHaveLength(1);
     expect(batches[0].indices).toBe(readyBucket);
     expect(batches[0].indices).not.toBe(actorStore.acceptedScratch);
@@ -2764,6 +2893,7 @@ describe("@lite-fsm/entities — этап 6 reduce pipeline и routing", () => {
 
     manager.transition({ type: "STOP", meta: { entityId: "unit/b" } } as never);
 
+    // covered by 5.4: stateBuckets and statePosition stay coherent after state transition.
     expect(actorStore.stateBuckets[readyCode]).toEqual([0, 2]);
     expect(actorStore.stateBuckets[stoppedCode]).toEqual([1]);
     expect(actorStore.statePosition[0]).toBe(0);
@@ -2799,6 +2929,7 @@ describe("@lite-fsm/entities — этап 6 reduce pipeline и routing", () => {
     manager.transition({ type: "PING", meta: { entityId: "unit/a" } } as never);
 
     const store = entityAccess<typeof machines>(manager).get("actor");
+    // covered by 5.2/5.4: routed entityId updates only accepted rows and their rowVersion.
     expect(store.hits[0 as EntityIndex]).toBe(1);
     expect(store.hits[1 as EntityIndex]).toBe(0);
     expect(actorStore.rowVersion[0]).toBeGreaterThan(beforeA);
@@ -2830,6 +2961,7 @@ describe("@lite-fsm/entities — этап 6 reduce pipeline и routing", () => {
     spawnStage6Entity(manager, "unit/c");
     manager.transition({ type: "PING", meta: { entityId: ["unit/c", "unit/a", "unit/c", "unit/b"] } } as never);
 
+    // covered by 5.2: routed entityId[] preserves first occurrence order.
     expect(delivered).toEqual(["unit/c", "unit/a", "unit/b"]);
   });
 
@@ -2882,6 +3014,7 @@ describe("@lite-fsm/entities — этап 6 reduce pipeline и routing", () => {
 
     const store = entityAccess<typeof machines>(manager).get("entityActor");
     const instanceRows = Object.values(manager.getState().instanceActor);
+    // covered by 5.2: routed groupTag delivers only matching entity rows.
     expect(store.hits[0 as EntityIndex]).toBe(1);
     expect(store.hits[1 as EntityIndex]).toBe(0);
     expect(instanceRows).toHaveLength(1);
@@ -3256,6 +3389,7 @@ describe("@lite-fsm/entities — despawn cleanup этап 2 indexed ownership", 
 
     expect(removeEntityRecords(runtime, [target])).toBe(1);
 
+    // covered by 5.4: full cleanup removes actor ownership, state buckets and entity indexes coherently.
     expect(runtime.actorRowsByEntity[target]).toEqual([]);
     expect(runtime.actorRowsByEntity[survivor]).toHaveLength(2);
     expect(runtime.actorRowsByGroupTag.unit.map((row) => row.entity).sort()).toEqual([survivor, survivor]);
@@ -3272,6 +3406,191 @@ describe("@lite-fsm/entities — despawn cleanup этап 2 indexed ownership", 
       expect(store.statePosition[survivor]).toBe(0);
     }
     expect(removeEntityRecords(runtime, [target])).toBe(0);
+    expectEntityRuntimeIndexesCoherent(runtime);
+  });
+
+  it("scheduled full-entity cleanup не делает per-row pop из actorRowsByEntity", () => {
+    const actorA = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { EXPIRE: "EXPIRED" }, EXPIRED: {} },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+      despawnOn: "EXPIRED",
+    } as const;
+    const actorB = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { EXPIRE: "EXPIRED" }, EXPIRED: {} },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+      despawnOn: "EXPIRED",
+    } as const;
+    const machines = { actorA, actorB };
+    const spawnEvents = createCleanupStage2SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_CLEANUP_STAGE2: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: { actorA: {}, actorB: {} },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+
+    spawnCleanupStage2Entity(manager, "unit/target");
+    spawnCleanupStage2Entity(manager, "unit/survivor");
+
+    const runtime = getEntityRuntimeState(manager.entities());
+    const target = 0 as EntityIndex;
+    const survivor = 1 as EntityIndex;
+    const entityRows = runtime.actorRowsByEntity[target];
+    const removedRows = entityRows.slice();
+    const originalPop = entityRows.pop;
+    entityRows.pop = () => {
+      throw new Error("full-entity cleanup must not pop actorRowsByEntity rows");
+    };
+
+    try {
+      expect(() =>
+        manager.transition({ type: "EXPIRE", meta: { entityId: "unit/target" } } as never),
+      ).not.toThrow();
+    } finally {
+      entityRows.pop = originalPop;
+    }
+
+    // covered by 5.4: full-entity cleanup leaves entity ownership array untouched until entity phase replaces it.
+    expect(entityRows).toHaveLength(2);
+    expect(runtime.actorRowsByEntity[target]).toEqual([]);
+    expect(runtime.actorRowsByEntity[target]).not.toBe(entityRows);
+    for (const row of removedRows) {
+      expect(row.entityRowsPosition).toBe(-1);
+      expect(row.groupRowsPosition).toBe(-1);
+    }
+    expect(runtime.actorRowsByEntity[survivor]).toHaveLength(2);
+    expect(runtime.actorRowsByGroupTag.unit.map((row) => row.entity).sort()).toEqual([survivor, survivor]);
+    expect(runtime.entityStore.freeList).toEqual([target]);
+    expectEntityRuntimeIndexesCoherent(runtime);
+  });
+
+  it("explicit transition.despawn(id) использует full-entity cleanup fast path и дедуплицирует entity", () => {
+    const despawnerActor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { DESPAWN_ID: "ACTIVE" }, ACTIVE: {} },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+      effects: {
+        ACTIVE: ({ transition }: { readonly transition: any }) => {
+          transition.despawn("unit/target");
+          transition.despawn("unit/target");
+          transition.despawn("missing");
+        },
+      },
+    } as const;
+    const siblingActor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: {} },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+    } as const;
+    const machines = { despawnerActor, siblingActor };
+    const spawnEvents = createCleanupStage2SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_CLEANUP_STAGE2: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: { despawnerActor: {}, siblingActor: {} },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+
+    spawnCleanupStage2Entity(manager, "unit/target");
+    spawnCleanupStage2Entity(manager, "unit/survivor");
+
+    const runtime = getEntityRuntimeState(manager.entities());
+    const target = 0 as EntityIndex;
+    const entityRows = runtime.actorRowsByEntity[target];
+    const removedRows = entityRows.slice();
+    const originalPop = entityRows.pop;
+    entityRows.pop = () => {
+      throw new Error("explicit id despawn must not pop actorRowsByEntity rows");
+    };
+
+    try {
+      expect(() =>
+        manager.transition({ type: "DESPAWN_ID", meta: { entityId: "unit/target" } } as never),
+      ).not.toThrow();
+    } finally {
+      entityRows.pop = originalPop;
+    }
+
+    // covered by 5.1/5.4: explicit id despawn uses scheduled full-entity cleanup and duplicate schedules are no-op.
+    expect(runtime.actorRowsByEntity[target]).toEqual([]);
+    expect(runtime.entityStore.freeList).toEqual([target]);
+    expect(runtime.entityStore.indexById["unit/target"]).toBeUndefined();
+    expect(runtime.entityStore.indexById["unit/survivor"]).toBe(1);
+    for (const row of removedRows) expect(row.entityRowsPosition).toBe(-1);
+    expectEntityRuntimeIndexesCoherent(runtime);
+  });
+
+  it("explicit transition.despawn(self.indices) использует full-entity cleanup fast path", () => {
+    const despawnerActor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: { DESPAWN_SCOPE: "ACTIVE" }, ACTIVE: {} },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+      effects: {
+        ACTIVE: ({ self, transition }: { readonly self: { readonly indices: readonly EntityIndex[] }; readonly transition: any }) => {
+          transition.despawn(self.indices);
+          transition.despawn(self.indices);
+        },
+      },
+    } as const;
+    const siblingActor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "READY" }, READY: {} },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+    } as const;
+    const machines = { despawnerActor, siblingActor };
+    const spawnEvents = createCleanupStage2SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_CLEANUP_STAGE2: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: { despawnerActor: {}, siblingActor: {} },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+
+    spawnCleanupStage2Entity(manager, "unit/target");
+    spawnCleanupStage2Entity(manager, "unit/survivor");
+
+    const runtime = getEntityRuntimeState(manager.entities());
+    const target = 0 as EntityIndex;
+    const entityRows = runtime.actorRowsByEntity[target];
+    const removedRows = entityRows.slice();
+    const originalPop = entityRows.pop;
+    entityRows.pop = () => {
+      throw new Error("explicit self.indices despawn must not pop actorRowsByEntity rows");
+    };
+
+    try {
+      expect(() =>
+        manager.transition({ type: "DESPAWN_SCOPE", meta: { entityId: "unit/target" } } as never),
+      ).not.toThrow();
+    } finally {
+      entityRows.pop = originalPop;
+    }
+
+    // covered by 5.1/5.4: explicit self.indices despawn removes full entity through optimized cleanup.
+    expect(runtime.actorRowsByEntity[target]).toEqual([]);
+    expect(runtime.entityStore.freeList).toEqual([target]);
+    for (const row of removedRows) expect(row.entityRowsPosition).toBe(-1);
+    expectEntityRuntimeIndexesCoherent(runtime);
   });
 
   it("batch removal возвращает 0 если row не принадлежит requested store", () => {
@@ -3403,6 +3722,7 @@ describe("@lite-fsm/entities — despawn cleanup этап 2 indexed ownership", 
     expect(removeActorRowsForStore(runtime, store, removedRows)).toBe(2);
     expect(removeEntityRecords(runtime, [0 as EntityIndex, 2 as EntityIndex])).toBe(2);
 
+    // covered by 5.4: actor/entity count, version and publicSlice update after removal.
     expect(store.count).toBe(1);
     expect(runtime.entityStore.count).toBe(1);
     expect(store.version).toBeGreaterThan(beforeStoreVersion);
@@ -3438,6 +3758,302 @@ describe("@lite-fsm/entities — despawn cleanup этап 3 lifecycle pipeline",
   ) => {
     manager.transition({ type: "SPAWN_CLEANUP_STAGE3", payload: { id, groupTag, hp } });
   };
+
+  const installCleanupMapAllocationCounter = () => {
+    const OriginalMap = globalThis.Map;
+    let mapAllocations = 0;
+    const CountingMap = new Proxy(OriginalMap, {
+      construct(target, args, newTarget) {
+        mapAllocations += 1;
+        return Reflect.construct(target, args, newTarget);
+      },
+    });
+
+    Object.defineProperty(globalThis, "Map", { configurable: true, writable: true, value: CountingMap });
+    return {
+      get mapAllocations() {
+        return mapAllocations;
+      },
+      restore() {
+        Object.defineProperty(globalThis, "Map", { configurable: true, writable: true, value: OriginalMap });
+      },
+    };
+  };
+
+  it("cleanup scratch переиспользует batch arrays и изолирует nested frame", () => {
+    const actor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "ACTIVE" }, ACTIVE: { EXPIRE: "EXPIRED" }, EXPIRED: {} },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+      despawnOn: "EXPIRED",
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createCleanupStage3SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_CLEANUP_STAGE3: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: { actor: {} },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+    spawnCleanupStage3Entity(manager, "unit/a");
+    spawnCleanupStage3Entity(manager, "unit/b");
+
+    const runtime = getEntityRuntimeState(manager.entities());
+    const store = runtime.actorStores.actor;
+    const transaction = prepareEntityTransaction({ runtime: new Map<string, unknown>() }, runtime);
+    const firstRow = runtime.actorRowsByEntity[0][0];
+    const secondRow = runtime.actorRowsByEntity[1][0];
+
+    const outer = beginEntityCleanupScratch(transaction);
+    appendCleanupRemovalRow(outer, store, firstRow, store.stateCode[0]);
+    appendCleanupLifecycleIndex(outer, store, 0 as EntityIndex);
+    outer.entities.push(0 as EntityIndex);
+
+    const removalBatch = outer.removalBatchesByStoreId[store.storeId]!;
+    const lifecycleBatch = outer.lifecycleBatchesByStoreId[store.storeId]!;
+    const rows = removalBatch.rows;
+    const bucketStateCodes = removalBatch.bucketStateCodes;
+    const indices = lifecycleBatch.indices;
+
+    const nested = beginEntityCleanupScratch(transaction);
+    expect(nested).not.toBe(outer);
+    expect(nested.removalTouchedStoreIds).toEqual([]);
+    expect(nested.lifecycleTouchedStoreIds).toEqual([]);
+    appendCleanupRemovalRow(nested, store, secondRow, undefined);
+    finishEntityCleanupScratch(transaction, nested);
+
+    // covered by 5.6: nested cleanup frame does not reuse active outer batch arrays.
+    expect(removalBatch.rows).toBe(rows);
+    expect(removalBatch.bucketStateCodes).toBe(bucketStateCodes);
+    expect(lifecycleBatch.indices).toBe(indices);
+    expect(rows).toEqual([firstRow]);
+    expect(bucketStateCodes).toEqual([store.stateCode[0]]);
+    expect(indices).toEqual([0]);
+
+    finishEntityCleanupScratch(transaction, outer);
+
+    const reused = beginEntityCleanupScratch(transaction);
+    appendCleanupRemovalRow(reused, store, secondRow, undefined);
+    appendCleanupLifecycleIndex(reused, store, 1 as EntityIndex);
+
+    // covered by 5.6: cleanup frame reset keeps arrays pooled but clears rows, indices and bucket hints.
+    expect(reused).toBe(outer);
+    expect(reused.removalBatchesByStoreId[store.storeId]).toBe(removalBatch);
+    expect(reused.lifecycleBatchesByStoreId[store.storeId]).toBe(lifecycleBatch);
+    expect(removalBatch.rows).toBe(rows);
+    expect(removalBatch.bucketStateCodes).toBe(bucketStateCodes);
+    expect(lifecycleBatch.indices).toBe(indices);
+    expect(rows).toEqual([secondRow]);
+    expect(bucketStateCodes).toEqual([]);
+    expect(removalBatch.bucketStateCodesActive).toBe(false);
+    expect(indices).toEqual([1]);
+
+    finishEntityCleanupScratch(transaction, reused);
+  });
+
+  it("cleanup scratch сохраняет active nested frame при out-of-order finish", () => {
+    const runtime = createEntityRuntimeState(
+      [{ key: "actor", kind: "entity", data: compileEntityTemplate("actor", createEntityTemplate()) }],
+      {} as never,
+    );
+    const transaction = prepareEntityTransaction({ runtime: new Map<string, unknown>() }, runtime);
+
+    const outer = beginEntityCleanupScratch(transaction);
+    const nested = beginEntityCleanupScratch(transaction);
+
+    finishEntityCleanupScratch(transaction, outer);
+    finishEntityCleanupScratch(transaction, nested);
+    finishEntityCleanupScratch(transaction, outer);
+
+    const reused = beginEntityCleanupScratch(transaction);
+
+    // covered by 5.6: non-top cleanup finish does not rewind the active nested frame.
+    expect(reused).toBe(outer);
+    finishEntityCleanupScratch(transaction, reused);
+  });
+
+  it("ошибка collect cleanup закрывает active scratch frame и очищает hints", () => {
+    const actor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "ACTIVE" }, ACTIVE: { EXPIRE: "EXPIRED" }, EXPIRED: {} },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+      despawnOn: "EXPIRED",
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createCleanupStage3SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_CLEANUP_STAGE3: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: { actor: {} },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+    spawnCleanupStage3Entity(manager, "unit/a");
+
+    const runtime = getEntityRuntimeState(manager.entities());
+    const store = runtime.actorStores.actor;
+    const primingTransaction = prepareEntityTransaction({ runtime: new Map<string, unknown>() }, runtime);
+    const primed = beginEntityCleanupScratch(primingTransaction);
+    finishEntityCleanupScratch(primingTransaction, primed);
+
+    const dispatch = {
+      runtime: new Map<string, unknown>(),
+      reportError(error: unknown) {
+        throw error;
+      },
+    };
+    const transaction = prepareEntityTransaction(dispatch, runtime);
+    const originalRows = runtime.actorRowsByEntity[0];
+    const throwingRow = Object.defineProperty(
+      {
+        entity: 0 as EntityIndex,
+        groupTag: "unit",
+        entityRowsPosition: 0,
+        groupRowsPosition: 0,
+      },
+      "store",
+      {
+        get() {
+          throw new Error("collect failed");
+        },
+      },
+    );
+
+    expect(scheduleEntityDespawn(transaction, 0 as EntityIndex)).toBe(true);
+    expect(scheduleDespawnRowHint(transaction, store, 0 as EntityIndex, store.metadata.stateCodeByName.ACTIVE)).toBe(true);
+    runtime.actorRowsByEntity[0] = [throwingRow as never];
+
+    try {
+      expect(() =>
+        flushEntityLifecycleCleanup(
+          runtime,
+          transaction,
+          createTestLifecycleContext(dispatch),
+          "public",
+          undefined,
+        ),
+      ).toThrow("collect failed");
+    } finally {
+      runtime.actorRowsByEntity[0] = originalRows;
+    }
+
+    const nextTransaction = prepareEntityTransaction({ runtime: new Map<string, unknown>() }, runtime);
+    const next = beginEntityCleanupScratch(nextTransaction);
+
+    // covered by 5.6: early collect errors still close the active cleanup frame before the next prepare.
+    expect(transaction.despawnRowHints).toEqual([]);
+    expect(next).toBe(primed);
+    expect(next.entities).toEqual([]);
+    expect(next.removalTouchedStoreIds).toEqual([]);
+    expect(next.lifecycleTouchedStoreIds).toEqual([]);
+
+    finishEntityCleanupScratch(nextTransaction, next);
+  });
+
+  it("cleanup plan hot path не создает Map batch plan", () => {
+    const actor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "ACTIVE" }, ACTIVE: { EXPIRE: "EXPIRED" }, EXPIRED: {} },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+      despawnOn: "EXPIRED",
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createCleanupStage3SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_CLEANUP_STAGE3: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: { actor: {} },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+    spawnCleanupStage3Entity(manager, "unit/a");
+    spawnCleanupStage3Entity(manager, "unit/b");
+
+    const runtime = getEntityRuntimeState(manager.entities());
+    const dispatch = {
+      runtime: new Map<string, unknown>(),
+      reportError(error: unknown) {
+        throw error;
+      },
+    };
+    const transaction = prepareEntityTransaction(dispatch, runtime);
+    expect(scheduleEntityDespawn(transaction, 0 as EntityIndex)).toBe(true);
+    expect(scheduleEntityDespawn(transaction, 1 as EntityIndex)).toBe(true);
+
+    const source = readFileSync(join(rootDir, "packages/entities/src/runtime/reduce-despawn.ts"), "utf8");
+    const allocations = installCleanupMapAllocationCounter();
+    let mapAllocations = 0;
+    try {
+      flushEntityLifecycleCleanup(
+        runtime,
+        transaction,
+        createTestLifecycleContext(dispatch),
+        "public",
+        undefined,
+      );
+      mapAllocations = allocations.mapAllocations;
+    } finally {
+      allocations.restore();
+    }
+
+    // covered by 5.6: cleanup plan batches are indexed by storeId scratch arrays, not Map<string, ...>.
+    expect(source).not.toContain("Map<string, ActorRowRemovalBatch>");
+    expect(source).not.toContain("new Map<string");
+    expect(mapAllocations).toBe(0);
+    expect(runtime.actorStores.actor.count).toBe(0);
+    expect(runtime.entityStore.count).toBe(0);
+  });
+
+  it("повторный dispatch очищает cleanup scratch rows и bucket hints", () => {
+    const actor = {
+      storage: "entity",
+      config: { __INIT: { ENTITY_SPAWNED: "ACTIVE" }, ACTIVE: { EXPIRE: "EXPIRED" }, EXPIRED: {} },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+      despawnOn: "EXPIRED",
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createCleanupStage3SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_CLEANUP_STAGE3: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: { actor: {} },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+    const store = entityAccess<typeof machines>(manager).get("actor");
+
+    spawnCleanupStage3Entity(manager, "unit/a");
+    spawnCleanupStage3Entity(manager, "unit/b");
+    manager.transition({ type: "EXPIRE", meta: { entityId: "unit/a" } } as never);
+    spawnCleanupStage3Entity(manager, "unit/c");
+    manager.transition({ type: "EXPIRE", meta: { entityId: "unit/b" } } as never);
+
+    const runtime = getEntityRuntimeState(manager.entities());
+    const reusedEntity = runtime.entityStore.indexById["unit/c"];
+
+    // covered by 5.6: stale cleanup rows and hints from the previous dispatch do not remove reused entities.
+    expect(reusedEntity).toBe(0);
+    expect(store.count).toBe(1);
+    expect(store.has(reusedEntity)).toBe(true);
+    expect(store.state(reusedEntity)).toBe("ACTIVE");
+    expect(runtime.entityStore.indexById["unit/a"]).toBeUndefined();
+    expect(runtime.entityStore.indexById["unit/b"]).toBeUndefined();
+    expect(runtime.entityStore.indexById["unit/c"]).toBe(reusedEntity);
+    expectEntityRuntimeIndexesCoherent(runtime);
+  });
 
   it("fast path удаляет actor без ENTITY_DESPAWNED work и не очищает runtime columns удаленной строки", () => {
     const subscriberSnapshots: Array<{ readonly count: number; readonly has: boolean }> = [];
@@ -3480,10 +4096,242 @@ describe("@lite-fsm/entities — despawn cleanup этап 3 lifecycle pipeline",
     spawnCleanupStage3Entity(manager, "unit/a", 42);
     manager.transition({ type: "EXPIRE" });
 
+    // covered by 5.3/5.5: no-lifecycle despawn is removed before subscribers observe the result.
     expect(subscriberSnapshots).toEqual([{ count: 0, has: false }]);
     expect(store.has(0 as EntityIndex)).toBe(false);
     expect(store.hp[0 as EntityIndex]).toBe(42);
     expect(getEntityRuntimeState(manager.entities()).actorRowsByEntity[0]).toEqual([]);
+  });
+
+  it("despawnOn final-removal удаляет all-despawn batch из source bucket hint", () => {
+    const actor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "ACTIVE" },
+        ACTIVE: { EXPIRE: "EXPIRED" },
+        EXPIRED: {},
+      },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+      despawnOn: "EXPIRED",
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createCleanupStage3SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_CLEANUP_STAGE3: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: { actor: {} },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+    const runtime = getEntityRuntimeState(manager.entities());
+    const store = runtime.actorStores.actor;
+
+    spawnCleanupStage3Entity(manager, "unit/a");
+    spawnCleanupStage3Entity(manager, "unit/b");
+    manager.transition({ type: "EXPIRE" });
+
+    // covered by 5.1/5.2/5.4: all final-removal despawnOn rows skip target bucket move and cleanup removes source bucket rows.
+    expect(store.count).toBe(0);
+    expect(store.stateBuckets[store.metadata.stateCodeByName.ACTIVE]).toEqual([]);
+    expect(store.stateBuckets[store.metadata.stateCodeByName.EXPIRED]).toEqual([]);
+    expect(runtime.actorRowsByEntity[0]).toEqual([]);
+    expect(runtime.actorRowsByEntity[1]).toEqual([]);
+    expect(runtime.entityStore.alive[0]).toBe(0);
+    expect(runtime.entityStore.alive[1]).toBe(0);
+  });
+
+  it("mixed despawnOn final-removal сохраняет survivors и original reaction получает только их", () => {
+    const originalReactions: string[] = [];
+    const actor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "ACTIVE" },
+        ACTIVE: { PROTECT: "SAFE", EXPIRE: "EXPIRED" },
+        SAFE: { EXPIRE: "SAFE" },
+        EXPIRED: {},
+      },
+      initialState: "__INIT",
+      initialContext: {},
+      spawnSchema: {},
+      despawnOn: "EXPIRED",
+      reactions: {
+        EXPIRE: ({ self }: { readonly self: any }) => {
+          originalReactions.push(self.indices.map((entity: EntityIndex) => self.entityId(entity)).join(","));
+        },
+      },
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createCleanupStage3SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_CLEANUP_STAGE3: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: { actor: {} },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+    const store = entityAccess<typeof machines>(manager).get("actor");
+
+    spawnCleanupStage3Entity(manager, "unit/a");
+    spawnCleanupStage3Entity(manager, "unit/b");
+    spawnCleanupStage3Entity(manager, "unit/c");
+    manager.transition({ type: "PROTECT", meta: { entityId: "unit/b" } } as never);
+    manager.transition({ type: "EXPIRE" });
+
+    // covered by 5.2/5.5: mixed final-removal original reaction receives survivor rows only.
+    expect(originalReactions).toEqual(["unit/b"]);
+    expect(store.count).toBe(1);
+    expect(store.has(0 as EntityIndex)).toBe(false);
+    expect(store.has(1 as EntityIndex)).toBe(true);
+    expect(store.has(2 as EntityIndex)).toBe(false);
+  });
+
+  it("reducer override live -> despawn удаляет только overridden rows", () => {
+    const actor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "ACTIVE" },
+        ACTIVE: { EXPIRE_MARKED: "ACTIVE" },
+        EXPIRED: {},
+      },
+      initialState: "__INIT",
+      initialContext: { hp: i32() },
+      spawnSchema: { hp: i32() },
+      despawnOn: "EXPIRED",
+      reducer(
+        _slice: unknown,
+        action: { readonly type: string },
+        { self, payloadFor }: { readonly self: any; payloadFor(entity: EntityIndex): { readonly hp: number } },
+      ) {
+        for (const entity of self.indices) {
+          if (action.type === "ENTITY_SPAWNED") self.hp[entity] = payloadFor(entity).hp;
+          if (action.type === "EXPIRE_MARKED" && self.hp[entity] <= 0) {
+            self.stateCode[entity] = self.states.EXPIRED;
+          }
+        }
+      },
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createCleanupStage3SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_CLEANUP_STAGE3: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: { actor: { hp: payload.hp ?? 0 } },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+    const store = entityAccess<typeof machines>(manager).get("actor");
+
+    spawnCleanupStage3Entity(manager, "unit/dead", 0);
+    spawnCleanupStage3Entity(manager, "unit/live", 5);
+    manager.transition({ type: "EXPIRE_MARKED" });
+
+    // covered by 5.2/5.5: despawnOn classification uses reducer final state after identity default transition.
+    expect(store.has(0 as EntityIndex)).toBe(false);
+    expect(store.has(1 as EntityIndex)).toBe(true);
+    expect(store.state(1 as EntityIndex)).toBe("ACTIVE");
+  });
+
+  it("identity despawnOn с survivor reaction использует owned reaction scope", () => {
+    const originalReactions: string[] = [];
+    const actor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "ACTIVE" },
+        ACTIVE: { TICK: "ACTIVE" },
+        EXPIRED: {},
+      },
+      initialState: "__INIT",
+      initialContext: { hp: i32() },
+      spawnSchema: { hp: i32() },
+      despawnOn: "EXPIRED",
+      reducer(
+        _slice: unknown,
+        action: { readonly type: string },
+        { self, payloadFor }: { readonly self: any; payloadFor(entity: EntityIndex): { readonly hp: number } },
+      ) {
+        for (const entity of self.indices) {
+          if (action.type === "ENTITY_SPAWNED") self.hp[entity] = payloadFor(entity).hp;
+          if (action.type === "TICK" && self.hp[entity] <= 0) self.stateCode[entity] = self.states.EXPIRED;
+        }
+      },
+      reactions: {
+        TICK: ({ self }: { readonly self: any }) => {
+          originalReactions.push(self.indices.map((entity: EntityIndex) => self.entityId(entity)).join(","));
+        },
+      },
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createCleanupStage3SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_CLEANUP_STAGE3: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: { actor: { hp: payload.hp ?? 0 } },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+    const store = entityAccess<typeof machines>(manager).get("actor");
+
+    spawnCleanupStage3Entity(manager, "unit/dead", 0);
+    spawnCleanupStage3Entity(manager, "unit/live", 5);
+    manager.transition({ type: "TICK" });
+
+    // covered by 5.5/5.6: identity batches with cleanup survivors own reaction indices before cleanup mutates rows.
+    expect(originalReactions).toEqual(["unit/live"]);
+    expect(store.has(0 as EntityIndex)).toBe(false);
+    expect(store.has(1 as EntityIndex)).toBe(true);
+  });
+
+  it("reducer override despawn default -> live отменяет despawnOn для final state", () => {
+    const actor = {
+      storage: "entity",
+      config: {
+        __INIT: { ENTITY_SPAWNED: "ACTIVE" },
+        ACTIVE: { EXPIRE: "EXPIRED" },
+        EXPIRED: {},
+      },
+      initialState: "__INIT",
+      initialContext: { hp: i32() },
+      spawnSchema: { hp: i32() },
+      despawnOn: "EXPIRED",
+      reducer(
+        _slice: unknown,
+        action: { readonly type: string },
+        { self, payloadFor }: { readonly self: any; payloadFor(entity: EntityIndex): { readonly hp: number } },
+      ) {
+        for (const entity of self.indices) {
+          if (action.type === "ENTITY_SPAWNED") self.hp[entity] = payloadFor(entity).hp;
+          if (action.type === "EXPIRE" && self.hp[entity] > 0) {
+            self.stateCode[entity] = self.prevStateCode[entity];
+          }
+        }
+      },
+    } as const;
+    const machines = { actor };
+    const spawnEvents = createCleanupStage3SpawnEvents();
+    const spawn = defineEntitySpawn(machines, spawnEvents)({
+      SPAWN_CLEANUP_STAGE3: (payload) => ({
+        id: payload.id,
+        groupTag: payload.groupTag,
+        actors: { actor: { hp: payload.hp ?? 0 } },
+      }),
+    });
+    const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+    const store = entityAccess<typeof machines>(manager).get("actor");
+
+    spawnCleanupStage3Entity(manager, "unit/dead", 0);
+    spawnCleanupStage3Entity(manager, "unit/live", 5);
+    manager.transition({ type: "EXPIRE" });
+
+    // covered by 5.2/5.5: reducer final state overrides despawn default transition before classification.
+    expect(store.has(0 as EntityIndex)).toBe(false);
+    expect(store.has(1 as EntityIndex)).toBe(true);
+    expect(store.state(1 as EntityIndex)).toBe("ACTIVE");
   });
 
   it("stale scheduled cleanup entry остается no-op", () => {
@@ -3502,6 +4350,7 @@ describe("@lite-fsm/entities — despawn cleanup этап 3 lifecycle pipeline",
       manager: {},
     } as never);
 
+    // covered by 5.1: stale scheduled despawn remains a no-op.
     expect(result).toEqual({ type: "skip" });
     expect(transaction.scheduledDespawns).toEqual([]);
     expect(runtime.entityStore.count).toBe(0);
@@ -3509,6 +4358,8 @@ describe("@lite-fsm/entities — despawn cleanup этап 3 lifecycle pipeline",
 
   it("ENTITY_DESPAWNED reducer читает columns и получает только lifecycle rows", () => {
     const lifecycleReads: string[] = [];
+    const lifecycleBucketReads: boolean[] = [];
+    let runtime: ReturnType<typeof getEntityRuntimeState> | undefined;
     const actor = {
       storage: "entity",
       config: {
@@ -3532,6 +4383,10 @@ describe("@lite-fsm/entities — despawn cleanup этап 3 lifecycle pipeline",
           if (action.type === "ENTITY_SPAWNED") self.hp[entity] = payloadFor(entity).hp;
           if (action.type === "ENTITY_DESPAWNED") {
             lifecycleReads.push(`${self.entityId(entity)}:${self.hp[entity]}:${self.has(entity)}`);
+            const store = runtime!.actorStores.actor;
+            lifecycleBucketReads.push(
+              store.stateBuckets[store.metadata.stateCodeByName.EXPIRED].includes(entity),
+            );
           }
         }
       },
@@ -3546,6 +4401,7 @@ describe("@lite-fsm/entities — despawn cleanup этап 3 lifecycle pipeline",
       }),
     });
     const manager = MachineManager(machines, { plugins: [entitiesPlugin({ spawn })] as const });
+    runtime = getEntityRuntimeState(manager.entities());
     const store = entityAccess<typeof machines>(manager).get("actor");
 
     spawnCleanupStage3Entity(manager, "unit/a", 11);
@@ -3553,7 +4409,9 @@ describe("@lite-fsm/entities — despawn cleanup этап 3 lifecycle pipeline",
     manager.transition({ type: "IGNORE", meta: { entityId: "unit/b" } } as never);
     manager.transition({ type: "EXPIRE" });
 
+    // covered by 5.3/5.5: ENTITY_DESPAWNED reducer sees lifecycle rows and columns before removal.
     expect(lifecycleReads).toEqual(["unit/a:11:true"]);
+    expect(lifecycleBucketReads).toEqual([true]);
     expect(store.has(0 as EntityIndex)).toBe(false);
     expect(store.has(1 as EntityIndex)).toBe(false);
   });
@@ -3595,6 +4453,7 @@ describe("@lite-fsm/entities — despawn cleanup этап 3 lifecycle pipeline",
     spawnCleanupStage3Entity(manager, "unit/a");
     manager.transition({ type: "EXPIRE" });
 
+    // covered by 5.3/5.5: ENTITY_DESPAWNED reaction reads columns before physical cleanup.
     expect(lifecycleReactions).toEqual(["unit/a:13"]);
     expect(store.has(0 as EntityIndex)).toBe(false);
   });
@@ -3651,13 +4510,28 @@ describe("@lite-fsm/entities — despawn cleanup этап 3 lifecycle pipeline",
     const access = entityAccess<typeof machines>(manager);
 
     spawnCleanupStage3Entity(manager, "unit/a");
-    manager.transition({ type: "EXPIRE" });
+    const runtime = getEntityRuntimeState(manager.entities());
+    const entityRows = runtime.actorRowsByEntity[0];
+    const removedRows = entityRows.slice();
+    const originalPop = entityRows.pop;
+    entityRows.pop = () => {
+      throw new Error("mixed lifecycle cleanup must not pop actorRowsByEntity rows");
+    };
 
+    try {
+      manager.transition({ type: "EXPIRE" });
+    } finally {
+      entityRows.pop = originalPop;
+    }
+
+    // covered by 5.3/5.5: sibling lifecycle and non-lifecycle rows stay visible until cleanup phase.
     expect(errors).toEqual([]);
     expect(observations).toEqual(["unit/a:true:true:77"]);
     expect(access.get("lifecycleActor").has(0 as EntityIndex)).toBe(false);
     expect(access.get("fastActor").has(0 as EntityIndex)).toBe(false);
-    expect(getEntityRuntimeState(manager.entities()).entityStore.alive[0]).toBe(0);
+    for (const row of removedRows) expect(row.entityRowsPosition).toBe(-1);
+    expect(runtime.entityStore.alive[0]).toBe(0);
+    expectEntityRuntimeIndexesCoherent(runtime);
   });
 
   it("original event reaction получает только rows, не удаленные через despawnOn", () => {
@@ -3701,6 +4575,7 @@ describe("@lite-fsm/entities — despawn cleanup этап 3 lifecycle pipeline",
     manager.transition({ type: "SAFE", meta: { entityId: "unit/b" } } as never);
     manager.transition({ type: "EXPIRE" });
 
+    // covered by 5.5: original event reaction receives survivor rows only.
     expect(lifecycleReactions).toEqual(["unit/a"]);
     expect(originalReactions).toEqual(["unit/b"]);
   });
@@ -3739,6 +4614,7 @@ describe("@lite-fsm/entities — despawn cleanup этап 3 lifecycle pipeline",
     const beforeVersion = runtime.actorStores.actor.version;
     manager.transition({ type: "EXPIRE" });
 
+    // covered by 5.3/5.5: empty ENTITY_DESPAWNED edge without reducer/reaction is not cleanup work.
     expect(runtime.actorStores.actor.version).toBeGreaterThan(beforeVersion);
     expect(effects).toEqual([]);
     expect(entityAccess<typeof machines>(manager).get("actor").has(0 as EntityIndex)).toBe(false);
@@ -3782,6 +4658,7 @@ describe("@lite-fsm/entities — despawn cleanup этап 3 lifecycle pipeline",
     spawnCleanupStage3Entity(manager, "unit/a");
     manager.transition({ type: "EXPIRE" });
 
+    // covered by 5.5: effects after ENTITY_DESPAWNED cleanup transition are not part of cleanup contract.
     expect(reactions).toEqual(["unit/a"]);
     expect(effects).toEqual([]);
   });
@@ -3814,6 +4691,7 @@ describe("@lite-fsm/entities — despawn cleanup этап 3 lifecycle pipeline",
     manager.transition({ type: "DONE" });
 
     const runtime = getEntityRuntimeState(manager.entities());
+    // covered by 5.3: terminal-only cleanup removes the actor row without full-entity lifecycle.
     expect(store.has(0 as EntityIndex)).toBe(false);
     expect(store.hp[0 as EntityIndex]).toBe(5);
     expect(runtime.actorRowsByEntity[0]).toEqual([]);
@@ -3855,15 +4733,24 @@ describe("@lite-fsm/entities — despawn cleanup этап 3 lifecycle pipeline",
     const access = entityAccess<typeof machines>(manager);
 
     spawnCleanupStage3Entity(manager, "unit/a");
+    const runtime = getEntityRuntimeState(manager.entities());
+    const entityRows = runtime.actorRowsByEntity[0];
+    const siblingRow = entityRows.find((row) => row.store.templateKey === "siblingActor");
+    const terminalRow = entityRows.find((row) => row.store.templateKey === "terminalActor");
+
     manager.transition({ type: "DONE" });
 
-    const runtime = getEntityRuntimeState(manager.entities());
+    // covered by 5.3/5.4: terminal row with sibling actor keeps row-level swap-remove semantics.
     expect(access.get("terminalActor").has(0 as EntityIndex)).toBe(false);
     expect(access.get("terminalActor").hp[0 as EntityIndex]).toBe(9);
     expect(access.get("siblingActor").has(0 as EntityIndex)).toBe(true);
-    expect(runtime.actorRowsByEntity[0]).toHaveLength(1);
+    expect(runtime.actorRowsByEntity[0]).toBe(entityRows);
+    expect(runtime.actorRowsByEntity[0]).toEqual([siblingRow]);
+    expect(siblingRow?.entityRowsPosition).toBe(0);
+    expect(terminalRow?.entityRowsPosition).toBe(-1);
     expect(runtime.entityStore.alive[0]).toBe(1);
     expect(runtime.entityStore.freeList).toEqual([]);
+    expectEntityRuntimeIndexesCoherent(runtime);
   });
 
   it("ошибка lifecycle reducer откатывает staged spawn snapshot", () => {
@@ -4046,6 +4933,7 @@ describe("@lite-fsm/entities — этап 8 despawnOn и lifecycle cleanup", () 
 
     manager.transition({ type: "EXPIRE", meta: { entityId: "unit/a" } } as never);
 
+    // covered by 5.1/5.3/5.5: despawnOn performs full cleanup after lifecycle rows see live columns.
     expect(ownerLifecycleCalls).toEqual([]);
     expect(cleanupLifecycleCalls).toEqual(["cleanup:unit/a:10", "audit:unit/a:10"]);
     expect(subscriberSnapshots).toEqual([{ ownerHasA: false, ownerCount: 1, cleanupCount: 1 }]);
@@ -4172,6 +5060,7 @@ describe("@lite-fsm/entities — этап 8 despawnOn и lifecycle cleanup", () 
     manager.transition({ type: "EXPIRE" });
 
     const runtime = getEntityRuntimeState(manager.entities());
+    // covered by 5.3/5.4: no ENTITY_DESPAWNED edge still clears group and entity indexes.
     expect(store.count).toBe(0);
     expect(store.has(0 as EntityIndex)).toBe(false);
     expect(runtime.actorRowsByGroupTag.unit).toBeUndefined();
@@ -4224,6 +5113,7 @@ describe("@lite-fsm/entities — этап 8 despawnOn и lifecycle cleanup", () 
     manager.transition({ type: "EXPIRE" });
 
     const access = entityAccess<typeof machines>(manager);
+    // covered by 5.3: lifecycle cleanup skips terminal attached row until physical removal.
     expect(lifecycleCalls).toEqual(["unit/a"]);
     expect(access.get("terminalActor").count).toBe(0);
     expect(access.get("cleanupActor").count).toBe(0);
@@ -4240,6 +5130,7 @@ describe("@lite-fsm/entities — этап 8 despawnOn и lifecycle cleanup", () 
 
     const transaction = prepareEntityTransaction({ runtime: new Map<string, unknown>() }, runtime);
 
+    // covered by 5.1: duplicate scheduled despawn in one dispatch is deduplicated.
     expect(scheduleEntityDespawn(transaction, 0 as EntityIndex)).toBe(true);
     expect(scheduleEntityDespawn(transaction, 0 as EntityIndex)).toBe(false);
     expect(transaction.scheduledDespawns).toEqual([0]);
@@ -4894,6 +5785,7 @@ describe("@lite-fsm/entities — этап 9 effects и transition helpers", () =
     spawnStage9Entity(manager, "unit/a");
     manager.transition({ type: "DESPAWN", meta: { entityId: "unit/a" } } as never);
 
+    // covered by 5.1: explicit ids and self.indices despawn paths keep missing ids as no-op.
     expect(store.has(0 as EntityIndex)).toBe(false);
     expect(getEntityRuntimeState(manager.entities()).entityStore.indexById["unit/a"]).toBeUndefined();
   });
@@ -5742,6 +6634,7 @@ describe("@lite-fsm/entities — этап 10 reactions и reaction error semanti
     spawnStage10Entity(manager, "unit/b", 2);
     manager.transition({ type: "EXPIRE" });
 
+    // covered by 5.3/5.5: ENTITY_DESPAWNED reaction scope contains lifecycle rows before cleanup.
     expect(frames).toEqual(["spawn:unit/a", "spawn:unit/b", "despawn:unit/a,unit/b"]);
   });
 
@@ -5786,6 +6679,7 @@ describe("@lite-fsm/entities — этап 10 reactions и reaction error semanti
     manager.transition({ type: "SAFE", meta: { entityId: "unit/b" } } as never);
     manager.transition({ type: "EXPIRE" });
 
+    // covered by 5.5: mixed despawn/survivor reaction excludes despawnOn rows.
     expect(lifecycleFrames).toEqual(["unit/a"]);
     expect(originalFrames).toEqual(["unit/b"]);
   });
@@ -5821,6 +6715,7 @@ describe("@lite-fsm/entities — этап 10 reactions и reaction error semanti
     store.metadata.despawnStateMask[store.metadata.stateCodeByName.READY] = 1;
     manager.transition({ type: "TICK" });
 
+    // covered by 5.5: all-despawn batch does not run original event reaction.
     expect(frames).toEqual([]);
     expect(entityAccess<typeof machines>(manager).get("actor").has(0 as EntityIndex)).toBe(false);
   });
@@ -5893,6 +6788,7 @@ describe("@lite-fsm/entities — этап 10 reactions и reaction error semanti
     manager.transition({ type: "IGNORE", meta: { entityId: "unit/b" } } as never);
     manager.transition({ type: "EXPIRE" });
 
+    // covered by 5.5: target despawnOn effects do not run and subscribers observe removed rows.
     expect(lifecycleReactions).toEqual(["unit/a:10"]);
     expect(originalReactions).toEqual([]);
     expect(subscriberSnapshots).toEqual([{ count: 0, hasA: false, hasB: false }]);
@@ -6171,8 +7067,25 @@ describe("@lite-fsm/entities — этап 10 reactions и reaction error semanti
       ],
       ctx,
     );
+    ensureEntityCapacity(runtime.entityStore, 3);
+    ensureActorCapacity(store, 3);
+    runtime.entityStore.alive[2] = 0;
+    runtime.entityStore.ids[2] = "unit/c";
+    store.presence[2] = 1;
+    runEntityReactionBatches(
+      runtime,
+      [
+        {
+          store,
+          eventCode: runtime.eventCodeByType.TICK,
+          ownership: "owned",
+          indices: [0 as EntityIndex, 1 as EntityIndex, 2 as EntityIndex],
+        },
+      ],
+      ctx,
+    );
 
-    expect(calls).toEqual(["unit/b", "unit/b"]);
+    expect(calls).toEqual(["unit/b", "unit/b", "unit/b"]);
   });
 
   it("валидирует reactions при init", () => {
